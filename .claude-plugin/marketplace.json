@@ -1,0 +1,20 @@
+{
+  "name": "claude-project-manager",
+  "owner": { "name": "raulfrk" },
+  "metadata": {
+    "description": "Claude Code plugins for project management workflows",
+    "pluginRoot": "plugins"
+  },
+  "plugins": [
+    {
+      "name": "proj",
+      "source": "./plugins/proj",
+      "description": "Project lifecycle management: init, status, update, todo, report, archive",
+      "version": "0.1.0",
+      "author": { "name": "raulfrk" },
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["project", "tracking", "todos", "workflow"]
+    }
+  ]
+}
