@@ -8,7 +8,9 @@ argument-hint: "[--global] [agent-name]"
 
 Create a custom Claude Code agent file for the **research** workflow step. Arguments: $ARGUMENTS (optional — agent name; --global flag for global scope)
 
-**Step 0: Determine scope**
+**Note:** This skill creates **research**-type agents only. For other agent types, use the matching skill: `/proj:agents-create-define` (define step) or `/proj:agents-create-decompose` (decompose step).
+
+**Step 1: Determine scope**
 
 Parse $ARGUMENTS for the `--global` flag.
 
@@ -17,7 +19,7 @@ Parse $ARGUMENTS for the `--global` flag.
   - "Create this agent for the current project or globally? (project / global)"
   - Set scope based on the answer (`project` or `global`).
 
-**Step 1: Get target directory**
+**Step 2: Get target directory**
 
 - If scope = `global`:
   - Target directory: `~/.claude/agents/`
@@ -27,25 +29,27 @@ Parse $ARGUMENTS for the `--global` flag.
   - Call `mcp__proj__proj_get_active` to get the active project. Extract the primary repo path from the first entry in `repos` (the `path` field). If no project is active, ask the user to run `/proj:load` first.
   - Target directory: `<repo-path>/.claude/agents/`
 
-2. Explore existing agent files in the target directory:
+Failure path: if `mkdir -p` fails (e.g. permission denied), stop immediately and display the error. Do not continue.
+
+**Step 3: Explore existing agent files** in the target directory:
    - Use Glob to list `<target-directory>/*.md` (only if the directory exists)
    - If any agent files exist, Read one or two to note their structure and conventions
    - Note any patterns (naming conventions, tool lists, model choices, system prompt style)
 
-3. Determine the agent name. If a name was provided in the remaining arguments (after removing `--global`), use it. Otherwise ask:
+**Step 4: Determine the agent name.** If a name was provided in the remaining arguments (after removing `--global`), use it. Otherwise ask:
    - "Agent name? (used as the filename — e.g. 'my-researcher' → `<target-directory>/my-researcher.md`)"
    - Name should be lowercase with hyphens (no spaces, no .md extension)
 
-4. Overwrite check: construct the full target path `<target-directory>/<name>.md`. Use Bash to check if it exists:
+**Step 5: Overwrite check:** construct the full target path `<target-directory>/<name>.md`. Use Bash to check if it exists:
    ```bash
    test -f <target-path> && echo "exists" || echo "not found"
    ```
    If it exists, prompt: "Agent `<name>` already exists at `<target-path>`. Overwrite? (y/N)" — abort if not confirmed.
 
-5. Ask for specialization:
+**Step 6: Ask for specialization:**
    - "What should this research agent specialize in? (e.g. specific tech stack, external API research, security analysis, performance benchmarking, codebase pattern discovery)"
 
-6. Generate the agent file with research-step defaults (uses haiku model for cost efficiency). For **global** scope, omit all project-specific context from the system prompt (no project name, CLAUDE.md content, or repo path references):
+**Step 7: Generate the agent file** with research-step defaults (uses haiku model for cost efficiency). For **global** scope, omit all project-specific context from the system prompt (no project name, CLAUDE.md content, or repo path references):
 
    ```markdown
    ---
@@ -65,7 +69,7 @@ Parse $ARGUMENTS for the `--global` flag.
    - Be honest about trade-offs — pros and cons should be balanced, not marketing copy
 
    Output format for research.md:
-   ```markdown
+   ````markdown
    # Research: <todo title>
 
    ## Approach Options
@@ -91,7 +95,7 @@ Parse $ARGUMENTS for the `--global` flag.
 
    ## References
    - <link or file path>
-   ```
+   ````
 
    <Additional instructions based on user's specialization>
 
@@ -100,9 +104,9 @@ Parse $ARGUMENTS for the `--global` flag.
 
    Incorporate the user's specialization details into the `<Additional instructions>` section. If they specialize in a specific tech domain, add instructions to search for domain-specific patterns, libraries, or conventions.
 
-7. Write the file to `<target-path>` using the Write tool.
+**Step 8: Write the file** to `<target-path>` using the Write tool.
 
-8. Display a confirmation:
+**Step 9: Display a confirmation:**
 
    For **project** scope:
    ```
@@ -124,5 +128,5 @@ Suggested next:
   (2) /proj:agents-list — view all current agent overrides
   (3) /proj:agents-create-decompose — create a decompose agent too
 - Global scope:
-  (1) /proj:create-agent --global decompose — create a global decompose agent too
+  (1) /proj:agents-create-decompose --global — create a global decompose agent too
   (2) /proj:agents-create-research — create a project-scoped research agent

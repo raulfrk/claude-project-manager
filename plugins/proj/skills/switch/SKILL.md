@@ -2,20 +2,23 @@
 name: switch
 description: Switch the active project context. Use when the user says "switch to <project>", "change project", or "work on <project>".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_list, mcp__proj__proj_set_active, mcp__proj__ctx_session_start, mcp__claude_ai_Todoist__find-tasks, mcp__proj__todo_update, mcp__proj__config_load
+allowed-tools: mcp__proj__proj_list, mcp__proj__proj_set_active, mcp__proj__ctx_session_start
 argument-hint: "[project-name]"
 ---
 
 Switch the active project to $ARGUMENTS.
 
-1. Call `mcp__proj__proj_list` to show available projects.
+1. Call `mcp__proj__proj_list` to get all tracked projects.
+   - If the list is empty: reply "No tracked projects. Use /proj:init to add one." and stop.
 
-2. If $ARGUMENTS is empty, present the list and ask which to switch to.
+2. If $ARGUMENTS is empty, present the list and ask the user which project to switch to.
+   If $ARGUMENTS is provided:
+   - Find projects whose name matches $ARGUMENTS (case-insensitive, exact or prefix match).
+   - If no match: reply "Project '<name>' not found. Use /proj:list to see available projects." and stop.
+   - If more than one match: list the matching names and ask the user to confirm which one.
 
-3. Call `mcp__proj__proj_set_active` with the chosen name.
+3. Call `mcp__proj__proj_set_active` with the confirmed project name.
 
-4. If Todoist `auto_sync: true`: pull current Todoist state for the new project.
-
-5. Call `mcp__proj__ctx_session_start` and display the returned context so the user immediately sees the new project's status.
+4. Call `mcp__proj__ctx_session_start` and display the returned context so the user immediately sees the new project's status.
 
 💡 Suggested next: (1) /proj:status — see the project status  (2) /proj:todo list — see all todos

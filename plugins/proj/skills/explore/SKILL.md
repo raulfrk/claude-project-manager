@@ -13,6 +13,8 @@ Explore and map the codebase at the given path. $ARGUMENTS may contain a directo
 2. Determine target path:
    - If $ARGUMENTS is non-empty, use that as the path
    - Otherwise, use the active project's content path (from proj_get_active → `repos[0].path` or `path` field)
+   - Guard: if $ARGUMENTS is empty AND proj_get_active returned no active project → stop immediately: "Path required. Usage: /proj:explore <path>"
+   - Validate: if the resolved path does not exist on disk → stop: "Path '<path>' does not exist."
    - Confirm: "Exploring `<path>` …"
 
 3. Run exploration:
@@ -26,12 +28,30 @@ Explore and map the codebase at the given path. $ARGUMENTS may contain a directo
    - Notable config / tooling — from `config_files`
    - Architecture summary (1–3 sentences) — use `arch_note` as a starting point
 
+   Synthesis output format:
+   ```
+   ## Overview
+   <1–2 sentence description>
+
+   ## Architecture
+   - <primary language(s) and framework(s)>
+   - <key directories and their purpose>
+   - <entry points and main modules>
+   - <notable config / tooling>
+   - <architecture summary 1–3 sentences>
+
+   ## Key Files
+   - <file path> — <purpose>
+   ...
+   ```
+
 5. **Write CLAUDE.md**:
    - Call `mcp__proj__claudemd_read` with the target path to check for an existing CLAUDE.md.
    - If it **exists**: merge — preserve ALL existing sections verbatim, then add or update an
      `## Architecture` section and a `## Key Files` section with the new exploration findings.
      Do not duplicate content that is already present.
    - If it **does not exist**: create from scratch:
+     - `<project-name>` and `<name>` are sourced from the active project's `name` field returned by `proj_get_active`. If there is no active project (path came from $ARGUMENTS), derive the name from `basename(<path>)`.
      ```markdown
      # <project-name>
 

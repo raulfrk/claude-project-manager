@@ -26,6 +26,7 @@ Parse $ARGUMENTS for the `--global` flag.
 - If scope = `project`:
   - Call `mcp__proj__proj_get_active` to get the active project. Extract the primary repo path from the first entry in `repos` (the `path` field). If no project is active, ask the user to run `/proj:load` first.
   - Target directory: `<repo-path>/.claude/agents/`
+  - Use Bash to create the directory if needed: `mkdir -p <target-directory>`
 
 2. Explore existing agent files in the target directory:
    - Use Glob to list `<target-directory>/*.md` (only if the directory exists)
@@ -63,26 +64,25 @@ Parse $ARGUMENTS for the `--global` flag.
    - Make Acceptance Criteria testable and specific (avoid vague terms like "works correctly")
    - Out of Scope should list explicit exclusions to prevent scope creep
 
-   Output format for requirements.md:
-   ```markdown
-   # Requirements: <todo title>
+   Output format for requirements.md (write as a markdown code block in the agent file):
 
-   ## Goal
-   <what we're building and why>
+       # Requirements: <todo title>
 
-   ## Acceptance Criteria
-   - [ ] <specific, testable condition>
+       ## Goal
+       <what we're building and why>
 
-   ## Out of Scope
-   - <explicit exclusion>
+       ## Acceptance Criteria
+       - [ ] <specific, testable condition>
 
-   ## Testing Strategy
-   <how to verify correctness>
+       ## Out of Scope
+       - <explicit exclusion>
 
-   ## Q&A
-   **Q:** <question>
-   **A:** <answer>
-   ```
+       ## Testing Strategy
+       <how to verify correctness>
+
+       ## Q&A
+       **Q:** <question>
+       **A:** <answer>
 
    <Additional instructions based on user's specialization>
 
@@ -113,5 +113,5 @@ Suggested next:
   (2) /proj:agents-list — view all current agent overrides
   (3) /proj:agents-create-research — create a research agent too
 - Global scope:
-  (1) /proj:create-agent --global research — create a global research agent too
+  (1) /proj:agents-create-research --global — create a global research agent too
   (2) /proj:agents-create-define — create a project-scoped define agent

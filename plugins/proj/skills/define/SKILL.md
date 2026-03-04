@@ -2,7 +2,7 @@
 name: define
 description: Gather detailed requirements for a todo through iterative Q&A. Use when the user says "define 1", "clarify requirements for 1", or "what does 1 need". Keeps asking questions until requirements are complete.
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__proj_get_active, mcp__proj__proj_resolve_agent, Task
+allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__proj_resolve_agent, Task
 argument-hint: "<todo-id> [--no-interactive]"
 ---
 
@@ -14,6 +14,9 @@ Extract from $ARGUMENTS:
 - `todo_id` = the first non-flag token (the todo ID)
 - `no_interactive` = `true` if `--no-interactive` is present in $ARGUMENTS
 
+If `todo_id` is empty or not present, stop and output:
+"Todo ID required. Usage: /proj:define <todo-id>"
+
 If `no_interactive` is true, skip directly to the **Non-interactive path** below.
 
 ---
@@ -23,6 +26,9 @@ If `no_interactive` is true, skip directly to the **Non-interactive path** below
 **2. Load context**
 
 Call `mcp__proj__proj_get_todo_context` with the todo ID to get the todo, existing requirements, and research in one call.
+
+If the result indicates the todo was not found (null todo or error), stop and output:
+"Todo <id> not found."
 
 Review existing requirements (if any) and identify what's still unclear. If the todo has a non-empty `notes` field, treat it as additional context (e.g. description pulled from Todoist) — incorporate it into your understanding of the goal and use it to inform your questions and the final requirements.md.
 
@@ -116,6 +122,10 @@ Instructions:
 4. Do NOT ask the user any questions — all Q&A is already complete.
 ```
 
+If the Task agent returns an error or fails to call `content_set_requirements`:
+- Display: "Requirements agent failed: <error message>"
+- Offer the user: "1. Retry — spawn the agent again  2. Write manually — I will write requirements.md in the main conversation now"
+
 ---
 
 ## Non-interactive path
@@ -123,6 +133,9 @@ Instructions:
 *(Reached when `--no-interactive` is present in $ARGUMENTS)*
 
 **NI-1.** Call `mcp__proj__proj_get_todo_context` with the todo ID.
+
+If the result indicates the todo was not found (null todo or error), stop and output:
+"Todo <id> not found."
 
 **NI-2.** Call `mcp__proj__proj_resolve_agent` with `step="define"` (and `project_name` if known).
 
@@ -145,6 +158,10 @@ Instructions:
 3. Call mcp__proj__todo_set_content_flag with has_requirements=True.
 4. Do NOT prompt the user — run fully autonomously.
 ```
+
+If the Task agent returns an error or fails to call `content_set_requirements`:
+- Display: "Requirements agent failed: <error message>"
+- Offer the user: "1. Retry — spawn the agent again  2. Write manually — I will write requirements.md in the main conversation now"
 
 **If `agent` is `"general-purpose"`:**
 
@@ -171,6 +188,10 @@ Call `mcp__proj__todo_set_content_flag` with `has_requirements=True`.
 
 ---
 
-**5. Update CLAUDE.md if the project has one.**
+**5. Update CLAUDE.md**
+
+If the project has a CLAUDE.md, call `mcp__proj__claudemd_write` to append or update the
+requirements summary under a `## Requirements: <todo-title>` heading. Write a 1–3 sentence
+summary of the goal and the key acceptance criteria.
 
 💡 Suggested next: (1) /proj:research <id> — research how to implement this  (2) /proj:execute <id> — if it's straightforward, execute directly

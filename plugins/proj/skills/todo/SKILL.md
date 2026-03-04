@@ -3,7 +3,7 @@ name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
 disable-model-invocation: "true"
 allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__claude_ai_Todoist__update-tasks, mcp__proj__config_load, mcp__proj__template_list, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__sentry__find-projects
-argument-hint: "[add|done|list|tree|block|delete] [args]"
+argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 ---
 
 Manage project todos. Parse $ARGUMENTS to determine the operation:
@@ -26,6 +26,7 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - Call `mcp__proj__proj_get_active` to read `todoist_project_id`.
     - If `todoist_project_id` is null: call `mcp__sentry__find-projects`, present a numbered list of project names, ask "Which Todoist project should tasks for '<project name>' go to? (enter number)", then call `mcp__proj__proj_update_meta` with the chosen `todoist_project_id`. Use the chosen ID for this call.
     - Call `mcp__claude_ai_Todoist__add-tasks` with content (title), priority (local→Todoist mapped: high→p2, medium→p3, low→p4), labels (from tags — pass the tags list directly as labels), `projectId` = `todoist_project_id`, and — if `due_date` was set — `dueString` = `<due_date value>`.
+    - Store the returned task ID: call `mcp__proj__todo_update` with `todo_id=<local todo id>` and `todoist_task_id=<id returned by add-tasks>`.
 
 **update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update a todo's fields
   - Parse the key=value pairs from the arguments
@@ -68,6 +69,9 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
 
 **block** `1 blocks 2` — set blocking relationship
   - Call `mcp__proj__todo_block`
+
+**unblock** `<id>` — remove a blocking relationship
+  - Call `mcp__proj__todo_unblock`
 
 **delete** `<id>` — delete a todo
   - Confirm before deleting

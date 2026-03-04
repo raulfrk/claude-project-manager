@@ -73,6 +73,7 @@ Enter 1 or 2:
 - Ask: `Which repo? (label from the list above)`
 - Ask: `Branch name for the worktree:`
 - Call `mcp__worktree__wt_create` with `repo_label=<chosen>`, `branch=<branch>`, `new_branch=true`.
+  - If `wt_create` returns a branch-conflict error: display the error message and prompt: `That branch name is already in use. Enter a different branch name:` then retry `wt_create` with the new branch name.
 - Store the returned worktree path as `content_path`.
 - Confirm: `Worktree created at <content_path>.`
 
@@ -83,6 +84,8 @@ Call `mcp__proj__proj_init` with:
 - `path` = `content_path`
 - `description` = `todo_title` (reused as description; user can refine later)
 - `git_enabled` = global config default (do not ask the user)
+
+- If `proj_init` returns a duplicate-project error: display `Error: Project '<name>' already exists. Use /proj:load to switch to it.` and stop.
 
 Call `mcp__proj__proj_set_active` to set the new project as the active project for this session.
 
@@ -112,7 +115,7 @@ Call `mcp__proj__claudemd_write` for `content_path` with this content (substitut
 # <name>
 
 **Status**: active | **Priority**: medium
-**Tracking**: ~/projects/tracking/<name>
+**Tracking**: <config.tracking_dir>/<name>
 
 ## Overview
 <todo_title>
@@ -161,6 +164,7 @@ This skill's base directory ends in `.../skills/quick`. The full-workflow skill 
 
 - Construct the path: `<parent-of-this-skill's-base-dir>/full-workflow/SKILL.md`
 - Call `Read` on that path to load the full-workflow skill file.
+  - If `Read` fails or returns an error: display `Error: could not read full-workflow/SKILL.md at <path>. Check the plugin installation.` and stop.
 - Extract the Markdown instructions — everything after the second `---` frontmatter delimiter.
 - Execute those instructions exactly, substituting `$ARGUMENTS` with:
 
@@ -169,3 +173,8 @@ This skill's base directory ends in `.../skills/quick`. The full-workflow skill 
 ```
 
 This is identical to the user having run `/proj:full-workflow <new_id> --iter-as-needed 5` directly. All interactive prompts, convergence checks, and execute steps apply as documented in full-workflow/SKILL.md.
+
+**Suggested next**
+- `/proj:todo list` — review all todos
+- `/proj:todo add` — add another todo to this project
+- `/proj:load <other-project>` — switch to a different project

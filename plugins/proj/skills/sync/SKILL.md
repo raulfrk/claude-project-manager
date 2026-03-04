@@ -1,8 +1,9 @@
 ---
 name: sync
 description: Manually trigger a full bidirectional Todoist sync. Always runs regardless of auto_sync setting. Use when the user says "sync with Todoist", "sync todos", or "pull from Todoist".
+argument-hint: "[all | everything]"
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__config_load, mcp__proj__proj_find_archived_by_title
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__config_load, mcp__proj__proj_find_archived_by_title, mcp__proj__proj_update_meta
 ---
 
 Full bidirectional Todoist sync for the active project.
@@ -36,6 +37,9 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
 `mcp__claude_ai_Todoist__find-tasks`.
 
 ## Steps
+
+0. **Guard**: Call `mcp__proj__config_load`. If `todoist.enabled` is false (or absent), stop immediately:
+   "Todoist sync is not enabled. Set todoist.enabled: true in ~/.claude/proj.yaml to use /proj:sync."
 
 1. **Setup**: Call `mcp__proj__proj_get_active` — get active project with `todoist_project_id`.
    - If no `todoist_project_id`, ask: "This project isn't linked to Todoist. Create a Todoist project for it?"

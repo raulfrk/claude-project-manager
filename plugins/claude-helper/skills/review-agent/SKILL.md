@@ -2,7 +2,7 @@
 name: review-agent
 description: Review a Claude subagent definition file using a 5-criterion parallel framework. Produces scored findings ranked by severity and confidence. Use when asked "review this agent", "check agent quality", or "audit agent file".
 disable-model-invocation: "true"
-allowed-tools: Read, Task
+allowed-tools: Read, Task, mcp__proj__todo_add
 argument-hint: "<path-to-agent-file>"
 ---
 
@@ -13,6 +13,12 @@ Review the subagent definition file at: $ARGUMENTS
 Call `Read` with the path provided in `$ARGUMENTS`. If the file does not exist or cannot be read, stop and report: "Cannot read file at <path>: <error>. Provide the correct absolute path to a subagent definition file."
 
 Store the file content in memory for passing to subagents in Step 2. Do not call `Read` again after this step.
+
+**SKILL.md detection gate:** After reading the file, determine the file type:
+- Set `file_type = "skill"` if `$ARGUMENTS` ends with `SKILL.md` OR the frontmatter contains any of the fields `disable-model-invocation`, `argument-hint`, `context`, or `agent`.
+- Otherwise set `file_type = "agent"`.
+
+Use `file_type` in Step 2 to select the appropriate C5 rubric variant: if `file_type = "skill"`, pass the **C5 SKILL.md variant** rubric to the C5 subagent; if `file_type = "agent"`, pass the **C5 agent file variant** rubric.
 
 ## Step 2 — Spawn 5 parallel criterion subagents
 
@@ -128,7 +134,7 @@ The "findings" array may be empty if no issues are found. The "score" field is a
   - **2**: Two or more expected sections are missing; steps feel out of order; description is vague or inaccurate; material gaps between description and body.
   - **1**: Unstructured; description absent, empty, or unrelated to function; major sections missing; body does not deliver on what description promises.
 
-**C5 — Structure (agent file variant)**
+**C5 — Structure (agent file variant)** _(use when `file_type = "agent"`)_
 - `{criterion_id}`: `C5`
 - `{criterion_name}`: `Structure`
 - `{criterion_definition}`: Does the file follow Claude Code agent file conventions? Check: (1) Frontmatter fields — `name` (required, lowercase-hyphen), `description` (required), `tools` (required; note: field name is `tools` not `allowed-tools`), `model` (optional, must be a valid Claude model ID if present). Presence of SKILL.md-specific fields (`disable-model-invocation`, `argument-hint`, `context`, `agent`) is a convention violation — flag each one found. (2) Tool list accuracy — exact match between `tools` and tools actually called in the body; missing tools (called but not listed) are more severe than unused tools (listed but not called). (3) Body ordering — role definition or context-setting opening, logical sequence of steps, output specification. (4) Formatting conventions — consistent header levels, code blocks for code and tool outputs, bullet lists for options.
@@ -139,11 +145,22 @@ The "findings" array may be empty if no issues are found. The "score" field is a
   - **2**: Two or more required frontmatter fields are missing or incorrect, OR two or more tools are missing from `tools`, OR one or more SKILL.md-specific fields (`disable-model-invocation`, `argument-hint`, `context`, `agent`) are present alongside the required agent fields.
   - **1**: Frontmatter is absent or unparseable; `tools` is empty while body calls tools; or multiple SKILL.md-specific fields are present making the file structurally ambiguous between a SKILL.md and an agent file.
 
+**C5 — Structure (SKILL.md variant)** _(use when `file_type = "skill"`)_
+- `{criterion_id}`: `C5`
+- `{criterion_name}`: `Structure`
+- `{criterion_definition}`: Does the file follow Claude Code SKILL.md conventions? Check: (1) Frontmatter fields — `name` (required, lowercase-hyphen), `description` (required), `allowed-tools` (required; note: SKILL.md uses `allowed-tools`, not `tools`), optional fields: `disable-model-invocation`, `argument-hint`, `context`, `agent`. These optional SKILL.md-specific fields are correct conventions — do NOT flag them as violations. (2) Tool list accuracy — exact match between `allowed-tools` and tools actually called in the body; missing tools (called but not listed) are more severe than unused tools (listed but not called). (3) Body ordering — opening directive or context-setting, logical sequence of steps, output specification. (4) Formatting conventions — consistent header levels, code blocks for code and tool outputs, bullet lists for options.
+- `{rubric}`:
+  - **5**: All required frontmatter fields present and correctly typed; `allowed-tools` field used; exact match between `allowed-tools` and tools called; optional SKILL.md fields used correctly; body follows logical sequence with output specification; formatting is consistent throughout.
+  - **4**: One minor issue — either one unused tool listed, or one formatting inconsistency; no missing required fields and no missing tools.
+  - **3**: One required frontmatter field is missing or incorrectly typed (e.g., `tools` used instead of `allowed-tools`), OR one tool called in the body is missing from `allowed-tools`, OR body ordering is informal but readable.
+  - **2**: Two or more required frontmatter fields are missing or incorrect, OR two or more tools are missing from `allowed-tools`.
+  - **1**: Frontmatter is absent or unparseable; `allowed-tools` is empty while body calls tools; or the file is structurally malformed.
+
 ## Step 3 — Collect and merge findings
 
 After all 5 subagents complete:
 
-1. Parse each subagent's JSON output to extract `criterion`, `score`, and `findings` array.
+1. Parse each subagent's JSON output to extract `criterion`, `score`, and `findings` array. If a subagent's output cannot be parsed as valid JSON, display the raw output inline (prefixed with the criterion ID, e.g., "C3 raw output: ..."), assign that criterion a score of 0 with an empty findings array, and continue processing the remaining subagents.
 2. Flatten all findings from all 5 subagents into a single list.
 
 **Deduplication algorithm** (apply before ranking):
@@ -216,6 +233,58 @@ This row has no **Detail** or **Suggestion** lines. "No findings" rows appear af
 
 ## Step 5 — Present the report
 
-Output the completed report in the conversation. Do not write any files. Do not modify any files. Do not call any tools after Step 1.
+Output the completed report in the conversation. Do not write any files. Do not modify any files. Do not call any tools in Steps 3–5.
+
+Retain the ranked findings list in memory (in ranked order, F1 first) for use in Step 6. Proceed to Step 6 after presenting the report.
+
+## Step 6 — Interactive review phase
+
+**Save issue context:** Before iterating through findings, ensure each finding in the ranked list has the following fields retained in memory for display during the review loop:
+- `file`: the absolute path of the reviewed file (value of `$ARGUMENTS`)
+- `location`: where in the file the issue occurs (extracted from the `detail` field — e.g., the step name or line reference mentioned)
+- `description`: the `detail` field verbatim
+- `severity`: the numeric severity value
+- `criterion`: the criterion ID (e.g., C2)
+- `suggestion`: the `suggestion` field verbatim (absent if the finding has no suggestion)
+- `title`: the `title` field
+
+After the report is presented, iterate through each finding in the ranked findings list (F1 first, in descending priority order). Skip any "No issues found" placeholder rows — only process findings with real detail.
+
+For each finding, display:
+
+```
+Issue <N>/<total>: <finding title>
+Criterion: <criterion_id> | Severity: <severity>/5 | Confidence: <confidence>/5
+Detail: <detail text>
+Suggestion: <suggestion text>
+
+Options:
+  1. Create todo
+  2. Skip
+  3. Edit description, then create todo
+  4. Stop reviewing
+```
+
+Where `<total>` is the count of real findings (excluding "No issues found" rows) and `<N>` increments from 1.
+
+Omit the `Suggestion:` line if the finding has no `suggestion` field.
+
+**Handling the user's choice:**
+
+- **1 — Create todo**: Call `mcp__proj__todo_add` with `title` set to the finding's `title` and `notes` set to `"[<criterion_id> | Severity <severity>/5 | Confidence <confidence>/5]\n\n<detail>\n\nSuggestion: <suggestion>"` (omit the Suggestion line in notes if no suggestion). Increment the todos-created counter. Advance to the next finding.
+
+- **2 — Skip**: Increment the skipped counter. Advance to the next finding without calling any tools.
+
+- **3 — Edit then create todo**: Ask the user: "Enter the revised description for this todo (or press Enter to keep the original):" Wait for the user's input. Use the user's input as the `title` if provided, otherwise keep the original finding `title`. Then call `mcp__proj__todo_add` with the (possibly revised) title and the same `notes` format as option 1. Increment the todos-created counter. Advance to the next finding.
+
+- **4 — Stop**: Exit the review loop immediately. Do not process remaining findings.
+
+**After the loop ends** (all findings reviewed, or option 4 chosen), display:
+
+```
+Review complete: <N_reviewed> issues reviewed, <M_created> todos created, <K_skipped> skipped.
+```
+
+Where `N_reviewed` is the number of findings shown to the user (not counting any that were not yet reached when Stop was chosen), `M_created` is the number of todos created, and `K_skipped` is the number of findings skipped.
 
 Suggested next: (1) `/claude-helper:review-all <directory> --include-agents` — batch-review all SKILL.md and agent files in a directory and compare scores  (2) Edit the agent file to address the highest-impact findings, then re-run this review to verify improvement

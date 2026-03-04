@@ -10,13 +10,16 @@ Load a project context for this session only (not persisted globally).
 
 1. If $ARGUMENTS is empty:
    - Call `mcp__proj__proj_list` to get all tracked projects
+   - If the list is empty, stop: "No tracked projects found. Use /proj:init to add one."
    - Present a numbered list and ask the user to pick one
-   - Use their response as the project name
+   - Call `mcp__proj__proj_load_session` with the selected name
+   - If the tool returns not-found, display the error and suggest: "Check the project name or use /proj:init to add it."
 
 2. If $ARGUMENTS is provided:
    - Call `mcp__proj__proj_load_session` with the name
    - The tool handles fuzzy matching automatically
    - If the tool returns an "Ambiguous match" message, present the options and ask the user to confirm
+   - If the tool returns not-found, display the error and suggest: "Check the project name or use /proj:init to add it."
 
 3. After successful load:
    - Call `mcp__proj__ctx_session_start` to get the full project context

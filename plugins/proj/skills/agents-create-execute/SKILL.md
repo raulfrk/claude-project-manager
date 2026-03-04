@@ -26,26 +26,27 @@ Parse $ARGUMENTS for the `--global` flag.
 - If scope = `project`:
   - Call `mcp__proj__proj_get_active` to get the active project. Extract the primary repo path from the first entry in `repos` (the `path` field). If no project is active, ask the user to run `/proj:load` first.
   - Target directory: `<repo-path>/.claude/agents/`
+  - Use Bash to create the directory if needed: `mkdir -p <repo-path>/.claude/agents/`
 
-2. Explore existing agent files in the target directory:
+**Step 2: Explore existing agent files in the target directory:**
    - Use Glob to list `<target-directory>/*.md` (only if the directory exists)
    - If any agent files exist, Read one or two to note their structure and conventions
    - Note any patterns (naming conventions, tool lists, system prompt style, coding conventions mentioned)
 
-3. Determine the agent name. If a name was provided in the remaining arguments (after removing `--global`), use it. Otherwise ask:
+**Step 3: Determine the agent name.** If a name was provided in the remaining arguments (after removing `--global`), use it. Otherwise ask:
    - "Agent name? (used as the filename — e.g. 'my-executor' → `<target-directory>/my-executor.md`)"
    - Name should be lowercase with hyphens (no spaces, no .md extension)
 
-4. Overwrite check: construct the full target path `<target-directory>/<name>.md`. Use Bash to check if it exists:
+**Step 4: Overwrite check:** construct the full target path `<target-directory>/<name>.md`. Use Bash to check if it exists:
    ```bash
    test -f <target-path> && echo "exists" || echo "not found"
    ```
-   If it exists, prompt: "Agent `<name>` already exists at `<target-path>`. Overwrite? (y/N)" — abort if not confirmed.
+   If it exists, prompt: "Agent `<name>` already exists at `<target-path>`. Overwrite? (y/N)" — if the user does not confirm, print "Aborted — existing agent file kept unchanged." and stop.
 
-5. Ask for specialization:
+**Step 5: Ask for specialization:**
    - "What should this execute agent specialize in? (e.g. specific language/framework, coding style to enforce, testing requirements, deployment steps, security constraints)"
 
-6. Generate the agent file with execute-step defaults. For **global** scope, omit all project-specific context from the system prompt (no project name, CLAUDE.md content, or repo path references):
+**Step 6: Generate the agent file with execute-step defaults.** For **global** scope, omit all project-specific context from the system prompt (no project name, CLAUDE.md content, or repo path references):
 
    ```markdown
    ---
@@ -76,9 +77,9 @@ Parse $ARGUMENTS for the `--global` flag.
 
    Incorporate the user's specialization details into the `<Additional instructions>` section. If they mention a specific language (e.g. Python), add language-specific conventions. If they mention tests, add a step to run tests before calling `todo_complete`. If they mention security, add security-specific checks.
 
-7. Write the file to `<target-path>` using the Write tool.
+**Step 7: Write the file** to `<target-path>` using the Write tool.
 
-8. Display a confirmation:
+**Step 8: Display a confirmation:**
 
    For **project** scope:
    ```

@@ -2,7 +2,7 @@
 name: init
 description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", or "set up project tracking for X".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__proj__template_list, mcp__proj__template_apply, Bash
+allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__proj__template_list, mcp__proj__template_apply, Bash
 argument-hint: "[project-name]"
 ---
 
@@ -34,7 +34,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
       ```
       (If `projects_base_dir` is not set, omit option 3 from the menu.)
 
-   d. **Mode 1** (option 1, or Enter): set content path = `<projects_base_dir>/<name>`. Proceed with existing directory check below.
+   d. **Mode 1** (option 1, or Enter): set content path = `<projects_base_dir>/<name>`. Set `_content_mode = "new-dir"`. Proceed with existing directory check below.
 
    e. **Mode 2** (option 2):
       - Display the registered repos (label + path).
@@ -92,6 +92,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - "Git integration enabled for this project? [global default]"
 
 5. Call `mcp__proj__proj_init` with name, path=<resolved content path>, description, tags, git_enabled.
+   - If `proj_init` returns an error: display the error message and stop (do not call `proj_set_active` or proceed further).
    Call `mcp__proj__proj_set_active` to set as active.
 
 5b. **Template** — Ask: "Would you like to apply a project template? [no]"
@@ -125,7 +126,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      # <project-name>
 
      **Status**: active | **Priority**: medium
-     **Tracking**: ~/projects/tracking/<name>
+     **Tracking**: <tracking_dir>/<name>
 
      ## Overview
      <description or 'Add description here'>

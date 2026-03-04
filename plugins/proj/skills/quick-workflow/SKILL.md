@@ -2,7 +2,7 @@
 name: quick-workflow
 description: Create a new todo and immediately run the full workflow on it in one command. Use when the user says "quick workflow", "proj:quick-workflow", or wants to start working on something new without a separate add step.
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__claudemd_write, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__sentry__find-projects, Read, Task
+allowed-tools: mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__proj_get_todo_context, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__sentry__find-projects, Read, Task
 argument-hint: "<description> [--steps define,execute] [--from <step>] [--iter N] [--iter-as-needed[=N]]"
 ---
 
@@ -36,6 +36,12 @@ Call `mcp__proj__todo_add` with:
 
 Store the returned todo ID as `new_id` and the title as `new_title`.
 
+If `todo_add` returns an error, display:
+
+> Error creating todo: <error message>
+
+Stop.
+
 **3. Todoist sync (if enabled)**
 
 If `todoist.enabled` is `true` AND `todoist.auto_sync` is `true`:
@@ -44,7 +50,13 @@ If `todoist.enabled` is `true` AND `todoist.auto_sync` is `true`:
 - If `todoist_project_id` is null: call `mcp__sentry__find-projects`, present a numbered list of project names, ask "Which Todoist project should tasks for '<project name>' go to? (enter number)", then call `mcp__proj__proj_update_meta` with the chosen `todoist_project_id`. Use the chosen ID for this call.
 - Call `mcp__claude_ai_Todoist__add-tasks` with:
   - `tasks`: `[{ "content": new_title, "priority": <mapped: high→p2, medium→p3, low→p4>, "projectId": todoist_project_id }]`
-- Store the returned task ID as `todoist_task_id`.
+- If the returned task list is empty or null, display:
+
+  > No Todoist tasks found matching the criteria.
+
+  Continue (the local todo was created successfully; Todoist sync did not produce a task ID — skip the `todo_update` call for `todoist_task_id`).
+
+- Otherwise: store the returned task ID as `todoist_task_id`.
 - Call `mcp__proj__todo_update` with `todo_id=new_id` and `todoist_task_id=todoist_task_id`.
 
 **4. Announce**
@@ -61,7 +73,19 @@ This skill's base directory ends in `.../skills/quick-workflow`. The full-workfl
 
 - Construct the path: `<parent-of-this-skill's-base-dir>/full-workflow/SKILL.md`
 - Call `Read` on that path to load the full-workflow skill file.
+- If `Read` fails or returns empty content, display:
+
+  > Error: could not read full-workflow/SKILL.md at <path>. Aborting.
+
+  Stop.
+
 - Extract the Markdown instructions — everything after the second `---` frontmatter delimiter.
 - Execute those instructions exactly, substituting `$ARGUMENTS` with: `<new_id> <forwarded-flags>` (the new todo ID followed by any flags extracted in step 1, in their original form).
 
 The full-workflow execution is identical to the user having run `/proj:full-workflow <new_id> <forwarded-flags>` directly. All interactive prompts, step filters, iteration modes, and child-workflow behaviour apply exactly as documented in full-workflow/SKILL.md.
+
+**Suggested next**
+
+- `/proj:todo list` — view all todos including the newly created one
+- `/proj:full-workflow <new_id> --steps <step>` — re-run a specific step
+- `/proj:todo done <new_id>` — mark the todo complete when done

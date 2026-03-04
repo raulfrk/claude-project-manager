@@ -2,7 +2,7 @@
 name: full-workflow
 description: Run the full workflow (define → research → decompose → execute) on a todo interactively, prompting between each step. Use when asked "full workflow on 1", "run workflow for 2", or "proj:full-workflow 1".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__claudemd_write, mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_active, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__claude_ai_Todoist__complete-tasks, Read, Task
+allowed-tools: mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__claude_ai_Todoist__complete-tasks, Read, Task
 argument-hint: "<todo-id> [--iter N | --iter-as-needed[=N]] [--steps define,execute] [--from <step>] [--no-interactive]"
 ---
 
@@ -40,6 +40,8 @@ For **range or comma list**: parse into a flat deduplicated list of todo ID stri
 - If the active step list is empty, stop with: `No steps to execute after applying filters.`
 - Display: `Running full-workflow on todo **<id>** — <title>`
 - Display: `Steps: <step1> → <step2> → ... (×<N> iterations)` (omit `×<N>` if N=1; for `--iter-as-needed`: display `(iter-as-needed, max N)` instead)
+
+> **Read failure policy**: Any `Read` call on a sibling SKILL.md file (e.g. `define/SKILL.md`, `execute/SKILL.md`) that fails (file not found, permission error, or empty result) must be treated as a hard stop: display `Error: cannot read <path> — aborting workflow.` and exit without executing further steps. Completed steps up to that point are already saved.
 
 **assess_convergence(todo_id)**
 
@@ -135,14 +137,14 @@ iv. Execute the step on all todos in `descendant_list`, in batch order:
 **If step is `research`** — parallel Task agents, one per batch:
 - For each batch in order:
   - Spawn one parallel `general-purpose` Task agent per todo ID in the batch. Each agent runs the research skill for its assigned todo ID autonomously (no user prompts).
-  - Wait for all agents in the batch to complete before starting the next batch.
+  - Wait for all agents in the batch to complete before starting the next batch. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Continue processing remaining todos in `descendant_list` (degraded mode). Do not re-run failed agents automatically.
 - After all todos are done, show the step summary using `## Step: research — Complete`:
   - Call `mcp__proj__content_get_research` for `<todo-id>` (parent only). Display the full `## Recommended Approach` section.
 
 **If step is `decompose`** — parallel Task agents, one per batch:
 - For each batch in order:
   - Spawn one parallel `general-purpose` Task agent per todo ID in the batch. Each agent runs the decompose skill for its assigned todo ID autonomously (no user prompts).
-  - Wait for all agents in the batch to complete before starting the next batch.
+  - Wait for all agents in the batch to complete before starting the next batch. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Continue processing remaining todos in `descendant_list` (degraded mode). Do not re-run failed agents automatically.
 - After all todos are done:
   - **Refresh `descendant_list`**: call `mcp__proj__todo_tree` again with `<todo-id>` and re-flatten depth-first. This picks up any grandchildren created by decompose during this iteration. The refreshed list is used for any subsequent steps within the same iteration and is available for the next iteration. If the count changed (new todos were added by decompose), display: `Descendant list refreshed: now <N> todos in scope.`
   - Show the step summary using `## Step: decompose — Complete`:
@@ -310,7 +312,7 @@ For each batch in dependency order:
 2. Spawn one parallel `general-purpose` Task agent per todo in the batch. Each agent:
    - Calls `mcp__proj__todo_check_executable` — if ⚠️ (manual-tagged): skip, record warning.
    - Otherwise: executes using execute instructions, calls `todo_complete`.
-3. Wait for batch to complete. Collect results including any manual-skips.
+3. Wait for batch to complete. Collect results including any manual-skips. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Mark that todo as failed (`❌`) in the final summary. Continue remaining batches. Do not re-run failed agents automatically.
 
 After all batches complete:
 - Count `manual_skipped` = number of todos where execute was skipped (⚠️ manual-tagged).
@@ -389,7 +391,7 @@ For each batch in the dependency order (using only `remaining_todos`):
 
 1. Display: `Batch <N>/<total> — <agent_steps joined "→">: todos <id1>, <id2>, ...`
 2. Spawn one parallel `general-purpose` Task agent per todo in `remaining_todos`. Each agent receives: the todo ID, `agent_steps` as the step list, the step instructions for those steps (with `$ARGUMENTS` replaced by the todo ID), `--iter 1` (single pass), and instructions to run autonomously without prompting the user. Each agent must compute convergence assessment for the steps it ran and include it in the result as `{converged: bool, reason: str}`.
-3. Wait for all agents in the batch to complete before proceeding to the next batch.
+3. Wait for all agents in the batch to complete before proceeding to the next batch. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Mark that todo as failed (`❌`) in the aggregated summary. Continue remaining batches. Do not re-run failed agents automatically.
 4. Collect each agent's result: todo ID, final status, any errors, **and convergence status**.
 
 **If `run_define_interactive` is false** (either `--no-interactive` or `define` not in active_step_list):
@@ -398,7 +400,7 @@ For each batch in the dependency order (using only `remaining_todos`):
 
 1. Display: `Batch <N>/<total>: todos <id1>, <id2>, ...`
 2. Spawn one parallel `general-purpose` Task agent per todo in `remaining_todos`. Each agent receives: the todo ID, `agent_steps` as the step list, the step instructions for those steps (with `$ARGUMENTS` replaced by `<todo-id> --no-interactive` for the define step when `no_interactive=True`, otherwise `<todo-id>`), `--iter 1` (single pass), and instructions to run all steps without prompting the user. Each agent must compute convergence assessment and include it in the result as `{converged: bool, reason: str}`.
-3. Wait for all agents in the batch to complete before proceeding to the next batch.
+3. Wait for all agents in the batch to complete before proceeding to the next batch. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Mark that todo as failed (`❌`) in the aggregated summary. Continue remaining batches. Do not re-run failed agents automatically.
 4. Collect each agent's result: todo ID, final status, any errors, **and convergence status**.
 
 **Convergence-based prompts** (only if `iter_mode == "as-needed" and iter_max > 1 and i < iter_max and NOT no_interactive`):
@@ -444,7 +446,7 @@ For each batch in dependency order (using `remaining_todos`):
 2. Spawn one parallel `general-purpose` agent per todo. Each agent:
    - Calls `mcp__proj__todo_check_executable` — if ⚠️ (manual-tagged): skip, record warning.
    - Otherwise: executes using execute instructions, calls `todo_complete`.
-3. Wait for batch to complete. Collect results including any manual-skips.
+3. Wait for batch to complete. Collect results including any manual-skips. If any agent terminates with an error or exception (non-success result), capture the error message and display `⚠️ Agent for todo <id> failed: <error>`. Mark that todo as failed (`❌`) in the aggregated summary (section d). Continue remaining batches. Do not re-run failed agents automatically.
 
 **d. Aggregated summary**
 

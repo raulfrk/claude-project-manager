@@ -2,8 +2,15 @@
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for root todos. Syncs root-level todos only — child/subtodos are never synced. Use when the user says "sync with Trello", "sync trello", or "trello sync".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_add, mcp__proj__config_load
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__config_load
 ---
+
+> **Note on allowed-tools:** Trello MCP tools (`mcp__{trello.mcp_server}__*`) are intentionally
+> absent from `allowed-tools`. The Trello MCP server name is user-configurable via
+> `trello.mcp_server` in the proj config (e.g. `"trello"`, `"my_trello"`, `"mcp-trello"`).
+> Because the server name is only known at runtime, a static wildcard like
+> `mcp__trello__*` would not match a differently-named server. Claude resolves the actual
+> tool names dynamically after reading config and calls them without a pre-declared allow entry.
 
 Full bidirectional Trello sync for root todos in the active project.
 
@@ -40,6 +47,7 @@ Trello list IDs must be resolved before creating or moving cards. The config sto
 To resolve list names to IDs:
 - Call `mcp__trello__get_lists` with `boardId` set to the effective board ID.
 - Match by exact name (case-insensitive). If already an ID (all hex characters, length ~24), use as-is.
+- If a configured list name is not found among the board's lists, follow the **Failure: list name mismatch** path in Step 1.
 - Cache resolved IDs for the duration of the sync run.
 
 Effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
@@ -53,6 +61,25 @@ Effective list mappings = per-project `trello.list_mappings` if set, else global
 - Call `mcp__proj__proj_get_active` — get active project name and per-project trello config.
 - Check prerequisites (enabled, board ID set). Stop with a clear message if not met.
 - Resolve list names to IDs using `mcp__trello__get_lists`.
+
+**Failure: Trello MCP server unavailable**
+If the Trello MCP server is not reachable — for example, `mcp__<server>__get_lists` raises a
+tool-not-found error, returns a connection error, or is simply not registered — stop immediately
+and say:
+
+> "Trello MCP server '<server_name>' is not available. Verify the server is running and that
+> `trello.mcp_server` in your proj config matches the registered MCP server name."
+
+Do not proceed with any further sync steps.
+
+**Failure: list name mismatch**
+After calling `mcp__trello__get_lists`, if a list name from `list_mappings.created` or
+`list_mappings.done` cannot be matched (case-insensitively) to any list on the board, stop and say:
+
+> "Trello list '<name>' not found on board '<board_id>'. Check your `trello.list_mappings`
+> config. Available lists: <comma-separated list of board list names>."
+
+Do not proceed with any further sync steps.
 
 ### 2. Fetch both sides
 
@@ -171,3 +198,9 @@ The following operations are performed by other skills (e.g., after `todo_add`, 
 - The `delorenj/mcp-server-trello` tools are: `add_card_to_list`, `update_card_details`, `move_card`, `get_cards_by_list_id`, `get_lists`, `get_recent_activity`.
 - If `update_card_details` does not support `closed`, use `move_card` to the "Done" list as the archive equivalent.
 - `trello_card_id` is stored on the local todo and is the stable link. Never overwrite it with a different card ID.
+
+## Suggested next
+
+- `/proj:todo list` — review todos after sync
+- `/proj:todo add` — add a new root todo (will be pushed to Trello on next sync)
+- `/proj:trello-sync` — run another sync after making local changes
