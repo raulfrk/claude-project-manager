@@ -1,0 +1,29 @@
+default: help
+
+@help:
+    just --list
+
+@check:
+    uv run ruff check --fix .
+    uv run ruff format .
+    uv run basedpyright server/
+
+@test:
+    uv run pytest
+
+@test-cov:
+    uv run pytest --cov=server --cov-report=html --cov-report=term-missing
+
+@security:
+    uv run bandit -r server
+    uv run pip-audit --desc
+
+@ci: check test security
+
+@install:
+    uv sync --all-groups
+
+@clean:
+    rm -rf .coverage .pytest_cache htmlcov
+    find . -type d -name __pycache__ -exec rm -rf {} +
+    find . -type f -name "*.pyc" -delete

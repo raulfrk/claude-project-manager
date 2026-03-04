@@ -1,0 +1,457 @@
+> """MCP tools for todo management."""
+  
+> from __future__ import annotations
+  
+> import json
+> from datetime import date
+> from typing import TYPE_CHECKING
+  
+> from server.lib import state, storage
+> from server.lib.ids import next_todo_id
+> from server.lib.models import Todo
+> from server.tools.config import require_config
+  
+- if TYPE_CHECKING:
+-     from mcp.server.fastmcp import FastMCP
+  
+> _TODAY = lambda: str(date.today())  # noqa: E731
+  
+  
+> def _save(cfg: object, project_name: str, todos: list[Todo]) -> None:
+!     from server.lib.models import ProjConfig
+  
+!     assert isinstance(cfg, ProjConfig)  # noqa: S101
+!     storage.save_todos(cfg, project_name, todos)
+  
+  
+> def register(app: FastMCP) -> None:
+>     @app.tool(description="Add a new todo to a project.")
+>     def todo_add(
+>         title: str,
+>         priority: str | None = None,
+>         tags: list[str] | None = None,
+>         blocked_by: list[str] | None = None,
+>         parent: str | None = None,
+>         notes: str = "",
+>         project_name: str | None = None,
+>         template: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+  
+          # Load and apply template if requested
+>         tmpl = None
+>         if template is not None:
+>             tmpl = storage.load_template(template)
+>             if tmpl is None:
+>                 return f"Template '{template}' not found."
+  
+>         meta = storage.load_meta(cfg, name)
+>         todos = storage.load_todos(cfg, name)
+>         today = _TODAY()
+>         parent_todo = None
+>         if parent:
+>             parent_todo = next((t for t in todos if t.id == parent), None)
+>             if not parent_todo:
+>                 return f"Parent todo '{parent}' not found."
+  
+          # Resolve priority and tags: caller-supplied wins; template defaults fill gaps
+>         effective_priority: str
+>         if priority is not None:
+>             effective_priority = priority
+>         elif tmpl is not None and tmpl.priority is not None:
+>             effective_priority = tmpl.priority
+>         else:
+>             effective_priority = cfg.default_priority
+  
+>         effective_tags: list[str]
+>         if tags is not None:
+>             effective_tags = tags
+>         elif tmpl is not None and tmpl.tags:
+>             effective_tags = list(tmpl.tags)
+>         else:
+>             effective_tags = []
+  
+>         todo = Todo(
+>             id=next_todo_id(meta, parent=parent_todo),
+>             title=title,
+>             priority=effective_priority,
+>             tags=effective_tags,
+>             blocked_by=blocked_by or [],
+>             parent=parent,
+>             notes=notes,
+>             created=today,
+>             updated=today,
+>             template_name=template,
+>         )
+>         if parent_todo:
+>             parent_todo.children.append(todo.id)
+>             parent_todo.updated = today
+>         todos.append(todo)
+>         storage.save_todos(cfg, name, todos)
+>         storage.save_meta(cfg, meta)
+>         return f"Added todo {todo.id}: {title}"
+  
+>     @app.tool(
+>         description=(
+>             "List todos for a project, with optional status/tag filters. "
+>             "Use limit and offset for pagination (limit=0 means no limit)."
+>         )
+>     )
+>     def todo_list(
+>         project_name: str | None = None,
+>         status: str | None = None,
+>         tag: str | None = None,
+>         blocked: bool | None = None,
+>         limit: int = 0,
+>         offset: int = 0,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         if status:
+!             todos = [t for t in todos if t.status == status]
+>         if tag:
+!             todos = [t for t in todos if tag in t.tags]
+>         if blocked is True:
+!             todos = [t for t in todos if t.blocked_by]
+>         elif blocked is False:
+!             todos = [t for t in todos if not t.blocked_by]
+>         if not todos:
+>             return "No todos matching filters."
+>         todos = todos[offset : offset + limit] if limit else todos[offset:]
+>         if not todos:
+!             return "No todos matching filters."
+>         return json.dumps([t.to_dict() for t in todos], indent=2)
+  
+>     @app.tool(description="Get a single todo by ID.")
+>     def todo_get(todo_id: str, project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo = next((t for t in todos if t.id == todo_id), None)
+>         if not todo:
+>             return f"Todo '{todo_id}' not found."
+>         return json.dumps(todo.to_dict(), indent=2)
+  
+>     @app.tool(description="Update a todo's fields.")
+>     def todo_update(
+>         todo_id: str,
+>         title: str | None = None,
+>         status: str | None = None,
+>         priority: str | None = None,
+>         tags: list[str] | None = None,
+>         notes: str | None = None,
+>         todoist_task_id: str | None = None,
+>         project_name: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo = next((t for t in todos if t.id == todo_id), None)
+>         if not todo:
+!             return f"Todo '{todo_id}' not found."
+>         if title is not None:
+>             todo.title = title
+>         if status is not None:
+>             todo.status = status
+>         if priority is not None:
+!             todo.priority = priority
+>         if tags is not None:
+!             todo.tags = tags
+>         if notes is not None:
+!             todo.notes = notes
+>         if todoist_task_id is not None:
+!             todo.todoist_task_id = todoist_task_id
+>         todo.updated = _TODAY()
+>         storage.save_todos(cfg, name, todos)
+>         return f"Updated todo {todo_id}."
+  
+>     @app.tool(description="Mark a todo as done.")
+>     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo = next((t for t in todos if t.id == todo_id), None)
+>         if not todo:
+!             return f"Todo '{todo_id}' not found."
+>         todo.status = "done"
+>         todo.updated = _TODAY()
+>         storage.save_todos(cfg, name, todos)
+>         return f"Marked {todo_id} as done."
+  
+>     @app.tool(description="Set blocking relationships between todos.")
+>     def todo_block(
+>         todo_id: str,
+>         blocks_ids: list[str],
+>         project_name: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo_map = {t.id: t for t in todos}
+>         blocker = todo_map.get(todo_id)
+>         if not blocker:
+!             return f"Todo '{todo_id}' not found."
+>         today = _TODAY()
+>         for blocked_id in blocks_ids:
+>             target = todo_map.get(blocked_id)
+>             if not target:
+!                 continue
+>             if blocked_id not in blocker.blocks:
+>                 blocker.blocks.append(blocked_id)
+>             if todo_id not in target.blocked_by:
+>                 target.blocked_by.append(todo_id)
+>             target.updated = today
+>         blocker.updated = today
+>         storage.save_todos(cfg, name, todos)
+>         return f"{todo_id} now blocks: {', '.join(blocks_ids)}"
+  
+>     @app.tool(description="Remove blocking relationships for a todo.")
+>     def todo_unblock(todo_id: str, project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo_map = {t.id: t for t in todos}
+>         today = _TODAY()
+>         todo = todo_map.get(todo_id)
+>         if not todo:
+!             return f"Todo '{todo_id}' not found."
+>         for blocked_id in todo.blocks:
+>             target = todo_map.get(blocked_id)
+>             if target and todo_id in target.blocked_by:
+>                 target.blocked_by.remove(todo_id)
+>                 target.updated = today
+>         todo.blocks = []
+>         todo.updated = today
+>         storage.save_todos(cfg, name, todos)
+>         return f"Removed all blocking relationships from {todo_id}."
+  
+>     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
+>     def todo_delete(todo_id: str, project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         today = _TODAY()
+          # Clean up references
+>         for t in todos:
+>             if todo_id in t.blocks:
+!                 t.blocks.remove(todo_id)
+!                 t.updated = today
+>             if todo_id in t.blocked_by:
+!                 t.blocked_by.remove(todo_id)
+!                 t.updated = today
+>             if todo_id in t.children:
+!                 t.children.remove(todo_id)
+!                 t.updated = today
+>         todos = [t for t in todos if t.id != todo_id]
+>         storage.save_todos(cfg, name, todos)
+>         return f"Deleted todo {todo_id}."
+  
+>     @app.tool(
+>         description=(
+>             "List todos that are ready to start (pending, no blockers). "
+>             "Use limit and offset for pagination (limit=0 means no limit)."
+>         )
+>     )
+>     def todo_ready(
+>         project_name: str | None = None,
+>         limit: int = 0,
+>         offset: int = 0,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         ready = [t for t in todos if t.status == "pending" and not t.blocked_by]
+>         if not ready:
+!             return "No todos ready to start."
+>         ready = ready[offset : offset + limit] if limit else ready[offset:]
+>         if not ready:
+!             return "No todos ready to start."
+>         return json.dumps([t.to_dict() for t in ready], indent=2)
+  
+>     @app.tool(description="Add a child todo under a parent todo.")
+>     def todo_add_child(
+>         parent_id: str,
+>         title: str,
+>         priority: str | None = None,
+>         tags: list[str] | None = None,
+>         blocked_by: list[str] | None = None,
+>         project_name: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         meta = storage.load_meta(cfg, name)
+>         todos = storage.load_todos(cfg, name)
+>         parent = next((t for t in todos if t.id == parent_id), None)
+>         if not parent:
+!             return f"Parent todo '{parent_id}' not found."
+>         today = _TODAY()
+>         child = Todo(
+>             id=next_todo_id(meta, parent=parent),
+>             title=title,
+>             priority=priority or cfg.default_priority,
+>             tags=tags or [],
+>             blocked_by=blocked_by or [],
+>             parent=parent_id,
+>             created=today,
+>             updated=today,
+>         )
+>         if child.id not in parent.children:
+>             parent.children.append(child.id)
+>         parent.updated = today
+>         todos.append(child)
+>         storage.save_todos(cfg, name, todos)
+>         storage.save_meta(cfg, meta)
+>         return f"Added child todo {child.id} under {parent_id}: {title}"
+  
+>     @app.tool(description="Return todos as a tree structure (JSON with nested children).")
+>     def todo_tree(project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo_map = {t.id: t.to_dict() for t in todos}
+          # Add nested children list
+>         for t in todos:
+>             todo_map[t.id]["_children"] = []
+>         for t in todos:
+>             if t.parent and t.parent in todo_map:
+>                 todo_map[t.parent]["_children"].append(todo_map[t.id])
+>         roots = [todo_map[t.id] for t in todos if t.parent is None]
+>         return json.dumps(roots, indent=2)
+  
+>     @app.tool(
+>         description=(
+>             "Topological sort of todo IDs by blocked_by graph. "
+>             "Returns independent parallel batches with cycle detection."
+>         )
+>     )
+>     def proj_identify_batches(
+>         todo_ids: list[str],
+>         project_name: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         all_todos = storage.load_todos(cfg, name)
+>         todo_map = {t.id: t for t in all_todos}
+  
+          # Identify missing IDs
+>         missing = [tid for tid in todo_ids if tid not in todo_map]
+>         found_ids = [tid for tid in todo_ids if tid in todo_map]
+>         requested_set = set(found_ids)
+  
+          # Build in-degree map and adjacency list (within requested set only)
+>         in_degree: dict[str, int] = {tid: 0 for tid in found_ids}
+          # adjacency: blocker -> list of todos it unblocks
+>         adjacency: dict[str, list[str]] = {tid: [] for tid in found_ids}
+  
+>         for tid in found_ids:
+>             todo = todo_map[tid]
+>             for blocker_id in todo.blocked_by:
+>                 if blocker_id in requested_set:
+>                     in_degree[tid] += 1
+>                     adjacency[blocker_id].append(tid)
+  
+          # Kahn's algorithm — BFS level by level
+>         from collections import deque
+  
+>         queue: deque[str] = deque(tid for tid in found_ids if in_degree[tid] == 0)
+>         batches: list[list[str]] = []
+>         visited_count = 0
+  
+>         while queue:
+>             batch = sorted(queue)  # sort for deterministic output
+>             batches.append(batch)
+>             visited_count += len(batch)
+>             queue.clear()
+>             next_level: list[str] = []
+>             for tid in batch:
+>                 for dependent in adjacency[tid]:
+>                     in_degree[dependent] -= 1
+>                     if in_degree[dependent] == 0:
+>                         next_level.append(dependent)
+>             queue.extend(next_level)
+  
+          # Detect cycles — any unvisited nodes remain
+>         cycles: list[str] = []
+>         if visited_count < len(found_ids):
+>             cycle_nodes = {tid for tid in found_ids if in_degree[tid] > 0}
+              # Build cycle descriptions by tracing each cycle node
+>             reported: set[str] = set()
+>             for start in sorted(cycle_nodes):
+>                 if start in reported:
+>                     continue
+                  # Trace a cycle path starting from `start`
+>                 path: list[str] = []
+>                 visited_trace: set[str] = set()
+>                 node = start
+>                 while node not in visited_trace and node in cycle_nodes:
+>                     path.append(node)
+>                     visited_trace.add(node)
+                      # Follow first blocker that is also in cycle_nodes
+>                     nexts = [
+>                         b
+>                         for b in todo_map[node].blocked_by
+>                         if b in cycle_nodes and b in requested_set
+>                     ]
+>                     node = nexts[0] if nexts else node
+>                     if node == start or node not in cycle_nodes:
+>                         break
+>                 path.append(start)  # close the cycle
+                  # Mark all nodes in path as reported
+>                 for n in path:
+>                     reported.add(n)
+>                 cycle_desc = " → ".join(path)
+>                 cycles.append(cycle_desc)
+  
+>         order = [tid for batch in batches for tid in batch]
+>         return json.dumps(
+>             {"batches": batches, "order": order, "cycles": cycles, "missing": missing}
+>         )
+  
+>     @app.tool(description="Mark has_requirements or has_research flags on a todo.")
+>     def todo_set_content_flag(
+>         todo_id: str,
+>         has_requirements: bool | None = None,
+>         has_research: bool | None = None,
+>         project_name: str | None = None,
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         todos = storage.load_todos(cfg, name)
+>         todo = next((t for t in todos if t.id == todo_id), None)
+>         if not todo:
+!             return f"Todo '{todo_id}' not found."
+>         if has_requirements is not None:
+!             todo.has_requirements = has_requirements
+>         if has_research is not None:
+>             todo.has_research = has_research
+>         todo.updated = _TODAY()
+>         storage.save_todos(cfg, name, todos)
+>         return f"Updated content flags for {todo_id}."

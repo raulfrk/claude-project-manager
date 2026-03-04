@@ -1,0 +1,67 @@
+> """MCP tools for per-todo requirements and research content."""
+  
+> from __future__ import annotations
+  
+> from typing import TYPE_CHECKING
+  
+> from server.lib import state, storage
+> from server.tools.config import require_config
+  
+- if TYPE_CHECKING:
+-     from mcp.server.fastmcp import FastMCP
+  
+  
+> def register(app: FastMCP) -> None:
+>     @app.tool(description="Write requirements.md for a todo.")
+>     def content_set_requirements(
+>         todo_id: str, content: str, project_name: str | None = None
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         storage.write_requirements(cfg, name, todo_id, content)
+>         return f"Written requirements.md for {todo_id}."
+  
+>     @app.tool(description="Read requirements.md for a todo.")
+>     def content_get_requirements(
+>         todo_id: str, project_name: str | None = None, max_chars: int = 4000
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         result = storage.read_requirements(cfg, name, todo_id)
+>         if result is None:
+>             return f"No requirements.md found for {todo_id}."
+>         if len(result) > max_chars:
+>             file_path = storage.requirements_path(cfg, name, todo_id)
+>             omitted = len(result) - max_chars
+>             return result[:max_chars] + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+>         return result
+  
+>     @app.tool(description="Write research.md for a todo.")
+>     def content_set_research(todo_id: str, content: str, project_name: str | None = None) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         storage.write_research(cfg, name, todo_id, content)
+>         return f"Written research.md for {todo_id}."
+  
+>     @app.tool(description="Read research.md for a todo.")
+>     def content_get_research(
+>         todo_id: str, project_name: str | None = None, max_chars: int = 4000
+>     ) -> str:
+>         cfg = require_config()
+>         name = state.resolve_project(project_name)
+>         if not name:
+!             return "No active project."
+>         result = storage.read_research(cfg, name, todo_id)
+>         if result is None:
+!             return f"No research.md found for {todo_id}."
+>         if len(result) > max_chars:
+>             file_path = storage.research_path(cfg, name, todo_id)
+>             omitted = len(result) - max_chars
+>             return result[:max_chars] + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+>         return result

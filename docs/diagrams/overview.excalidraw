@@ -1,0 +1,40 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "claude-project-manager",
+  "elements": [
+    {"type":"text","id":"title","x":310,"y":20,"width":400,"height":40,"text":"claude-project-manager","fontSize":32,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"subtitle","x":350,"y":62,"width":400,"height":30,"text":"Claude Code Plugin Marketplace","fontSize":20,"strokeColor":"#6B7280","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"ccBox","x":430,"y":120,"width":240,"height":70,"roundness":{"type":3},"backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed","strokeWidth":2,"roughness":1,"opacity":100},
+    {"type":"text","id":"ccLabel","x":480,"y":144,"width":140,"height":24,"text":"Claude Code","fontSize":22,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"arrow","id":"ccToPerms","x":430,"y":185,"width":-150,"height":120,"points":[[0,0],[-150,120]],"strokeColor":"#6366F1","strokeWidth":2,"endArrowhead":"arrow","roughness":1,"opacity":100},
+    {"type":"arrow","id":"ccToWorktree","x":550,"y":190,"width":0,"height":115,"points":[[0,0],[0,115]],"strokeColor":"#8B5CF6","strokeWidth":2,"endArrowhead":"arrow","roughness":1,"opacity":100},
+    {"type":"arrow","id":"ccToProj","x":670,"y":185,"width":150,"height":120,"points":[[0,0],[150,120]],"strokeColor":"#EC4899","strokeWidth":2,"endArrowhead":"arrow","roughness":1,"opacity":100},
+    {"type":"rectangle","id":"permsBox","x":140,"y":310,"width":220,"height":80,"roundness":{"type":3},"backgroundColor":"#ddd8ff","fillStyle":"solid","strokeColor":"#6366F1","strokeWidth":2,"roughness":1,"opacity":100},
+    {"type":"text","id":"permsLabel","x":170,"y":338,"width":160,"height":24,"text":"perms  v0.6.0","fontSize":20,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"permsDesc","x":148,"y":400,"width":240,"height":20,"text":"settings.json permissions","fontSize":16,"strokeColor":"#6366F1","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"permsDesc2","x":148,"y":422,"width":240,"height":20,"text":"MCP allow rules · auto-grant","fontSize":16,"strokeColor":"#6366F1","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"worktreeBox","x":440,"y":310,"width":220,"height":80,"roundness":{"type":3},"backgroundColor":"#e5dbff","fillStyle":"solid","strokeColor":"#8B5CF6","strokeWidth":2,"roughness":1,"opacity":100},
+    {"type":"text","id":"worktreeLabel","x":458,"y":338,"width":180,"height":24,"text":"worktree  v0.6.0","fontSize":20,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"worktreeDesc","x":448,"y":400,"width":240,"height":20,"text":"git worktree management","fontSize":16,"strokeColor":"#8B5CF6","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"worktreeDesc2","x":448,"y":422,"width":240,"height":20,"text":"create · list · remove · prune","fontSize":16,"strokeColor":"#8B5CF6","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"projBox","x":740,"y":310,"width":220,"height":80,"roundness":{"type":3},"backgroundColor":"#fce7f3","fillStyle":"solid","strokeColor":"#EC4899","strokeWidth":2,"roughness":1,"opacity":100},
+    {"type":"text","id":"projLabel","x":778,"y":338,"width":144,"height":24,"text":"proj  v0.8.0","fontSize":20,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"projDesc","x":748,"y":400,"width":220,"height":20,"text":"full project lifecycle","fontSize":16,"strokeColor":"#EC4899","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"projDesc2","x":748,"y":422,"width":220,"height":20,"text":"todos · notes · git · Todoist","fontSize":16,"strokeColor":"#EC4899","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"skillsBox","x":650,"y":520,"width":380,"height":200,"roundness":{"type":3},"backgroundColor":"#fff9f0","fillStyle":"solid","strokeColor":"#f59e0b","strokeWidth":1,"roughness":1,"opacity":80},
+    {"type":"text","id":"skillsTitle","x":668,"y":530,"width":200,"height":22,"text":"15 proj skills","fontSize":18,"strokeColor":"#f59e0b","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"worktreeSkillsBox","x":250,"y":520,"width":280,"height":120,"roundness":{"type":3},"backgroundColor":"#f5f0ff","fillStyle":"solid","strokeColor":"#8B5CF6","strokeWidth":1,"roughness":1,"opacity":80},
+    {"type":"text","id":"wtSkillsTitle","x":268,"y":530,"width":200,"height":22,"text":"6 worktree skills","fontSize":18,"strokeColor":"#8B5CF6","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"arrow","id":"projToSkills","x":850,"y":390,"width":0,"height":128,"points":[[0,0],[0,128]],"strokeColor":"#EC4899","strokeWidth":2,"endArrowhead":"arrow","roughness":1,"opacity":100},
+    {"type":"arrow","id":"worktreeToSkills","x":550,"y":390,"width":-120,"height":128,"points":[[0,0],[-120,128]],"strokeColor":"#8B5CF6","strokeWidth":2,"endArrowhead":"arrow","roughness":1,"opacity":100},
+    {"type":"rectangle","id":"todoistBox","x":80,"y":560,"width":150,"height":50,"roundness":{"type":3},"backgroundColor":"#ffd8a8","fillStyle":"solid","strokeColor":"#f59e0b","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"todoistLabel","x":118,"y":576,"width":74,"height":22,"text":"Todoist","fontSize":18,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"rectangle","id":"storageBox","x":80,"y":700,"width":180,"height":50,"roundness":{"type":3},"backgroundColor":"#c3fae8","fillStyle":"solid","strokeColor":"#22c55e","strokeWidth":1,"roughness":1,"opacity":100},
+    {"type":"text","id":"storageLabel","x":90,"y":716,"width":160,"height":20,"text":"~/projects/tracking","fontSize":15,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"roughness":1,"opacity":100}
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "currentItemFontFamily": 1
+  }
+}

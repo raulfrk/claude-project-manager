@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "perms-mcp-server"
+version = "0.7.0"
+description = "MCP server for managing Claude Code settings.json permissions"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.2.0",
+]
+
+[project.scripts]
+perms-server = "server.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "basedpyright>=1.2",
+    "pre-commit>=3.7",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=7.0",
+    "pytest-xdist>=3.5",
+    "pytest-mock>=3.14",
+]
+lint = [
+    "bandit>=1.7",
+    "pip-audit>=2.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "PTH", "S"]
+ignore = ["S603", "S607"]  # subprocess calls are intentional
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S108", "TC003"]  # assert/tmp paths/runtime Path usage fine in tests
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto"]
+
+[tool.coverage.run]
+branch = true
+omit = ["*/tests/*", "server/main.py"]

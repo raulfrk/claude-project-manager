@@ -1,0 +1,7 @@
+{
+  "name": "worktree",
+  "description": "Git worktree management for Claude Code. Create, list, and remove worktrees from configured base repositories.",
+  "version": "0.7.0",
+  "author": { "name": "raulfrk" },
+  "mcpServers": "./.mcp.json"
+}

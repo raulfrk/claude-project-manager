@@ -1,0 +1,243 @@
+> """MCP tools for template management."""
+  
+> from __future__ import annotations
+  
+> import json
+> from datetime import date
+> from typing import TYPE_CHECKING
+  
+> from server.lib import state, storage
+> from server.lib.models import Template, WorkflowConfig
+> from server.tools.config import require_config
+  
+- if TYPE_CHECKING:
+-     from mcp.server.fastmcp import FastMCP
+  
+> _TODAY = lambda: str(date.today())  # noqa: E731
+  
+  
+> def _detect_conflicts(
+>     existing_tags: list[str],
+>     existing_priority: str,
+>     existing_template_name: str | None,
+>     incoming: Template,
+> ) -> list[dict[str, object]]:
+>     """Return a list of conflict dicts between existing state and the incoming template.
+  
+>     Checks:
+>     - tags: both sides non-empty and different
+>     - priority: existing is non-default and incoming differs
+>     - workflow.steps: existing template set and steps differ
+>     - hooks: existing template set and hook keys overlap
+>     """
+>     conflicts: list[dict[str, object]] = []
+  
+      # Tags conflict
+>     if existing_tags and incoming.tags and set(existing_tags) != set(incoming.tags):
+>         conflicts.append(
+>             {
+>                 "field": "tags",
+>                 "existing": existing_tags,
+>                 "incoming": incoming.tags,
+>                 "resolution": "merge or replace?",
+>             }
+>         )
+  
+      # Priority conflict
+>     if (
+>         existing_priority != "medium"
+>         and incoming.priority is not None
+>         and existing_priority != incoming.priority
+>     ):
+>         conflicts.append(
+>             {
+>                 "field": "priority",
+>                 "existing": existing_priority,
+>                 "incoming": incoming.priority,
+>                 "resolution": "which wins?",
+>             }
+>         )
+  
+      # Workflow + hooks conflicts (only when a previous template was applied)
+>     if existing_template_name is not None:
+>         prev_template = storage.load_template(existing_template_name)
+>         if prev_template is not None:
+              # Workflow steps conflict
+>             if prev_template.workflow.steps != incoming.workflow.steps:
+>                 conflicts.append(
+>                     {
+>                         "field": "workflow.steps",
+>                         "existing": prev_template.workflow.steps,
+>                         "incoming": incoming.workflow.steps,
+>                         "resolution": "merge or override?",
+>                     }
+>                 )
+              # Hooks conflict (overlapping hook event keys)
+>             overlapping_hooks = set(prev_template.hooks) & set(incoming.hooks)
+>             if overlapping_hooks:
+>                 conflicts.append(
+>                     {
+>                         "field": "hooks",
+>                         "existing": prev_template.hooks,
+>                         "incoming": incoming.hooks,
+>                         "resolution": "additive or override?",
+>                     }
+>                 )
+  
+>     return conflicts
+  
+  
+> def register(app: FastMCP) -> None:
+>     @app.tool(description="Load a template by name with scoped resolution (project-first, then global).")
+>     def template_get(name: str, project_repo_path: str | None = None) -> str:
+!         require_config()
+!         template = storage.load_template(name, project_repo_path)
+!         if template is None:
+!             return f"Template '{name}' not found."
+!         return json.dumps(template.to_dict(), indent=2)
+  
+>     @app.tool(
+>         description=(
+>             "List templates in a scope. "
+>             "scope must be 'global' or 'project'. "
+>             "For scope='project', project_repo_path is required."
+>         )
+>     )
+>     def template_list(scope: str, project_repo_path: str | None = None) -> str:
+!         require_config()
+!         if scope == "project" and project_repo_path is None:
+!             return "project_repo_path required for scope='project'."
+!         try:
+!             names = storage.list_templates(scope, project_repo_path)
+!         except ValueError as exc:
+!             return str(exc)
+!         if not names:
+!             return "No templates found."
+!         return json.dumps(names)
+  
+>     @app.tool(
+>         description=(
+>             "Apply a template to a todo or project. "
+>             "target_type must be 'todo' or 'project'. "
+>             "Task templates cannot be applied to a project. "
+>             "When conflicts exist and force=False, returns a JSON conflict report. "
+>             "Pass force=True to overwrite conflicting fields."
+>         )
+>     )
+>     def template_apply(
+>         name: str,
+>         target_id: str,
+>         target_type: str,
+>         project_name: str | None = None,
+>         force: bool = False,
+>     ) -> str:
+>         cfg = require_config()
+>         proj = state.resolve_project(project_name)
+>         if not proj:
+>             return "No active project."
+  
+>         if target_type not in ("todo", "project"):
+>             return "Invalid target_type: must be 'todo' or 'project'."
+  
+>         template = storage.load_template(name)
+>         if template is None:
+>             return f"Template '{name}' not found."
+  
+>         if target_type == "project" and template.type == "task":
+>             return "Cannot apply a task template to a project."
+  
+>         if target_type == "todo":
+>             todos = storage.load_todos(cfg, proj)
+>             todo = next((t for t in todos if t.id == target_id), None)
+>             if not todo:
+>                 return f"Todo '{target_id}' not found."
+  
+>             if not force:
+>                 conflicts = _detect_conflicts(
+>                     existing_tags=todo.tags,
+>                     existing_priority=todo.priority,
+>                     existing_template_name=todo.template_name,
+>                     incoming=template,
+>                 )
+>                 if conflicts:
+>                     return json.dumps(
+>                         {
+>                             "status": "conflict",
+>                             "existing_template": todo.template_name,
+>                             "incoming_template": name,
+>                             "conflicts": conflicts,
+>                             "hint": "Re-call with force=True to overwrite, or resolve conflicts manually.",
+>                         }
+>                     )
+  
+>             todo.template_name = name
+>             todo.updated = _TODAY()
+>             storage.save_todos(cfg, proj, todos)
+  
+>         elif target_type == "project":
+>             meta = storage.load_meta(cfg, proj)
+  
+>             if not force:
+>                 conflicts = _detect_conflicts(
+>                     existing_tags=meta.tags,
+>                     existing_priority=meta.priority,
+>                     existing_template_name=None,  # ProjectMeta has no template_name field
+>                     incoming=template,
+>                 )
+>                 if conflicts:
+>                     return json.dumps(
+>                         {
+>                             "status": "conflict",
+>                             "existing_template": None,
+>                             "incoming_template": name,
+>                             "conflicts": conflicts,
+>                             "hint": "Re-call with force=True to overwrite, or resolve conflicts manually.",
+>                         }
+>                     )
+  
+>         return f"Applied template '{name}' to {target_type} '{target_id}'."
+  
+>     @app.tool(
+>         description=(
+>             "Create a new template YAML file. "
+>             "scope must be 'global' or 'project'. "
+>             "For scope='project', project_repo_path is required."
+>         )
+>     )
+>     def template_create(
+>         name: str,
+>         type: str,
+>         scope: str,
+>         description: str = "",
+>         tags: list[str] | None = None,
+>         priority: str | None = None,
+>         workflow_steps: list[str] | None = None,
+>         hooks: dict[str, list[str]] | None = None,
+>         claudemd_snippet: str = "",
+>         bundled_task_templates: list[str] | None = None,
+>         project_repo_path: str | None = None,
+>     ) -> str:
+>         require_config()
+>         if scope == "project" and project_repo_path is None:
+>             return "project_repo_path required for scope='project'."
+  
+>         workflow = WorkflowConfig(
+>             steps=workflow_steps or ["define", "research", "decompose", "execute"]
+>         )
+>         template = Template(
+>             name=name,
+>             type=type,
+>             description=description,
+>             tags=tags or [],
+>             priority=priority,
+>             workflow=workflow,
+>             hooks=hooks or {},
+>             claudemd_snippet=claudemd_snippet,
+>             bundled_task_templates=bundled_task_templates or [],
+>         )
+>         try:
+>             storage.save_template(name, template, scope, project_repo_path)
+!         except ValueError as exc:
+!             return str(exc)
+  
+>         return f"Created template '{name}' in {scope} scope."
