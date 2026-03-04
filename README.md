@@ -20,7 +20,7 @@ A Claude Code plugin marketplace for project management workflows.
 
 **worktree** (v0.7.0) — Git worktree management. Register base repositories once, then create, list, and remove isolated worktrees on demand — all from within a Claude Code conversation.
 
-**proj** (v0.31.0) — Full project lifecycle management. Tracks todos with nested dependencies, appends timestamped notes, syncs bidirectionally with Todoist, detects git activity, generates reports, and drives AI-powered research and parallel execution of work items.
+**proj** (v0.31.0) — Full project lifecycle management. Tracks todos with nested dependencies, appends timestamped notes, syncs bidirectionally with Todoist and Trello (root todos only), detects git activity, generates reports, and drives AI-powered research and parallel execution of work items.
 
 **claude-helper** (v0.1.0) — Review and quality tooling for Claude Code. Analyses SKILL.md files and subagent definition files, scoring them across ten quality dimensions and producing prioritised improvement reports. Pure-skill plugin — no MCP server required.
 
@@ -125,10 +125,10 @@ The `proj` plugin is the core of the marketplace. It tracks project metadata, to
 
 **Skills by category:**
 
-- **Setup**: `init-plugin`, `init`
-- **Daily workflow**: `status`, `todo`, `update`, `sync`, `explore`, `list-proj`, `save`
+- **Setup**: `init-plugin`, `init`, `quick`
+- **Daily workflow**: `status`, `todo`, `update`, `sync`, `explore`, `list-proj`, `save`, `trello-sync`, `extract-todos`
 - **Deep work**: `define`, `research`, `decompose`, `execute`, `full-workflow`, `prep-workflow`, `quick-workflow`
-- **Agents**: `agents-list`, `agents-set`, `agents-remove`, `create-agent`
+- **Agents**: `agents-list`, `agents-set`, `agents-remove`, `create-agent`, `agents-create-define`, `agents-create-research`, `agents-create-decompose`, `agents-create-execute`
 - **Reports**: `report`
 - **Management**: `archive`, `load`, `switch`
 - **Maintenance**: `migrate-ids`, `migrate-to-proj`, `perms-sync`
@@ -145,6 +145,7 @@ Hooks run automatically at session start, session end, and pre-compact to inject
 |-------|--------|-------------|-----------|
 | `/proj:init-plugin` | proj | First-time setup wizard | none |
 | `/proj:init` | proj | Initialize project tracking | `[project-name]` |
+| `/proj:quick` | proj | Create a new project and immediately launch full-workflow on the first todo | `[project-name]` |
 | `/proj:status` | proj | Show project status, todos, git activity | none |
 | `/proj:todo` | proj | Manage todos (add/done/list/tree/block/delete) | `[operation] [args]` |
 | `/proj:update` | proj | Record progress, reconcile git, append notes | `[note text]` |
@@ -166,10 +167,16 @@ Hooks run automatically at session start, session end, and pre-compact to inject
 | `/proj:prep-workflow` | proj | Run define → research → decompose interactively | `<id | range | list> [--iter N | --iter-as-needed[=N]] [--steps <csv> | --from <step>] [--no-interactive]` |
 | `/proj:quick-workflow` | proj | Create a new todo and immediately run full-workflow on it | `<description> [--steps <csv>] [--from <step>] [--iter N] [--iter-as-needed[=N]]` |
 | `/proj:save` | proj | Save session notes to project — appends to NOTES.md and writes a dated session file | none |
+| `/proj:trello-sync` | proj | Bidirectional Trello sync for root todos | — |
+| `/proj:extract-todos` | proj | Scan repo source files for TODO/FIXME comments and import as project todos | `[--dry-run]` |
 | `/proj:agents-list` | proj | List all agent overrides for the active project | none |
 | `/proj:agents-set` | proj | Set an agent override for a workflow step (define/research/decompose/execute) | `<step> <agent-name>` |
 | `/proj:agents-remove` | proj | Remove an agent override for a step | `<step>` |
 | `/proj:create-agent` | proj | Create a custom Claude Code agent file for a project workflow step | `[--global] [step] [agent-name]` |
+| `/proj:agents-create-define` | proj | Create a custom agent file for the define (requirements) step | `[--global] [agent-name]` |
+| `/proj:agents-create-research` | proj | Create a custom agent file for the research step | `[--global] [agent-name]` |
+| `/proj:agents-create-decompose` | proj | Create a custom agent file for the decompose step | `[--global] [agent-name]` |
+| `/proj:agents-create-execute` | proj | Create a custom agent file for the execute step | `[--global] [agent-name]` |
 
 ### claude-helper skills
 
@@ -206,6 +213,14 @@ The `proj` plugin is configured via `~/.claude/proj.yaml`, written during `/proj
 | `permissions.auto_allow_mcps` | boolean | `true` | Auto-allow plugin MCP tools in `settings.json` |
 | `todoist.enabled` | boolean | `false` | Enable Todoist bidirectional sync |
 | `todoist.auto_sync` | boolean | `true` | Auto-sync todos on every proj command |
+| `todoist.mcp_server` | string | `claude_ai_Todoist` | MCP server name for Todoist integration |
+| `todoist.root_only` | boolean | `false` | Sync only root-level todos (no subtodos) to Todoist |
+| `trello.enabled` | boolean | `false` | Enable Trello bidirectional sync |
+| `trello.mcp_server` | string | `trello` | MCP server name for Trello integration |
+| `trello.default_board_id` | string | — | Trello board ID to sync root todos to |
+| `trello.list_mappings.created` | string | — | Trello list name for pending/in-progress todos |
+| `trello.list_mappings.done` | string | — | Trello list name for completed todos |
+| `trello.on_delete` | string | `archive` | What to do with Trello cards when todo is deleted (`archive` or `delete`) |
 | `perms_integration` | boolean | `false` | Whether the `perms` plugin is installed |
 | `worktree_integration` | boolean | `false` | Whether the `worktree` plugin is installed |
 
@@ -223,6 +238,16 @@ sync:
   todoist:
     enabled: true
     auto_sync: true
+    mcp_server: claude_ai_Todoist
+    root_only: false
+  trello:
+    enabled: false
+    mcp_server: trello
+    default_board_id: ""
+    list_mappings:
+      created: "In Progress"
+      done: "Done"
+    on_delete: archive
 perms_integration: true
 worktree_integration: true
 ```
