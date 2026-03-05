@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "worktree": {
+      "command": "uv",
+      "args": [
+        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
+        "run", "worktree-server"
+      ],
+      "env": {
+        "WORKTREE_CONFIG": "~/.claude/worktree.yaml"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "proj": {
+      "command": "uv",
+      "args": [
+        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
+        "run", "proj-server"
+      ],
+      "env": {
+        "PROJ_CONFIG": "~/.claude/proj.yaml"
+      }
+    }
+  }
+}
