@@ -500,3 +500,182 @@ class TestBatchAddMcpAllowProjectScope:
         allow = _read_allow(project_settings)
         assert "Read(//home/user/proj/**)" in allow
         assert "mcp__proj__*" in allow
+
+
+# ---------------------------------------------------------------------------
+# target="sandbox" — writes to settings.local.json sandbox.filesystem.allowWrite
+# ---------------------------------------------------------------------------
+
+
+def _write_local_settings(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+
+
+def _read_sandbox_allow_write(path: Path) -> list[str]:
+    data: dict[str, object] = json.loads(path.read_text())
+    sandbox = data.get("sandbox", {})
+    assert isinstance(sandbox, dict)
+    fs = sandbox.get("filesystem", {})
+    assert isinstance(fs, dict)
+    return fs.get("allowWrite", [])  # type: ignore[return-value]
+
+
+def _read_local_allow(path: Path) -> list[str]:
+    data: dict[str, object] = json.loads(path.read_text())
+    perms = data.get("permissions", {})
+    assert isinstance(perms, dict)
+    return perms.get("allow", [])  # type: ignore[return-value]
+
+
+@pytest.fixture()
+def sandbox_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Return path to ~/.claude/settings.local.json with sandbox.enabled=true."""
+    local_path = tmp_path / ".claude" / "settings.local.json"
+    _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+    monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+    # Also set _USER_SETTINGS to a separate file so standard mode doesn't interfere
+    monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / ".claude" / "settings.json")
+    return local_path
+
+
+class TestAddAllowSandboxMode:
+    def test_adds_path_to_sandbox_allow_write(self, sandbox_settings: Path) -> None:
+        result = add_allow("/home/user/proj", scope="user", target="sandbox")
+        assert "sandbox" in result.lower()
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/home/user/proj" in aw
+
+    def test_idempotent(self, sandbox_settings: Path) -> None:
+        add_allow("/home/user/proj", scope="user", target="sandbox")
+        result = add_allow("/home/user/proj", scope="user", target="sandbox")
+        assert "already present" in result
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert aw.count("/home/user/proj") == 1
+
+    def test_auto_detects_sandbox(self, sandbox_settings: Path) -> None:
+        result = add_allow("/home/user/proj", scope="user", target="auto")
+        assert "sandbox" in result.lower()
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/home/user/proj" in aw
+
+    def test_preserves_existing_sandbox_config(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/existing"]},
+            },
+        })
+        add_allow("/home/user/proj", scope="user", target="sandbox")
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/existing" in aw
+        assert "/home/user/proj" in aw
+
+
+class TestRemoveAllowSandboxMode:
+    def test_removes_path_from_sandbox(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj"]},
+            },
+        })
+        result = remove_allow("/home/user/proj", scope="user", target="sandbox")
+        assert "Removed" in result
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/home/user/proj" not in aw
+
+    def test_no_match_idempotent(self, sandbox_settings: Path) -> None:
+        result = remove_allow("/nonexistent", scope="user", target="sandbox")
+        assert "No matching" in result
+
+
+class TestListAllowSandboxMode:
+    def test_shows_sandbox_rules(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj"]},
+            },
+            "permissions": {"allow": ["mcp__proj__*"]},
+        })
+        result = list_allow("user", target="sandbox")
+        assert "/home/user/proj" in result
+        assert "mcp__proj__*" in result
+
+    def test_empty_sandbox(self, sandbox_settings: Path) -> None:
+        result = list_allow("user", target="sandbox")
+        assert "no sandbox rules" in result
+
+
+class TestCheckAllowSandboxMode:
+    def test_present(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj"]},
+            },
+        })
+        result = check_allow("/home/user/proj", scope="user", target="sandbox")
+        assert "OK" in result
+
+    def test_missing(self, sandbox_settings: Path) -> None:
+        result = check_allow("/home/user/proj", scope="user", target="sandbox")
+        assert "MISSING" in result
+
+
+class TestMcpAllowSandboxMode:
+    def test_mcp_rules_go_to_local_permissions_allow(self, sandbox_settings: Path) -> None:
+        result = add_mcp_allow("proj", scope="user", target="sandbox")
+        assert "mcp__proj__*" in result
+        allow = _read_local_allow(sandbox_settings)
+        assert "mcp__proj__*" in allow
+
+    def test_idempotent(self, sandbox_settings: Path) -> None:
+        add_mcp_allow("proj", scope="user", target="sandbox")
+        result = add_mcp_allow("proj", scope="user", target="sandbox")
+        assert "already present" in result
+
+    def test_remove_mcp_sandbox(self, sandbox_settings: Path) -> None:
+        add_mcp_allow("proj", scope="user", target="sandbox")
+        result = remove_mcp_allow("proj", scope="user", target="sandbox")
+        assert "Removed" in result
+        allow = _read_local_allow(sandbox_settings)
+        assert "mcp__proj__*" not in allow
+
+
+class TestBatchAddMcpAllowSandboxMode:
+    def test_adds_to_local_settings(self, sandbox_settings: Path) -> None:
+        result = batch_add_mcp_allow(["proj", "perms"], scope="user", target="sandbox")
+        assert "Added 2" in result
+        allow = _read_local_allow(sandbox_settings)
+        assert "mcp__proj__*" in allow
+        assert "mcp__perms__*" in allow
+
+    def test_auto_detects_sandbox(self, sandbox_settings: Path) -> None:
+        result = batch_add_mcp_allow(["proj"], scope="user", target="auto")
+        allow = _read_local_allow(sandbox_settings)
+        assert "mcp__proj__*" in allow
+
+    def test_does_not_write_to_settings_json(
+        self, sandbox_settings: Path, tmp_path: Path
+    ) -> None:
+        """Sandbox mode must not create or modify settings.json."""
+        user_settings = tmp_path / ".claude" / "settings.json"
+        batch_add_mcp_allow(["proj"], scope="user", target="sandbox")
+        assert not user_settings.exists()
+
+
+class TestAutoTargetFallsBackToSettings:
+    """When sandbox is not enabled, auto target falls back to settings.json."""
+
+    def test_auto_uses_settings_when_no_sandbox(
+        self, user_settings: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Ensure no settings.local.json exists
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        result = add_allow("/home/user/proj", scope="user", target="auto")
+        assert "Added 2" in result
+        allow = _read_allow(user_settings)
+        assert "Read(//home/user/proj/**)" in allow
+        assert "Edit(//home/user/proj/**)" in allow

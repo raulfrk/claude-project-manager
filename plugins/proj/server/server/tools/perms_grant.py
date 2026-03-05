@@ -16,20 +16,56 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _USER_SETTINGS = Path.home() / ".claude" / "settings.json"
+_USER_LOCAL_SETTINGS = Path.home() / ".claude" / "settings.local.json"
 _WORKTREE_CONFIG = Path.home() / ".claude" / "worktree.yaml"
+
+
+# ── Sandbox detection ─────────────────────────────────────────────────────────
+
+
+def _is_sandbox_enabled(project_dir: Path | None = None) -> bool:
+    """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
+    for path in _sandbox_paths(project_dir):
+        if not path.exists():
+            continue
+        try:
+            data: dict[str, object] = json.loads(path.read_text())
+            sandbox = data.get("sandbox", {})
+            if isinstance(sandbox, dict) and sandbox.get("enabled", False):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
+
+
+def _sandbox_paths(project_dir: Path | None = None) -> list[Path]:
+    """Return settings.local.json paths to check for sandbox mode (user-level + project-level)."""
+    paths = [_USER_LOCAL_SETTINGS]
+    if project_dir:
+        paths.append(Path(project_dir) / ".claude" / "settings.local.json")
+    return paths
+
+
+def _effective_settings_path(project_dir: Path | None = None) -> Path:
+    """Return the settings file path to use (settings.json or settings.local.json)."""
+    if _is_sandbox_enabled(project_dir):
+        return _USER_LOCAL_SETTINGS
+    return _USER_SETTINGS
 
 
 # ── Settings I/O ──────────────────────────────────────────────────────────────
 
 
-def _load_settings() -> dict[str, object]:
-    if not _USER_SETTINGS.exists():
+def _load_settings(project_dir: Path | None = None) -> dict[str, object]:
+    path = _effective_settings_path(project_dir)
+    if not path.exists():
         return {}
-    return json.loads(_USER_SETTINGS.read_text())  # type: ignore[return-value]  # json.loads returns Any; caller expects dict
+    return json.loads(path.read_text())  # type: ignore[return-value]
 
 
-def _save_settings(data: dict[str, object]) -> None:
-    storage.atomic_write_json(_USER_SETTINGS, data)
+def _save_settings(data: dict[str, object], project_dir: Path | None = None) -> None:
+    path = _effective_settings_path(project_dir)
+    storage.atomic_write_json(path, data)
 
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
@@ -82,6 +118,51 @@ def _mcp_allow_entry(server_name: str) -> str:
     return f"mcp__{server_name}__*"
 
 
+# ── Sandbox-aware helpers ──────────────────────────────────────────────────────
+
+
+def _ensure_sandbox_section(data: dict[str, object]) -> dict[str, object]:
+    """Ensure ``sandbox.filesystem.allowWrite`` path exists in the data dict."""
+    sandbox = data.get("sandbox", {})
+    if not isinstance(sandbox, dict):
+        sandbox = {}
+    fs = sandbox.get("filesystem", {})
+    if not isinstance(fs, dict):
+        fs = {}
+    if "allowWrite" not in fs:
+        fs["allowWrite"] = []
+    sandbox["filesystem"] = fs
+    data["sandbox"] = sandbox
+    return data
+
+
+def _project_dir_from_meta(meta: ProjectMeta) -> Path | None:
+    """Derive the project directory from the first non-reference repo path."""
+    for repo in meta.repos:
+        if not repo.reference:
+            return Path(repo.path)
+    # Fall back to the first repo if all are reference
+    if meta.repos:
+        return Path(meta.repos[0].path)
+    return None
+
+
+def _add_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
+    """Add a path to sandbox.filesystem.allowWrite. Returns True if added."""
+    data = _ensure_sandbox_section(data)
+    sandbox = data["sandbox"]
+    assert isinstance(sandbox, dict)
+    fs = sandbox["filesystem"]
+    assert isinstance(fs, dict)
+    aw = fs["allowWrite"]
+    assert isinstance(aw, list)
+    clean = abs_path.rstrip("/")
+    if clean not in aw:
+        aw.append(clean)
+        return True
+    return False
+
+
 # ── Grant / revoke ─────────────────────────────────────────────────────────────
 
 
@@ -97,7 +178,8 @@ def grant_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
     if not tools or not paths:
         return 0
 
-    data = _load_settings()
+    project_dir = _project_dir_from_meta(meta)
+    data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
         perms = {}
@@ -118,7 +200,7 @@ def grant_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
         allow.extend(new_entries)
         perms["allow"] = allow
         data["permissions"] = perms
-        _save_settings(data)
+        _save_settings(data, project_dir)
 
     return len(new_entries)
 
@@ -139,7 +221,8 @@ def revoke_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
 
     to_remove: set[str] = {_bash_entry(tool, path) for path in paths for tool in tools}
 
-    data = _load_settings()
+    project_dir = _project_dir_from_meta(meta)
+    data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
         return 0
@@ -153,7 +236,7 @@ def revoke_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
     if removed:
         perms["allow"] = new_allow
         data["permissions"] = perms
-        _save_settings(data)
+        _save_settings(data, project_dir)
 
     return removed
 
@@ -166,8 +249,15 @@ def _apply_path_rules(
     cfg: ProjConfig,
     allow_set: set[str],
     new_entries: list[str],
+    *,
+    sandbox_mode: bool = False,
+    data: dict[str, object] | None = None,
 ) -> int:
-    """Add Read+Edit rules for writable repo paths and Read-only for reference repos and tracking dir. Returns count added."""
+    """Add Read+Edit rules for writable repo paths and Read-only for reference repos and tracking dir.
+
+    In sandbox mode, writable paths are also added to sandbox.filesystem.allowWrite.
+    Returns count added.
+    """
     count = 0
     for repo in meta.repos:
         abs_path = str(Path(repo.path).expanduser().resolve())
@@ -175,6 +265,10 @@ def _apply_path_rules(
         entries = [f"Read({prefix}/**)"]
         if not repo.reference:
             entries.append(f"Edit({prefix}/**)")
+            # In sandbox mode, also add to sandbox.filesystem.allowWrite
+            if sandbox_mode and data is not None:
+                if _add_sandbox_write_path(data, abs_path):
+                    count += 1
         for entry in entries:
             if entry not in allow_set:
                 new_entries.append(entry)
@@ -182,6 +276,9 @@ def _apply_path_rules(
                 count += 1
     if cfg.tracking_dir:
         abs_path = str(Path(cfg.tracking_dir).expanduser().resolve())
+        if sandbox_mode and data is not None:
+            if _add_sandbox_write_path(data, abs_path):
+                count += 1
         for entry in _path_allow_entries(abs_path):
             if entry not in allow_set:
                 new_entries.append(entry)
@@ -234,18 +331,23 @@ def setup_permissions(
     grant_investigation_tools_flag: bool = True,
     mcp_servers: list[str] | None = None,
 ) -> dict[str, int]:
-    """Add all project permission rules in a single atomic settings.json write.
+    """Add all project permission rules in a single atomic write.
+
+    Targets settings.json or settings.local.json depending on sandbox mode.
 
     Consolidates what would otherwise be 5-7 sequential tool calls:
     - Read+Edit rules for each repo path and the tracking dir
     - Bash investigation-tool rules (scoped to project paths)
     - MCP server wildcard rules
+    - (sandbox mode) sandbox.filesystem.allowWrite paths
 
     Returns a dict with counts: {"path_rules": N, "bash_rules": N, "mcp_rules": N}.
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
-    data = _load_settings()
+    project_dir = _project_dir_from_meta(meta)
+    sandbox_mode = _is_sandbox_enabled(project_dir)
+    data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
         perms = {}
@@ -258,7 +360,10 @@ def setup_permissions(
     counts = {"path_rules": 0, "bash_rules": 0, "mcp_rules": 0}
 
     if grant_path_access:
-        counts["path_rules"] = _apply_path_rules(meta, cfg, allow_set, new_entries)
+        counts["path_rules"] = _apply_path_rules(
+            meta, cfg, allow_set, new_entries,
+            sandbox_mode=sandbox_mode, data=data,
+        )
 
     if grant_investigation_tools_flag:
         counts["bash_rules"] = _apply_bash_rules(meta, cfg, allow_set, new_entries)
@@ -266,11 +371,11 @@ def setup_permissions(
     if mcp_servers:
         counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
 
-    if new_entries:
+    if new_entries or sum(counts.values()) > 0:
         allow.extend(new_entries)
         perms["allow"] = allow
         data["permissions"] = perms
-        _save_settings(data)
+        _save_settings(data, project_dir)
 
     return counts
 
@@ -285,7 +390,8 @@ def register(app: FastMCP) -> None:
         description=(
             "Grant Bash allow rules for read-only investigation tools (grep, find, ls, etc.) "
             "for a project's directories and worktree paths. "
-            "Rules are scoped to the project paths. Idempotent — safe to call multiple times."
+            "Rules are scoped to the project paths. Idempotent — safe to call multiple times. "
+            "Automatically detects sandbox mode and writes to settings.local.json if enabled."
         )
     )
     def proj_grant_tool_permissions(project_name: str | None = None) -> str:
@@ -312,9 +418,11 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Grant all permission rules for a project in one atomic settings.json write. "
+            "Grant all permission rules for a project in one atomic write. "
             "Replaces calling perms_add_allow + proj_grant_tool_permissions + perms_add_mcp_allow "
             "separately. Idempotent. "
+            "Automatically detects sandbox mode and writes to settings.local.json if enabled. "
+            "In sandbox mode, writable paths are also added to sandbox.filesystem.allowWrite. "
             "grant_path_access=true adds Read+Edit rules for repo paths and tracking dir. "
             "grant_investigation_tools=true adds scoped Bash rules (grep, find, ls, etc.). "
             "mcp_servers is a list of server names to add wildcard allow rules for "
@@ -358,7 +466,8 @@ def register(app: FastMCP) -> None:
         description=(
             "Remove Bash allow rules for investigation tools for a project's directories. "
             "Only removes rules that were added by proj_grant_tool_permissions — "
-            "other allow rules are never touched. Idempotent."
+            "other allow rules are never touched. Idempotent. "
+            "Automatically detects sandbox mode."
         )
     )
     def proj_revoke_tool_permissions(project_name: str | None = None) -> str:

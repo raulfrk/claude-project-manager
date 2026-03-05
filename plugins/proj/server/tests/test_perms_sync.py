@@ -742,3 +742,218 @@ class TestProjPermsSyncTool:
         prefix = f"//{repo_path.strip('/')}"
         assert f"Read({prefix}/**)" in allow_set
         assert f"Edit({prefix}/**)" in allow_set
+
+
+# ── Sandbox mode tests ────────────────────────────────────────────────────────
+
+
+def _write_local_settings(path: Path, data: dict[str, object]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+    return path
+
+
+class TestSandboxDetection:
+    def test_is_sandbox_enabled_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.tools.perms_sync import _is_sandbox_enabled
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: local_path,
+        )
+        assert _is_sandbox_enabled() is True
+
+    def test_is_sandbox_enabled_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.tools.perms_sync import _is_sandbox_enabled
+
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: tmp_path / "nonexistent.json",
+        )
+        assert _is_sandbox_enabled() is False
+
+    def test_is_sandbox_enabled_project_level_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sandbox enabled at project level but not user level is detected."""
+        from server.tools.perms_sync import _is_sandbox_enabled
+
+        # User-level settings.local.json does not exist
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: tmp_path / "nonexistent.json",
+        )
+        # Project-level has sandbox enabled
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
+
+        assert _is_sandbox_enabled(project_dir) is True
+
+    def test_is_sandbox_enabled_user_false_project_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When user-level sandbox is disabled but project-level is enabled, returns True."""
+        from server.tools.perms_sync import _is_sandbox_enabled
+
+        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
+        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: user_local,
+        )
+
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
+
+        assert _is_sandbox_enabled(project_dir) is True
+
+    def test_is_sandbox_enabled_both_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both user-level and project-level sandbox are disabled, returns False."""
+        from server.tools.perms_sync import _is_sandbox_enabled
+
+        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
+        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: user_local,
+        )
+
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": False}})
+
+        assert _is_sandbox_enabled(project_dir) is False
+
+
+class TestLoadActualRulesSandbox:
+    def test_reads_from_local_when_sandbox_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": ["mcp__proj__*"]},
+        })
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: local_path,
+        )
+        monkeypatch.setattr(
+            "server.tools.perms_sync._settings_path",
+            lambda: tmp_path / "settings.json",
+        )
+
+        result = _load_actual_rules()
+        assert "mcp__proj__*" in result
+
+
+class TestDeriveExpectedSandboxPaths:
+    def test_writable_repo_paths_included(self) -> None:
+        from server.tools.perms_sync import _derive_expected_sandbox_paths
+
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg(tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        assert "/home/user/proj" in paths
+        assert "/home/user/docs" not in paths  # reference repo excluded
+        assert "/tmp/tracking" in paths
+
+
+class TestRunSyncSandbox:
+    def test_in_sync_sandbox_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False, tracking_dir="/tmp/tracking")
+        expected = _derive_expected_rules(meta, cfg)
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj", "/tmp/tracking"]},
+            },
+            "permissions": {"allow": sorted(expected)},
+        })
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: local_path,
+        )
+        monkeypatch.setattr(
+            "server.tools.perms_sync._settings_path",
+            lambda: tmp_path / "settings.json",
+        )
+
+        result = run_sync(meta, cfg)
+
+        assert "settings.local.json" in result
+        assert "in sync" in result
+
+    def test_missing_sandbox_paths_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected = _derive_expected_rules(meta, cfg)
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        # All permission rules present but sandbox.filesystem.allowWrite is empty
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": sorted(expected)},
+        })
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: local_path,
+        )
+        monkeypatch.setattr(
+            "server.tools.perms_sync._settings_path",
+            lambda: tmp_path / "settings.json",
+        )
+
+        result = run_sync(meta, cfg)
+
+        assert "❌" in result
+        assert "sandbox allowWrite" in result.lower() or "Sandbox allowWrite" in result
+        assert "/home/user/proj" in result
+
+    def test_missing_rules_in_sandbox_mode_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=False)
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr(
+            "server.tools.perms_sync._local_settings_path",
+            lambda: local_path,
+        )
+        monkeypatch.setattr(
+            "server.tools.perms_sync._settings_path",
+            lambda: tmp_path / "settings.json",
+        )
+
+        result = run_sync(meta, cfg)
+
+        assert "❌" in result
+        assert "settings.local.json" in result
+        assert "Read(//home/user/proj/**)" in result

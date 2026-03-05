@@ -1,4 +1,4 @@
-"""Perms sync tool — compare expected vs actual settings.json allow rules."""
+"""Perms sync tool — compare expected vs actual allow rules (settings.json or settings.local.json)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,28 @@ if TYPE_CHECKING:
 
 def _settings_path() -> Path:
     return Path.home() / ".claude" / "settings.json"
+
+
+def _local_settings_path() -> Path:
+    return Path.home() / ".claude" / "settings.local.json"
+
+
+def _is_sandbox_enabled(project_dir: Path | None = None) -> bool:
+    """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
+    paths = [_local_settings_path()]
+    if project_dir:
+        paths.append(Path(project_dir) / ".claude" / "settings.local.json")
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            data: dict[str, object] = json.loads(path.read_text())
+            sandbox = data.get("sandbox", {})
+            if isinstance(sandbox, dict) and sandbox.get("enabled", False):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
 
 
 def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
@@ -52,8 +74,21 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     return rules
 
 
-def _load_actual_rules() -> set[str]:
-    path = _settings_path()
+def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
+    """Derive the paths expected in sandbox.filesystem.allowWrite."""
+    paths: set[str] = set()
+    for repo in meta.repos:
+        if not repo.reference:
+            paths.add(repo.path.rstrip("/"))
+    if cfg.tracking_dir:
+        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
+    return paths
+
+
+def _load_actual_rules(project_dir: Path | None = None) -> set[str]:
+    """Load permissions.allow rules from the effective settings file."""
+    sandbox_mode = _is_sandbox_enabled(project_dir)
+    path = _local_settings_path() if sandbox_mode else _settings_path()
     if not path.exists():
         return set()
     data: dict[str, object] = json.loads(path.read_text())
@@ -64,6 +99,24 @@ def _load_actual_rules() -> set[str]:
     if not isinstance(allow, list):
         return set()
     return set(str(r) for r in allow)
+
+
+def _load_actual_sandbox_paths() -> set[str]:
+    """Load sandbox.filesystem.allowWrite paths from settings.local.json."""
+    path = _local_settings_path()
+    if not path.exists():
+        return set()
+    data: dict[str, object] = json.loads(path.read_text())
+    sandbox = data.get("sandbox", {})
+    if not isinstance(sandbox, dict):
+        return set()
+    fs = sandbox.get("filesystem", {})
+    if not isinstance(fs, dict):
+        return set()
+    aw = fs.get("allowWrite", [])
+    if not isinstance(aw, list):
+        return set()
+    return set(str(p) for p in aw)
 
 
 def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
@@ -77,12 +130,34 @@ def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
     return servers
 
 
+def _project_dir_from_meta(meta: ProjectMeta) -> Path | None:
+    """Derive the project directory from the first non-reference repo path."""
+    for repo in meta.repos:
+        if not repo.reference:
+            return Path(repo.path)
+    if meta.repos:
+        return Path(meta.repos[0].path)
+    return None
+
+
 def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
+    project_dir = _project_dir_from_meta(meta)
+    sandbox_mode = _is_sandbox_enabled(project_dir)
     expected = _derive_expected_rules(meta, cfg)
-    actual = _load_actual_rules()
+    actual = _load_actual_rules(project_dir)
     missing = expected - actual
-    if not missing:
-        return "✅ settings.json is in sync — all expected rules are present."
+
+    # In sandbox mode, also check sandbox.filesystem.allowWrite
+    missing_sandbox_paths: set[str] = set()
+    if sandbox_mode:
+        expected_paths = _derive_expected_sandbox_paths(meta, cfg)
+        actual_paths = _load_actual_sandbox_paths()
+        missing_sandbox_paths = expected_paths - actual_paths
+
+    target_name = "settings.local.json" if sandbox_mode else "settings.json"
+
+    if not missing and not missing_sandbox_paths:
+        return f"✅ {target_name} is in sync — all expected rules are present."
 
     # Group by type
     missing_path = sorted(
@@ -103,8 +178,8 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
             mcp_servers=mcp_servers,
         )
         total = sum(counts.values())
-        if total == 0:
-            return "✅ settings.json is in sync — all expected rules are present."
+        if total == 0 and not missing_sandbox_paths:
+            return f"✅ {target_name} is in sync — all expected rules are present."
         parts: list[str] = []
         if counts["path_rules"]:
             parts.append(f"{counts['path_rules']} path rule(s)")
@@ -112,9 +187,10 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
             parts.append(f"{counts['bash_rules']} Bash rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        return f"✅ Applied missing rules — added {total} rule(s): {', '.join(parts)}."
+        applied_total = total
+        return f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
 
-    lines = ["❌ Missing rules in settings.json:\n"]
+    lines = [f"❌ Missing rules in {target_name}:\n"]
     if missing_path:
         lines.append("**Directory rules:**")
         lines.extend(f"  - `{r}`" for r in missing_path)
@@ -124,6 +200,9 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
     if missing_mcp:
         lines.append("\n**MCP rules:**")
         lines.extend(f"  - `{r}`" for r in missing_mcp)
+    if missing_sandbox_paths:
+        lines.append("\n**Sandbox allowWrite paths:**")
+        lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))
     lines.append(
         "\nRun `proj_setup_permissions` to add all missing rules at once, "
         "or `proj_grant_tool_permissions` (Bash rules), "
@@ -138,9 +217,11 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Check if settings.json allow rules match the active project config. "
+            "Check if settings allow rules match the active project config. "
             "Reports missing rules (one-way check — extras in actual are fine). "
             "Does not auto-fix. Idempotent. "
+            "Automatically detects sandbox mode and checks settings.local.json if enabled. "
+            "In sandbox mode, also checks sandbox.filesystem.allowWrite paths. "
             "Pass apply=true to automatically add all missing rules in one atomic write."
         )
     )

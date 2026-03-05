@@ -21,7 +21,7 @@ Inspect $ARGUMENTS to determine the input mode and extract flags:
 - If both `--steps` and `--from` are given, `--steps` takes precedence; ignore `--from`.
 - **`--iter N`**: if present, extract N as the number of prep iterations (default 1). N must be a positive integer. Ignored for range/comma-list input.
 - **`--iter-as-needed[=N]`**: if present, use adaptive iteration mode — iterate prep steps until convergence, up to N iterations max (default 5 if N omitted). N must be a positive integer. If both `--iter` and `--iter-as-needed` are given, stop with: `Cannot use both --iter and --iter-as-needed. Choose one.`
-- **`--no-interactive`**: if present, run all batch steps autonomously with no user prompts — define runs inside agents, convergence prompts are suppressed. Restores original batch behaviour. (Ignored for single-ID input.)
+- **`--no-interactive`**: if present, run all steps autonomously with no user prompts — define runs inside agents (or non-interactively for single-ID), convergence prompts are suppressed. For single-ID input: auto-proceed through convergence prompts (step 4c) and execute prompts (step 5) based on convergence state.
 - If no todo ID is present, stop with: `Todo ID required. Usage: /proj:full-workflow <id> [--steps define,execute] [--from <step>]`
 
 For **single ID**: call `mcp__proj__todo_get` to confirm it exists. If not found, stop with a clear error. Then continue to step 2.
@@ -174,7 +174,12 @@ Store `children_converged` from the result for use in step 5.
 
 Display this assessment line immediately before the prompt options.
 
-When convergence is 🟢 AND `has_execute` is true, show a 4-option prompt (execute is the natural next step):
+**Automatic progression with `--no-interactive`** (single-ID path):
+- If `--no-interactive` is true AND `overall_converged` is true: display the convergence assessment, then display `Auto-proceeding to execute (--no-interactive mode)` and skip remaining iterations — jump directly to step 5.
+- If `--no-interactive` is true AND `overall_converged` is false: display the convergence assessment, then display `Auto-continuing to iteration <i+1> (--no-interactive mode)` and continue to the next iteration.
+- If `--no-interactive` is false (interactive mode): proceed to show the user prompt as documented below.
+
+When convergence is 🟢 AND `has_execute` is true AND NOT `--no-interactive`, show a 4-option prompt (execute is the natural next step):
 ```
 ### Iteration <i>/<N> complete — Next Action?
 
@@ -188,7 +193,7 @@ When convergence is 🟢 AND `has_execute` is true, show a 4-option prompt (exec
 Enter 1, 2, 3, or 4:
 ```
 
-When convergence is 🔄 OR `has_execute` is false, show the standard 3-option prompt:
+When convergence is 🔄 OR `has_execute` is false, AND NOT `--no-interactive`, show the standard 3-option prompt:
 ```
 ### Iteration <i>/<N> complete — Next Action?
 
@@ -217,7 +222,11 @@ First, call `mcp__proj__todo_get` with the todo ID to refresh the todo (it may h
 
 **Store `execute_all_path = false`** (will be set to true if the execute-all path is taken; used by step 7).
 
-If **`has_children` is false**, present the standard prompt:
+If **`has_children` is false**:
+
+When `--no-interactive` is true: display `Auto-proceeding to execute (--no-interactive mode)` and jump directly to step 5i (parent execute) — do not show the prompt.
+
+Otherwise, present the standard prompt:
 
 ```
 ### Prep complete (<N> iteration(s)) — Next Action?
@@ -234,7 +243,11 @@ Handle responses:
 - **Edit** (2, "edit", "e"): ask what to change, apply as direct update, then return to this prompt.
 - **Stop** (3, "stop", "s"): display summary and exit cleanly.
 
-If **`has_children` is true AND `children_converged` is true**, present the execute-all prompt:
+If **`has_children` is true AND `children_converged` is true**:
+
+When `--no-interactive` is true: display `Auto-proceeding to execute all — parent + children (--no-interactive mode)`, set `execute_all_path = true`, and jump directly to step 5ii (execute-all) — do not show the prompt.
+
+Otherwise, present the execute-all prompt:
 
 ```
 ### Prep complete — todo has <N> children (all converged). Next Action?
@@ -251,7 +264,11 @@ Handle responses:
 - **Edit** (2, "edit", "e"): ask what to change, apply as direct update, then return to this prompt.
 - **Stop** (3, "stop", "s"): display summary and exit cleanly.
 
-If **`has_children` is true AND `children_converged` is false**, present the children-aware prompt instead:
+If **`has_children` is true AND `children_converged` is false**:
+
+When `--no-interactive` is true: display `Auto-proceeding to execute parent, then children workflow (--no-interactive mode)` and jump to step 5i (parent execute), then continue to step 6 (children workflow) — do not show the prompt.
+
+Otherwise, present the children-aware prompt:
 
 > **Note (edge-case fallback):** This prompt is only reached when `--steps` excluded the research/decompose steps, leaving children without prep. In the normal full-workflow path, step 4 handles all descendants (prep) and step 5ii handles execute-all; this branch is not taken. The children workflow below (step 6) will define/research/decompose/execute each child now.
 

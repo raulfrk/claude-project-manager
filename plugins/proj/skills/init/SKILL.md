@@ -2,7 +2,7 @@
 name: init
 description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", or "set up project tracking for X".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__proj__template_list, mcp__proj__template_apply, Bash
+allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, Bash
 argument-hint: "[project-name]"
 ---
 
@@ -94,18 +94,6 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 5. Call `mcp__proj__proj_init` with name, path=<resolved content path>, description, tags, git_enabled.
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_set_active` or proceed further).
    Call `mcp__proj__proj_set_active` to set as active.
-
-5b. **Template** — Ask: "Would you like to apply a project template? [no]"
-   - If the user says no (or presses Enter): skip this step.
-   - If the user says yes (or names a template directly):
-     - Call `mcp__proj__template_list` with scope="global" to list global templates.
-     - If `_explored = true` (repo was mapped in step 3b): also call `mcp__proj__template_list` with scope="project" and the mapped content path.
-     - Collect all results; filter to `type=project`. If none found, tell the user "No project templates available." and skip.
-     - Present the list as a numbered menu (name + description if available).
-     - Ask: "Select a template by name or number (or press Enter to skip):"
-     - If the user picks one: call `mcp__proj__template_apply` with name=<chosen>, target_type="project", target_id=<project_name>.
-     - Confirm: "Applied template '<name>' to project '<project_name>'."
-     - If the user presses Enter: skip without applying.
 
 6. **Permissions** (if `perms_integration: true` in config and project's auto_grant != false):
    - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"

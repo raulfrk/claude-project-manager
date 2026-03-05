@@ -523,6 +523,260 @@ class TestProjGrantToolPermissionsTool:
         assert "mcp__plugin_proj_proj__*" in allow
 
 
+# ── Sandbox mode tests ─────────────────────────────────────────────────────────
+
+
+def _write_local_settings(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+
+
+def _read_local_allow(path: Path) -> list[str]:
+    data = json.loads(path.read_text())
+    return data.get("permissions", {}).get("allow", [])
+
+
+def _read_sandbox_allow_write(path: Path) -> list[str]:
+    data = json.loads(path.read_text())
+    return data.get("sandbox", {}).get("filesystem", {}).get("allowWrite", [])
+
+
+class TestSandboxModeDetection:
+    def test_is_sandbox_enabled_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        assert _is_sandbox_enabled() is True
+
+    def test_is_sandbox_enabled_false_when_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        monkeypatch.setattr(
+            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            tmp_path / "nonexistent.json",
+        )
+        assert _is_sandbox_enabled() is False
+
+    def test_is_sandbox_enabled_false_when_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        assert _is_sandbox_enabled() is False
+
+    def test_is_sandbox_enabled_project_level_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sandbox enabled at project level but not user level is detected."""
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        # User-level has no sandbox
+        monkeypatch.setattr(
+            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            tmp_path / "nonexistent.json",
+        )
+        # Project-level has sandbox enabled
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
+
+        assert _is_sandbox_enabled(project_dir) is True
+
+    def test_is_sandbox_enabled_user_false_project_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When user-level sandbox is disabled but project-level is enabled, returns True."""
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
+        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", user_local)
+
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
+
+        assert _is_sandbox_enabled(project_dir) is True
+
+    def test_is_sandbox_enabled_both_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both user-level and project-level sandbox are disabled, returns False."""
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
+        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", user_local)
+
+        project_dir = tmp_path / "myproject"
+        proj_local = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(proj_local, {"sandbox": {"enabled": False}})
+
+        assert _is_sandbox_enabled(project_dir) is False
+
+    def test_is_sandbox_enabled_no_project_dir_only_checks_user(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When project_dir is None, only user-level is checked (backward compat)."""
+        from server.tools.perms_grant import _is_sandbox_enabled
+
+        monkeypatch.setattr(
+            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            tmp_path / "nonexistent.json",
+        )
+        assert _is_sandbox_enabled(None) is False
+
+
+class TestGrantInvestigationToolsSandbox:
+    def test_writes_to_local_settings_when_sandbox_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        added = grant_investigation_tools(meta, cfg)
+
+        assert added == 1
+        allow = _read_local_allow(local_path)
+        assert "Bash(grep //home/user/proj/**)" in allow
+        # Standard settings.json must NOT be created
+        assert not (tmp_path / "settings.json").exists()
+
+
+class TestSetupPermissionsSandbox:
+    def test_adds_sandbox_write_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=[])
+        cfg.tracking_dir = "/tmp/tracking"
+        counts = setup_permissions(
+            meta, cfg,
+            grant_path_access=True,
+            grant_investigation_tools_flag=False,
+        )
+
+        # Path rules include Read+Edit in permissions.allow AND sandbox.filesystem.allowWrite
+        allow = _read_local_allow(local_path)
+        assert "Read(//home/user/proj/**)" in allow
+        assert "Edit(//home/user/proj/**)" in allow
+        aw = _read_sandbox_allow_write(local_path)
+        assert "/home/user/proj" in aw
+        assert counts["path_rules"] > 0
+
+    def test_reference_repo_not_in_sandbox_allow_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="docs", path="/home/user/docs", reference=True)])
+        cfg = _make_cfg(tools=[])
+        cfg.tracking_dir = ""
+        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=False)
+
+        aw = _read_sandbox_allow_write(local_path)
+        assert "/home/user/docs" not in aw
+        # Read rule should still be in permissions.allow
+        allow = _read_local_allow(local_path)
+        assert "Read(//home/user/docs/**)" in allow
+
+    def test_all_rules_sandbox(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        counts = setup_permissions(
+            meta, cfg,
+            grant_path_access=True,
+            grant_investigation_tools_flag=True,
+            mcp_servers=["plugin_proj_proj"],
+        )
+
+        allow = _read_local_allow(local_path)
+        assert "Bash(grep //home/user/proj/**)" in allow
+        assert "mcp__plugin_proj_proj__*" in allow
+        aw = _read_sandbox_allow_write(local_path)
+        assert "/home/user/proj" in aw
+        assert sum(counts.values()) > 0
+
+    def test_idempotent_sandbox(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
+        counts2 = setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
+
+        assert sum(counts2.values()) == 0
+
+
+class TestRevokeInvestigationToolsSandbox:
+    def test_revokes_from_local_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": ["Bash(grep //home/user/proj/**)"]},
+        })
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        removed = revoke_investigation_tools(meta, cfg)
+
+        assert removed == 1
+        allow = _read_local_allow(local_path)
+        assert "Bash(grep //home/user/proj/**)" not in allow
+
+
 # ── Fixture ───────────────────────────────────────────────────────────────────
 
 

@@ -17,4 +17,6 @@ class Priority(str, Enum):
     HIGH = "high"
 
 
+TERMINAL_STATUSES = frozenset({"done", "cancelled"})
+
 MANUAL_TAG = "manual"

@@ -7,7 +7,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from server.lib import storage
-from server.lib.enums import MANUAL_TAG, TodoStatus
+from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import Todo
 from server.tools.config import require_project
@@ -127,6 +127,8 @@ def _filter_todos(
     """Apply status/tag/blocked filters and pagination to a todo list."""
     if active_only:
         todos = [t for t in todos if t.status in (TodoStatus.PENDING, TodoStatus.IN_PROGRESS)]
+    elif status == "open":
+        todos = [t for t in todos if t.status not in TERMINAL_STATUSES]
     elif status is not None:
         todos = [t for t in todos if t.status == status]
     if tag:
@@ -191,6 +193,7 @@ def register(app: FastMCP) -> None:
         description=(
             "List todos for a project, with optional status/tag filters. "
             "status='active' (default) returns pending+in_progress only; "
+            "status='open' returns all non-done/non-cancelled todos; "
             "pass status=None to return all statuses including done. "
             "Use limit and offset for pagination (limit=0 means no limit)."
         )
@@ -225,6 +228,7 @@ def register(app: FastMCP) -> None:
     @app.tool(
         description=(
             "List all todos including archived (active + archive.yaml), with optional filters. "
+            "status='open' returns all non-done/non-cancelled todos. "
             "Use limit and offset for pagination (limit=0 means no limit)."
         )
     )

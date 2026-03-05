@@ -144,6 +144,39 @@ class TestProjectsMCPTools:
         result = await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
         assert "docs" in result
 
+    async def test_proj_remove_repo(
+        self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
+    ) -> None:
+        # Add a second repo so we can remove one
+        new_repo = str(tmp_path / "extra_repo")
+        Path(new_repo).mkdir()
+        await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
+        result = await call_tool(mcp_app, "proj_remove_repo", label="docs")
+        assert "Removed" in result
+        assert "docs" in result
+        meta = storage.load_meta(project[0], "myapp")
+        assert len(meta.repos) == 1
+        assert meta.repos[0].label == "code"
+
+    async def test_proj_remove_repo_last_repo_guard(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        result = await call_tool(mcp_app, "proj_remove_repo", label="code")
+        assert "Cannot remove the last repo" in result
+        meta = storage.load_meta(project[0], "myapp")
+        assert len(meta.repos) == 1
+
+    async def test_proj_remove_repo_label_not_found(
+        self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
+    ) -> None:
+        # Add a second repo so we pass the last-repo guard
+        new_repo = str(tmp_path / "extra_repo")
+        Path(new_repo).mkdir()
+        await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
+        result = await call_tool(mcp_app, "proj_remove_repo", label="nonexistent")
+        assert "No repo with label" in result
+        assert "nonexistent" in result
+
 
 @pytest.mark.asyncio
 class TestTodosMCPTools:
@@ -425,6 +458,23 @@ class TestTodosMCPTools:
         result = await call_tool(mcp_app, "todo_list", status=None)
         assert "Pending" in result
         assert "Done" in result
+
+    async def test_todo_list_status_open_returns_all_non_terminal(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """status='open' returns pending, in_progress, blocked but not done."""
+        await call_tool(mcp_app, "todo_add", title="Pending")
+        await call_tool(mcp_app, "todo_add", title="InProgress")
+        await call_tool(mcp_app, "todo_update", todo_id="2", status="in_progress")
+        await call_tool(mcp_app, "todo_add", title="Blocked")
+        await call_tool(mcp_app, "todo_update", todo_id="3", status="blocked")
+        await call_tool(mcp_app, "todo_add", title="Done")
+        await call_tool(mcp_app, "todo_update", todo_id="4", status="done")
+        result = await call_tool(mcp_app, "todo_list", status="open")
+        assert "Pending" in result
+        assert "InProgress" in result
+        assert "Blocked" in result
+        assert "Done" not in result
 
     async def test_todo_ready_limit(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Ready A")
@@ -839,6 +889,18 @@ class TestTodoListAll:
         data = _json.loads(result)
         assert len(data) == 1
         assert data[0]["title"] == "Done"
+
+    async def test_todo_list_all_status_open_returns_non_terminal(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """status='open' on todo_list_all returns non-done/non-cancelled todos."""
+        await call_tool(mcp_app, "todo_add", title="Active")
+        await call_tool(mcp_app, "todo_add", title="Done")
+        await call_tool(mcp_app, "todo_complete", todo_id="2")
+        result = await call_tool(mcp_app, "todo_list_all", status="open")
+        data = _json.loads(result)
+        assert len(data) == 1
+        assert data[0]["title"] == "Active"
 
     async def test_todo_list_all_empty_project(
         self, mcp_app: Any, project: tuple[ProjConfig, str]

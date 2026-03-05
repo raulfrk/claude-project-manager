@@ -37,7 +37,7 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_set_permissions, and proj_load_session tools with the MCP app."""
+    """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, and proj_load_session tools with the MCP app."""
 
     @app.tool(description="Initialize tracking for a new project.")
     def proj_init(
@@ -227,6 +227,26 @@ def register(app: FastMCP) -> None:
         if reference:
             return f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
         return f"Added repo '{label}' at {abs_path} to project '{name}'."
+
+    @app.tool(description="Remove a repository from a project by label (cannot remove the last repo).")
+    def proj_remove_repo(
+        label: str,
+        project_name: str | None = None,
+    ) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        meta = storage.load_meta(cfg, name)
+        if len(meta.repos) <= 1:
+            return "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."
+        found = next((r for r in meta.repos if r.label == label), None)
+        if found is None:
+            return f"No repo with label '{label}' found in project '{name}'."
+        meta.repos.remove(found)
+        storage.save_meta(cfg, meta)
+        ref_note = " (reference, read-only)" if found.reference else ""
+        return f"Removed repo '{label}' at {found.path}{ref_note} from project '{name}'."
 
     @app.tool(description="Set per-project permissions override (null = use global config).")
     def proj_set_permissions(auto_grant: bool | None, project_name: str | None = None) -> str:

@@ -4,11 +4,7 @@ A Claude Code plugin marketplace for project management workflows.
 
 [![version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-180%20passing-brightgreen?style=flat-square)](#contributing)
-
-[![Open in Excalidraw](https://img.shields.io/badge/view-architecture%20diagram-EC4899?style=flat-square&logo=excalidraw)](https://excalidraw.com/#json=ue4znbuVRXdEwG3C7cuc0,F6Q5l9SK9gxOXnP1qup2bQ)
-
-> Source: [`docs/diagrams/overview.excalidraw`](docs/diagrams/overview.excalidraw)
+[![tests](https://img.shields.io/badge/tests-753%20passing-brightgreen?style=flat-square)](#contributing)
 
 ---
 
@@ -16,13 +12,13 @@ A Claude Code plugin marketplace for project management workflows.
 
 `claude-project-manager` is a Claude Code plugin marketplace that extends Claude with project management superpowers. Four focused plugins work independently or together to handle the full lifecycle of software projects — from permissions management through task tracking to AI-powered execution.
 
-**perms** (v0.7.0) — Auto-manages `settings.json` permissions. Grants directory Read/Edit access and adds MCP allow-rule wildcards so Claude can act on your filesystem without manual configuration.
+**perms** (v0.8.0) — Auto-manages `settings.json` permissions. Grants directory Read/Edit access and adds MCP allow-rule wildcards so Claude can act on your filesystem without manual configuration.
 
-**worktree** (v0.7.0) — Git worktree management. Register base repositories once, then create, list, and remove isolated worktrees on demand — all from within a Claude Code conversation.
+**worktree** (v0.8.0) — Git worktree management. Register base repositories once, then create, list, and remove isolated worktrees on demand — all from within a Claude Code conversation.
 
-**proj** (v0.31.0) — Full project lifecycle management. Tracks todos with nested dependencies, appends timestamped notes, syncs bidirectionally with Todoist and Trello (root todos only), detects git activity, generates reports, and drives AI-powered research and parallel execution of work items.
+**proj** (v0.41.0) — Full project lifecycle management. Tracks todos with nested dependencies, appends timestamped notes, syncs bidirectionally with Todoist and Trello (root todos only), detects git activity, generates reports, and drives AI-powered research and parallel execution of work items.
 
-**claude-helper** (v0.1.0) — Review and quality tooling for Claude Code. Analyses SKILL.md files and subagent definition files, scoring them across ten quality dimensions and producing prioritised improvement reports. Pure-skill plugin — no MCP server required.
+**claude-helper** (v0.4.0) — Review and quality tooling for Claude Code. Analyses SKILL.md files and subagent definition files, scoring them across ten quality dimensions and producing prioritised improvement reports. Pure-skill plugin — no MCP server required.
 
 ---
 
@@ -114,8 +110,10 @@ The `claude-helper` plugin provides review and quality tooling for Claude Code s
 | `/claude-helper:review-skill` | Review a single SKILL.md file — scores all 10 quality dimensions and produces an annotated report |
 | `/claude-helper:review-agent` | Review a Claude subagent definition file — same workflow with criteria adapted for agent conventions |
 | `/claude-helper:review-all` | Batch-review all SKILL.md files under a directory, spawning parallel agents and sorting results by score |
+| `/claude-helper:resume-review` | Load a saved review file and continue from the first pending finding |
+| `/claude-helper:review-to-todo` | Convert pending review findings into project todos interactively |
 
-Each dimension produces a 1–5 score, an impact rating, a finding, and a concrete improvement suggestion. Pass `--include-agents` to `review-all` to also cover agent definition files.
+Five skills cover the full review lifecycle: individual and batch reviews, resuming interrupted reviews, and converting findings into actionable todos. Each dimension produces a 1–5 score, an impact rating, a finding, and a concrete improvement suggestion. Pass `--include-agents` to `review-all` to also cover agent definition files.
 
 ---
 
@@ -126,7 +124,7 @@ The `proj` plugin is the core of the marketplace. It tracks project metadata, to
 **Skills by category:**
 
 - **Setup**: `init-plugin`, `init`, `quick`
-- **Daily workflow**: `status`, `todo`, `update`, `sync`, `explore`, `list-proj`, `save`, `trello-sync`, `extract-todos`
+- **Daily workflow**: `status`, `todo`, `update`, `sync`, `explore`, `list-proj`, `save`, `trello-sync`, `extract-todos`, `add-repo`, `remove-repo`
 - **Deep work**: `define`, `research`, `decompose`, `execute`, `full-workflow`, `prep-workflow`, `quick-workflow`
 - **Agents**: `agents-list`, `agents-set`, `agents-remove`, `create-agent`, `agents-create-define`, `agents-create-research`, `agents-create-decompose`, `agents-create-execute`
 - **Reports**: `report`
@@ -177,6 +175,8 @@ Hooks run automatically at session start, session end, and pre-compact to inject
 | `/proj:agents-create-research` | proj | Create a custom agent file for the research step | `[--global] [agent-name]` |
 | `/proj:agents-create-decompose` | proj | Create a custom agent file for the decompose step | `[--global] [agent-name]` |
 | `/proj:agents-create-execute` | proj | Create a custom agent file for the execute step | `[--global] [agent-name]` |
+| `/proj:add-repo` | proj | Add a new directory or repository to the active project | `<path> [--label=<label>] [--reference] [--claudemd]` |
+| `/proj:remove-repo` | proj | Remove a directory or repository from the active project by label | `<label>` |
 
 ### claude-helper skills
 
@@ -185,6 +185,8 @@ Hooks run automatically at session start, session end, and pre-compact to inject
 | `/claude-helper:review-skill` | claude-helper | Review a single SKILL.md file across 10 quality dimensions | `<path-to-SKILL.md>` |
 | `/claude-helper:review-agent` | claude-helper | Review a Claude subagent definition file | `<path-to-agent-file>` |
 | `/claude-helper:review-all` | claude-helper | Batch-review all SKILL.md files under a directory (parallel agents, sorted by score) | `<directory> [--include-agents]` |
+| `/claude-helper:resume-review` | claude-helper | Load a saved review file and continue from the first pending finding | `<path-to-review-file>` |
+| `/claude-helper:review-to-todo` | claude-helper | Convert pending review findings into project todos interactively | `<path-to-review-file>` |
 
 ### worktree skills
 
@@ -206,11 +208,12 @@ The `proj` plugin is configured via `~/.claude/proj.yaml`, written during `/proj
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `tracking_dir` | string | `~/projects/tracking` | Root directory for all project tracking data |
-| `projects_base_dir` | string | `~/projects` | Base directory used when initializing new projects |
+| `projects_base_dir` | string | — | Base directory used when initializing new projects |
 | `git_integration` | boolean | `true` | Enable git activity detection |
 | `default_priority` | string | `medium` | Default todo priority (`low`/`medium`/`high`) |
 | `permissions.auto_grant` | boolean | `true` | Auto-add Read/Edit rules for project directories |
 | `permissions.auto_allow_mcps` | boolean | `true` | Auto-allow plugin MCP tools in `settings.json` |
+| `permissions.investigation_tools` | list | `["grep","find","ls","cat","head","tail","wc","tree","du","file"]` | Bash tools granted scoped access via `proj_setup_permissions` |
 | `todoist.enabled` | boolean | `false` | Enable Todoist bidirectional sync |
 | `todoist.auto_sync` | boolean | `true` | Auto-sync todos on every proj command |
 | `todoist.mcp_server` | string | `claude_ai_Todoist` | MCP server name for Todoist integration |
@@ -234,6 +237,17 @@ default_priority: medium
 permissions:
   auto_grant: true
   auto_allow_mcps: true
+  investigation_tools:
+    - grep
+    - find
+    - ls
+    - cat
+    - head
+    - tail
+    - wc
+    - tree
+    - du
+    - file
 sync:
   todoist:
     enabled: true
@@ -255,6 +269,327 @@ worktree_integration: true
 ---
 
 ## Workflow Diagrams
+
+### Architecture Overview
+
+Architecture overview — how each plugin fits into the marketplace.
+
+```mermaid
+flowchart TB
+    subgraph marketplace["Marketplace: claude-project-manager"]
+        direction TB
+
+        subgraph perms_plugin["perms plugin"]
+            direction LR
+            perms_mcp["MCP Server<br/>perms_add_allow<br/>perms_remove_allow<br/>perms_add_mcp_allow<br/>perms_check<br/>perms_list"]
+            perms_store[("settings.json<br/>~/.claude/settings.json")]
+            perms_mcp --> perms_store
+        end
+
+        subgraph worktree_plugin["worktree plugin"]
+            direction LR
+            wt_mcp["MCP Server<br/>wt_create / wt_remove<br/>wt_list / wt_lock<br/>wt_add_repo"]
+            wt_skills["Skills<br/>/worktree:setup<br/>/worktree:create<br/>/worktree:list"]
+            wt_store[("worktree.yaml<br/>~/.claude/worktree.yaml")]
+            wt_mcp --> wt_store
+        end
+
+        subgraph proj_plugin["proj plugin"]
+            direction LR
+            proj_mcp["MCP Server<br/>proj_init / proj_list<br/>todo_add / todo_complete<br/>notes_append<br/>git_detect_work<br/>config_load"]
+            proj_skills["Skills<br/>/proj:init / /proj:todo<br/>/proj:full-workflow<br/>/proj:status / /proj:quick<br/>/proj:explore"]
+            proj_hooks["Hooks<br/>PostCompact<br/>(auto session save)"]
+            proj_store[("proj.yaml + tracking/<br/>~/.claude/proj.yaml<br/>~/projects/tracking/")]
+            proj_mcp --> proj_store
+        end
+
+        subgraph helper_plugin["claude-helper plugin"]
+            direction LR
+            helper_skills["Skills only<br/>/claude-helper:review-skill<br/>/claude-helper:review-agent<br/>/claude-helper:review-all"]
+        end
+    end
+
+    %% Dependencies
+    proj_plugin -- "permissions mgmt" --> perms_plugin
+    worktree_plugin -- "permissions mgmt" --> perms_plugin
+
+    %% Styling
+    style marketplace fill:#1a1a2e,stroke:#333,color:#fff
+    style perms_plugin fill:#6366F1,stroke:#4338CA,color:#fff
+    style worktree_plugin fill:#8B5CF6,stroke:#6D28D9,color:#fff
+    style proj_plugin fill:#EC4899,stroke:#BE185D,color:#fff
+    style helper_plugin fill:#6B7280,stroke:#4B5563,color:#fff
+
+    style perms_mcp fill:#4F46E5,stroke:#3730A3,color:#fff
+    style perms_store fill:#312E81,stroke:#1E1B4B,color:#fff
+
+    style wt_mcp fill:#7C3AED,stroke:#5B21B6,color:#fff
+    style wt_skills fill:#7C3AED,stroke:#5B21B6,color:#fff
+    style wt_store fill:#4C1D95,stroke:#2E1065,color:#fff
+
+    style proj_mcp fill:#DB2777,stroke:#9D174D,color:#fff
+    style proj_skills fill:#DB2777,stroke:#9D174D,color:#fff
+    style proj_hooks fill:#DB2777,stroke:#9D174D,color:#fff
+    style proj_store fill:#831843,stroke:#500724,color:#fff
+
+    style helper_skills fill:#4B5563,stroke:#374151,color:#fff
+```
+
+### Plugin Interaction
+
+How the three MCP plugins interact during init and execution.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant CC as Claude Code
+    participant proj as proj (MCP)
+    participant wt as worktree (MCP)
+    participant perms as perms (MCP)
+    participant settings as settings.json
+
+    rect rgb(230, 245, 255)
+        Note over User, settings: Session Init — /proj:init-plugin
+        User->>CC: /proj:init-plugin
+        CC->>proj: config_init(project_dir)
+        activate proj
+        proj->>perms: perms_add_allow(project_dir)
+        activate perms
+        perms->>settings: Read current permissions
+        settings-->>perms: permissions.allow[]
+        perms->>settings: Write Read/Edit rules for project_dir
+        perms-->>proj: OK
+        deactivate perms
+        proj->>perms: perms_add_mcp_allow("proj")
+        activate perms
+        perms->>settings: Add mcp__plugin_proj_proj__* wildcard
+        perms-->>proj: OK
+        deactivate perms
+        proj-->>CC: Project initialized
+        deactivate proj
+    end
+
+    rect rgb(235, 255, 235)
+        Note over User, settings: Worktree Setup — /worktree:setup
+        User->>CC: /worktree:setup
+        CC->>wt: wt_add_repo(repo_path)
+        activate wt
+        wt->>perms: perms_add_allow(worktree_base)
+        activate perms
+        perms->>settings: Read current permissions
+        settings-->>perms: permissions.allow[]
+        perms->>settings: Write Read/Edit rules for worktree_base
+        perms-->>wt: OK
+        deactivate perms
+        wt->>perms: perms_add_mcp_allow("worktree")
+        activate perms
+        perms->>settings: Add mcp__plugin_worktree_worktree__* wildcard
+        perms-->>wt: OK
+        deactivate perms
+        wt-->>CC: Worktree repo registered
+        deactivate wt
+    end
+
+    rect rgb(255, 245, 230)
+        Note over User, settings: Execution — /proj:execute (multi-repo)
+        User->>CC: /proj:execute todo_id
+        CC->>proj: todo_get(todo_id)
+        activate proj
+        proj-->>CC: Todo with multi-repo context
+        deactivate proj
+        CC->>wt: wt_create(repo, branch)
+        activate wt
+        Note right of wt: git worktree add
+        wt->>perms: perms_add_allow(new_worktree_path)
+        activate perms
+        perms->>settings: Write Read/Edit rules for worktree
+        perms-->>wt: OK
+        deactivate perms
+        wt-->>CC: Worktree created at path
+        deactivate wt
+        CC->>proj: todo_update(todo_id, status=in_progress)
+        activate proj
+        proj-->>CC: Updated
+        deactivate proj
+        Note over CC: Execute work in isolated worktree
+        CC->>proj: todo_complete(todo_id)
+        activate proj
+        proj-->>CC: Done
+        deactivate proj
+    end
+```
+
+### Full Workflow Lifecycle
+
+The full-workflow lifecycle for a todo: define → research → decompose → execute.
+
+```mermaid
+flowchart TD
+    %% Color definitions
+    classDef user fill:#22C55E,stroke:#16A34A,color:#fff
+    classDef claude fill:#4A9EED,stroke:#2563EB,color:#fff
+    classDef proj fill:#EC4899,stroke:#DB2777,color:#fff
+    classDef decision fill:#F59E0B,stroke:#D97706,color:#fff
+    classDef skip fill:#94A3B8,stroke:#64748B,color:#fff
+
+    %% Entry
+    START(["/proj:full-workflow <id>"]):::proj
+    START --> PARSE
+
+    %% Step 1: Parse & Validate
+    PARSE["1. Parse Arguments\n--steps, --from, --iter, --iter-as-needed\n--no-interactive"]:::proj
+    PARSE --> MODE_CHECK{Input mode?}:::decision
+
+    MODE_CHECK -->|"Single ID"| VALIDATE_TODO
+    MODE_CHECK -->|"Range / Comma list"| RANGE_PATH
+
+    VALIDATE_TODO["Validate todo exists\ntodo_get(id)"]:::proj
+    VALIDATE_TODO --> LOAD_STEPS
+
+    %% Step 2: Load Workflow Steps
+    LOAD_STEPS["2. Load Step List\nfull-workflow.yaml\nDefault: define -> research -> decompose -> execute"]:::proj
+    LOAD_STEPS --> APPLY_FLAGS
+
+    APPLY_FLAGS{"--steps or\n--from given?"}:::decision
+    APPLY_FLAGS -->|"--steps csv"| FILTER_STEPS["Filter & reorder\nto requested steps"]:::proj
+    APPLY_FLAGS -->|"--from step"| SLICE_STEPS["Slice from step\nto end"]:::proj
+    APPLY_FLAGS -->|"Neither"| FULL_STEPS["Use all 4 steps"]:::proj
+
+    FILTER_STEPS --> SPLIT
+    SLICE_STEPS --> SPLIT
+    FULL_STEPS --> SPLIT
+
+    %% Step 3: Split prep vs execute
+    SPLIT["3. Split Steps\nprep_steps = steps minus execute\nhas_execute = execute in list?"]:::proj
+    SPLIT --> ITER_LOOP
+
+    %% Step 4: Iteration Loop
+    ITER_LOOP["4. Iteration Loop\ni = 1 to N"]:::proj
+    ITER_LOOP --> REFRESH_TREE
+
+    REFRESH_TREE["4a. Refresh descendant list\ntodo_tree(id) -> flatten depth-first"]:::proj
+    REFRESH_TREE --> PREP_STEPS
+
+    %% Prep Steps Detail
+    PREP_STEPS{"Next prep step?"}:::decision
+
+    PREP_STEPS -->|"define"| DEFINE
+    PREP_STEPS -->|"research"| RESEARCH
+    PREP_STEPS -->|"decompose"| DECOMPOSE
+    PREP_STEPS -->|"All prep done"| CONVERGENCE_CHECK
+
+    %% Define
+    DEFINE["Step: Define\nSequential & Interactive\nIterative Q&A with user\nWrites requirements.md"]:::user
+    DEFINE --> PREP_STEPS
+
+    %% Research
+    RESEARCH["Step: Research\nParallel Task agents (1 per batch)\nCodebase exploration\nWrites research.md"]:::claude
+    RESEARCH --> PREP_STEPS
+
+    %% Decompose
+    DECOMPOSE["Step: Decompose\nParallel Task agents (1 per batch)\nBreaks into sub-todos with deps\nRefreshes descendant list"]:::claude
+    DECOMPOSE --> PREP_STEPS
+
+    %% Convergence Check (between iterations)
+    CONVERGENCE_CHECK{"4c. Last iteration?\n(i == N)"}:::decision
+    CONVERGENCE_CHECK -->|"Yes"| EXECUTE_GATE
+    CONVERGENCE_CHECK -->|"No"| ITER_MODE_CHECK
+
+    ITER_MODE_CHECK{"--iter-as-needed?"}:::decision
+    ITER_MODE_CHECK -->|"Yes"| ASSESS["assess_convergence(id)\nCheck define + research + decompose\nfor parent & all descendants"]:::proj
+    ITER_MODE_CHECK -->|"No (fixed --iter)"| ITER_PROMPT
+
+    ASSESS --> CONVERGED_CHECK{Converged?}:::decision
+
+    CONVERGED_CHECK -->|"Overall converged"| CONVERGED_PROMPT
+    CONVERGED_CHECK -->|"Not converged"| NOT_CONVERGED_PROMPT
+
+    CONVERGED_PROMPT["Recommend stop\nShow 4 options:\n1. Proceed to execute\n2. Continue iteration\n3. Edit\n4. Stop"]:::user
+    CONVERGED_PROMPT -->|"Proceed"| EXECUTE_GATE
+    CONVERGED_PROMPT -->|"Continue"| ITER_LOOP
+    CONVERGED_PROMPT -->|"Edit"| EDIT_ITER["Apply edits\nRe-run or update"]:::user
+    CONVERGED_PROMPT -->|"Stop"| WORKFLOW_END
+    EDIT_ITER --> CONVERGED_PROMPT
+
+    NOT_CONVERGED_PROMPT["Recommend another iteration\nShow 3 options:\n1. Continue\n2. Edit\n3. Stop"]:::user
+    NOT_CONVERGED_PROMPT -->|"Continue"| ITER_LOOP
+    NOT_CONVERGED_PROMPT -->|"Edit"| EDIT_ITER2["Apply edits\nRe-run or update"]:::user
+    NOT_CONVERGED_PROMPT -->|"Stop"| WORKFLOW_END
+    EDIT_ITER2 --> NOT_CONVERGED_PROMPT
+
+    ITER_PROMPT["Iteration prompt\n(3 options: continue/edit/stop)"]:::user
+    ITER_PROMPT -->|"Continue"| ITER_LOOP
+    ITER_PROMPT -->|"Stop"| WORKFLOW_END
+
+    %% --no-interactive auto-progression
+    subgraph NO_INTERACTIVE ["--no-interactive auto-progression"]
+        direction TB
+        NI_CONVERGED["Auto-proceed to execute"]:::skip
+        NI_NOT_CONVERGED["Auto-continue next iteration"]:::skip
+    end
+
+    %% Step 5: Execute
+    EXECUTE_GATE{"5. has_execute\nAND has_children?"}:::decision
+
+    EXECUTE_GATE -->|"No children"| MANUAL_CHECK
+    EXECUTE_GATE -->|"Children converged"| EXECUTE_ALL
+    EXECUTE_GATE -->|"Children NOT converged\n(edge-case --steps)"| PARENT_EXEC_THEN_CHILDREN
+    EXECUTE_GATE -->|"No execute step"| WORKFLOW_END
+
+    %% Manual tag guard
+    MANUAL_CHECK{"todo_check_executable\nManual tag?"}:::decision
+    MANUAL_CHECK -->|"manual tagged"| MANUAL_STOP["Stop: manual tag guard\nSkip execute\nUser must execute manually"]:::skip
+    MANUAL_CHECK -->|"Executable"| PARENT_EXEC
+
+    PARENT_EXEC["5i. Parent Execute\nRead execute/SKILL.md\nImplement changes\ntodo_complete(id)"]:::claude
+    PARENT_EXEC --> WORKFLOW_END
+
+    %% Execute All path
+    EXECUTE_ALL["5ii. Execute All (parent + children)\nidentify_batches for dependency order"]:::proj
+    EXECUTE_ALL --> BATCH_EXEC
+
+    BATCH_EXEC["For each batch:\nParallel Task agents\nCheck manual tag -> skip if manual\nExecute & complete each todo"]:::claude
+    BATCH_EXEC --> AUTO_COMPLETE
+
+    AUTO_COMPLETE{"All children\nexecuted?"}:::decision
+    AUTO_COMPLETE -->|"0 manual-skipped"| AUTO_DONE["Auto-complete parent\ntodo_complete(parent_id)"]:::proj
+    AUTO_COMPLETE -->|"Some manual-skipped"| NO_AUTO["Parent NOT auto-completed\nManual todos remain"]:::skip
+
+    AUTO_DONE --> WORKFLOW_END
+    NO_AUTO --> WORKFLOW_END
+
+    %% Children workflow (edge-case)
+    PARENT_EXEC_THEN_CHILDREN --> CHILDREN_WORKFLOW
+
+    CHILDREN_WORKFLOW["6. Children Workflow (edge-case fallback)\nDefine each child (sequential, interactive)\nResearch all (parallel agents)\nDecompose each (sequential confirm)\nExecute all (parallel agents)"]:::claude
+    CHILDREN_WORKFLOW --> WORKFLOW_END
+
+    %% Range/batch path
+    RANGE_PATH["Range/Batch Path\nAll steps run autonomously\nNo interactive prompts"]:::proj
+    RANGE_PATH --> RANGE_BATCHES["identify_batches\nDependency-ordered batches"]:::proj
+    RANGE_BATCHES --> RANGE_DEFINE
+
+    RANGE_DEFINE{"define in steps\nAND interactive?"}:::decision
+    RANGE_DEFINE -->|"Yes"| RANGE_DEFINE_SEQ["Phase A: Define\nSequential, interactive\nQ&A per todo"]:::user
+    RANGE_DEFINE -->|"No"| RANGE_AGENTS
+
+    RANGE_DEFINE_SEQ --> RANGE_AGENTS
+    RANGE_AGENTS["Phase B: Remaining prep steps\nParallel agents per batch\n1 agent per todo"]:::claude
+    RANGE_AGENTS --> RANGE_CONVERGE
+
+    RANGE_CONVERGE{"--iter-as-needed\nConverged?"}:::decision
+    RANGE_CONVERGE -->|"All converged / max iter"| RANGE_EXECUTE
+    RANGE_CONVERGE -->|"Not converged"| RANGE_BATCHES
+
+    RANGE_EXECUTE["Phase C: Execute\nParallel agents per batch\nManual-tagged todos skipped"]:::claude
+    RANGE_EXECUTE --> RANGE_SUMMARY["Aggregated Summary\nPer-batch breakdown\nnotes_append()"]:::proj
+    RANGE_SUMMARY --> WORKFLOW_END
+
+    %% End
+    WORKFLOW_END(["7. Workflow Complete\nSteps completed summary\nnotes_append()"]):::proj
+```
+
+### Plugin Installation Flow
 
 How each plugin is installed and wired together during first-time setup.
 
@@ -291,6 +626,8 @@ flowchart TD
     classDef worktree fill:#8B5CF6,stroke:#7C3AED,color:#fff
 ```
 
+### Todo Lifecycle
+
 The states a todo passes through from creation to completion, including requirements, research, and blocking relationships.
 
 ```mermaid
@@ -317,6 +654,8 @@ flowchart TD
     style EX fill:#f3f4f6,stroke:#d1d5db,color:#374151
 ```
 
+### Skill Invocation Architecture
+
 How a skill invocation travels from the `/proj:<name>` command through the MCP server to tracking data.
 
 ```mermaid
@@ -340,6 +679,8 @@ sequenceDiagram
     MCP-->>CC: Filtered todo list
     CC->>User: Formatted project status
 ```
+
+### Project Session Flow
 
 What happens automatically at session start, during a session, and at session end via hooks.
 
@@ -373,6 +714,97 @@ flowchart LR
     classDef user fill:#22C55E,stroke:#16A34A,color:#fff
     classDef claude fill:#4A9EED,stroke:#2563EB,color:#fff
     classDef proj fill:#EC4899,stroke:#DB2777,color:#fff
+```
+
+### Todoist/Trello Sync Flow
+
+Bidirectional sync flow for Todoist and Trello integrations.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant S as proj Skill
+    participant TdM as Todoist MCP
+    participant TdS as Todoist Service
+    participant TrM as Trello MCP
+    participant TrS as Trello Service
+
+    note over S: Sync happens at skill level,<br/>NOT in MCP server.<br/>root_only config limits scope<br/>to root todos only.
+
+    rect rgb(40, 60, 90)
+        note right of U: Todoist Sync (/proj:sync)
+
+        note over U,TdS: 1. Local todo created -- push to Todoist
+        U->>S: /proj:sync
+        S->>S: Load todos (root_only filter)
+        S->>TdM: add-tasks(title, project_id)
+        TdM->>TdS: POST /tasks
+        TdS-->>TdM: task_id
+        TdM-->>S: task_id
+        S->>S: Store todoist_task_id on local todo
+
+        note over U,TdS: 2. Todoist task completed -- pull to local
+        U->>S: /proj:sync
+        S->>TdM: fetch-object(task_id)
+        TdM->>TdS: GET /tasks/{id}
+        TdS-->>TdM: task (is_completed=true)
+        TdM-->>S: completed task
+        S->>S: Mark local todo done
+
+        note over U,TdS: 3. Title conflict resolution
+        U->>S: /proj:sync
+        S->>TdM: fetch-object(task_id)
+        TdM-->>S: remote title + updated_at
+        S->>S: Compare timestamps
+        alt Local is newer
+            S->>TdM: update-tasks(task_id, local title)
+            TdM->>TdS: POST /tasks/{id}
+        else Remote is newer
+            S->>S: Update local todo title from remote
+        end
+
+        note over U,TdS: 4. Ghost detection -- archived local match
+        U->>S: /proj:sync
+        S->>S: Detect archived todo with todoist_task_id
+        S->>TdM: complete-tasks(task_id)
+        TdM->>TdS: POST /tasks/{id}/close
+        TdS-->>TdM: 204 OK
+    end
+
+    rect rgb(50, 70, 50)
+        note right of U: Trello Sync (/proj:trello-sync)
+
+        note over U,TrS: 1. Root todo created -- push card
+        U->>S: /proj:trello-sync
+        S->>S: Load todos (root_only filter)
+        S->>TrM: create_card(name, list="created")
+        TrM->>TrS: POST /cards
+        TrS-->>TrM: card_id
+        TrM-->>S: card_id
+        S->>S: Store trello_card_id on local todo
+
+        note over U,TrS: 2. Todo completed -- move card
+        U->>S: /proj:trello-sync
+        S->>S: Detect completed todo with trello_card_id
+        S->>TrM: update_card(card_id, list="done")
+        TrM->>TrS: PUT /cards/{id}
+        TrS-->>TrM: updated card
+        TrM-->>S: OK
+
+        note over U,TrS: 3. Todo deleted -- on_delete config
+        U->>S: /proj:trello-sync
+        S->>S: Detect deleted todo with trello_card_id
+        alt on_delete = "archive"
+            S->>TrM: archive_card(card_id)
+            TrM->>TrS: PUT /cards/{id} closed=true
+        else on_delete = "delete"
+            S->>TrM: delete_card(card_id)
+            TrM->>TrS: DELETE /cards/{id}
+        end
+        TrS-->>TrM: OK
+        TrM-->>S: OK
+    end
 ```
 
 ---

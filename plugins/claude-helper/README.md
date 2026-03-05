@@ -18,7 +18,7 @@ Review and quality tooling for Claude Code. Analyse SKILL.md files and Claude su
 
 ## What it does
 
-The `claude-helper` plugin provides review skills that score Claude skill and agent definition files across five criteria:
+The `claude-helper` plugin provides review skills that score Claude skill and agent definition files across seven criteria:
 
 - **Skill review** — read a single SKILL.md file, score each dimension, and produce an annotated report with findings and concrete improvement suggestions.
 - **Agent review** — same workflow applied to Claude subagent definition files, with criteria adapted to agent frontmatter conventions.
@@ -54,7 +54,7 @@ Skills are invoked as `/claude-helper:<name>`.
 
 | Skill | Usage | Description | Argument hint |
 |-------|-------|-------------|---------------|
-| `review-skill` | `/claude-helper:review-skill <path>` | Review a single SKILL.md file. Reads the file, scores all 5 criteria, and presents a detailed report in the conversation. Does not modify any files. | `<path-to-SKILL.md>` |
+| `review-skill` | `/claude-helper:review-skill <path>` | Review a single SKILL.md file. Reads the file, scores all 7 criteria, and presents a detailed report in the conversation. Does not modify any files. | `<path-to-SKILL.md>` |
 | `review-agent` | `/claude-helper:review-agent <path>` | Review a Claude subagent definition file. Identical workflow to `review-skill` with criteria adapted for agent frontmatter conventions. Does not modify any files. | `<path-to-agent-file>` |
 | `review-all` | `/claude-helper:review-all <dir> [--include-agents]` | Batch-review all SKILL.md files under a directory. Spawns parallel review agents for performance, aggregates individual reports into a summary table sorted by overall score ascending. Pass `--include-agents` to also review agent definition files. | `<directory> [--include-agents]` |
 
@@ -62,7 +62,7 @@ Skills are invoked as `/claude-helper:<name>`.
 
 ## Scoring dimensions
 
-The scoring framework uses five criteria evaluated in parallel. Each criterion produces a score (1–5), a one-sentence finding, and — when the score is below 5 — a concrete suggestion.
+The scoring framework uses seven criteria evaluated in parallel. Each criterion produces a score (1–5), a one-sentence finding, and — when the score is below 5 — a concrete suggestion.
 
 | ID | Criterion | What it checks |
 |----|-----------|----------------|
@@ -71,10 +71,12 @@ The scoring framework uses five criteria evaluated in parallel. Each criterion p
 | C3 | Overfitting vs generalisation | Is the skill/agent correctly scoped? Too narrow (handles only one case when it should generalise) or too broad (tries to be universal when it should be specific) both lower the score. |
 | C4 | Completeness | Does the skill/agent fully achieve its stated goal? Are there gaps between what the description promises and what the body delivers? |
 | C5 | Structure | Does the file follow Claude Code conventions? For SKILL.md files: correct frontmatter fields, tool list accuracy, body ordering. For agent files: correct agent frontmatter fields, no SKILL.md-specific fields. |
+| C6 | Devil's Advocate | Does the skill/agent handle edge cases, error conditions, and adversarial inputs? Does it fail gracefully? Are assumptions about input validity checked? Are environmental failures (missing files, network errors, permission denied) addressed? Are silent failure modes possible? |
+| C7 | End-to-End Flow Integrity | Can the skill/agent be chained with other skills? Do tool outputs match expected input formats for subsequent steps? Is the control flow deterministic end-to-end? Are data flows between steps consistent in format and type? Does the final output match the description? |
 
 ### Overall score
 
-`overall = round(mean(C1..C5), 1)` — reported alongside individual criterion scores.
+`overall = round(mean(C1..C7), 1)` — reported alongside individual criterion scores.
 
 ### Score bands
 
@@ -106,6 +108,8 @@ The scoring framework uses five criteria evaluated in parallel. Each criterion p
 | C3 | Overfitting vs generalisation | 3/5 | Missing error handling for empty result |
 | C4 | Completeness | 4/5 | — |
 | C5 | Structure | 5/5 | — |
+| C6 | Devil's Advocate | 4/5 | No handling for permission denied on file read |
+| C7 | End-to-End Flow Integrity | 5/5 | — |
 
 ## Ranked Findings
 
@@ -120,9 +124,13 @@ The scoring framework uses five criteria evaluated in parallel. Each criterion p
 ### F3 — No issues found (C2, severity N/A, confidence N/A, priority N/A)
 ### F4 — No issues found (C4, severity N/A, confidence N/A, priority N/A)
 ### F5 — No issues found (C5, severity N/A, confidence N/A, priority N/A)
+### F6 — No handling for permission denied on file read (C6, severity 2/5, confidence 4/5, priority 8)
+**Detail**: The skill does not specify behaviour when the target file cannot be read due to filesystem permissions.
+**Suggestion**: Add: "If the file cannot be read (permission denied or not found), stop and report the error to the user."
+### F7 — No issues found (C7, severity N/A, confidence N/A, priority N/A)
 
 ## Summary
-The skill is well-structured and factually accurate (C2, C5). The most impactful issues are a missing empty-result handler in C3 and one vague verb in C1. Addressing C3 and C1 would move this skill from 'Good' to 'Excellent'.
+The skill is well-structured and factually accurate (C2, C5, C7). The most impactful issues are a missing empty-result handler in C3, one vague verb in C1, and a missing permission-denied handler in C6. Addressing C3, C1, and C6 would move this skill from 'Good' to 'Excellent'.
 ```
 
 Omit the `## Ranked Findings` section entirely if no findings are present.

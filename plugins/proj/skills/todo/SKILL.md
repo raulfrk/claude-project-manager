@@ -2,7 +2,7 @@
 name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__claude_ai_Todoist__update-tasks, mcp__proj__config_load, mcp__proj__template_list, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__sentry__find-projects
+allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__claude_ai_Todoist__update-tasks, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__sentry__find-projects
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 ---
 
@@ -16,11 +16,6 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - If the todo does not exist: use the full original string as the title, no parent
   - Ask for priority (default: from config), tags (optional), blocked_by (optional)
   - Ask: "Due date? (optional, e.g. 'tomorrow', '2026-06-01')" — if the user provides a value, store it as `due_date`; if skipped, leave unset.
-  - Ask: "Apply a task template? [no]"
-    - If the user says no (or presses Enter): proceed without a template.
-    - If the user names a template directly: use that name.
-    - If the user says yes but gives no name: call `mcp__proj__template_list` (scope="global") and present results filtered to `type=task`. Ask the user to pick one by name or number. If none found, note "No task templates available." and continue without template.
-    - If a template is selected: include `template=<name>` when calling `mcp__proj__todo_add`.
   - Call `mcp__proj__todo_add` — include `due_date=<value>` if the user provided one.
   - If Todoist auto_sync:
     - Call `mcp__proj__proj_get_active` to read `todoist_project_id`.

@@ -1,4 +1,4 @@
-"""Atomic read/write for Claude Code settings.json files."""
+"""Atomic read/write for Claude Code settings.json and settings.local.json files."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ import os
 import tempfile
 from pathlib import Path
 
-from server.lib.models import Permissions, SettingsFile
+from server.lib.models import Permissions, SandboxConfig, SettingsFile
 
 _USER_SETTINGS = Path.home() / ".claude" / "settings.json"
+_USER_LOCAL_SETTINGS = Path.home() / ".claude" / "settings.local.json"
 
 
 def _settings_path(scope: str, project_dir: Path | None = None) -> Path:
@@ -18,6 +19,32 @@ def _settings_path(scope: str, project_dir: Path | None = None) -> Path:
         base = project_dir or Path.cwd()
         return base / ".claude" / "settings.json"
     return _USER_SETTINGS
+
+
+def _local_settings_path(scope: str, project_dir: Path | None = None) -> Path:
+    """Return the settings.local.json path for the given scope."""
+    if scope == "project":
+        base = project_dir or Path.cwd()
+        return base / ".claude" / "settings.local.json"
+    return _USER_LOCAL_SETTINGS
+
+
+def _parse_settings_file(path: Path, raw: dict[str, object]) -> SettingsFile:
+    """Parse raw JSON dict into a SettingsFile, extracting permissions and sandbox."""
+    perms_raw = raw.get("permissions", {})
+    if not isinstance(perms_raw, dict):
+        perms_raw = {}
+
+    sandbox_raw = raw.get("sandbox", {})
+    if not isinstance(sandbox_raw, dict):
+        sandbox_raw = {}
+
+    return SettingsFile(
+        path=path,
+        permissions=Permissions.from_dict(perms_raw),  # type: ignore[arg-type]
+        sandbox=SandboxConfig.from_dict(sandbox_raw),
+        raw={k: v for k, v in raw.items() if k not in ("permissions", "sandbox")},
+    )
 
 
 def load(scope: str = "user", project_dir: Path | None = None) -> SettingsFile:
@@ -29,15 +56,38 @@ def load(scope: str = "user", project_dir: Path | None = None) -> SettingsFile:
     with path.open() as f:
         raw: dict[str, object] = json.load(f)
 
-    perms_raw = raw.get("permissions", {})
-    if not isinstance(perms_raw, dict):
-        perms_raw = {}
+    return _parse_settings_file(path, raw)
 
-    return SettingsFile(
-        path=path,
-        permissions=Permissions.from_dict(perms_raw),  # type: ignore[arg-type]  # dict[str,object] narrowed but pyright can't verify
-        raw={k: v for k, v in raw.items() if k != "permissions"},
-    )
+
+def load_local(scope: str = "user", project_dir: Path | None = None) -> SettingsFile:
+    """Load a settings.local.json file, returning empty defaults if it doesn't exist."""
+    path = _local_settings_path(scope, project_dir)
+    if not path.exists():
+        return SettingsFile(path=path)
+
+    with path.open() as f:
+        raw: dict[str, object] = json.load(f)
+
+    return _parse_settings_file(path, raw)
+
+
+def is_sandbox_enabled(scope: str = "user", project_dir: Path | None = None) -> bool:
+    """Check if sandbox mode is enabled by reading settings.local.json."""
+    local = load_local(scope, project_dir)
+    return local.sandbox.enabled
+
+
+def resolve_target(target: str, scope: str = "user", project_dir: Path | None = None) -> str:
+    """Resolve ``auto`` target to ``settings`` or ``sandbox`` based on settings.local.json.
+
+    Returns ``settings`` or ``sandbox``.
+    """
+    if target in ("settings", "sandbox"):
+        return target
+    # target == "auto": detect
+    if is_sandbox_enabled(scope, project_dir):
+        return "sandbox"
+    return "settings"
 
 
 def _atomic_write(path: Path, content: str) -> None:
