@@ -1,7 +1,7 @@
 {
   "name": "perms",
   "description": "Manage Claude Code settings.json permissions. Provides MCP tools to add/remove allow rules for project directories.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "author": { "name": "raulfrk" },
   "mcpServers": "./.mcp.json"
 }
