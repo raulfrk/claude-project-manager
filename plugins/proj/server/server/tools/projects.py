@@ -38,7 +38,7 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, and proj_load_session tools with the MCP app."""
+    """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
 
     @app.tool(description="Initialize tracking for a new project. Accepts multiple directories via the dirs parameter (list of {path, label} dicts). The legacy path parameter is kept for backward compatibility and creates a single directory with label 'code'.")
     def proj_init(
@@ -352,4 +352,40 @@ def register(app: FastMCP) -> None:
             else:
                 return f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"
         state.set_session_active(name)
-        return f"Loaded project '{name}' for this session."
+        msg = f"Loaded project '{name}' for this session."
+        # Detect old single-path format
+        raw = storage._load_yaml(storage.meta_path(cfg, name))
+        if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
+            msg += "\n\n⚠️ Project uses legacy single-path format. Run `/proj:migrate-dirs` to upgrade to multi-dir format."
+        return msg
+
+    @app.tool(description="Migrate a project from legacy single-path format to multi-dir repos format.")
+    def proj_migrate_dirs(
+        label: str = "code",
+        project_name: str | None = None,
+        dry_run: bool = False,
+    ) -> str:
+        cfg = require_config()
+        project_name = state.resolve_project(project_name)
+        if not project_name:
+            return "No active project."
+        raw = storage._load_yaml(storage.meta_path(cfg, project_name))
+        path_val = raw.get("path")
+        repos_val = raw.get("repos", [])
+        if not isinstance(path_val, str) or not path_val or (isinstance(repos_val, list) and repos_val):
+            return f"Project '{project_name}' already uses multi-dir format. No migration needed."
+        if dry_run:
+            return (
+                f"Dry run — migration preview for '{project_name}':\n"
+                f"  Old format: path: {path_val}\n"
+                f"  New format: repos:\n"
+                f"    - label: {label}\n"
+                f"      path: {path_val}\n"
+                f"      claudemd: false\n"
+                f"      reference: false"
+            )
+        new_repo = {"label": label, "path": path_val, "claudemd": False, "reference": False}
+        raw["repos"] = [new_repo]
+        del raw["path"]
+        storage._write_yaml(storage.meta_path(cfg, project_name), raw)
+        return json.dumps({"migrated": True, "project": project_name, "label": label, "path": path_val})

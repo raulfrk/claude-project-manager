@@ -412,6 +412,12 @@ class ProjectMeta:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> ProjectMeta:
         repos_raw = data.get("repos", [])
+        # Backward compat: old single-dir projects have a top-level `path` string
+        # instead of `repos`. Auto-populate repos from legacy path on read (no disk write).
+        if not (isinstance(repos_raw, list) and repos_raw):
+            path_raw = data.get("path")
+            if isinstance(path_raw, str) and path_raw:
+                repos_raw = [{"label": "code", "path": path_raw, "claudemd": False, "reference": False}]
         links_raw = data.get("links", [])
         tags_raw = data.get("tags", [])
         perms_raw = data.get("permissions", {})

@@ -74,6 +74,11 @@ def _build_context(cfg: object, project_name: str, compact: bool = False) -> str
     if meta.description:
         lines.append(f"**Description**: {meta.description}")
 
+    # Detect old single-path format
+    raw = storage._load_yaml(storage.meta_path(cfg, project_name))
+    if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
+        lines.append("\n⚠️ Project uses legacy single-path format. Run `/proj:migrate-dirs` to upgrade to multi-dir format.")
+
     _format_todos_section(todos, lines)
 
     if not compact:
