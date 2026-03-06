@@ -1,6 +1,6 @@
 ---
 name: init
-description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", or "set up project tracking for X".
+description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", "set up project tracking for X", "new project", "create project", or "initialize tracking".
 disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, Bash
 argument-hint: "[project-name]"
@@ -17,7 +17,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
 3. Collect project directories (multi-directory loop):
 
-   Initialize: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred worktree creations).
+   Initialize: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred worktree creations), `_explored_dirs = set()` (labels of directories that had repo mapping + CLAUDE.md written).
 
    **Directory collection loop** — repeat until the user says done:
 
@@ -53,30 +53,34 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
       - If path does not exist: "Directory `<path>` does not exist. Create it now? [y/n]" -> `mkdir -p`
       - If path exists: "Found directory: `<path>`"
 
-   g. Ask: "Add another directory? [yes/no]"
-      - If **yes**: loop back to (a).
-      - If **no**: exit loop.
+   g. Ask: "Add another directory? (Enter to skip, or type a path):"
+      - If the user presses Enter (empty): exit loop.
+      - If the user types a path: use it as the next directory's path and loop back to (b) or (c) for mode/label selection.
 
    At least one directory is required. If `_dirs` is empty after the loop, error.
 
 3b. **Repo mapping** (for each directory that exists and has files):
    - For each dir in `_dirs`:
-     - Check: `Bash: find <path> -maxdepth 1 -mindepth 1 | head -1`
+     - Check: `Bash: ls -A <path> | head -1`
      - If output is **non-empty** (directory has existing content):
        - Ask: "Directory '<label>' at `<path>` has existing content. Map the repo? [yes/no]"
-       - If **yes** — run the full exploration sequence and set `_explored = true`:
+       - If **yes** — run the full exploration sequence and add to `_explored_dirs`:
          1. Call `mcp__proj__proj_explore_codebase` with `path=<path>`. Returns JSON with `tech_stack`, `entry_points`, `key_dirs`, `config_files`, `file_types`, `file_tree`, `arch_note`.
          2. Synthesise: primary language/framework, key directories, entry points, architecture from the returned data.
          3. Call `mcp__proj__claudemd_read` for the path. If CLAUDE.md exists, merge findings into it (preserve all existing sections; add/update `## Architecture` and `## Key Files`). If not, create fresh CLAUDE.md with Overview, Architecture, Key Files sections.
          4. Call `mcp__proj__claudemd_write` with the result.
-         5. Call `mcp__proj__notes_append` with: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
+         5. Add `label` to `_explored_dirs`.
+         6. Call `mcp__proj__notes_append` with project_name=<name> and text: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
        - If **no**: continue normally.
      - If output is **empty**: skip.
 
-4. Ask:
-   - Description (optional, hit enter to skip)
-   - Tags (optional, comma-separated)
-   - "Git integration enabled for this project? [global default]"
+4. Ask all metadata in one prompt:
+   ```
+   Project details (all optional, press Enter to use defaults):
+   - Description:
+   - Tags (comma-separated):
+   - Git integration? [yes]:
+   ```
 
 5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled.
    - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
@@ -94,9 +98,10 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
        add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`
+   - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Run `/proj:perms-sync` when the perms plugin is available." and continue.
 
-7. **CLAUDE.md** — Skip if `_explored = true` (already written during repo mapping).
-   Otherwise ask: "Create a CLAUDE.md in the project directory to help Claude understand the project context? [yes]"
+7. **CLAUDE.md** — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
+   Ask: "Create a CLAUDE.md in '<label>' (`<path>`) to help Claude understand the project context? [yes]"
    - If yes: call `mcp__proj__claudemd_write` with initial content:
      ```markdown
      # <project-name>
@@ -130,6 +135,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 9. **Todoist** (if `todoist.enabled: true` in config):
    - Use `mcp__{todoist.mcp_server}__add-projects` with the project name (server name from config)
    - Store todoist_project_id via `mcp__proj__proj_update_meta`
+   - If the Todoist tool call fails (server not running or not configured), warn: "Todoist project could not be created. You can link it later via `/proj:sync`." and continue.
 
 10. Show summary of what was created. List all directories:
     ```
