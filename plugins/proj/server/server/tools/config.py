@@ -76,6 +76,8 @@ def register(app: FastMCP) -> None:
             f"  trello.on_delete: {cfg.trello.on_delete}\n"
             f"  perms_integration: {cfg.perms_integration}\n"
             f"  worktree_integration: {cfg.worktree_integration}\n"
+            f"  zoxide_integration: {cfg.zoxide_integration}\n"
+            f"  claudemd_management: {cfg.claudemd_management}\n"
             f"  config_path: {storage.config_path()}"
         )
 
@@ -99,6 +101,8 @@ def register(app: FastMCP) -> None:
         default_priority: str = "medium",
         perms_integration: bool = False,
         worktree_integration: bool = False,
+        zoxide_integration: bool = False,
+        claudemd_management: bool = False,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -107,6 +111,8 @@ def register(app: FastMCP) -> None:
             default_priority=default_priority,
             perms_integration=perms_integration,
             worktree_integration=worktree_integration,
+            zoxide_integration=zoxide_integration,
+            claudemd_management=claudemd_management,
         )
         cfg.permissions.auto_grant = auto_grant_permissions
         cfg.permissions.auto_allow_mcps = auto_allow_mcps
@@ -172,6 +178,8 @@ def register(app: FastMCP) -> None:
         default_priority: str | None = None,
         perms_integration: bool | None = None,
         worktree_integration: bool | None = None,
+        zoxide_integration: bool | None = None,
+        claudemd_management: bool | None = None,
         investigation_tools: list[str] | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
@@ -244,6 +252,10 @@ def register(app: FastMCP) -> None:
             cfg.perms_integration = perms_integration
         if worktree_integration is not None:
             cfg.worktree_integration = worktree_integration
+        if zoxide_integration is not None:
+            cfg.zoxide_integration = zoxide_integration
+        if claudemd_management is not None:
+            cfg.claudemd_management = claudemd_management
         if investigation_tools is not None:
             cfg.permissions.investigation_tools = investigation_tools
         storage.save_config(cfg)

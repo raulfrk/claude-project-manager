@@ -24,7 +24,7 @@ Parse $ARGUMENTS for the `--global` flag.
   - Skip `proj_get_active` — no project context needed.
   - Use Bash to create the directory if needed: `mkdir -p ~/.claude/agents/`
 - If scope = `project`:
-  - Call `mcp__proj__proj_get_active` to get the active project. Extract the primary repo path from the first entry in `repos` (the `path` field). If no project is active, ask the user to run `/proj:load` first.
+  - Call `mcp__proj__proj_get_active` to get the active project. Find the first writable (non-reference) repo in `repos` and use its `path`. If no project is active, ask the user to run `/proj:load` first.
   - Target directory: `<repo-path>/.claude/agents/`
   - Use Bash to create the directory if needed: `mkdir -p <target-directory>`
 

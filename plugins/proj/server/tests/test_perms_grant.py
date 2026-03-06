@@ -103,7 +103,7 @@ class TestCollectPaths:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(worktree_integration=False)
         paths = collect_paths(meta, cfg)
-        assert len(paths) == 1
+        assert len(paths) == 2  # repo + tracking_dir
 
     def test_worktree_paths_added_when_enabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -153,7 +153,8 @@ class TestCollectPaths:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(worktree_integration=True)
         paths = collect_paths(meta, cfg)
-        assert paths == ["/home/user/proj"]
+        assert "/home/user/proj" in paths
+        assert len(paths) == 2  # repo + tracking_dir
 
 
 # ── grant_investigation_tools ─────────────────────────────────────────────────
@@ -171,7 +172,7 @@ class TestGrantInvestigationTools:
         cfg = _make_cfg(tools=["grep", "find", "ls"])
         added = grant_investigation_tools(meta, cfg)
 
-        assert added == 3
+        assert added == 6  # 3 tools × 2 paths (repo + tracking_dir)
         allow = _read_allow(settings_path)
         assert "Bash(grep //home/user/proj/**)" in allow
         assert "Bash(find //home/user/proj/**)" in allow
@@ -181,7 +182,10 @@ class TestGrantInvestigationTools:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=["Bash(grep //home/user/proj/**)"])
+        _write_settings(settings_path, allow=[
+            "Bash(grep //home/user/proj/**)",
+            "Bash(grep //tmp/tracking/**)",
+        ])
         monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -208,7 +212,7 @@ class TestGrantInvestigationTools:
         cfg = _make_cfg(tools=["grep"])
         added = grant_investigation_tools(meta, cfg)
 
-        assert added == 2
+        assert added == 3  # 1 tool × 3 paths (2 repos + tracking_dir)
         allow = _read_allow(settings_path)
         assert "Bash(grep //home/user/proj-a/**)" in allow
         assert "Bash(grep //home/user/proj-b/**)" in allow
@@ -238,7 +242,7 @@ class TestGrantInvestigationTools:
         cfg = _make_cfg(tools=["grep"])
         added = grant_investigation_tools(meta, cfg)
 
-        assert added == 1
+        assert added == 2  # 1 tool × 2 paths (repo + tracking_dir)
         assert settings_path.exists()
         assert "Bash(grep //home/user/proj/**)" in _read_allow(settings_path)
 
@@ -368,7 +372,7 @@ class TestSetupPermissions:
         allow = _read_allow(settings_path)
         assert "Bash(grep //home/user/proj/**)" in allow
         assert "Bash(find //home/user/proj/**)" in allow
-        assert counts["bash_rules"] == 2
+        assert counts["bash_rules"] == 4  # 2 tools × 2 paths (repo + tracking_dir)
 
     def test_adds_mcp_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
@@ -652,7 +656,7 @@ class TestGrantInvestigationToolsSandbox:
         cfg = _make_cfg(tools=["grep"])
         added = grant_investigation_tools(meta, cfg)
 
-        assert added == 1
+        assert added == 2  # 1 tool × 2 paths (repo + tracking_dir)
         allow = _read_local_allow(local_path)
         assert "Bash(grep //home/user/proj/**)" in allow
         # Standard settings.json must NOT be created

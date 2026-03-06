@@ -15,6 +15,7 @@ from server.lib.models import (
     RepoEntry,
     validate_project_name,
 )
+from server.lib.zoxide import resolve_enabled as _zoxide_enabled, zoxide_boost, zoxide_remove
 from server.tools.config import require_config, require_project
 
 if TYPE_CHECKING:
@@ -39,10 +40,11 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
 def register(app: FastMCP) -> None:
     """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, and proj_load_session tools with the MCP app."""
 
-    @app.tool(description="Initialize tracking for a new project.")
+    @app.tool(description="Initialize tracking for a new project. Accepts multiple directories via the dirs parameter (list of {path, label} dicts). The legacy path parameter is kept for backward compatibility and creates a single directory with label 'code'.")
     def proj_init(
         name: str,
         path: str | None = None,
+        dirs: list[dict[str, str]] | None = None,
         description: str = "",
         tags: list[str] | None = None,
         git_enabled: bool = True,
@@ -57,16 +59,39 @@ def register(app: FastMCP) -> None:
         if name in index.projects:
             return f"Project '{name}' already exists."
 
-        # Resolve content path: explicit path wins; fall back to projects_base_dir/name
-        if path:
-            resolved_path = str(Path(path).expanduser().resolve())
-        elif cfg.projects_base_dir:
-            resolved_path = str((Path(cfg.projects_base_dir).expanduser() / name).resolve())
+        # Build list of RepoEntry from dirs or legacy path parameter
+        repo_entries: list[RepoEntry] = []
+        if dirs:
+            if path:
+                return "Provide either 'dirs' or 'path', not both."
+            labels_seen: set[str] = set()
+            for d in dirs:
+                d_path = d.get("path", "")
+                d_label = d.get("label", "")
+                if not d_path:
+                    return "Each directory entry must have a 'path'."
+                if not d_label:
+                    return "Each directory entry must have a 'label'."
+                if d_label in labels_seen:
+                    return f"Duplicate label '{d_label}'. Each directory must have a unique label."
+                labels_seen.add(d_label)
+                resolved = str(Path(d_path).expanduser().resolve())
+                repo_entries.append(RepoEntry(label=d_label, path=resolved))
         else:
-            return (
-                f"No path provided for project '{name}' and no projects_base_dir configured. "
-                "Provide an explicit path or set projects_base_dir via /proj:init-plugin."
-            )
+            # Legacy single-path mode
+            if path:
+                resolved_path = str(Path(path).expanduser().resolve())
+            elif cfg.projects_base_dir:
+                resolved_path = str((Path(cfg.projects_base_dir).expanduser() / name).resolve())
+            else:
+                return (
+                    f"No path provided for project '{name}' and no projects_base_dir configured. "
+                    "Provide an explicit path or set projects_base_dir via /proj:init-plugin."
+                )
+            repo_entries.append(RepoEntry(label="code", path=resolved_path))
+
+        if not repo_entries:
+            return "At least one directory is required."
 
         today = str(date.today())
         tracking = Path(cfg.tracking_dir).expanduser() / name
@@ -78,10 +103,16 @@ def register(app: FastMCP) -> None:
             tags=tags or [],
             git_enabled=git_enabled,
         )
-        meta.repos.append(RepoEntry(label="code", path=resolved_path))
+        for repo_entry in repo_entries:
+            meta.repos.append(repo_entry)
         meta.dates.created = today
         meta.dates.last_updated = today
         storage.save_meta(cfg, meta)
+
+        # Boost paths in zoxide frecency database if enabled
+        if _zoxide_enabled(cfg, meta):
+            for repo_entry in repo_entries:
+                zoxide_boost(repo_entry.path)
 
         entry = ProjectEntry(
             name=name,
@@ -170,6 +201,8 @@ def register(app: FastMCP) -> None:
         tags: list[str] | None = None,
         target_date: str | None = None,
         git_enabled: bool | None = None,
+        claudemd_management: bool | None = None,
+        zoxide_integration: bool | None = None,
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
@@ -188,6 +221,10 @@ def register(app: FastMCP) -> None:
             meta.dates.target = target_date
         if git_enabled is not None:
             meta.git_enabled = git_enabled
+        if claudemd_management is not None:
+            meta.claudemd_management = claudemd_management
+        if zoxide_integration is not None:
+            meta.zoxide_integration = zoxide_integration
         storage.save_meta(cfg, meta)
         return f"Updated project '{project_name}'."
 
@@ -200,6 +237,34 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
         if project_name not in index.projects:
             return f"Project '{project_name}' not found."
+
+        # Remove repo paths from zoxide before archiving
+        try:
+            meta = storage.load_meta(cfg, project_name)
+            if _zoxide_enabled(cfg, meta):
+                # Collect worktree base repo paths to skip
+                skip_paths: set[str] = set()
+                if cfg.worktree_integration:
+                    from server.tools.perms_grant import _WORKTREE_CONFIG
+                    import yaml
+                    if _WORKTREE_CONFIG.exists():
+                        try:
+                            wt_data = yaml.safe_load(_WORKTREE_CONFIG.read_text()) or {}
+                            base_repos_raw = wt_data.get("base_repos", [])
+                            if isinstance(base_repos_raw, list):
+                                for repo in base_repos_raw:
+                                    if isinstance(repo, dict):
+                                        p = repo.get("path", "")
+                                        if isinstance(p, str) and p:
+                                            skip_paths.add(p)
+                        except Exception:  # noqa: BLE001
+                            pass
+                for repo in meta.repos:
+                    if repo.path not in skip_paths:
+                        zoxide_remove(repo.path)
+        except FileNotFoundError:
+            pass  # No meta file — skip zoxide removal
+
         index.projects[project_name].archived = True
         if index.active == project_name:
             index.active = None
@@ -222,8 +287,15 @@ def register(app: FastMCP) -> None:
         abs_path = str(Path(repo_path).expanduser().resolve())
         if any(r.path == abs_path for r in meta.repos):
             return f"Repo at '{abs_path}' already registered."
+        if any(r.label == label for r in meta.repos):
+            return f"Label '{label}' already in use. Choose a different label."
         meta.repos.append(RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference))
         storage.save_meta(cfg, meta)
+
+        # Boost path in zoxide frecency database if enabled
+        if _zoxide_enabled(cfg, meta):
+            zoxide_boost(abs_path)
+
         if reference:
             return f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
         return f"Added repo '{label}' at {abs_path} to project '{name}'."

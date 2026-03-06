@@ -146,6 +146,16 @@ def register(app: FastMCP) -> None:
 
     @app.tool(description="Write or update CLAUDE.md in a project repo directory.")
     def claudemd_write(repo_path: str, content: str) -> str:
+        cfg = require_config()
+        # Resolve effective claudemd_management flag (project overrides global)
+        proj_name = ctx_detect_project_name(repo_path)
+        enabled = cfg.claudemd_management  # global default
+        if proj_name:
+            meta = storage.load_meta(cfg, proj_name)
+            if meta.claudemd_management is not None:
+                enabled = meta.claudemd_management
+        if not enabled:
+            return "CLAUDE.md management is disabled (claudemd_management=false). Enable it in global or project config to allow writes."
         storage.write_claudemd(repo_path, content)
         return f"Written CLAUDE.md at {repo_path}."
 

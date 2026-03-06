@@ -15,83 +15,71 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Otherwise, **ask**: "What is the project name?" (do not assume from cwd)
    - Confirm: "Project name: <name>?"
 
-3. Determine content path:
+3. Collect project directories (multi-directory loop):
 
-   **If `worktree_integration: true` in config AND `projects_base_dir` is set**:
+   Initialize: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred worktree creations).
 
-   a. Call `mcp__plugin_worktree_worktree__wt_list_repos` to get the list of pre-registered repos.
+   **Directory collection loop** — repeat until the user says done:
 
-   b. If **no repos are registered**:
-      - Inform the user: "No repos are registered. Worktree and existing-repo options are unavailable. To enable them, run `/worktree:add-repo` first."
-      - Proceed with Mode 1 (default new directory behavior, see below).
+   a. Ask: "Add a directory to this project (path):" (or for the first iteration: "What is the first content directory for this project?")
 
-   c. If **repos are registered**, present mode selection:
-      ```
-      How should the content directory be set up?
-      1. New directory — create <projects_base_dir>/<name>  [default]
-      2. Use existing repo — point directly to a registered repo
-      3. Create worktree — new worktree from a registered repo
-      ```
-      (If `projects_base_dir` is not set, omit option 3 from the menu.)
+   b. If `worktree_integration: true` AND `projects_base_dir` is set:
+      - Call `mcp__plugin_worktree_worktree__wt_list_repos` (once, cache the result).
+      - Present mode selection for this directory:
+        ```
+        How should this directory be set up?
+        1. New directory — create at the given path  [default]
+        2. Use existing repo — point directly to a registered repo
+        3. Create worktree — new worktree from a registered repo
+        ```
+        (Omit option 2/3 if no repos are registered.)
 
-   d. **Mode 1** (option 1, or Enter): set content path = `<projects_base_dir>/<name>`. Set `_content_mode = "new-dir"`. Proceed with existing directory check below.
+      - **Mode 1**: Ask for path (default: `<projects_base_dir>/<name>`). Ask for label. Set `_content_mode = "new-dir"`.
+      - **Mode 2**: Display registered repos. Ask user to select by label. Set path = selected repo path. Ask for label (default: repo label). Set `_content_mode = "existing-repo"`.
+      - **Mode 3**: Display registered repos. Ask user to select. Set path = `<projects_base_dir>/worktrees/<name>`. Ask for label. Store in `_worktree_entries` for deferred creation. Set `_content_mode = "worktree"`.
 
-   e. **Mode 2** (option 2):
-      - Display the registered repos (label + path).
-      - Ask: "Select a repo by label:"
-      - Set content path = the selected repo's local path.
-      - Skip directory creation checks (path already exists).
-      - Set `_content_mode = "existing-repo"`, `_content_repo_label = <selected label>`.
-      - Jump to step 3b.
+   c. **Otherwise** (no worktree integration):
+      - If first directory and `projects_base_dir` is set: default path = `<projects_base_dir>/<name>`
+      - If first directory and no `projects_base_dir`: default path = current working directory
+      - Ask for path (show default). Ask for label (default: "code" for first dir, require explicit for subsequent).
 
-   f. **Mode 3** (option 3, only if `projects_base_dir` is set):
-      - Display the registered repos (label + path).
-      - Ask: "Select a repo by label:"
-      - Set `_worktree_repo_label = <selected label>`.
-      - Set `_worktree_path = <projects_base_dir>/worktrees/<project-name>`.
-      - Set `_worktree_branch = <project-name>`.
-      - Inform the user: "Will create worktree at `<_worktree_path>` on branch `<_worktree_branch>`."
-      - Set content path = `_worktree_path` (will be created in step 8).
-      - Set `_content_mode = "worktree"`.
-      - Skip directory creation checks (worktree does not exist yet).
-      - Jump to step 3b.
+   d. Validate:
+      - Label must be unique within `_dirs`. If duplicate: "Label '<label>' already used. Choose a different label."
+      - Path must not be empty.
 
-   **Otherwise** (worktree_integration is false/unset OR projects_base_dir is not set):
-   - If `projects_base_dir` is set in config: content path = `<projects_base_dir>/<name>`
-   - Otherwise: use the current working directory as content path
-   - Set `_content_mode = "new-dir"`.
+   e. Add `{path: <resolved_path>, label: <label>}` to `_dirs`.
 
-   **Directory creation checks** (Mode 1 and Mode 2 only — skip for Mode 3):
-   - Check if the content path directory exists on disk (use Bash `test -d <path>`):
-     - If it **does not exist**: "Content directory `<path>` does not exist. Create it now? [y/n]"
-       - If yes: `mkdir -p <path>`
-       - If no: proceed without creating (note it in summary)
-     - If it **exists**: "Found content directory: `<path>` ✓"
-   - Check if the tracking path directory exists (`<tracking_dir>/<name>`):
-     - If it **does not exist**: "Tracking directory `<path>` does not exist. Create it now? [y/n]"
-       - If yes: `mkdir -p <path>`
-       - If no: proceed (the MCP tool will create it anyway)
-     - If it **exists**: "Found tracking directory: `<path>` ✓"
+   f. **Directory creation check** (skip for worktree mode):
+      - If path does not exist: "Directory `<path>` does not exist. Create it now? [y/n]" -> `mkdir -p`
+      - If path exists: "Found directory: `<path>`"
 
-3b. **Repo mapping** (only if the content directory exists and has files):
-   - Check: `Bash: find <content_path> -maxdepth 1 -mindepth 1 | head -1`
-   - If output is **non-empty** (directory has existing content):
-     - Ask: "This directory has existing content. Map the repo? Claude will scan it and write findings to CLAUDE.md and NOTES.md. [yes/no]"
-     - If **yes** — run the full exploration sequence and set `_explored = true`:
-       1. Call `mcp__proj__proj_explore_codebase` with `path=<content_path>`. Returns JSON with `tech_stack`, `entry_points`, `key_dirs`, `config_files`, `file_types`, `file_tree`, `arch_note`.
-       2. Synthesise: primary language/framework, key directories, entry points, architecture from the returned data.
-       3. Call `mcp__proj__claudemd_read` for the content path. If CLAUDE.md exists, merge findings into it (preserve all existing sections; add/update `## Architecture` and `## Key Files`). If not, create fresh CLAUDE.md with Overview, Architecture, Key Files sections.
-       4. Call `mcp__proj__claudemd_write` with the result.
-       5. Call `mcp__proj__notes_append` with: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
-     - If **no**: continue normally.
-   - If output is **empty** (new or empty directory): skip this step.
+   g. Ask: "Add another directory? [yes/no]"
+      - If **yes**: loop back to (a).
+      - If **no**: exit loop.
+
+   At least one directory is required. If `_dirs` is empty after the loop, error.
+
+3b. **Repo mapping** (for each directory that exists and has files):
+   - For each dir in `_dirs`:
+     - Check: `Bash: find <path> -maxdepth 1 -mindepth 1 | head -1`
+     - If output is **non-empty** (directory has existing content):
+       - Ask: "Directory '<label>' at `<path>` has existing content. Map the repo? [yes/no]"
+       - If **yes** — run the full exploration sequence and set `_explored = true`:
+         1. Call `mcp__proj__proj_explore_codebase` with `path=<path>`. Returns JSON with `tech_stack`, `entry_points`, `key_dirs`, `config_files`, `file_types`, `file_tree`, `arch_note`.
+         2. Synthesise: primary language/framework, key directories, entry points, architecture from the returned data.
+         3. Call `mcp__proj__claudemd_read` for the path. If CLAUDE.md exists, merge findings into it (preserve all existing sections; add/update `## Architecture` and `## Key Files`). If not, create fresh CLAUDE.md with Overview, Architecture, Key Files sections.
+         4. Call `mcp__proj__claudemd_write` with the result.
+         5. Call `mcp__proj__notes_append` with: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
+       - If **no**: continue normally.
+     - If output is **empty**: skip.
 
 4. Ask:
    - Description (optional, hit enter to skip)
    - Tags (optional, comma-separated)
    - "Git integration enabled for this project? [global default]"
 
-5. Call `mcp__proj__proj_init` with name, path=<resolved content path>, description, tags, git_enabled.
+5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled.
+   - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_set_active` or proceed further).
    Call `mcp__proj__proj_set_active` to set as active.
 
@@ -123,33 +111,31 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      None yet. Use /proj:todo add to add todos.
      ```
 
-8. **Worktree** — executes deferred worktree creation from step 3 (Mode 3 only):
+8. **Worktrees** — executes deferred worktree creations from step 3:
 
-   - If `_content_mode != "worktree"`: skip this step silently.
+   - If `_worktree_entries` is empty: skip this step silently.
 
-   - If `_content_mode == "worktree"`:
+   - For each entry in `_worktree_entries`:
      1. Call `mcp__plugin_worktree_worktree__wt_create` with:
-        - `repo_label`: `_worktree_repo_label`
-        - `branch`: `_worktree_branch`
+        - `repo_label`: entry's repo label
+        - `branch`: entry's branch name
         - `new_branch`: true
-        - `path`: `_worktree_path`
-     2. **On success**: inform the user — "Worktree created at `<_worktree_path>` on branch `<_worktree_branch>`."
+        - `path`: entry's worktree path
+     2. **On success**: inform the user — "Worktree created at `<path>` on branch `<branch>`."
      3. **On failure**: inform the user of the error. Offer fallback:
-        "Worktree creation failed. Fall back to creating a new directory at `<projects_base_dir>/<name>`? [yes/no]"
-        - If **yes**:
-          - Run `mkdir -p <projects_base_dir>/<name>`
-          - Update content path to `<projects_base_dir>/<name>`
-          - Set `_content_mode = "new-dir"` (so the summary reflects the actual state)
-          - Note the fallback in the summary.
-        - If **no**: note the failure in the summary and continue.
+        "Worktree creation failed for '<label>'. Fall back to creating a new directory? [yes/no]"
+        - If **yes**: `mkdir -p <path>`, note the fallback.
+        - If **no**: note the failure and continue.
 
 9. **Todoist** (if `todoist.enabled: true` in config):
    - Use `mcp__{todoist.mcp_server}__add-projects` with the project name (server name from config)
    - Store todoist_project_id via `mcp__proj__proj_update_meta`
 
-10. Show summary of what was created. Include a content directory line reflecting the mode used:
-    - Mode 1 (`_content_mode == "new-dir"`): "Content directory: `<path>` (new directory)"
-    - Mode 2 (`_content_mode == "existing-repo"`): "Content directory: `<path>` (existing repo: `<_content_repo_label>`)"
-    - Mode 3 (`_content_mode == "worktree"`): "Content directory: `<path>` (worktree of `<_worktree_repo_label>`, branch: `<_worktree_branch>`)"
+10. Show summary of what was created. List all directories:
+    ```
+    Directories:
+      - <label>: <path> (new directory | existing repo | worktree of <repo>, branch: <branch>)
+      ...
+    ```
 
 💡 Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview

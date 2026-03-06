@@ -26,6 +26,18 @@ def reset_session_state() -> None:
     state.clear_session_active()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_sandbox_detection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent sandbox detection from reading the real ~/.claude/settings.local.json.
+
+    Tests that explicitly need sandbox mode will override these monkeypatches
+    with their own paths.
+    """
+    nonexistent = tmp_path / "nonexistent-local-settings.json"
+    monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", nonexistent)
+    monkeypatch.setattr("server.tools.perms_sync._local_settings_path", lambda: nonexistent)
+
+
 @pytest.fixture()
 def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjConfig:
     config_path = tmp_path / "proj.yaml"

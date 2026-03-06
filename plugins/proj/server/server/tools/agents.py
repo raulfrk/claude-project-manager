@@ -65,12 +65,20 @@ def register(app: FastMCP) -> None:
         writable_repos = [r for r in meta.repos if not r.reference]
         if not writable_repos:
             return "Project has no writable repositories configured."
-        primary_repo = writable_repos[0]
-        agents_dir = Path(primary_repo.path).expanduser().resolve() / ".claude" / "agents"
-        agent_path = agents_dir / f"{agent_name}.md"
-        if not agent_path.exists():
+        # Search all writable repos for the agent file
+        agent_found = False
+        searched_paths: list[str] = []
+        for repo in writable_repos:
+            agents_dir = Path(repo.path).expanduser().resolve() / ".claude" / "agents"
+            agent_path = agents_dir / f"{agent_name}.md"
+            searched_paths.append(str(agent_path))
+            if agent_path.exists():
+                agent_found = True
+                break
+        if not agent_found:
             return (
-                f"Agent '{agent_name}' not found at {agent_path}. "
+                f"Agent '{agent_name}' not found in any writable repo's .claude/agents/ directory. "
+                f"Searched: {', '.join(searched_paths)}. "
                 "Create the agent file before assigning it."
             )
 

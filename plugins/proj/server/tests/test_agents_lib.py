@@ -142,6 +142,82 @@ class TestResolveAgentForStep:
         assert agent == "MyExecuteAgent"
         assert warning is None
 
+    def test_resolve_override_found_in_second_repo(
+        self, tmp_cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """Override set + agent file exists in second repo → returns (agent_name, None)."""
+        _make_project_dir(tmp_cfg, "myapp")
+
+        # First repo has no agent file
+        repo1 = tmp_path / "repo1"
+        repo1.mkdir()
+
+        # Second repo has the agent file
+        repo2 = tmp_path / "repo2"
+        agents_dir = repo2 / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "MultiAgent.md").write_text("# MultiAgent\n")
+
+        from datetime import date
+
+        from server.lib.models import ProjectDates, ProjectMeta, RepoEntry
+
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[
+                RepoEntry(label="code", path=str(repo1)),
+                RepoEntry(label="docs", path=str(repo2)),
+            ],
+            dates=ProjectDates(created=str(date.today()), last_updated=str(date.today())),
+        )
+        storage.save_meta(tmp_cfg, meta)
+
+        storage.save_agents(
+            tmp_cfg,
+            "myapp",
+            {"version": 1, "agents": {"define": "MultiAgent"}},
+        )
+
+        agent, warning = resolve_agent_for_step(tmp_cfg, "myapp", "define")
+        assert agent == "MultiAgent"
+        assert warning is None
+
+    def test_resolve_override_not_in_any_repo_returns_warning(
+        self, tmp_cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """Override set + agent file missing from all repos → returns (default, warning)."""
+        _make_project_dir(tmp_cfg, "myapp")
+
+        repo1 = tmp_path / "repo1"
+        repo1.mkdir()
+        repo2 = tmp_path / "repo2"
+        repo2.mkdir()
+
+        from datetime import date
+
+        from server.lib.models import ProjectDates, ProjectMeta, RepoEntry
+
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[
+                RepoEntry(label="code", path=str(repo1)),
+                RepoEntry(label="docs", path=str(repo2)),
+            ],
+            dates=ProjectDates(created=str(date.today()), last_updated=str(date.today())),
+        )
+        storage.save_meta(tmp_cfg, meta)
+
+        storage.save_agents(
+            tmp_cfg,
+            "myapp",
+            {"version": 1, "agents": {"research": "NowhereAgent"}},
+        )
+
+        agent, warning = resolve_agent_for_step(tmp_cfg, "myapp", "research")
+        assert agent == STEP_DEFAULTS["research"]
+        assert warning is not None
+        assert "NowhereAgent" in warning
+
     def test_resolve_unknown_step_raises_value_error(self, tmp_cfg: ProjConfig) -> None:
         """Unknown step → raises ValueError."""
         _make_project_dir(tmp_cfg, "myapp")

@@ -12,7 +12,7 @@ Explore and map the codebase at the given path. $ARGUMENTS may contain a directo
 
 2. Determine target path:
    - If $ARGUMENTS is non-empty, use that as the path
-   - Otherwise, use the active project's content path (from proj_get_active → `repos[0].path` or `path` field)
+   - Otherwise, use the active project's content path (from proj_get_active → first writable repo's `path`)
    - Guard: if $ARGUMENTS is empty AND proj_get_active returned no active project → stop immediately: "Path required. Usage: /proj:explore <path>"
    - Validate: if the resolved path does not exist on disk → stop: "Path '<path>' does not exist."
    - Confirm: "Exploring `<path>` …"

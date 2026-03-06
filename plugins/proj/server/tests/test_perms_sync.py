@@ -79,11 +79,15 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
+        # collect_paths() includes repos + tracking_dir for Bash rules
+        all_bash_paths = repos + ["/tmp/tracking"]
         expected: set[str] = set()
         for path in repos:
             prefix = f"/{path}"
             expected.add(f"Read({prefix}/**)")
             expected.add(f"Edit({prefix}/**)")
+        for path in all_bash_paths:
+            prefix = f"/{path}"
             for tool in DEFAULT_INVESTIGATION_TOOLS:
                 expected.add(f"Bash({tool} {prefix}/**)")
         # Always-present global Claude.ai MCP rules (auto_allow_mcps=False only
@@ -154,12 +158,12 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # With no integration flags set, only proj itself and global Claude.ai servers
-        assert rules == {
-            "mcp__proj__*",
-            "mcp__claude_ai_Excalidraw__*",
-            "mcp__claude_ai_Mermaid_Chart__*",
-        }
+        # MCP rules always present
+        assert "mcp__proj__*" in rules
+        assert "mcp__claude_ai_Excalidraw__*" in rules
+        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
+        # Bash rules for tracking_dir also present (no repos, but tracking_dir is set)
+        assert any("Bash(" in r and "/tmp/tracking" in r for r in rules)
 
     def test_no_repos_auto_allow_with_integrations(self) -> None:
         meta = _make_meta(repos=[])
@@ -169,13 +173,11 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert rules == {
-            "mcp__proj__*",
-            "mcp__perms__*",
-            "mcp__worktree__*",
-            "mcp__claude_ai_Excalidraw__*",
-            "mcp__claude_ai_Mermaid_Chart__*",
-        }
+        assert "mcp__proj__*" in rules
+        assert "mcp__perms__*" in rules
+        assert "mcp__worktree__*" in rules
+        assert "mcp__claude_ai_Excalidraw__*" in rules
+        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
     def test_perms_integration_only_adds_perms_mcp_rule(self) -> None:
         meta = _make_meta(repos=[])
@@ -201,7 +203,11 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert rules == {"mcp__claude_ai_Excalidraw__*", "mcp__claude_ai_Mermaid_Chart__*"}
+        # MCP rules + Bash rules for tracking_dir
+        assert "mcp__claude_ai_Excalidraw__*" in rules
+        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
+        # No Read/Edit rules since no repos
+        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in rules)
 
     def test_worktree_integration_false_with_worktree_config_no_extra_bash_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

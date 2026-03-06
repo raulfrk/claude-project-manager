@@ -179,6 +179,62 @@ class TestProjectsMCPTools:
 
 
 @pytest.mark.asyncio
+class TestMultiDirInit:
+    """Tests for multi-directory init (dirs parameter) and label uniqueness."""
+
+    async def test_proj_init_with_dirs(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        dirs = [
+            {"path": str(tmp_path / "src"), "label": "code"},
+            {"path": str(tmp_path / "docs"), "label": "docs"},
+        ]
+        result = await call_tool(mcp_app, "proj_init", name="multidir", dirs=dirs)
+        assert "multidir" in result
+        meta = storage.load_meta(cfg, "multidir")
+        assert len(meta.repos) == 2
+        assert meta.repos[0].label == "code"
+        assert meta.repos[1].label == "docs"
+
+    async def test_proj_init_dirs_and_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        dirs = [{"path": str(tmp_path / "src"), "label": "code"}]
+        result = await call_tool(mcp_app, "proj_init", name="bad", path=str(tmp_path), dirs=dirs)
+        assert "either" in result.lower() or "not both" in result.lower()
+
+    async def test_proj_init_dirs_duplicate_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        dirs = [
+            {"path": str(tmp_path / "a"), "label": "code"},
+            {"path": str(tmp_path / "b"), "label": "code"},
+        ]
+        result = await call_tool(mcp_app, "proj_init", name="dup", dirs=dirs)
+        assert "Duplicate label" in result
+
+    async def test_proj_init_dirs_missing_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        dirs = [{"path": "", "label": "code"}]
+        result = await call_tool(mcp_app, "proj_init", name="nopath", dirs=dirs)
+        assert "path" in result.lower()
+
+    async def test_proj_init_dirs_missing_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        dirs = [{"path": str(tmp_path), "label": ""}]
+        result = await call_tool(mcp_app, "proj_init", name="nolabel", dirs=dirs)
+        assert "label" in result.lower()
+
+    async def test_proj_init_legacy_path_still_works(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        result = await call_tool(mcp_app, "proj_init", name="legacy", path=str(tmp_path))
+        assert "legacy" in result
+        meta = storage.load_meta(cfg, "legacy")
+        assert len(meta.repos) == 1
+        assert meta.repos[0].label == "code"
+
+    async def test_proj_add_repo_label_uniqueness(
+        self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
+    ) -> None:
+        """Attempting to add a repo with the same label as an existing one should fail."""
+        new_repo = str(tmp_path / "new_repo")
+        Path(new_repo).mkdir()
+        result = await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="code")
+        assert "already in use" in result
+
+
+@pytest.mark.asyncio
 class TestTodosMCPTools:
     async def test_todo_add(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "todo_add", title="My first task")
@@ -697,6 +753,9 @@ class TestContextMCPTools:
     async def test_claudemd_write_read(
         self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
     ) -> None:
+        cfg = project[0]
+        cfg.claudemd_management = True
+        storage.save_config(cfg)
         await call_tool(
             mcp_app, "claudemd_write", repo_path=str(tmp_path), content="# CLAUDE\nStatus: active"
         )

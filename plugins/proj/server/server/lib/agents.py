@@ -65,13 +65,13 @@ def resolve_agent_for_step(
     if not meta.repos:
         return (agent_override, None)
 
-    # Check whether the agent file exists in the first repo's .claude/agents/ dir
-    repo_path = Path(meta.repos[0].path).expanduser().resolve()
-    agent_file = repo_path / ".claude" / "agents" / f"{agent_override}.md"
+    # Check whether the agent file exists in any repo's .claude/agents/ dir
+    for repo in meta.repos:
+        repo_path = Path(repo.path).expanduser().resolve()
+        agent_file = repo_path / ".claude" / "agents" / f"{agent_override}.md"
+        if agent_file.exists():
+            return (agent_override, None)
 
-    if agent_file.exists():
-        return (agent_override, None)
-
-    # File missing → soft-fail: return default + warning
-    warning = f"Agent '{agent_override}.md' not found in .claude/agents/ \u2014 falling back to default"
+    # File missing in all repos → soft-fail: return default + warning
+    warning = f"Agent '{agent_override}.md' not found in any repo's .claude/agents/ \u2014 falling back to default"
     return (STEP_DEFAULTS[step], warning)

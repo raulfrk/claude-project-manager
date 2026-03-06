@@ -23,9 +23,9 @@ _WORKTREE_CONFIG = Path.home() / ".claude" / "worktree.yaml"
 # ── Sandbox detection ─────────────────────────────────────────────────────────
 
 
-def _is_sandbox_enabled(project_dir: Path | None = None) -> bool:
+def _is_sandbox_enabled(project_dir: Path | None = None, project_dirs: list[Path] | None = None) -> bool:
     """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
-    for path in _sandbox_paths(project_dir):
+    for path in _sandbox_paths(project_dir, project_dirs):
         if not path.exists():
             continue
         try:
@@ -38,10 +38,13 @@ def _is_sandbox_enabled(project_dir: Path | None = None) -> bool:
     return False
 
 
-def _sandbox_paths(project_dir: Path | None = None) -> list[Path]:
+def _sandbox_paths(project_dir: Path | None = None, project_dirs: list[Path] | None = None) -> list[Path]:
     """Return settings.local.json paths to check for sandbox mode (user-level + project-level)."""
     paths = [_USER_LOCAL_SETTINGS]
-    if project_dir:
+    if project_dirs:
+        for d in project_dirs:
+            paths.append(Path(d) / ".claude" / "settings.local.json")
+    elif project_dir:
         paths.append(Path(project_dir) / ".claude" / "settings.local.json")
     return paths
 
@@ -83,11 +86,16 @@ def _bash_entry(tool: str, abs_path: str) -> str:
 def collect_paths(meta: ProjectMeta, cfg: ProjConfig) -> list[str]:
     """Collect all paths that should receive investigation-tool access.
 
-    Includes all registered project repo paths plus, when worktree_integration
-    is enabled, any base-repo paths from ``~/.claude/worktree.yaml`` that are
-    not already covered.
+    Includes all registered project repo paths, the tracking directory (if set),
+    and when worktree_integration is enabled, any base-repo paths from
+    ``~/.claude/worktree.yaml`` that are not already covered.
     """
     paths: list[str] = [repo.path for repo in meta.repos]
+
+    if cfg.tracking_dir:
+        abs_tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
+        if abs_tracking not in paths:
+            paths.append(abs_tracking)
 
     if cfg.worktree_integration and _WORKTREE_CONFIG.exists():
         try:
@@ -136,15 +144,22 @@ def _ensure_sandbox_section(data: dict[str, object]) -> dict[str, object]:
     return data
 
 
+def _project_dirs_from_meta(meta: ProjectMeta) -> list[Path]:
+    """Return all non-reference repo paths (or all repos if all are reference)."""
+    dirs = [Path(repo.path) for repo in meta.repos if not repo.reference]
+    if not dirs and meta.repos:
+        dirs = [Path(meta.repos[0].path)]
+    return dirs
+
+
 def _project_dir_from_meta(meta: ProjectMeta) -> Path | None:
-    """Derive the project directory from the first non-reference repo path."""
-    for repo in meta.repos:
-        if not repo.reference:
-            return Path(repo.path)
-    # Fall back to the first repo if all are reference
-    if meta.repos:
-        return Path(meta.repos[0].path)
-    return None
+    """Derive the project directory from the first non-reference repo path.
+
+    For sandbox detection this is kept as a convenience; callers that need
+    to check *all* repo paths should use ``_project_dirs_from_meta``.
+    """
+    dirs = _project_dirs_from_meta(meta)
+    return dirs[0] if dirs else None
 
 
 def _add_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
@@ -178,7 +193,8 @@ def grant_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
     if not tools or not paths:
         return 0
 
-    project_dir = _project_dir_from_meta(meta)
+    project_dirs = _project_dirs_from_meta(meta)
+    project_dir = project_dirs[0] if project_dirs else None
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
@@ -221,7 +237,8 @@ def revoke_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
 
     to_remove: set[str] = {_bash_entry(tool, path) for path in paths for tool in tools}
 
-    project_dir = _project_dir_from_meta(meta)
+    project_dirs = _project_dirs_from_meta(meta)
+    project_dir = project_dirs[0] if project_dirs else None
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
@@ -345,8 +362,9 @@ def setup_permissions(
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
-    project_dir = _project_dir_from_meta(meta)
-    sandbox_mode = _is_sandbox_enabled(project_dir)
+    project_dirs = _project_dirs_from_meta(meta)
+    project_dir = project_dirs[0] if project_dirs else None
+    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
@@ -370,6 +388,15 @@ def setup_permissions(
 
     if mcp_servers:
         counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
+
+    # Add Bash(zoxide *) rule when zoxide integration is enabled
+    from server.lib.zoxide import resolve_enabled as _zoxide_enabled
+    if _zoxide_enabled(cfg, meta):
+        zoxide_entry = "Bash(zoxide *)"
+        if zoxide_entry not in allow_set:
+            new_entries.append(zoxide_entry)
+            allow_set.add(zoxide_entry)
+            counts["bash_rules"] += 1
 
     if new_entries or sum(counts.values()) > 0:
         allow.extend(new_entries)

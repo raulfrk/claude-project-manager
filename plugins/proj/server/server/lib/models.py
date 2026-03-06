@@ -8,6 +8,11 @@ from dataclasses import dataclass, field
 
 DEFAULT_INVESTIGATION_TOOLS: list[str] = [
     "grep", "find", "ls", "cat", "head", "tail", "wc", "tree", "du", "file",
+    "mkdir", "cd",
+    "git status", "git diff", "git log", "git branch", "git show",
+    "git stash", "git fetch", "git checkout", "git switch", "git remote",
+    "git tag", "git blame", "git reflog", "git rev-parse", "git ls-files",
+    "git config",
 ]
 
 
@@ -124,6 +129,8 @@ class ProjConfig:
     # Optional integration flags set by /proj:init-plugin
     perms_integration: bool = False
     worktree_integration: bool = False
+    zoxide_integration: bool = False
+    claudemd_management: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -136,6 +143,8 @@ class ProjConfig:
             "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict()},
             "perms_integration": self.perms_integration,
             "worktree_integration": self.worktree_integration,
+            "zoxide_integration": self.zoxide_integration,
+            "claudemd_management": self.claudemd_management,
         }
 
     @classmethod
@@ -166,6 +175,8 @@ class ProjConfig:
             trello=TrelloSync.from_dict(trello_raw),
             perms_integration=bool(data.get("perms_integration", False)),
             worktree_integration=bool(data.get("worktree_integration", False)),
+            zoxide_integration=bool(data.get("zoxide_integration", False)),
+            claudemd_management=bool(data.get("claudemd_management", False)),
         )
 
 
@@ -374,6 +385,8 @@ class ProjectMeta:
     permissions: ProjectPermissions = field(default_factory=ProjectPermissions)
     todoist: ProjectTodoistConfig = field(default_factory=ProjectTodoistConfig)
     trello: ProjectTrelloConfig = field(default_factory=ProjectTrelloConfig)
+    zoxide_integration: bool | None = None  # None = use global config default
+    claudemd_management: bool | None = None  # None = use global config default
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -392,6 +405,8 @@ class ProjectMeta:
             "permissions": self.permissions.to_dict(),
             "todoist": self.todoist.to_dict(),
             "trello": self.trello.to_dict(),
+            "zoxide_integration": self.zoxide_integration,
+            "claudemd_management": self.claudemd_management,
         }
 
     @classmethod
@@ -429,6 +444,8 @@ class ProjectMeta:
             trello=ProjectTrelloConfig.from_dict(
                 trello_raw if isinstance(trello_raw, dict) else {}
             ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            zoxide_integration=bool(zi_raw) if (zi_raw := data.get("zoxide_integration")) is not None else None,
+            claudemd_management=bool(cm_raw) if (cm_raw := data.get("claudemd_management")) is not None else None,
         )
 
 
