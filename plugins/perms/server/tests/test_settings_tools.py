@@ -317,7 +317,8 @@ class TestAddAllowProjectScope:
         result = add_allow("/home/user/proj", scope="project")
         # Result message should mention the project-local path, not ~/.claude/settings.json
         assert ".claude/settings.json" in result
-        assert str(Path.home()) not in result
+        home_settings = str(Path.home() / ".claude" / "settings.json")
+        assert home_settings not in result
 
     def test_idempotent(self, project_settings: Path) -> None:
         add_allow("/home/user/proj", scope="project")

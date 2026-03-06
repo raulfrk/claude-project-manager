@@ -65,7 +65,8 @@ class TestIsGitRepo:
         subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
         assert is_git_repo(str(tmp_path))
 
-    def test_non_repo(self, tmp_path: Path) -> None:
+    def test_non_repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
         assert not is_git_repo(str(tmp_path))
 
 

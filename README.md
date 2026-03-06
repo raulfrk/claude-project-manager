@@ -2,9 +2,9 @@
 
 A Claude Code plugin marketplace for project management workflows.
 
-[![version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.44.0-blue?style=flat-square)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-753%20passing-brightgreen?style=flat-square)](#contributing)
+[![tests](https://img.shields.io/badge/tests-760%20passing-brightgreen?style=flat-square)](#contributing)
 
 ---
 
@@ -16,7 +16,7 @@ A Claude Code plugin marketplace for project management workflows.
 
 **worktree** (v0.8.0) — Git worktree management. Register base repositories once, then create, list, and remove isolated worktrees on demand — all from within a Claude Code conversation.
 
-**proj** (v0.41.0) — Full project lifecycle management. Tracks todos with nested dependencies, appends timestamped notes, syncs bidirectionally with Todoist and Trello (root todos only), detects git activity, generates reports, and drives AI-powered research and parallel execution of work items.
+**proj** (v0.44.0) — Full project lifecycle management. Tracks todos with nested dependencies across multi-directory projects, appends timestamped notes, syncs bidirectionally with Todoist and Trello, detects git activity, generates reports, and drives AI-powered research and parallel execution of work items. Supports optional zoxide integration for fast directory switching and CLAUDE.md management guards.
 
 **claude-helper** (v0.4.0) — Review and quality tooling for Claude Code. Analyses SKILL.md files and subagent definition files, scoring them across ten quality dimensions and producing prioritised improvement reports. Pure-skill plugin — no MCP server required.
 
@@ -129,7 +129,7 @@ The `proj` plugin is the core of the marketplace. It tracks project metadata, to
 - **Agents**: `agents-list`, `agents-set`, `agents-remove`, `create-agent`, `agents-create-define`, `agents-create-research`, `agents-create-decompose`, `agents-create-execute`
 - **Reports**: `report`
 - **Management**: `archive`, `load`, `switch`
-- **Maintenance**: `migrate-ids`, `migrate-to-proj`, `perms-sync`
+- **Maintenance**: `migrate-ids`, `migrate-to-proj`, `migrate-dirs`, `perms-sync`
 
 Hooks run automatically at session start, session end, and pre-compact to inject project context without any manual steps.
 
@@ -158,6 +158,7 @@ Hooks run automatically at session start, session end, and pre-compact to inject
 | `/proj:decompose` | proj | Break todo into sub-todos | `<todo-id>` |
 | `/proj:migrate-ids` | proj | Migrate todo IDs to numeric format | `[--dry-run]` |
 | `/proj:migrate-to-proj` | proj | Migrate existing project directory into proj tracking | `[project-name]` |
+| `/proj:migrate-dirs` | proj | Migrate legacy single-dir projects to multi-dir format | `[project-name]` |
 | `/proj:perms-sync` | proj | Check settings.json matches project config | none |
 | `/proj:explore` | proj | Explore and map a project's codebase, update CLAUDE.md | none |
 | `/proj:list-proj` | proj | List all non-archived tracked projects | none |
@@ -213,7 +214,7 @@ The `proj` plugin is configured via `~/.claude/proj.yaml`, written during `/proj
 | `default_priority` | string | `medium` | Default todo priority (`low`/`medium`/`high`) |
 | `permissions.auto_grant` | boolean | `true` | Auto-add Read/Edit rules for project directories |
 | `permissions.auto_allow_mcps` | boolean | `true` | Auto-allow plugin MCP tools in `settings.json` |
-| `permissions.investigation_tools` | list | `["grep","find","ls","cat","head","tail","wc","tree","du","file"]` | Bash tools granted scoped access via `proj_setup_permissions` |
+| `permissions.investigation_tools` | list | `["grep","find","ls","cat","head","tail","wc","tree","du","file","mkdir","cd","git status","git log","git diff","git branch","git show","git rev-parse","git describe","git tag","git remote","git stash list","git config","git shortlog","git blame","git ls-files","git ls-tree"]` | Bash tools granted scoped access via `proj_setup_permissions` |
 | `todoist.enabled` | boolean | `false` | Enable Todoist bidirectional sync |
 | `todoist.auto_sync` | boolean | `true` | Auto-sync todos on every proj command |
 | `todoist.mcp_server` | string | `claude_ai_Todoist` | MCP server name for Todoist integration |
@@ -226,6 +227,8 @@ The `proj` plugin is configured via `~/.claude/proj.yaml`, written during `/proj
 | `trello.on_delete` | string | `archive` | What to do with Trello cards when todo is deleted (`archive` or `delete`) |
 | `perms_integration` | boolean | `false` | Whether the `perms` plugin is installed |
 | `worktree_integration` | boolean | `false` | Whether the `worktree` plugin is installed |
+| `zoxide_integration` | boolean | `false` | Enable zoxide directory tracking (boost on init, remove on archive) |
+| `claudemd_management` | boolean | `false` | Enable CLAUDE.md write guard (opt-in per project or globally) |
 
 **Example `~/.claude/proj.yaml`:**
 
@@ -264,6 +267,8 @@ sync:
     on_delete: archive
 perms_integration: true
 worktree_integration: true
+zoxide_integration: false
+claudemd_management: false
 ```
 
 ---
@@ -824,7 +829,7 @@ uv sync
 uv run pytest tests/ -q
 ```
 
-**Coverage threshold:** 72%
+**Coverage threshold:** 72% (current: 85%)
 
 **Version bumps** must update both files together:
 - `plugins/<name>/.claude-plugin/plugin.json`
