@@ -2,7 +2,7 @@
 name: prune
 description: Prune stale git worktree admin files. Use when the user says "prune worktrees", "clean up stale worktrees".
 disable-model-invocation: "true"
-allowed-tools: mcp__worktree__wt_prune
+allowed-tools: mcp__plugin_worktree_worktree__wt_prune
 argument-hint: "[repo-label]"
 ---
 
@@ -10,7 +10,7 @@ Prune stale worktree metadata.
 
 ## Steps
 
-1. If `$ARGUMENTS` contains a repo label, pass it to `mcp__worktree__wt_prune`. Otherwise call with no label to prune all repos.
+1. If `$ARGUMENTS` contains a repo label, pass it to `mcp__plugin_worktree_worktree__wt_prune`. Otherwise call with no label to prune all repos.
 2. On success, display the pruned worktrees as a list: branch name and path for each entry.
 3. If no worktrees were pruned, print: "No stale worktrees found."
 

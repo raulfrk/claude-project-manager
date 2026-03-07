@@ -2,7 +2,7 @@
 name: load
 description: Load a specific project for this session, even if Claude was not started in that project's directory. Use when asked "load project", "switch to project", or "open project".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__proj_find_archived_by_title, Bash, Read
+allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, Bash, Read
 argument-hint: "[project-name]"
 ---
 
@@ -35,9 +35,11 @@ Load a project context for this session only (not persisted globally).
 4. **Auto-sync with Todoist** (if configured):
    - Call `mcp__proj__config_load` to read global config.
    - If `todoist.enabled: true` AND `todoist.auto_sync: true`: run the full bidirectional sync.
-   - Follow the exact same algorithm as `/proj:sync` (steps 1–6 in that skill).
+   - Follow the exact same algorithm as `/proj:sync` (steps 0–5 in that skill).
    - **Todoist tool names are dynamic**: use `mcp__{todoist.mcp_server}__<tool>` as the prefix
      for all Todoist calls (e.g. if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks`).
+   - **Use `auto_apply=True`** when calling `proj_todoist_diff` — this applies pull operations
+     server-side and eliminates the separate apply call for pulls.
    - Display the sync summary inline after the load confirmation.
    - If `todoist.enabled` is false or `todoist.auto_sync` is false: skip silently.
 

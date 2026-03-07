@@ -2,7 +2,7 @@
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__claude_ai_Todoist__add-tasks, mcp__sentry__find-projects, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -99,10 +99,10 @@ Decompose todo $ARGUMENTS into sub-todos.
    - Call `mcp__proj__config_load`. If `todoist.enabled` is false or `auto_sync` is false: skip silently.
    - Call `mcp__proj__proj_get_active` to read `todoist_project_id` and `project.todoist.root_only`.
    - **Resolve `effective_root_only`**: `project.todoist.root_only ?? global.todoist.root_only ?? false`.
-   - If `todoist_project_id` is null: call `mcp__sentry__find-projects`, present a numbered list of project names, ask "Which Todoist project should tasks for '<project name>' go to? (enter number)", then call `mcp__proj__proj_update_meta` with the chosen `todoist_project_id`. Use the chosen ID for the calls below.
+   - If `todoist_project_id` is null: call `mcp__{todoist.mcp_server}__find-projects`, present a numbered list of project names, ask "Which Todoist project should tasks for '<project name>' go to? (enter number)", then call `mcp__proj__proj_update_meta` with the chosen `todoist_project_id`. Use the chosen ID for the calls below.
    - Collect all newly created local todo IDs (from step 7) with their local parent IDs and the returned local IDs.
    - Push in depth order to handle parent→child linking:
-     1. **Root subtodos** (parent = the decompose target): call `mcp__claude_ai_Todoist__add-tasks` in one bulk call.
+     1. **Root subtodos** (parent = the decompose target): call `mcp__{todoist.mcp_server}__add-tasks` in one bulk call.
         - Map each: `content` = title, `priority` = (high→p2, medium→p3, low→p4), `labels` = tags, `parentId` = the decompose target's `todoist_task_id` (if it has one), `projectId` = `todoist_project_id`.
         - For each returned task: call `mcp__proj__todo_update` to store `todoist_task_id`.
      2. **Nested children** (parent = another new subtodo): if `effective_root_only` is true, skip this step entirely — do not push child todos to Todoist. Otherwise, repeat with one bulk `add-tasks` call per depth level.

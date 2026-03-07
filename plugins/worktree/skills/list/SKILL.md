@@ -1,13 +1,13 @@
 ---
 name: list
 description: List all git worktrees across configured base repositories. Use when the user says "list worktrees", "show worktrees", or "what worktrees do I have".
-allowed-tools: mcp__worktree__wt_list
+allowed-tools: mcp__plugin_worktree_worktree__wt_list
 argument-hint: "[repo-label]"
 ---
 
 List git worktrees.
 
-Call `mcp__worktree__wt_list` with the optional repo label from $ARGUMENTS (or no filter to list all).
+Call `mcp__plugin_worktree_worktree__wt_list` with the optional repo label from $ARGUMENTS (or no filter to list all).
 
 Display the results clearly. For each worktree show: path, branch, HEAD SHA (short), and any status flags (locked, prunable).
 

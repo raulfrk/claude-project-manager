@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .coverage
 *.cover
+*,cover
+pytest-of-*/
 /.mcp.json
 !plugins/**/.mcp.json
 .claude/

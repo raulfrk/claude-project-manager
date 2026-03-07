@@ -2,7 +2,7 @@
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__claude_ai_Todoist__complete-tasks, Task, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, Task, EnterPlanMode, ExitPlanMode
 argument-hint: "[todo-id | range] e.g. 1 or 2-4"
 ---
 
@@ -32,7 +32,7 @@ Execute todo(s): $ARGUMENTS
 4. Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions pulled from Todoist) — it should inform your implementation approach.
 5. On completion:
    - Call `mcp__proj__todo_complete`
-   - If Todoist enabled: call `mcp__claude_ai_Todoist__complete-tasks`
+   - If Todoist enabled: call `mcp__{todoist.mcp_server}__complete-tasks`
    - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
    - Append a brief progress note: `mcp__proj__notes_append`
 

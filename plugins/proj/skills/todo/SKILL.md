@@ -2,7 +2,7 @@
 name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__claude_ai_Todoist__update-tasks, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta
+allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 context: fork
 agent: general-purpose
@@ -25,7 +25,7 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
   - If Todoist auto_sync:
     - Call `mcp__proj__proj_get_active` to read `todoist_project_id`.
     - If `todoist_project_id` is null: stop with "Todoist project not linked. Set todoist_project_id via mcp__proj__proj_update_meta first."
-    - Call `mcp__claude_ai_Todoist__add-tasks` with content (title), priority (local to Todoist mapped: high->p2, medium->p3, low->p4), labels (from tags -- pass the tags list directly as labels), `projectId` = `todoist_project_id`, and -- if `due` was set -- `dueString` = `<due value>`.
+    - Call `mcp__{todoist.mcp_server}__add-tasks` with content (title), priority (local to Todoist mapped: high->p2, medium->p3, low->p4), labels (from tags -- pass the tags list directly as labels), `projectId` = `todoist_project_id`, and -- if `due` was set -- `dueString` = `<due value>`.
     - Store the returned task ID: call `mcp__proj__todo_update` with `todo_id=<local todo id>` and `todoist_task_id=<id returned by add-tasks>`.
 
 **update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update a todo's fields
@@ -35,12 +35,12 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - If `tags` were changed: include `labels` set to the new tags list (full replacement) in the Todoist update
     - If `notes` were changed: include `description` set to the new notes value in the Todoist update (immediately pushes to Todoist without waiting for `/proj:sync`)
     - If `due_date` was changed: include `dueString` set to the new `due_date` value in the Todoist update
-    - Combine all changed fields into a single `mcp__claude_ai_Todoist__update-tasks` call
+    - Combine all changed fields into a single `mcp__{todoist.mcp_server}__update-tasks` call
   - Show the updated todo
 
 **done** `<id>` — mark a todo complete (e.g. "done 2")
   - Call `mcp__proj__todo_complete`
-  - If Todoist auto_sync: call `mcp__claude_ai_Todoist__complete-tasks`
+  - If Todoist auto_sync: call `mcp__{todoist.mcp_server}__complete-tasks`
 
 **list** [all|pending|ready|blocked] — list todos with optional filter
   - Default (no filter): call `mcp__proj__todo_tree` — shows open tasks as a hierarchy, filtering out done todos

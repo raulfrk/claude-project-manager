@@ -3,7 +3,7 @@ name: quick
 description: Quick-start a project or todo and immediately run the full workflow. Use when the user says "quick project", "proj:quick", or wants to start something new fast.
 disable-model-invocation: "true"
 argument-hint: "[description or project-name]"
-allowed-tools: mcp__proj__config_load, mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__proj_setup_permissions, mcp__proj__claudemd_write, mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_tree, mcp__worktree__wt_list_repos, mcp__worktree__wt_create, mcp__claude_ai_Todoist__add-tasks, mcp__claude_ai_Todoist__complete-tasks, mcp__sentry__find-projects, Bash, Read, Task, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__proj__config_load, mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__proj_setup_permissions, mcp__proj__claudemd_write, mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_tree, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, Bash, Read, Task, EnterPlanMode, ExitPlanMode
 ---
 
 Quick-start: $ARGUMENTS
@@ -37,8 +37,8 @@ Store returned ID as `new_id`.
 
 If `todoist.enabled` and `todoist.auto_sync`:
 - Get `todoist_project_id` from `mcp__proj__proj_get_active`.
-- If null: call `mcp__sentry__find-projects`, ask user to pick, update meta.
-- Call `mcp__claude_ai_Todoist__add-tasks` with the todo. Store returned task ID.
+- If null: call `mcp__{todoist.mcp_server}__find-projects`, ask user to pick, update meta.
+- Call `mcp__{todoist.mcp_server}__add-tasks` with the todo. Store returned task ID.
 - Call `mcp__proj__todo_update` with `todoist_task_id`.
 
 **T4. Launch workflow**
