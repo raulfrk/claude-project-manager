@@ -111,9 +111,7 @@ def register(app: FastMCP) -> None:
             todo.git.branch = branch
         if commit and commit not in todo.git.commits:
             todo.git.commits.append(commit[:8])
-        from datetime import date as _date
-
-        todo.updated = str(_date.today())
+        todo.updated = str(date.today())
         storage.save_todos(cfg, name, todos)
         return f"Linked git info to {todo_id}: branch={todo.git.branch}, commits={todo.git.commits}"
 

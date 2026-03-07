@@ -38,19 +38,16 @@ def test_config_exists(tmp_cfg: ProjConfig) -> None:
 def test_index_empty_on_missing_file(tmp_cfg: ProjConfig) -> None:
     index = storage.load_index(tmp_cfg)
     assert index.projects == {}
-    assert index.active is None
 
 
 def test_index_roundtrip(tmp_cfg: ProjConfig) -> None:
     index = ProjectIndex(
-        active="myapp",
         projects={
             "myapp": ProjectEntry(name="myapp", tracking_dir="/t/myapp", created="2026-01-01")
         },
     )
     storage.save_index(tmp_cfg, index)
     loaded = storage.load_index(tmp_cfg)
-    assert loaded.active == "myapp"
     assert "myapp" in loaded.projects
 
 

@@ -52,8 +52,6 @@ def _setup_project_with_todos(
     storage.save_todos(cfg, name, todos)
     index = storage.load_index(cfg)
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
-    if not index.active:
-        index.active = name
     storage.save_index(cfg, index)
 
 

@@ -2,6 +2,8 @@
 name: status
 description: Show the current project status, open todos, and recent git activity. Use when asked "what's the project status", "what are my todos", "what should I work on next", or "project overview".
 allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_ready, mcp__proj__git_detect_work, mcp__claude_ai_Todoist__find-tasks, mcp__proj__config_load, mcp__proj__todo_update
+context: fork
+agent: general-purpose
 ---
 
 Show a comprehensive status report for the active project.
@@ -40,4 +42,4 @@ Show a comprehensive status report for the active project.
    - abc1234  Fix storage layer (2026-02-26)
    ```
 
-💡 Suggested next: (1) /proj:execute 3 — start work on a ready task  (2) /proj:todo add — add a new task  (3) /proj:update — record recent progress
+💡 Suggested next: (1) /proj:execute 3 — start work on a ready task  (2) /proj:todo add — add a new task  (3) /proj:save — save session and reconcile git

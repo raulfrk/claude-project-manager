@@ -28,7 +28,7 @@ The `proj` plugin provides a complete project management workflow inside Claude 
 
 - **Project tracking** — each project has a tracking directory (`~/projects/tracking/<name>/`) containing a `todos.yaml`, `NOTES.md`, and per-todo `requirements.md` / `research.md` files.
 - **Todo lifecycle** — add, prioritize, block/unblock, complete, and archive todos with hierarchical dot-notation IDs (`1`, `1.1`, `1.2.3`).
-- **Full workflow** — structured skills for defining requirements, researching approaches, decomposing into sub-todos, and executing them — individually or in parallel batches.
+- **Full workflow** — structured skills for defining requirements + researching approaches, decomposing into sub-todos, and executing them — individually or in parallel batches.
 - **Git integration** — detect recent commits across all project repos, suggest todo completions, and link commits to specific todos.
 - **Todoist sync** — bidirectional sync with a Todoist project (optional).
 - **CLAUDE.md management** — write and update per-project `CLAUDE.md` files to keep Claude's context current.
@@ -116,7 +116,7 @@ tracking/my-project/
   NOTES.md           # freeform dated notes
   <todo-id>/
     requirements.md  # structured requirements (from /proj:define)
-    research.md      # implementation research (from /proj:research)
+    research.md      # implementation research (from /proj:define)
 ```
 
 ### todos.yaml
@@ -136,24 +136,15 @@ Todos are stored as plain YAML — no frontmatter, no markdown. Each todo has:
 
 ### CLAUDE.md per project
 
-Each project's content directory can have a `CLAUDE.md` that gives Claude context about the codebase. The `/proj:init` skill creates one automatically; `/proj:update` and `/proj:execute` keep it current. `/proj:explore` scans the codebase and writes or merges findings into CLAUDE.md.
+Each project's content directory can have a `CLAUDE.md` that gives Claude context about the codebase. The `/proj:init` skill creates one automatically; `/proj:save` and `/proj:execute` keep it current.
 
 ### Active project
 
-One project is "active" at a time. The active project is used as the default target for all todo and note operations. The active project persists across sessions (stored in the project index); use `/proj:load` to set a session-only override without changing the global active project.
+One project is "active" at a time. The active project is used as the default target for all todo and note operations. Use `/proj:load` to set a session-only override without changing the global active project.
 
 ### Session context injection
 
-At session start, the `SessionStart` hook calls `ctx_session_start`, which auto-detects the active project from `$CLAUDE_PROJECT_DIR` (by matching the cwd against registered repo paths) and injects a context block into the conversation:
-
-```
-## Active Project: my-project
-Status: active | Priority: high
-...
-### In Progress
-### Ready to Start
-### Recent Notes
-```
+At session start, the `SessionStart` hook calls `ctx_session_start`, which auto-detects the active project from `$CLAUDE_PROJECT_DIR` and injects a context block into the conversation.
 
 ---
 
@@ -165,74 +156,49 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `init-plugin` | `/proj:init-plugin` | First-time setup wizard. Creates `~/.claude/proj.yaml`. Run this before anything else. |
-| `init` | `/proj:init [name]` | Initialize tracking for a project. Asks for name, path, description, tags, git integration. Creates tracking directory, CLAUDE.md, and optional Todoist project. |
+| `init-plugin` | `/proj:init-plugin` | First-time setup wizard. Creates `~/.claude/proj.yaml`. |
+| `init` | `/proj:init [name]` | Initialize tracking for a project. Creates tracking directory, CLAUDE.md, and optional Todoist project. |
 | `list-proj` | `/proj:list-proj` | List all non-archived tracked projects. |
-| `switch` | `/proj:switch [name]` | Switch the globally active project. Displays the new project's context after switching. |
-| `load` | `/proj:load [name]` | Load a project for this session only (session-local override, not persisted). Supports fuzzy name matching. |
-| `archive` | `/proj:archive [name]` | Archive a completed project. Warns if open todos remain. |
-| `explore` | `/proj:explore [path]` | Scan a codebase directory and write findings (tech stack, entry points, key dirs) to CLAUDE.md and NOTES.md. |
-| `migrate-to-proj` | `/proj:migrate-to-proj [path]` | Import an existing project into proj tracking. Detects TODOS.md, todo.yaml, NOTES.md, and legacy `~/.project-tracker/` data. Creates a backup before migrating. |
-| `migrate-ids` | `/proj:migrate-ids [--dry-run]` | Migrate todo IDs from legacy T-format (T001) to numeric dot-notation (1, 1.1). Backs up todos.yaml. |
+| `switch` | `/proj:switch [name]` | Switch the globally active project. |
+| `load` | `/proj:load [name]` | Load a project for this session only. Supports fuzzy matching. |
+| `archive` | `/proj:archive [name]` | Archive a completed project. |
 
-### Status and reporting
+### Status and notes
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `status` | `/proj:status` | Show project status, open todos grouped by in-progress/ready/blocked, and recent git activity. Syncs Todoist if auto_sync is enabled. |
-| `update` | `/proj:update [note]` | Reconcile recent git commits with todos (suggest completions, link commits). Add new todos and notes. Rebuild CLAUDE.md. |
-| `save` | `/proj:save` | Save session notes and context (decisions, todos, insights, open questions) to NOTES.md + session file. |
-| `report` | `/proj:report` | Generate a comprehensive Markdown report: completed work, in-progress todos, pending todos, git history (30 days), and recent notes. Spawns parallel agents to gather data. |
+| `status` | `/proj:status` | Show project status, open todos, and recent git activity. Syncs Todoist if auto_sync is enabled. |
+| `save` | `/proj:save` | Save session notes (decisions, todos, insights, open questions) to session file + NOTES.md. Reconciles git activity with todos. |
 
 ### Todo management
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `todo` | `/proj:todo <subcommand>` | All todo CRUD operations. See subcommands below. |
-
-`/proj:todo` subcommands:
-
-| Subcommand | Example | Description |
-|------------|---------|-------------|
-| `add <title>` | `/proj:todo add Fix login bug` | Add a new todo. Asks for priority, tags, blocked_by. Smart parent inference: if title starts with an existing todo ID, the new todo is created as a child. |
-| `done <id>` | `/proj:todo done 2` | Mark a todo complete and archive it. |
-| `update <id> [fields]` | `/proj:todo update 2 priority=high` | Update a todo's title, priority, tags, or notes. |
-| `list [filter]` | `/proj:todo list ready` | List todos. Filters: `all`, `ready`, `blocked`. Default shows pending todos. |
-| `tree` | `/proj:todo tree` | Show todos as a nested hierarchy. |
-| `block <id> blocks <id>` | `/proj:todo block 1 blocks 2` | Set a blocking dependency. |
-| `delete <id>` | `/proj:todo delete 3` | Delete a todo (asks for confirmation). |
+| `todo` | `/proj:todo <subcommand>` | All todo CRUD: add, done, update, list, tree, block, delete. |
 
 ### Workflow
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `define` | `/proj:define <id>` | Gather requirements for a todo through iterative Q&A. Writes a structured `requirements.md` covering Goal, Acceptance Criteria, Out of Scope, Testing Strategy, and Q&A. |
-| `research` | `/proj:research <id>` | Research implementation approaches for a todo. Explores the codebase (Read, Glob, Grep) and external sources (WebSearch, WebFetch). Writes `research.md` with approach options and a recommendation. Supports `all` or comma-separated IDs to spawn parallel research agents. |
-| `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos based on its requirements and research. Proposes a multi-level breakdown, confirms with you, then creates the sub-todos with correct parent/child relationships and dependencies. |
-| `execute` | `/proj:execute [id\|range]` | Implement one or more todos. Reads requirements and research before starting. For a range with independent todos, spawns parallel agents. Respects `blocked_by` ordering. Calls `todo_complete` on finish. |
-| `prep-workflow` | `/proj:prep-workflow <id> [--iter N]` | Run define + research + decompose in sequence. Supports `--iter N` to repeat the cycle N times. Supports ranges and comma lists for batch processing. |
-| `full-workflow` | `/proj:full-workflow <id> [--steps ...] [--from ...]` | Run the full workflow (define + research + decompose + execute) with interactive prompts between steps. Flags: `--steps define,execute` to select steps; `--from research` to start from a specific step; `--iter N` for prep iterations. Supports ranges for batch autonomous execution. |
-| `quick-workflow` | `/proj:quick-workflow <description> [flags]` | Create a new todo and immediately run full-workflow on it. Accepts the same flags as `full-workflow` (`--steps`, `--from`, `--iter`, `--iter-as-needed`). If no description is given, prompts interactively. |
+| `define` | `/proj:define <id>` | Gather requirements through Q&A and research implementation approaches. Writes `requirements.md` and `research.md`. Uses plan mode to outline before writing. |
+| `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos with dependency analysis. Detects shared-file conflicts for safe parallel execution. |
+| `execute` | `/proj:execute [id\|range]` | Implement todos. Uses plan mode for review. For ranges, plans sequentially then executes in parallel. |
+| `run` | `/proj:run <id> [--steps ...] [--from ...]` | Full workflow: define → decompose → execute. Interactive prompts between steps. Supports `--steps`, `--from`, `--iter N`. Ranges run autonomously in batches. |
+| `quick` | `/proj:quick [description]` | Quick-start: creates a new project (if none active) or a new todo (if active project exists), then launches `/proj:run`. |
 
-### Agent management
+### Sync
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `agents-set` | `/proj:agents-set <step> <agent-name>` | Set a specialized agent override for a specific project step (research, decompose, define, execute). |
-| `agents-list` | `/proj:agents-list` | List all agent overrides for the active project, showing defaults for unset steps. |
-| `agents-remove` | `/proj:agents-remove <step>` | Remove an agent override and revert a step to its default agent. |
-| `create-agent` | `/proj:create-agent [step] [name]` | Generic skill to create a custom Claude Code agent file for any workflow step. Asks which step, then guides through name and specialization to generate a properly configured `.claude/agents/<name>.md`. |
-| `agents-create-define` | `/proj:agents-create-define [name]` | Create a custom agent file for the define (requirements) step. Uses define-specific tool defaults and system prompt structure. |
-| `agents-create-research` | `/proj:agents-create-research [name]` | Create a custom agent file for the research step. Defaults to `claude-haiku-4-5-20251001` model and includes WebSearch/WebFetch tools. |
-| `agents-create-decompose` | `/proj:agents-create-decompose [name]` | Create a custom agent file for the decompose step. Uses decompose-specific tool defaults and structured breakdown prompt format. |
-| `agents-create-execute` | `/proj:agents-create-execute [name]` | Create a custom agent file for the execute step. Includes Edit, Write, Bash tools and enforces the check-executable guard in the generated agent. |
+| `sync` | `/proj:sync` | Manually trigger bidirectional Todoist sync. |
+| `trello-sync` | `/proj:trello-sync` | Sync root-level todos with a Trello board. |
 
-### Sync and permissions
+### Repository management
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `sync` | `/proj:sync` | Manually trigger a full bidirectional Todoist sync regardless of auto_sync setting. |
-| `perms-sync` | `/proj:perms-sync` | Check whether settings.json allow rules match the active project config. Reports missing rules without auto-fixing. |
+| `add-repo` | `/proj:add-repo <path>` | Register an additional repository path for a project. |
+| `remove-repo` | `/proj:remove-repo <label>` | Unregister a repository by label. |
 
 ---
 
@@ -246,7 +212,7 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 |------|-------------|
 | `config_load` | Check if the plugin is configured. Returns config summary or setup instructions. |
 | `config_init` | Initialize configuration (called by `/proj:init-plugin`). |
-| `config_update` | Update individual config settings (tracking_dir, projects_base_dir, priorities, Todoist, git, perms). |
+| `config_update` | Update individual config settings. |
 
 ### Projects
 
@@ -254,78 +220,77 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 |------|-------------|
 | `proj_init` | Initialize tracking for a new project. |
 | `proj_list` | List all projects (active and archived). |
-| `proj_get` | Get full project metadata. Defaults to active project. |
+| `proj_get` | Get full project metadata. |
 | `proj_get_active` | Get the currently active project. |
-| `proj_set_active` | Set the globally active project. |
-| `proj_load_session` | Set the active project for this session only (not persisted). Fuzzy-matches project names. |
-| `proj_update_meta` | Update project fields: description, status, priority, tags, target_date, git_enabled. |
-| `proj_archive` | Archive a project (removes from active list). |
-| `proj_add_repo` | Register an additional repository path against a project. |
-| `proj_set_permissions` | Set per-project auto_grant override (null = use global config). |
-| `proj_set_agent` | Set an agent override for a step (research, decompose, define, execute) in the active project. |
-| `proj_get_agents` | Get all agent overrides for the active project, with defaults shown for unset steps. |
-| `proj_remove_agent` | Remove an agent override for a step, reverting it to default. |
-| `proj_explore_codebase` | Scan a directory and return structured findings: tech_stack, entry_points, key_dirs, config_files, file_types, file_tree, arch_note. No Bash required. |
-| `proj_identify_batches` | Topological sort of todo IDs by dependency graph. Returns independent parallel batches with cycle detection. |
-| `proj_migrate_ids` | Migrate all project todo IDs from T-prefix format to numeric dot-notation. Backs up todos.yaml. |
+| `proj_load_session` | Set the active project for this session (not persisted). |
+| `proj_update_meta` | Update project fields. |
+| `proj_archive` | Archive a project. |
+| `proj_add_repo` | Register a repository path. |
+| `proj_remove_repo` | Unregister a repository. |
+| `proj_set_permissions` | Set per-project auto_grant override. |
+| `proj_explore_codebase` | Scan a directory and return structured findings. |
+| `proj_identify_batches` | Topological sort of todo IDs by dependency graph. |
+| `proj_migrate_ids` | Migrate todo IDs from T-format to numeric dot-notation. |
+| `proj_migrate_dirs` | Migrate single-dir projects to multi-dir format. |
+| `proj_find_archived_by_title` | Fuzzy-match archived todos by title. |
 
 ### Todos
 
 | Tool | Description |
 |------|-------------|
-| `todo_add` | Add a new todo. Accepts title, priority, tags, blocked_by, parent, notes. |
-| `todo_list` | List todos with optional status/tag/blocked filters and pagination. |
-| `todo_list_all` | List todos including archived items (todos.yaml + archive.yaml). |
-| `todo_get` | Get a single todo by ID (checks active and archived). |
-| `todo_update` | Update a todo's fields: title, status, priority, tags, notes, todoist_task_id. |
-| `todo_complete` | Mark a todo done and archive it. Parent todos require all children to be done first. |
-| `todo_check_executable` | Guard for the `manual` tag. Returns todo JSON if executable; returns an error string if manual-tagged. Skills call this before executing. |
-| `todo_delete` | Delete a todo and clean up all blocks/blocked_by/children references. |
-| `todo_block` | Set blocking relationships between todos (bidirectional). |
-| `todo_unblock` | Remove all blocking relationships from a todo. |
-| `todo_ready` | List todos that are pending with no blockers. |
-| `todo_add_child` | Add a child todo under a parent todo. |
-| `todo_tree` | Return todos as a nested JSON tree. Prunes done nodes with no active descendants by default; pass `include_done=true` for full history. |
-| `todo_set_content_flag` | Set `has_requirements` or `has_research` flags on a todo. Idempotent. |
+| `todo_add` | Add a new todo. |
+| `todo_list` | List todos with filters and pagination. |
+| `todo_list_all` | List todos including archived items. |
+| `todo_get` | Get a single todo by ID. |
+| `todo_update` | Update a todo's fields. |
+| `todo_complete` | Mark a todo done and archive it. |
+| `todo_check_executable` | Guard for the `manual` tag. |
+| `todo_delete` | Delete a todo. |
+| `todo_block` | Set blocking relationships. |
+| `todo_unblock` | Remove blocking relationships. |
+| `todo_ready` | List pending unblocked todos. |
+| `todo_add_child` | Add a child todo. |
+| `todo_tree` | Return todos as a nested JSON tree. |
+| `todo_set_content_flag` | Set `has_requirements` or `has_research` flags. |
 
-### Content (per-todo requirements and research)
+### Content
 
 | Tool | Description |
 |------|-------------|
 | `content_set_requirements` | Write `requirements.md` for a todo. |
-| `content_get_requirements` | Read `requirements.md` for a todo (truncates at max_chars with a path hint). |
+| `content_get_requirements` | Read `requirements.md` for a todo. |
 | `content_set_research` | Write `research.md` for a todo. |
-| `content_get_research` | Read `research.md` for a todo (truncates at max_chars with a path hint). |
-| `proj_get_todo_context` | Return a todo's full context in one call: todo + parent + requirements + research. Replaces 3-4 sequential tool calls. |
+| `content_get_research` | Read `research.md` for a todo. |
+| `proj_get_todo_context` | Get todo + parent + requirements + research in one call. |
 
 ### Notes and context
 
 | Tool | Description |
 |------|-------------|
-| `notes_append` | Append a dated note to the active project's `NOTES.md`. |
-| `claudemd_write` | Write or update `CLAUDE.md` in a project repo directory. |
-| `claudemd_read` | Read `CLAUDE.md` from a project repo directory. |
-| `ctx_session_start` | Build the session context string for the active project (used by the SessionStart hook). Auto-detects project from cwd. |
-| `ctx_session_end` | Update the `last_updated` timestamp for the active project (used by the SessionEnd hook). |
-| `ctx_detect_project` | Detect which tracked project matches the given cwd by comparing against registered repo paths. |
+| `notes_append` | Append a dated note to NOTES.md. |
+| `claudemd_write` | Write CLAUDE.md in a project repo. |
+| `claudemd_read` | Read CLAUDE.md from a project repo. |
+| `ctx_session_start` | Build session context string (SessionStart hook). |
+| `ctx_session_end` | Update last_updated timestamp (SessionEnd hook). |
+| `ctx_detect_project` | Detect project from cwd. |
 
 ### Git
 
 | Tool | Description |
 |------|-------------|
-| `git_detect_work` | Detect recent commits and branches across all project repos (uses `git log`). Returns empty results gracefully if git is not available or not enabled. |
-| `git_link_todo` | Link a git branch and/or commit SHA to a todo. |
-| `git_suggest_todos` | Suggest todo titles based on recent commit messages. |
-| `proj_git_reconcile_todos` | Single-call git reconciliation: detects commits, branches, and generates structured todo suggestions. Replaces calling `git_detect_work` + `git_suggest_todos` separately. |
+| `git_detect_work` | Detect recent commits and branches. |
+| `git_link_todo` | Link a git branch/commit to a todo. |
+| `git_suggest_todos` | Suggest todo titles from commit messages. |
+| `proj_git_reconcile_todos` | Combined git detection + todo suggestions. |
 
 ### Permissions
 
 | Tool | Description |
 |------|-------------|
-| `proj_setup_permissions` | Grant all permission rules in one atomic settings.json write: Read+Edit path rules, scoped Bash investigation-tool rules, and MCP wildcard rules. Idempotent. |
-| `proj_grant_tool_permissions` | Add scoped Bash allow rules for investigation tools (grep, find, ls, etc.) for a project's directories. Idempotent. |
-| `proj_revoke_tool_permissions` | Remove scoped Bash investigation-tool allow rules added by `proj_grant_tool_permissions`. Does not touch other rules. Idempotent. |
-| `proj_perms_sync` | Compare expected vs actual settings.json allow rules and report missing entries. Does not auto-fix. |
+| `proj_setup_permissions` | Grant all permission rules atomically. |
+| `proj_grant_tool_permissions` | Add scoped Bash investigation-tool rules. |
+| `proj_revoke_tool_permissions` | Remove scoped Bash investigation-tool rules. |
+| `proj_perms_sync` | Compare expected vs actual permission rules. |
 
 ---
 
@@ -335,83 +300,57 @@ Todos support a `tags` list. Tags are free-form strings except for `manual`, whi
 
 ### The `manual` tag
 
-Mark a todo as requiring human execution (cannot be automated):
+Mark a todo as requiring human execution:
 
-```
-/proj:todo add Deploy to production server
-# then: /proj:todo update 5 tags=manual
-```
-
-Behavior when `manual` is set:
-
-- **`/proj:execute <id>`** — shows a warning and stops: `"Todo <id> is tagged manual — execute it yourself, then run /proj:todo done <id>"`. Does not attempt implementation.
-- **`/proj:full-workflow <id>`** — runs define/research/decompose normally but skips the execute step. Shows the warning in the summary.
-- **Batch/range modes** — manual todos are skipped at execute with a warning in the aggregated summary.
-- **MCP guard** — `todo_check_executable` returns an error string (not JSON) for manual-tagged todos. All execute-capable skills call this before implementing.
-- **Display** — `[manual]` badge shown after priority in all todo list, tree, and decompose output.
-- **Tags do not propagate** — child todos are independent; setting `manual` on a parent does not affect children.
-- **No effect on Todoist sync** — the `manual` tag syncs to Todoist as a label like any other tag.
+- **`/proj:execute <id>`** — shows a warning and stops.
+- **`/proj:run <id>`** — runs define/decompose normally but skips execute.
+- **Batch modes** — manual todos are skipped at execute with a warning.
+- **MCP guard** — `todo_check_executable` returns an error for manual-tagged todos.
+- **Display** — `[manual]` badge shown after priority.
+- **Tags do not propagate** — child todos are independent.
 
 ---
 
 ## Todo IDs
 
-Todos use numeric dot-notation IDs:
-
-- Root todos: `1`, `2`, `3`, ...
-- Child todos: `1.1`, `1.2`, `2.1`, ...
-- Nested children: `1.1.1`, `1.2.3`, ...
-
-IDs are assigned automatically when todos are created. The `/proj:migrate-ids` skill converts legacy T-format IDs (`T001`, `T001.1`) to this format.
+Todos use numeric dot-notation IDs: `1`, `1.1`, `1.2.3`. IDs are assigned automatically.
 
 ---
 
 ## Configuration
 
-Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`, permissions set to `0600`).
+Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`).
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `tracking_dir` | `~/projects/tracking` | Root directory for all project tracking data |
 | `projects_base_dir` | null | If set, `/proj:init` uses `<base>/<name>` as content path |
-| `git_integration` | `true` | Enable git commit detection in `/proj:update` |
-| `default_priority` | `medium` | Default priority for new todos (`low` / `medium` / `high`) |
-| `perms_integration` | `false` | Enable automatic `settings.json` permission management |
+| `git_integration` | `true` | Enable git commit detection |
+| `default_priority` | `medium` | Default priority for new todos |
+| `perms_integration` | `false` | Enable automatic permission management |
 | `worktree_integration` | `false` | Enable worktree plugin integration |
-| `permissions.auto_grant` | `true` | Auto-add Read/Edit rules for project directories on `/proj:init` |
-| `permissions.auto_allow_mcps` | `true` | Auto-add MCP wildcard allow rules on `/proj:init-plugin` |
-| `permissions.investigation_tools` | `["grep", "find", "ls"]` | Bash tools granted scoped access via `proj_grant_tool_permissions` |
+| `permissions.auto_grant` | `true` | Auto-add Read/Edit rules |
+| `permissions.auto_allow_mcps` | `true` | Auto-add MCP wildcard rules |
 | `todoist.enabled` | `false` | Enable Todoist sync |
-| `todoist.auto_sync` | `true` | Auto-sync on status/load/update commands when Todoist is enabled |
-
-Update individual settings after initial setup:
-
-```
-# via MCP tool (in a Claude conversation)
-mcp__proj__config_update(tracking_dir="~/work/tracking")
-```
+| `todoist.auto_sync` | `true` | Auto-sync on status/load commands |
 
 ---
 
 ## Hooks
 
-The plugin registers three lifecycle hooks in `hooks/hooks.json`. These are auto-discovered by Claude Code — they do not need to be referenced in `plugin.json`.
+Three lifecycle hooks (auto-discovered from `hooks/hooks.json`):
 
-| Hook | Timing | What it does |
-|------|--------|--------------|
-| `SessionStart` | At the start of every Claude Code session | Calls `ctx_session_start` to auto-detect the active project from `$CLAUDE_PROJECT_DIR` and inject project context (status, in-progress todos, ready todos, recent notes) into the conversation. |
-| `SessionEnd` | When the session ends | Calls `ctx_session_end` to update the `last_updated` timestamp on the active project's metadata. Runs asynchronously. |
-| `PreCompact` | Before context window compaction | Calls `ctx_session_start` with `--compact` flag to re-inject a condensed project context so Claude retains awareness of the active project after compaction. |
-
-All hooks call `server/cli.py` (a thin CLI wrapper that shares the MCP server's library). Hooks cannot call the MCP stdio server directly.
+| Hook | What it does |
+|------|--------------|
+| `SessionStart` | Auto-detect active project, inject context (status, todos, notes). |
+| `SessionEnd` | Update `last_updated` timestamp. |
+| `PreCompact` | Re-inject condensed context before compaction. |
 
 ---
 
 ## Todoist sync
 
-When `todoist.enabled: true`, the plugin can bidirectionally sync todos with a Todoist project.
-
-Field mapping:
+When `todoist.enabled: true`, bidirectional sync with a Todoist project.
 
 | Local field | Todoist field |
 |-------------|---------------|
@@ -423,112 +362,24 @@ Field mapping:
 | `notes` | `description` |
 | `tags` | `labels` |
 
-Sync runs automatically (when `auto_sync: true`) during `/proj:status`, `/proj:load`, and `/proj:update`. To trigger manually: `/proj:sync`.
-
-The `/proj:sync` skill performs a full bidirectional sync:
-1. Pull new and updated tasks from Todoist into local todos.
-2. Push new and updated local todos to Todoist.
-3. Detect tasks closed or deleted in Todoist and complete them locally.
-
-The `todoist_task_id` field on each todo is the stable link between local and Todoist state.
+Sync runs automatically during `/proj:status` and `/proj:load` when `auto_sync: true`. Manual trigger: `/proj:sync`.
 
 ---
 
 ## Trello sync
 
-When `trello.enabled: true`, the plugin can bidirectionally sync **root-level todos** with a Trello board. Child/subtodos are never synced to Trello.
-
-### Requirements
-
-Register the `delorenj/mcp-server-trello` MCP server in your Claude Code MCP configuration (`~/.claude/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "trello": {
-      "command": "npx",
-      "args": ["-y", "@delorenj/mcp-server-trello"],
-      "env": {
-        "TRELLO_API_KEY": "<your-api-key>",
-        "TRELLO_TOKEN": "<your-token>"
-      }
-    }
-  }
-}
-```
-
-Get your API key and token from [https://trello.com/app-key](https://trello.com/app-key).
-
-### Configuration
-
-Enable Trello sync in the plugin config (`~/.claude/proj.yaml`):
-
-```yaml
-sync:
-  trello:
-    enabled: true
-    mcp_server: "trello"         # MCP server name from mcp.json
-    default_board_id: "abc123"   # Trello board ID (from board URL)
-    list_mappings:
-      created: "Backlog"         # List where new todos are created as cards
-      done: "Done"               # List where completed todos are moved
-    on_delete: "archive"         # "archive" or "delete"
-```
-
-Per-project overrides in `meta.yaml` (set via `proj_update_meta`):
-
-```yaml
-trello:
-  enabled: true
-  board_id: "abc123"
-  list_mappings:
-    created: "To Do"
-    done: "Completed"
-  on_delete: "archive"
-```
-
-### Action mapping
-
-| Local action | Trello action |
-|---|---|
-| Todo created | Card added to configured "created" list |
-| Todo completed | Card moved to configured "done" list |
-| Todo title updated | Card name updated |
-| Todo deleted | Card archived or deleted (per `on_delete`) |
-| Todo due_date updated | Card due date updated |
-
-| Trello event | Local action |
-|---|---|
-| Card moved to "done" list | Todo marked complete |
-| Card renamed | Todo title updated |
-| Card due date changed | `due_date` field updated |
-
-### Running a sync
-
-```
-/proj:trello-sync
-```
-
-The `trello_card_id` field on each root todo is the stable link to its Trello card.
+When `trello.enabled: true`, bidirectional sync of root-level todos with a Trello board. See configuration in `~/.claude/proj.yaml`. Manual trigger: `/proj:trello-sync`.
 
 ---
 
 ## Permissions integration
 
-When `perms_integration: true` (requires the `perms` plugin), the `proj` plugin can automatically manage `~/.claude/settings.json` allow rules:
-
-- **Path access** — `Read(//path/**)` and `Edit(//path/**)` rules for each project's repo directories and the tracking directory.
-- **Bash investigation tools** — scoped rules like `Bash(grep //path/**)` for configured tools (grep, find, ls, etc.).
-- **MCP wildcard rules** — `mcp__plugin_proj_proj__*` and similar entries so Claude never prompts for MCP tool permissions.
-
-These rules are added atomically in a single `settings.json` write by `proj_setup_permissions`. They take effect immediately.
-
-The `proj_perms_sync` tool (and `/proj:perms-sync` skill) checks whether all expected rules are present without modifying anything, making it safe to audit at any time.
+When `perms_integration: true` (requires the `perms` plugin), automatic management of `~/.claude/settings.json` allow rules for path access, Bash investigation tools, and MCP wildcards.
 
 ---
 
 ## Version
 
-Current version: **0.23.2**
+Current version: **0.51.0**
 
 See `CHANGELOG.md` for full release history.

@@ -67,10 +67,15 @@ class SandboxFilesystem:
 
 @dataclass
 class SandboxNetwork:
-    """Represents the ``sandbox.network`` section of settings.local.json."""
+    """Represents the ``sandbox.network`` section of settings.json."""
 
     allowed_domains: list[str] = field(default_factory=list)
-    allow_unix_sockets: bool = False
+    allow_unix_sockets: list[str] = field(default_factory=list)
+    allow_all_unix_sockets: bool = False
+    allow_local_binding: bool = False
+    allow_managed_domains_only: bool = False
+    http_proxy_port: int | None = None
+    socks_proxy_port: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = {}
@@ -78,23 +83,48 @@ class SandboxNetwork:
             result["allowedDomains"] = self.allowed_domains
         if self.allow_unix_sockets:
             result["allowUnixSockets"] = self.allow_unix_sockets
+        if self.allow_all_unix_sockets:
+            result["allowAllUnixSockets"] = True
+        if self.allow_local_binding:
+            result["allowLocalBinding"] = True
+        if self.allow_managed_domains_only:
+            result["allowManagedDomainsOnly"] = True
+        if self.http_proxy_port is not None:
+            result["httpProxyPort"] = self.http_proxy_port
+        if self.socks_proxy_port is not None:
+            result["socksProxyPort"] = self.socks_proxy_port
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> SandboxNetwork:
+        raw_sockets = data.get("allowUnixSockets", [])
+        if isinstance(raw_sockets, bool):
+            sockets: list[str] = []
+        else:
+            sockets = [str(s) for s in raw_sockets]  # type: ignore[union-attr]
+        http_port = data.get("httpProxyPort")
+        socks_port = data.get("socksProxyPort")
         return cls(
             allowed_domains=list(data.get("allowedDomains", [])),  # type: ignore[arg-type]
-            allow_unix_sockets=bool(data.get("allowUnixSockets", False)),
+            allow_unix_sockets=sockets,
+            allow_all_unix_sockets=bool(data.get("allowAllUnixSockets", False)),
+            allow_local_binding=bool(data.get("allowLocalBinding", False)),
+            allow_managed_domains_only=bool(data.get("allowManagedDomainsOnly", False)),
+            http_proxy_port=int(http_port) if http_port is not None else None,  # type: ignore[arg-type]
+            socks_proxy_port=int(socks_port) if socks_port is not None else None,  # type: ignore[arg-type]
         )
 
 
 @dataclass
 class SandboxConfig:
-    """Represents the ``sandbox`` section of settings.local.json."""
+    """Represents the ``sandbox`` section of settings.json."""
 
     enabled: bool = False
     auto_allow_bash_if_sandboxed: bool = False
     allow_unsandboxed_commands: bool = False
+    excluded_commands: list[str] = field(default_factory=list)
+    enable_weaker_nested_sandbox: bool = False
+    enable_weaker_network_isolation: bool = False
     filesystem: SandboxFilesystem = field(default_factory=SandboxFilesystem)
     network: SandboxNetwork = field(default_factory=SandboxNetwork)
     raw: dict[str, object] = field(default_factory=dict)
@@ -107,6 +137,12 @@ class SandboxConfig:
             result["autoAllowBashIfSandboxed"] = True
         if self.allow_unsandboxed_commands:
             result["allowUnsandboxedCommands"] = True
+        if self.excluded_commands:
+            result["excludedCommands"] = self.excluded_commands
+        if self.enable_weaker_nested_sandbox:
+            result["enableWeakerNestedSandbox"] = True
+        if self.enable_weaker_network_isolation:
+            result["enableWeakerNetworkIsolation"] = True
         fs = self.filesystem.to_dict()
         if fs:
             result["filesystem"] = fs
@@ -119,12 +155,19 @@ class SandboxConfig:
     def from_dict(cls, data: dict[str, object]) -> SandboxConfig:
         fs_raw = data.get("filesystem", {})
         net_raw = data.get("network", {})
-        known_keys = {"enabled", "autoAllowBashIfSandboxed", "allowUnsandboxedCommands", "filesystem", "network"}
+        known_keys = {
+            "enabled", "autoAllowBashIfSandboxed", "allowUnsandboxedCommands",
+            "excludedCommands", "enableWeakerNestedSandbox", "enableWeakerNetworkIsolation",
+            "filesystem", "network",
+        }
         raw = {k: v for k, v in data.items() if k not in known_keys}
         return cls(
             enabled=bool(data.get("enabled", False)),
             auto_allow_bash_if_sandboxed=bool(data.get("autoAllowBashIfSandboxed", False)),
             allow_unsandboxed_commands=bool(data.get("allowUnsandboxedCommands", False)),
+            excluded_commands=list(data.get("excludedCommands", [])),  # type: ignore[arg-type]
+            enable_weaker_nested_sandbox=bool(data.get("enableWeakerNestedSandbox", False)),
+            enable_weaker_network_isolation=bool(data.get("enableWeakerNetworkIsolation", False)),
             filesystem=SandboxFilesystem.from_dict(fs_raw if isinstance(fs_raw, dict) else {}),
             network=SandboxNetwork.from_dict(net_raw if isinstance(net_raw, dict) else {}),
             raw=raw,

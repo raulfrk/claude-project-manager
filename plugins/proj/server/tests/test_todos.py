@@ -42,7 +42,6 @@ def cfg_with_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
     )
     storage.save_meta(cfg, meta)
     index = ProjectIndex(
-        active="myapp",
         projects={"myapp": ProjectEntry(name="myapp", tracking_dir=str(proj_dir), created=today)},
     )
     storage.save_index(cfg, index)

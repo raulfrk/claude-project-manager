@@ -10,17 +10,17 @@
       "name": "perms",
       "source": "./plugins/perms",
       "description": "Manage Claude Code settings.json permissions — auto-grant directory access for project workflows",
-      "version": "0.8.1",
+      "version": "0.10.1",
       "author": { "name": "raulfrk" },
       "license": "MIT",
       "category": "utilities",
-      "keywords": ["permissions", "settings", "allow", "access"]
+      "keywords": ["permissions", "settings", "allow", "access", "sandbox"]
     },
     {
       "name": "worktree",
       "source": "./plugins/worktree",
       "description": "Git worktree management — create, list, and remove worktrees from configured base repositories",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "author": { "name": "raulfrk" },
       "license": "MIT",
       "category": "utilities",
@@ -30,21 +30,11 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "0.44.0",
+      "version": "0.52.0",
       "author": { "name": "raulfrk" },
       "license": "MIT",
       "category": "productivity",
       "keywords": ["project", "tracking", "todos", "workflow"]
-    },
-    {
-      "name": "claude-helper",
-      "source": "./plugins/claude-helper",
-      "description": "Review and quality tooling for Claude Code skills and subagent definition files",
-      "version": "0.4.0",
-      "author": { "name": "raulfrk" },
-      "license": "MIT",
-      "category": "utilities",
-      "keywords": ["review", "quality", "skills", "agents", "audit"]
     }
   ]
 }

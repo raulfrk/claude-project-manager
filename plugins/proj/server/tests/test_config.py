@@ -149,7 +149,7 @@ class TestConfigUpdateIntegrationFlags:
         settings_path.write_text(
             json.dumps({"permissions": {"allow": ["mcp__plugin_perms_perms__*"]}})
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", perms_integration=True)
 
@@ -167,7 +167,7 @@ class TestConfigUpdateIntegrationFlags:
     ) -> None:
         settings_path = tmp_path / "settings_missing.json"
         # File does not exist — treated as plugin absent
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", perms_integration=True)
 
@@ -189,7 +189,7 @@ class TestConfigUpdateIntegrationFlags:
         settings_path = tmp_path / "settings.json"
         # Settings exists but has no worktree MCP rule
         settings_path.write_text(json.dumps({"permissions": {"allow": ["Read(//some/path/**)"]}}))
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", worktree_integration=True)
 
@@ -206,7 +206,7 @@ class TestConfigUpdateIntegrationFlags:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         settings_path = tmp_path / "settings_missing.json"
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", perms_integration=False)
 
@@ -223,7 +223,7 @@ class TestConfigUpdateIntegrationFlags:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         settings_path = tmp_path / "settings_missing.json"
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", worktree_integration=False)
 
@@ -243,7 +243,7 @@ class TestConfigUpdateIntegrationFlags:
 
         settings_path = tmp_path / "settings.json"
         settings_path.write_text(json.dumps({}))
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         # Set initial values
         await call_tool(mcp_app, "config_update", perms_integration=False)

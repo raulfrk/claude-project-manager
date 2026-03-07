@@ -10,64 +10,31 @@ import yaml
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig, ProjectMeta
+from server.lib.perms_helpers import (
+    _WORKTREE_CONFIG,
+    effective_settings_path,
+    is_sandbox_enabled,
+    project_dir_from_meta,
+    project_dirs_from_meta,
+)
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-
-_USER_SETTINGS = Path.home() / ".claude" / "settings.json"
-_USER_LOCAL_SETTINGS = Path.home() / ".claude" / "settings.local.json"
-_WORKTREE_CONFIG = Path.home() / ".claude" / "worktree.yaml"
-
-
-# ── Sandbox detection ─────────────────────────────────────────────────────────
-
-
-def _is_sandbox_enabled(project_dir: Path | None = None, project_dirs: list[Path] | None = None) -> bool:
-    """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
-    for path in _sandbox_paths(project_dir, project_dirs):
-        if not path.exists():
-            continue
-        try:
-            data: dict[str, object] = json.loads(path.read_text())
-            sandbox = data.get("sandbox", {})
-            if isinstance(sandbox, dict) and sandbox.get("enabled", False):
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-    return False
-
-
-def _sandbox_paths(project_dir: Path | None = None, project_dirs: list[Path] | None = None) -> list[Path]:
-    """Return settings.local.json paths to check for sandbox mode (user-level + project-level)."""
-    paths = [_USER_LOCAL_SETTINGS]
-    if project_dirs:
-        for d in project_dirs:
-            paths.append(Path(d) / ".claude" / "settings.local.json")
-    elif project_dir:
-        paths.append(Path(project_dir) / ".claude" / "settings.local.json")
-    return paths
-
-
-def _effective_settings_path(project_dir: Path | None = None) -> Path:
-    """Return the settings file path to use (settings.json or settings.local.json)."""
-    if _is_sandbox_enabled(project_dir):
-        return _USER_LOCAL_SETTINGS
-    return _USER_SETTINGS
 
 
 # ── Settings I/O ──────────────────────────────────────────────────────────────
 
 
 def _load_settings(project_dir: Path | None = None) -> dict[str, object]:
-    path = _effective_settings_path(project_dir)
+    path = effective_settings_path(project_dir)
     if not path.exists():
         return {}
     return json.loads(path.read_text())  # type: ignore[return-value]
 
 
 def _save_settings(data: dict[str, object], project_dir: Path | None = None) -> None:
-    path = _effective_settings_path(project_dir)
+    path = effective_settings_path(project_dir)
     storage.atomic_write_json(path, data)
 
 
@@ -144,24 +111,6 @@ def _ensure_sandbox_section(data: dict[str, object]) -> dict[str, object]:
     return data
 
 
-def _project_dirs_from_meta(meta: ProjectMeta) -> list[Path]:
-    """Return all non-reference repo paths (or all repos if all are reference)."""
-    dirs = [Path(repo.path) for repo in meta.repos if not repo.reference]
-    if not dirs and meta.repos:
-        dirs = [Path(meta.repos[0].path)]
-    return dirs
-
-
-def _project_dir_from_meta(meta: ProjectMeta) -> Path | None:
-    """Derive the project directory from the first non-reference repo path.
-
-    For sandbox detection this is kept as a convenience; callers that need
-    to check *all* repo paths should use ``_project_dirs_from_meta``.
-    """
-    dirs = _project_dirs_from_meta(meta)
-    return dirs[0] if dirs else None
-
-
 def _add_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
     """Add a path to sandbox.filesystem.allowWrite. Returns True if added."""
     data = _ensure_sandbox_section(data)
@@ -193,7 +142,7 @@ def grant_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
     if not tools or not paths:
         return 0
 
-    project_dirs = _project_dirs_from_meta(meta)
+    project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
@@ -237,7 +186,7 @@ def revoke_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
 
     to_remove: set[str] = {_bash_entry(tool, path) for path in paths for tool in tools}
 
-    project_dirs = _project_dirs_from_meta(meta)
+    project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
@@ -362,9 +311,9 @@ def setup_permissions(
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
-    project_dirs = _project_dirs_from_meta(meta)
+    project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
+    sandbox_mode = is_sandbox_enabled(project_dirs=project_dirs)
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):

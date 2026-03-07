@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
+from server.lib.models import ProjConfig
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ def _format_todos_section(todos: list, lines: list[str]) -> None:
             lines.append(f"- {t.id} {t.title} (blocked by: {', '.join(t.blocked_by)})")
 
 
-def _format_notes_section(cfg: object, project_name: str, lines: list[str]) -> None:
+def _format_notes_section(cfg: ProjConfig, project_name: str, lines: list[str]) -> None:
     """Append recent notes section to lines (reads NOTES.md)."""
     notes_path = storage.notes_path(cfg, project_name)
     notes = _read_recent_notes(notes_path)
@@ -56,12 +57,8 @@ def _format_notes_section(cfg: object, project_name: str, lines: list[str]) -> N
         lines.append(f"\n### Recent Notes\n{notes}")
 
 
-def _build_context(cfg: object, project_name: str, compact: bool = False) -> str:
+def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) -> str:
     """Build a markdown context string for the active project."""
-    from server.lib.models import ProjConfig
-
-    assert isinstance(cfg, ProjConfig)  # noqa: S101
-
     meta = storage.load_meta(cfg, project_name)
     todos = storage.load_todos(cfg, project_name)
 

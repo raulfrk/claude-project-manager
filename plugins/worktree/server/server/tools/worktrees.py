@@ -14,6 +14,20 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+def _find_worktree(path: str) -> tuple[str, str] | None:
+    """Find a worktree by path across all repos. Returns (abs_path, repo_path) or None."""
+    abs_path = str(Path(path).expanduser().resolve())
+    config = storage.load()
+    for repo in config.base_repos:
+        try:
+            entries = git.list_worktrees(repo.path)
+        except GitError:
+            continue
+        if any(e.path == abs_path for e in entries):
+            return abs_path, repo.path
+    return None
+
+
 def _resolve_worktree_path(repo_label: str, branch: str, custom_path: str | None) -> str:
     """Resolve the target path for a new worktree."""
     if custom_path:
@@ -76,37 +90,28 @@ def list_worktrees(repo_label: str | None = None) -> str:
 
 def get_worktree(path: str) -> str:
     """Get details of a specific worktree by path."""
-    config = storage.load()
-    for repo in config.base_repos:
-        try:
-            entries = git.list_worktrees(repo.path)
-        except GitError:
-            continue
-        for entry in entries:
-            if entry.path == str(Path(path).expanduser().resolve()):
-                return json.dumps(entry.to_dict(), indent=2)
-    return f"No worktree found at: {path}"
+    abs_path = str(Path(path).expanduser().resolve())
+    result = _find_worktree(path)
+    if not result:
+        return f"No worktree found at: {abs_path}"
+    abs_path, repo_path = result
+    for entry in git.list_worktrees(repo_path):
+        if entry.path == abs_path:
+            return json.dumps(entry.to_dict(), indent=2)
+    return f"No worktree found at: {abs_path}"
 
 
 def remove_worktree(path: str, force: bool = False) -> str:
     """Remove a worktree by path."""
-    abs_path = str(Path(path).expanduser().resolve())
-    config = storage.load()
-
-    # Find which repo owns this worktree
-    for repo in config.base_repos:
-        try:
-            entries = git.list_worktrees(repo.path)
-        except GitError:
-            continue
-        if any(e.path == abs_path for e in entries):
-            try:
-                git.remove_worktree(repo.path, abs_path, force=force)
-                return f"Removed worktree at {abs_path}."
-            except GitError as e:
-                return f"Error: {e}\nTip: use force=true for unclean worktrees."
-
-    return f"No managed worktree found at: {abs_path}"
+    result = _find_worktree(path)
+    if not result:
+        return f"No managed worktree found at: {path}"
+    abs_path, repo_path = result
+    try:
+        git.remove_worktree(repo_path, abs_path, force=force)
+        return f"Removed worktree at {abs_path}."
+    except GitError as e:
+        return f"Error: {e}\nTip: use force=true for unclean worktrees."
 
 
 def prune_worktrees(repo_label: str | None = None) -> str:
@@ -129,38 +134,28 @@ def prune_worktrees(repo_label: str | None = None) -> str:
 
 def lock_worktree(path: str, reason: str = "") -> str:
     """Lock a worktree to prevent pruning."""
-    abs_path = str(Path(path).expanduser().resolve())
-    config = storage.load()
-    for repo in config.base_repos:
-        try:
-            entries = git.list_worktrees(repo.path)
-        except GitError:
-            continue
-        if any(e.path == abs_path for e in entries):
-            try:
-                git.lock_worktree(repo.path, abs_path, reason=reason)
-                return f"Locked worktree at {abs_path}."
-            except GitError as e:
-                return f"Error: {e}"
-    return f"No managed worktree found at: {abs_path}"
+    result = _find_worktree(path)
+    if not result:
+        return f"No managed worktree found at: {path}"
+    abs_path, repo_path = result
+    try:
+        git.lock_worktree(repo_path, abs_path, reason=reason)
+        return f"Locked worktree at {abs_path}."
+    except GitError as e:
+        return f"Error: {e}"
 
 
 def unlock_worktree(path: str) -> str:
     """Unlock a worktree."""
-    abs_path = str(Path(path).expanduser().resolve())
-    config = storage.load()
-    for repo in config.base_repos:
-        try:
-            entries = git.list_worktrees(repo.path)
-        except GitError:
-            continue
-        if any(e.path == abs_path for e in entries):
-            try:
-                git.unlock_worktree(repo.path, abs_path)
-                return f"Unlocked worktree at {abs_path}."
-            except GitError as e:
-                return f"Error: {e}"
-    return f"No managed worktree found at: {abs_path}"
+    result = _find_worktree(path)
+    if not result:
+        return f"No managed worktree found at: {path}"
+    abs_path, repo_path = result
+    try:
+        git.unlock_worktree(repo_path, abs_path)
+        return f"Unlocked worktree at {abs_path}."
+    except GitError as e:
+        return f"Error: {e}"
 
 
 def register(app: FastMCP) -> None:

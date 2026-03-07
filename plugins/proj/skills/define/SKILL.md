@@ -1,12 +1,12 @@
 ---
 name: define
-description: Gather detailed requirements for a todo through iterative Q&A. Use when the user says "define 1", "clarify requirements for 1", or "what does 1 need". Keeps asking questions until requirements are complete.
+description: Gather requirements and research implementation approach for a todo. Runs interactive Q&A, then researches the codebase. Use when asked "define 1", "clarify requirements for 1", or "research 1".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__proj_resolve_agent, Task
+allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task
 argument-hint: "<todo-id> [--no-interactive]"
 ---
 
-Gather requirements for todo: $ARGUMENTS
+Define and research todo: $ARGUMENTS
 
 **1. Parse arguments**
 
@@ -30,9 +30,9 @@ Call `mcp__proj__proj_get_todo_context` with the todo ID to get the todo, existi
 If the result indicates the todo was not found (null todo or error), stop and output:
 "Todo <id> not found."
 
-Review existing requirements (if any) and identify what's still unclear. If the todo has a non-empty `notes` field, treat it as additional context (e.g. description pulled from Todoist) — incorporate it into your understanding of the goal and use it to inform your questions and the final requirements.md.
+Review existing requirements and research (if any) and identify what's still unclear. If the todo has a non-empty `notes` field, treat it as additional context — incorporate it into your understanding.
 
-**3. Iterative Q&A loop** — run entirely in the main conversation, ask questions until no meaningful gaps remain:
+**3. Iterative Q&A loop** — ask questions until no meaningful gaps remain:
 
 - Focus on: Goals, Acceptance Criteria, Edge Cases, Out of Scope, Testing Strategy
 - Ask the single most important open question
@@ -40,43 +40,33 @@ Review existing requirements (if any) and identify what's still unclear. If the 
 - Assess whether there are more important questions to ask
 - Repeat until you've covered all critical aspects
 
-Example questions to consider:
-- "What is the exact goal of this task?"
-- "How will you know when this is done? What are the acceptance criteria?"
-- "Are there any edge cases or failure modes to handle?"
-- "What should explicitly NOT be in scope?"
-- "How should this be tested?"
-- "Are there any technical constraints or dependencies?"
-
-**Final question (always last):** Once you have covered the critical aspects, always end with:
-> "Are you happy to proceed with writing the requirements, or would you like to add more details first?"
-> 1. Proceed — write requirements now
+**Final question (always last):**
+> "Are you happy to proceed, or would you like to add more details first?"
+> 1. Proceed — write requirements and research now
 > 2. Add more details — ask another question
 
-If the user picks "Add more details", continue the Q&A loop. If they pick "Proceed" (or say yes/proceed/go), move to step 4.
+If the user picks "Add more details", continue the Q&A loop.
 
-Record all Q&A pairs as a transcript in this format:
+Record all Q&A pairs as a transcript.
 
-```markdown
-## Q&A Transcript
+**4. Plan the requirements and research**
 
-**Q:** <question>
-**A:** <answer>
+Call `EnterPlanMode`. Based on the Q&A transcript and codebase knowledge, outline:
+- Requirements document structure (goal, acceptance criteria, out of scope, testing)
+- Research approach: which areas of the codebase to explore, what patterns to look for, 2-3 implementation approaches to consider
 
-**Q:** <question>
-**A:** <answer>
-```
+Call `ExitPlanMode` to present the outline for user review. The user will approve or request changes before you proceed to step 5.
 
-**4. Resolve agent and write requirements**
+**5. Research the codebase**
 
-Call `mcp__proj__proj_resolve_agent` with `step="define"` (and `project_name` if known).
+After plan approval, research the implementation approach:
+- Explore the codebase for existing patterns (Read, Glob, Grep)
+- Research external libraries or APIs if needed (WebSearch, WebFetch)
+- Evaluate 2-3 different approaches based on what you find
 
-Parse the JSON result: `{"agent": "<name>", "warning": "<msg or null>"}`.
-If `warning` is non-null: display it to the user.
+**6. Write requirements and research**
 
-**If `agent` is `"general-purpose"`:**
-
-Write a structured `requirements.md` directly in the main conversation:
+Write `requirements.md`:
 
 ```markdown
 # Requirements: <todo title>
@@ -99,32 +89,34 @@ Write a structured `requirements.md` directly in the main conversation:
 **A:** <answer>
 ```
 
-Call `mcp__proj__content_set_requirements` with the content.
-Call `mcp__proj__todo_set_content_flag` with `has_requirements=True`.
+Write `research.md`:
 
-**If `agent` differs from `"general-purpose"` (e.g. `"Plan"`):**
+```markdown
+# Research: <todo title>
 
-Spawn a Task agent of type `agent` with the following content:
+## Approach Options
+### Option 1: <name>
+<description, pros, cons>
 
+### Option 2: <name>
+<description, pros, cons>
+
+## Recommended Approach
+<which option and why>
+
+## Key Dependencies
+- <library/API/file>
+
+## Risks
+- <risk 1>
+
+## References
+- <link or file path>
 ```
-Write requirements.md for todo <id>: <title>
 
-Context:
-<full todo context: title, notes, existing requirements if any, existing research if any>
-
-Q&A Transcript (Q&A is already complete — do NOT ask any questions):
-<full Q&A transcript from step 3, formatted as ## Q&A Transcript block>
-
-Instructions:
-1. Write a structured requirements.md based on the todo context and the Q&A transcript above.
-2. Call mcp__proj__content_set_requirements with the complete requirements.md content.
-3. Call mcp__proj__todo_set_content_flag with has_requirements=True.
-4. Do NOT ask the user any questions — all Q&A is already complete.
-```
-
-If the Task agent returns an error or fails to call `content_set_requirements`:
-- Display: "Requirements agent failed: <error message>"
-- Offer the user: "1. Retry — spawn the agent again  2. Write manually — I will write requirements.md in the main conversation now"
+Call `mcp__proj__content_set_requirements` with the requirements content.
+Call `mcp__proj__content_set_research` with the research content.
+Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
 
 ---
 
@@ -137,61 +129,20 @@ If the Task agent returns an error or fails to call `content_set_requirements`:
 If the result indicates the todo was not found (null todo or error), stop and output:
 "Todo <id> not found."
 
-**NI-2.** Call `mcp__proj__proj_resolve_agent` with `step="define"` (and `project_name` if known).
+**NI-2.** Explore the codebase for existing patterns and relevant code (Read, Glob, Grep).
 
-Parse the JSON result: `{"agent": "<name>", "warning": "<msg or null>"}`.
-If `warning` is non-null: display it.
-
-**If `agent` is `"Plan"` (or other non-general-purpose agent):**
-
-Spawn a Task agent of type `agent` with the following content:
-
-```
-Write requirements.md for todo <id>: <title> autonomously.
-
-Context:
-<full todo context: title, notes, existing requirements if any, existing research if any>
-
-Instructions:
-1. Write a complete structured requirements.md based on the todo context above.
-2. Call mcp__proj__content_set_requirements with the complete requirements.md content.
-3. Call mcp__proj__todo_set_content_flag with has_requirements=True.
-4. Do NOT prompt the user — run fully autonomously.
-```
-
-If the Task agent returns an error or fails to call `content_set_requirements`:
-- Display: "Requirements agent failed: <error message>"
-- Offer the user: "1. Retry — spawn the agent again  2. Write manually — I will write requirements.md in the main conversation now"
-
-**If `agent` is `"general-purpose"`:**
-
-Write requirements.md directly from context (no Q&A):
-
-```markdown
-# Requirements: <todo title>
-
-## Goal
-<derived from todo context>
-
-## Acceptance Criteria
-- [ ] <criterion derived from context>
-
-## Out of Scope
-- <derived from context>
-
-## Testing Strategy
-<derived from context>
-```
+**NI-3.** Write both `requirements.md` and `research.md` directly from context (no Q&A, no plan mode). Use the same formats as step 6.
 
 Call `mcp__proj__content_set_requirements` with the content.
-Call `mcp__proj__todo_set_content_flag` with `has_requirements=True`.
+Call `mcp__proj__content_set_research` with the content.
+Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
 
 ---
 
-**5. Update CLAUDE.md**
+**7. Update CLAUDE.md**
 
 If the project has a CLAUDE.md, call `mcp__proj__claudemd_write` to append or update the
-requirements summary under a `## Requirements: <todo-title>` heading. Write a 1–3 sentence
+requirements summary under a `## Requirements: <todo-title>` heading. Write a 1-3 sentence
 summary of the goal and the key acceptance criteria.
 
-💡 Suggested next: (1) /proj:research <id> — research how to implement this  (2) /proj:execute <id> — if it's straightforward, execute directly
+Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:execute <id> — if straightforward, execute directly

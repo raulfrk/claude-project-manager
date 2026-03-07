@@ -60,8 +60,6 @@ def _make_active_project(
     storage.save_meta(cfg, meta)
     index = storage.load_index(cfg)
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
-    if active:
-        index.active = name
     storage.save_index(cfg, index)
     return proj_dir
 
@@ -150,30 +148,28 @@ class TestLoadIndexCorruption:
         index_path.write_text("")
 
         index = storage.load_index(cfg)
-        assert index.active is None
         assert index.projects == {}
 
-    def test_index_with_active_none_returns_no_active(self, cfg: ProjConfig) -> None:
-        """Index file with 'active: null' parses to active=None."""
+    def test_index_with_legacy_active_field_is_ignored(self, cfg: ProjConfig) -> None:
+        """Index file with legacy 'active' field loads gracefully (field ignored)."""
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text("active: null\nprojects: {}\n")
+        index_path.write_text("active: myapp\nprojects: {}\n")
 
         index = storage.load_index(cfg)
-        assert index.active is None
+        assert index.projects == {}
 
     def test_invalid_yaml_in_index_returns_empty(self, cfg: ProjConfig) -> None:
         """A syntactically invalid active-projects.yaml is swallowed and returns empty index.
 
         _load_yaml catches yaml.YAMLError and returns {}, so load_index returns a
-        default empty ProjectIndex with active=None and projects={}.
+        default empty ProjectIndex with projects={}.
         """
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text("active: myapp\nprojects: {bad: [unclosed\n")
 
         index = storage.load_index(cfg)
-        assert index.active is None
         assert index.projects == {}
 
     def test_index_file_scalar_top_level_returns_empty(self, cfg: ProjConfig) -> None:
@@ -186,7 +182,6 @@ class TestLoadIndexCorruption:
         index_path.write_text("just a string\n")
 
         index = storage.load_index(cfg)
-        assert index.active is None
         assert index.projects == {}
 
     def test_projects_not_a_dict_returns_empty_projects(self, cfg: ProjConfig) -> None:
@@ -197,7 +192,6 @@ class TestLoadIndexCorruption:
 
         index = storage.load_index(cfg)
         assert index.projects == {}
-        assert index.active is None
 
 
 # ---------------------------------------------------------------------------
@@ -302,21 +296,21 @@ class TestCmdSessionStartCorruption:
     """cmd_session_start edge cases with various forms of data corruption."""
 
     def test_corrupted_index_returns_empty_output(
-        self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
+        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """When the index YAML is syntactically invalid, cmd_session_start returns gracefully.
 
         _load_yaml swallows the YAMLError and returns {}; load_index returns an
-        empty index (active=None), so cmd_session_start outputs nothing (no active project).
+        empty index (projects={}), so ctx_detect_project_name finds nothing.
         """
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text("active: myapp\nprojects: {bad: [unclosed\n")
+        index_path.write_text("projects: {bad: [unclosed\n")
 
         from server.cli import cmd_session_start
 
         # Should not raise — graceful degradation
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
 
     def test_corrupted_todos_yaml_returns_context_with_empty_todos(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -333,7 +327,7 @@ class TestCmdSessionStartCorruption:
         from server.cli import cmd_session_start
 
         # Should not raise — graceful degradation
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
 
     def test_malformed_meta_yaml_missing_name_produces_output(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -350,7 +344,7 @@ class TestCmdSessionStartCorruption:
         from server.cli import cmd_session_start
 
         # Should not raise — graceful degradation
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
 
     def test_valid_meta_corrupted_todos_scalar_returns_gracefully(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -365,7 +359,7 @@ class TestCmdSessionStartCorruption:
         from server.cli import cmd_session_start
 
         # Should not raise — graceful degradation
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
 
     def test_missing_fields_in_meta_with_defaults_produces_context(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -375,12 +369,14 @@ class TestCmdSessionStartCorruption:
         This is the happy path for missing optional fields — graceful degradation.
         """
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        # Overwrite meta.yaml with only the required field
-        (proj_dir / "meta.yaml").write_text("name: myapp\n")
+        # Overwrite meta.yaml with minimal fields (keep repos so cwd detection works)
+        (proj_dir / "meta.yaml").write_text(
+            f"name: myapp\nrepos:\n  - label: code\n    path: {tmp_path}\n"
+        )
 
         from server.cli import cmd_session_start
 
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
         out, err = capsys.readouterr()
         assert "myapp" in out
         assert err == ""
@@ -395,20 +391,21 @@ class TestCmdSessionEndCorruption:
     """cmd_session_end edge cases with various forms of data corruption."""
 
     def test_corrupted_index_returns_gracefully(
-        self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
+        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """When the index YAML is syntactically invalid, cmd_session_end returns gracefully.
 
-        _load_yaml swallows the YAMLError; load_index returns empty index (active=None).
+        _load_yaml swallows the YAMLError; load_index returns empty index (projects={}).
+        ctx_detect_project_name finds nothing, so session-end is a no-op.
         """
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text("active: [unclosed\n")
+        index_path.write_text("projects: [unclosed\n")
 
         from server.cli import cmd_session_end
 
         # Should not raise — graceful degradation
-        cmd_session_end(cwd=None)
+        cmd_session_end(cwd=str(tmp_path))
 
     def test_malformed_meta_yaml_missing_name_does_not_raise_in_session_end(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -423,7 +420,7 @@ class TestCmdSessionEndCorruption:
         from server.cli import cmd_session_end
 
         # Should not raise — graceful degradation
-        cmd_session_end(cwd=None)
+        cmd_session_end(cwd=str(tmp_path))
 
     def test_meta_with_defaults_only_does_not_crash_session_end(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -438,7 +435,7 @@ class TestCmdSessionEndCorruption:
 
         from server.cli import cmd_session_end
 
-        cmd_session_end(cwd=None)
+        cmd_session_end(cwd=str(tmp_path))
         out, err = capsys.readouterr()
         assert out == ""
         assert err == ""

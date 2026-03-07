@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -248,6 +249,146 @@ def batch_add_mcp_allow(servers: list[str], scope: str = "user", target: str = "
     return f"All {len(skipped)} rule(s) already present in {settings.path} — no changes made."
 
 
+_PATH_RULE_RE = re.compile(r"^(?:Read|Edit)\(//(.+?)/\*\*\)$")
+
+
+def _extract_paths_from_allow(allow: list[str]) -> list[str]:
+    """Extract unique base paths from Read(//path/**) and Edit(//path/**) rules."""
+    paths: dict[str, None] = {}
+    for entry in allow:
+        m = _PATH_RULE_RE.match(entry)
+        if m:
+            paths[f"/{m.group(1)}"] = None
+    return list(paths)
+
+
+def sandbox_init(path: str | None = None) -> str:
+    """Enable sandbox mode in global settings with auto-migration of existing path rules.
+
+    Sets ``sandbox.enabled`` and ``sandbox.autoAllowBashIfSandboxed`` to true.
+    Migrates existing ``Read(//path/**)`` / ``Edit(//path/**)`` rules from
+    ``permissions.allow`` into ``sandbox.filesystem.allowWrite``.
+    Optionally adds an extra path to ``allowWrite``.
+    Idempotent.
+    """
+    settings = storage.load("user")
+    actions: list[str] = []
+
+    if not settings.sandbox.enabled:
+        settings.sandbox.enabled = True
+        actions.append("sandbox.enabled = true")
+    if not settings.sandbox.auto_allow_bash_if_sandboxed:
+        settings.sandbox.auto_allow_bash_if_sandboxed = True
+        actions.append("sandbox.autoAllowBashIfSandboxed = true")
+
+    aw_set = set(settings.sandbox.filesystem.allow_write)
+
+    # Auto-migrate existing Read/Edit path rules
+    migrated: list[str] = []
+    for p in _extract_paths_from_allow(settings.permissions.allow):
+        if p not in aw_set:
+            settings.sandbox.filesystem.allow_write.append(p)
+            aw_set.add(p)
+            migrated.append(p)
+
+    # Optional extra path
+    if path:
+        abs_path = str(Path(path).expanduser().resolve())
+        if abs_path not in aw_set:
+            settings.sandbox.filesystem.allow_write.append(abs_path)
+            aw_set.add(abs_path)
+            actions.append(f"sandbox.filesystem.allowWrite: {abs_path}")
+
+    if not actions and not migrated:
+        return f"Sandbox already initialized in {settings.path} — no changes made."
+
+    storage.save(settings)
+    lines = [f"Sandbox initialized in {settings.path}:"]
+    for a in actions:
+        lines.append(f"  {a}")
+    if migrated:
+        lines.append(f"  Migrated {len(migrated)} path(s) from permissions.allow:")
+        for p in migrated:
+            lines.append(f"    {p}")
+    return "\n".join(lines)
+
+
+def add_domain(domain: str) -> str:
+    """Add a domain to sandbox.network.allowedDomains. Idempotent."""
+    settings = storage.load("user")
+    if domain in settings.sandbox.network.allowed_domains:
+        return f"Domain already present in {settings.path} — no changes made."
+    settings.sandbox.network.allowed_domains.append(domain)
+    storage.save(settings)
+    return f"Added domain to {settings.path}:\n  {domain}"
+
+
+def remove_domain(domain: str) -> str:
+    """Remove a domain from sandbox.network.allowedDomains. Idempotent."""
+    settings = storage.load("user")
+    before = len(settings.sandbox.network.allowed_domains)
+    settings.sandbox.network.allowed_domains = [
+        d for d in settings.sandbox.network.allowed_domains if d != domain
+    ]
+    removed = before - len(settings.sandbox.network.allowed_domains)
+    if removed:
+        storage.save(settings)
+        return f"Removed domain from {settings.path}: {domain}"
+    return f"Domain not found in {settings.path} — no changes made."
+
+
+_DENY_DISPLAY = {"deny_write": "denyWrite", "deny_read": "denyRead"}
+
+
+def _add_to_deny_list(path: str, field: str) -> str:
+    """Add a path to a sandbox deny list (denyWrite or denyRead). Idempotent."""
+    display = _DENY_DISPLAY[field]
+    abs_path = str(Path(path).expanduser().resolve())
+    settings = storage.load("user")
+    deny_list: list[str] = getattr(settings.sandbox.filesystem, field)
+    if abs_path in deny_list:
+        return f"Path already in {display} in {settings.path} — no changes made."
+    deny_list.append(abs_path)
+    storage.save(settings)
+    return f"Added to sandbox.filesystem.{display} in {settings.path}:\n  {abs_path}"
+
+
+def _remove_from_deny_list(path: str, field: str) -> str:
+    """Remove a path from a sandbox deny list (denyWrite or denyRead). Idempotent."""
+    display = _DENY_DISPLAY[field]
+    abs_path = str(Path(path).expanduser().resolve())
+    settings = storage.load("user")
+    deny_list: list[str] = getattr(settings.sandbox.filesystem, field)
+    before = len(deny_list)
+    new_list = [p for p in deny_list if p != abs_path]
+    setattr(settings.sandbox.filesystem, field, new_list)
+    removed = before - len(new_list)
+    if removed:
+        storage.save(settings)
+        return f"Removed from {display} in {settings.path}: {abs_path}"
+    return f"Path not in {display} in {settings.path} — no changes made."
+
+
+def deny_write(path: str) -> str:
+    """Add a path to sandbox.filesystem.denyWrite. Idempotent."""
+    return _add_to_deny_list(path, "deny_write")
+
+
+def remove_deny_write(path: str) -> str:
+    """Remove a path from sandbox.filesystem.denyWrite. Idempotent."""
+    return _remove_from_deny_list(path, "deny_write")
+
+
+def deny_read(path: str) -> str:
+    """Add a path to sandbox.filesystem.denyRead. Idempotent."""
+    return _add_to_deny_list(path, "deny_read")
+
+
+def remove_deny_read(path: str) -> str:
+    """Remove a path from sandbox.filesystem.denyRead. Idempotent."""
+    return _remove_from_deny_list(path, "deny_read")
+
+
 def register(app: FastMCP) -> None:
     """Register all perms tools with the MCP application."""
 
@@ -319,3 +460,50 @@ def register(app: FastMCP) -> None:
     )
     def perms_batch_add_mcp_allow(servers: list[str], scope: str = "user", target: str = "auto") -> str:
         return batch_add_mcp_allow(servers, scope, target)
+
+    @app.tool(
+        description=(
+            "Initialize sandbox mode in global settings (~/.claude/settings.json). "
+            "Enables sandbox.enabled and sandbox.autoAllowBashIfSandboxed. "
+            "Auto-migrates existing Read/Edit path rules from permissions.allow into "
+            "sandbox.filesystem.allowWrite. Optionally adds an extra path. Idempotent."
+        )
+    )
+    def perms_sandbox_init(path: str | None = None) -> str:
+        return sandbox_init(path)
+
+    @app.tool(
+        description="Add a domain to sandbox.network.allowedDomains in global settings. Idempotent."
+    )
+    def perms_add_domain(domain: str) -> str:
+        return add_domain(domain)
+
+    @app.tool(
+        description="Remove a domain from sandbox.network.allowedDomains in global settings. Idempotent."
+    )
+    def perms_remove_domain(domain: str) -> str:
+        return remove_domain(domain)
+
+    @app.tool(
+        description="Add a path to sandbox.filesystem.denyWrite in global settings. Idempotent."
+    )
+    def perms_deny_write(path: str) -> str:
+        return deny_write(path)
+
+    @app.tool(
+        description="Remove a path from sandbox.filesystem.denyWrite in global settings. Idempotent."
+    )
+    def perms_remove_deny_write(path: str) -> str:
+        return remove_deny_write(path)
+
+    @app.tool(
+        description="Add a path to sandbox.filesystem.denyRead in global settings. Idempotent."
+    )
+    def perms_deny_read(path: str) -> str:
+        return deny_read(path)
+
+    @app.tool(
+        description="Remove a path from sandbox.filesystem.denyRead in global settings. Idempotent."
+    )
+    def perms_remove_deny_read(path: str) -> str:
+        return remove_deny_read(path)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from server.lib import storage
 from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import Todo
+from server.lib.models import ProjConfig, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
@@ -19,11 +19,7 @@ def _today() -> str:
     return str(date.today())
 
 
-def _save(cfg: object, project_name: str, todos: list[Todo]) -> None:
-    from server.lib.models import ProjConfig
-
-    if not isinstance(cfg, ProjConfig):
-        raise TypeError(f"Expected ProjConfig, got {type(cfg).__name__}")
+def _save(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
     storage.save_todos(cfg, project_name, todos)
 
 

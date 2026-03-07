@@ -118,28 +118,6 @@ def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
     _write_yaml(path, {"todos": [t.to_dict() for t in todos]})
 
 
-# ── Agents ────────────────────────────────────────────────────────────────────
-
-
-def agents_path(cfg: ProjConfig, project_name: str) -> Path:
-    """Return the path to agents.yaml for a project."""
-    return tracking_dir(cfg, project_name) / "agents.yaml"
-
-
-def load_agents(cfg: ProjConfig, project_name: str) -> dict[str, object]:
-    """Load agents.yaml, returning empty dict if missing or empty."""
-    data = _load_yaml(agents_path(cfg, project_name))
-    if not data:
-        return {}
-    return data
-
-
-def save_agents(cfg: ProjConfig, project_name: str, data: dict[str, object]) -> None:
-    """Atomically write agents.yaml using the _write_yaml() helper."""
-    path = agents_path(cfg, project_name)
-    _write_yaml(path, data)
-
-
 # ── Archive ────────────────────────────────────────────────────────────────────
 
 

@@ -41,7 +41,6 @@ def _setup_project(cfg: ProjConfig, name: str, tmp_path: Path) -> None:
     )
     storage.save_meta(cfg, meta)
     index = ProjectIndex(
-        active=name,
         projects={name: ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)},
     )
     storage.save_index(cfg, index)
@@ -68,18 +67,14 @@ class TestProjectsTools:
         _setup_project(cfg, "myapp", tmp_path)
         index = storage.load_index(cfg)
         assert "myapp" in index.projects
-        assert index.active == "myapp"
 
     def test_proj_archive(self, cfg: ProjConfig, tmp_path: Path) -> None:
         _setup_project(cfg, "myapp", tmp_path)
         index = storage.load_index(cfg)
         index.projects["myapp"].archived = True
-        if index.active == "myapp":
-            index.active = None
         storage.save_index(cfg, index)
         index = storage.load_index(cfg)
         assert index.projects["myapp"].archived
-        assert index.active is None
 
 
 class TestTodosTools:

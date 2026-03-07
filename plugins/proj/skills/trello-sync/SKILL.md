@@ -3,6 +3,8 @@ name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for root todos. Syncs root-level todos only — child/subtodos are never synced. Use when the user says "sync with Trello", "sync trello", or "trello sync".
 disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__config_load
+context: fork
+agent: general-purpose
 ---
 
 > **Note on allowed-tools:** Trello MCP tools (`mcp__{trello.mcp_server}__*`) are intentionally

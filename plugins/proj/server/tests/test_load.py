@@ -15,13 +15,9 @@ from tests.conftest import call_tool, setup_project
 
 @pytest.fixture()
 def two_projects(cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str, str]:
-    """Create two projects: 'alpha' (active) and 'beta'."""
+    """Create two projects: 'alpha' and 'beta'."""
     setup_project(cfg, "alpha", str(tmp_path / "alpha"))
     setup_project(cfg, "beta", str(tmp_path / "beta"))
-    # Make alpha the persisted active
-    index = storage.load_index(cfg)
-    index.active = "alpha"
-    storage.save_index(cfg, index)
     return cfg, "alpha", "beta"
 
 
@@ -61,14 +57,10 @@ class TestProjLoadSession:
     async def test_load_sets_session_override(
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
     ) -> None:
-        cfg = two_projects[0]
-        # Persisted active is "alpha"
-        assert storage.load_index(cfg).active == "alpha"
         # Load "beta" for this session
         await call_tool(mcp_app, "proj_load_session", name="beta")
-        # Session override is now "beta", persisted active unchanged
+        # Session override is now "beta"
         assert state.get_session_active() == "beta"
-        assert storage.load_index(cfg).active == "alpha"
 
     async def test_load_unknown_name_returns_error(
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]

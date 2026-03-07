@@ -2,7 +2,7 @@
 name: init
 description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", "set up project tracking for X", "new project", "create project", or "initialize tracking".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_init, mcp__proj__proj_set_active, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, Bash
+allowed-tools: mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, Bash
 argument-hint: "[project-name]"
 ---
 
@@ -84,8 +84,8 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
 5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled.
    - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
-   - If `proj_init` returns an error: display the error message and stop (do not call `proj_set_active` or proceed further).
-   Call `mcp__proj__proj_set_active` to set as active.
+   - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
+   Call `mcp__proj__proj_load_session` to set as active for this session.
 
 6. **Permissions** (if `perms_integration: true` in config and project's auto_grant != false):
    - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"
@@ -98,7 +98,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
        add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`
-   - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Run `/proj:perms-sync` when the perms plugin is available." and continue.
+   - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Install the perms plugin when available." and continue.
 
 7. **CLAUDE.md** — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
    Ask: "Create a CLAUDE.md in '<label>' (`<path>`) to help Claude understand the project context? [yes]"

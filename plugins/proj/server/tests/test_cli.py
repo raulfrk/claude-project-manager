@@ -45,8 +45,6 @@ def _make_project(cfg: ProjConfig, name: str, repo_path: str, *, active: bool = 
     storage.save_meta(cfg, meta)
     index = storage.load_index(cfg)
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
-    if active:
-        index.active = name
     storage.save_index(cfg, index)
 
 
@@ -100,15 +98,15 @@ class TestCmdSessionStart:
         assert out == ""
         assert err == ""
 
-    def test_active_project_prints_context(
+    def test_cwd_detects_project_prints_context(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When an active project exists, session-start prints its context."""
+        """When cwd matches a project repo, session-start prints its context."""
         _make_project(cfg, "myapp", str(tmp_path), active=True)
 
         from server.cli import cmd_session_start
 
-        cmd_session_start(cwd=None, compact=False)
+        cmd_session_start(cwd=str(tmp_path), compact=False)
         out, _ = capsys.readouterr()
         assert "myapp" in out
 
@@ -121,7 +119,7 @@ class TestCmdSessionStart:
 
         from server.cli import cmd_session_start
 
-        cmd_session_start(cwd=None, compact=True)
+        cmd_session_start(cwd=str(tmp_path), compact=True)
         out, _ = capsys.readouterr()
         assert "myapp" in out
         assert "A secret note" not in out
@@ -129,12 +127,8 @@ class TestCmdSessionStart:
     def test_cwd_auto_detects_project(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When no active project set but cwd matches a repo, it auto-detects."""
+        """When cwd matches a repo, session-start auto-detects."""
         _make_project(cfg, "myapp", str(tmp_path), active=False)
-        # Clear active from index so detection fires
-        index = storage.load_index(cfg)
-        index.active = None
-        storage.save_index(cfg, index)
 
         from server.cli import cmd_session_start
 
@@ -142,34 +136,29 @@ class TestCmdSessionStart:
         out, _ = capsys.readouterr()
         assert "myapp" in out
 
+    def test_no_cwd_prints_nothing(
+        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Without cwd, session-start prints nothing (no persisted active)."""
+        _make_project(cfg, "myapp", str(tmp_path), active=True)
+
+        from server.cli import cmd_session_start
+
+        cmd_session_start(cwd=None, compact=False)
+        out, err = capsys.readouterr()
+        assert out == ""
+
     def test_cwd_no_match_prints_nothing(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """cwd that matches no project repo still prints nothing."""
         _make_project(cfg, "myapp", str(tmp_path), active=False)
-        index = storage.load_index(cfg)
-        index.active = None
-        storage.save_index(cfg, index)
 
         from server.cli import cmd_session_start
 
         cmd_session_start(cwd="/nonexistent/path/xyz", compact=False)
         out, err = capsys.readouterr()
         assert out == ""
-
-    def test_missing_project_config_warns_to_stderr(
-        self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """When active project name is set but its tracking dir is missing, warn to stderr."""
-        # Set active to a nonexistent project
-        index = ProjectIndex(active="ghost")
-        storage.save_index(cfg, index)
-
-        from server.cli import cmd_session_start
-
-        cmd_session_start(cwd=None, compact=False)
-        _, err = capsys.readouterr()
-        assert "Warning" in err
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +181,10 @@ class TestCmdSessionEnd:
         assert out == ""
         assert err == ""
 
-    def test_no_active_project_is_noop(
+    def test_no_cwd_is_noop(
         self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When config exists but index has no active project, session-end is silent."""
-        index = ProjectIndex()
-        storage.save_index(cfg, index)
-
+        """When no cwd is provided, session-end is silent (no project to detect)."""
         from server.cli import cmd_session_end
 
         cmd_session_end(cwd=None)
@@ -219,15 +205,10 @@ class TestCmdSessionEnd:
 
         from server.cli import cmd_session_end
 
-        cmd_session_end(cwd=None)
+        cmd_session_end(cwd=str(tmp_path))
 
         # After the call, meta should have been written (save_meta called)
-        # We can verify the file mtime changed by reading it back
         meta_after = storage.load_meta(cfg, "myapp")
-        # The implementation calls save_meta when date differs — meta itself
-        # doesn't auto-update the date field (that's left to the caller), so
-        # we just verify no exception was raised and the function returned cleanly.
-        # The key observable: no error was raised.
         assert meta_after.name == "myapp"
 
     def test_skips_save_when_date_current(
@@ -252,21 +233,21 @@ class TestCmdSessionEnd:
 
         from server.cli import cmd_session_end
 
-        cmd_session_end(cwd=None)
+        cmd_session_end(cwd=str(tmp_path))
         assert save_called == [], "save_meta should not be called when date is already today"
 
-    def test_missing_project_config_warns_to_stderr(
-        self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
+    def test_cwd_no_match_is_noop(
+        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When active project meta file is missing, session-end warns to stderr."""
-        index = ProjectIndex(active="ghost")
-        storage.save_index(cfg, index)
+        """When cwd doesn't match any project, session-end is silent."""
+        _make_project(cfg, "myapp", str(tmp_path), active=True)
 
         from server.cli import cmd_session_end
 
-        cmd_session_end(cwd=None)
-        _, err = capsys.readouterr()
-        assert "Warning" in err
+        cmd_session_end(cwd="/nonexistent/path/xyz")
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert err == ""
 
 
 # ---------------------------------------------------------------------------
@@ -364,12 +345,12 @@ class TestCliArgParsing:
             f"tracking_dir: {tracking_dir}\ngit_integration: false\n"
         )
 
-        # Write index with active project
+        # Write index with project (no active field — session-only now)
         proj_dir = tracking_dir / "myapp"
         proj_dir.mkdir()
         today = str(date.today())
         (tracking_dir / "active-projects.yaml").write_text(
-            f"active: myapp\nprojects:\n  myapp:\n    name: myapp\n"
+            f"projects:\n  myapp:\n    name: myapp\n"
             f"    tracking_dir: {proj_dir}\n    created: '{today}'\n"
         )
 

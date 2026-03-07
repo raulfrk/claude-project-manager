@@ -70,7 +70,6 @@ def legacy_project(cfg: ProjConfig, tmp_path: Path) -> tuple[str, ProjConfig]:
     index.projects[name] = ProjectEntry(
         name=name, tracking_dir=str(tracking), created="2026-01-01"
     )
-    index.active = name
     storage.save_index(cfg, index)
     state.set_session_active(name)
 

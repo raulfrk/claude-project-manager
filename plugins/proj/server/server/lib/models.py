@@ -248,13 +248,11 @@ class ProjectEntry:
 @dataclass
 class ProjectIndex:
     version: int = 1
-    active: str | None = None
     projects: dict[str, ProjectEntry] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "version": self.version,
-            "active": self.active,
             "projects": {k: v.to_dict() for k, v in self.projects.items()},
         }
 
@@ -263,9 +261,10 @@ class ProjectIndex:
         projects_raw = data.get("projects", {})
         if not isinstance(projects_raw, dict):
             projects_raw = {}
+        # Note: old YAML files may contain an 'active' field — it is intentionally
+        # ignored here (session-only concept now).
         return cls(
             version=int(data.get("version", 1)),
-            active=data.get("active") if isinstance(data.get("active"), str) else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
             projects={k: ProjectEntry.from_dict(v) for k, v in projects_raw.items()},  # type: ignore[arg-type]  # dict values are object; items are dicts at runtime
         )
 

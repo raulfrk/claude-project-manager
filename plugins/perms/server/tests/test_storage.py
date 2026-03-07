@@ -207,7 +207,7 @@ class TestSandboxConfig:
             },
             "network": {
                 "allowedDomains": ["example.com"],
-                "allowUnixSockets": True,
+                "allowUnixSockets": ["/var/run/docker.sock"],
             },
             "customKey": "preserved",
         }
@@ -217,7 +217,7 @@ class TestSandboxConfig:
         assert sc.filesystem.allow_write == ["/tmp"]
         assert sc.filesystem.deny_write == ["/etc"]
         assert sc.network.allowed_domains == ["example.com"]
-        assert sc.network.allow_unix_sockets is True
+        assert sc.network.allow_unix_sockets == ["/var/run/docker.sock"]
         assert sc.raw.get("customKey") == "preserved"
 
     def test_round_trip_preserves_unknown_keys(self) -> None:

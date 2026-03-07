@@ -118,12 +118,6 @@ class TestProjectsMCPTools:
         result = await call_tool(mcp_app, "proj_get_active")
         assert "myapp" in result
 
-    async def test_proj_set_active(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
-        setup_project(cfg, "other", str(tmp_path))
-        result = await call_tool(mcp_app, "proj_set_active", name="other")
-        assert "other" in result
-        assert storage.load_index(cfg).active == "other"
-
     async def test_proj_archive(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_archive")
         assert "myapp" in result

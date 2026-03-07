@@ -298,8 +298,8 @@ class TestLoadActualRules:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: tmp_path / ".claude" / "settings.json",
+            "server.lib.perms_helpers._USER_SETTINGS",
+tmp_path / ".claude" / "settings.json",
         )
 
         result = _load_actual_rules()
@@ -314,8 +314,8 @@ class TestLoadActualRules:
             allow=["Read(//home/user/proj/**)", "mcp__proj__*"],
         )
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = _load_actual_rules()
@@ -329,8 +329,8 @@ class TestLoadActualRules:
     ) -> None:
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = _load_actual_rules()
@@ -350,8 +350,8 @@ class TestRunSync:
         expected = _derive_expected_rules(meta, cfg)
         settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -367,8 +367,8 @@ class TestRunSync:
         # settings.json has no rules at all
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -390,8 +390,8 @@ class TestRunSync:
         )
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -411,8 +411,8 @@ class TestRunSync:
         actual_rules = sorted(expected) + ["Read(//some/other/path/**)", "mcp__custom__*"]
         settings_path = _write_settings(tmp_path, allow=actual_rules)
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -426,8 +426,8 @@ class TestRunSync:
         cfg = _make_cfg(auto_allow_mcps=False)
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -441,8 +441,8 @@ class TestRunSync:
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -461,8 +461,8 @@ class TestRunSync:
         assert "mcp__perms__*" not in expected
         settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -493,8 +493,8 @@ class TestRunSync:
         assert not any("/extra/worktree/path" in r for r in expected)
         settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -517,8 +517,8 @@ class TestRunSync:
         assert "Edit(//home/user/proj/**)" not in partial_rules  # Edit is NOT present
         settings_path = _write_settings(tmp_path, allow=partial_rules)
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -558,8 +558,8 @@ class TestRunSync:
         ]
         settings_path = _write_settings(tmp_path, allow=repo_rules)
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -576,8 +576,8 @@ class TestRunSync:
         cfg.todoist.mcp_server = "sentry"
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = run_sync(meta, cfg)
@@ -595,10 +595,10 @@ class TestRunSync:
         # settings.json starts with no rules
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = run_sync(meta, cfg, apply=True)
 
@@ -622,10 +622,10 @@ class TestRunSync:
         expected = _derive_expected_rules(meta, cfg)
         settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         original_mtime = settings_path.stat().st_mtime
         result = run_sync(meta, cfg, apply=True)
@@ -644,10 +644,10 @@ class TestRunSync:
         cfg = _make_cfg(auto_allow_mcps=False)
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         original_content = settings_path.read_text()
         result = run_sync(meta, cfg, apply=False)
@@ -698,8 +698,8 @@ class TestProjPermsSyncTool:
         expected = _derive_expected_rules(meta, cfg)
         settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
 
         result = await call_tool(mcp_app, "proj_perms_sync")
@@ -731,10 +731,10 @@ class TestProjPermsSyncTool:
         # Start with an empty settings.json
         settings_path = _write_settings(tmp_path, allow=[])
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: settings_path,
+            "server.lib.perms_helpers._USER_SETTINGS",
+settings_path,
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "proj_perms_sync", apply=True)
 
@@ -763,24 +763,24 @@ class TestSandboxDetection:
     def test_is_sandbox_enabled_true(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from server.tools.perms_sync import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         local_path = tmp_path / ".claude" / "settings.local.json"
         _write_local_settings(local_path, {"sandbox": {"enabled": True}})
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: local_path,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+local_path,
         )
         assert _is_sandbox_enabled() is True
 
     def test_is_sandbox_enabled_false(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from server.tools.perms_sync import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: tmp_path / "nonexistent.json",
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+tmp_path / "nonexistent.json",
         )
         assert _is_sandbox_enabled() is False
 
@@ -788,12 +788,12 @@ class TestSandboxDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Sandbox enabled at project level but not user level is detected."""
-        from server.tools.perms_sync import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         # User-level settings.local.json does not exist
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: tmp_path / "nonexistent.json",
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+tmp_path / "nonexistent.json",
         )
         # Project-level has sandbox enabled
         project_dir = tmp_path / "myproject"
@@ -806,13 +806,13 @@ class TestSandboxDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When user-level sandbox is disabled but project-level is enabled, returns True."""
-        from server.tools.perms_sync import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         user_local = tmp_path / "user" / ".claude" / "settings.local.json"
         _write_local_settings(user_local, {"sandbox": {"enabled": False}})
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: user_local,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+user_local,
         )
 
         project_dir = tmp_path / "myproject"
@@ -825,13 +825,13 @@ class TestSandboxDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When both user-level and project-level sandbox are disabled, returns False."""
-        from server.tools.perms_sync import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         user_local = tmp_path / "user" / ".claude" / "settings.local.json"
         _write_local_settings(user_local, {"sandbox": {"enabled": False}})
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: user_local,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+user_local,
         )
 
         project_dir = tmp_path / "myproject"
@@ -851,12 +851,12 @@ class TestLoadActualRulesSandbox:
             "permissions": {"allow": ["mcp__proj__*"]},
         })
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: local_path,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+local_path,
         )
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: tmp_path / "settings.json",
+            "server.lib.perms_helpers._USER_SETTINGS",
+tmp_path / "settings.json",
         )
 
         result = _load_actual_rules()
@@ -897,12 +897,12 @@ class TestRunSyncSandbox:
             "permissions": {"allow": sorted(expected)},
         })
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: local_path,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+local_path,
         )
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: tmp_path / "settings.json",
+            "server.lib.perms_helpers._USER_SETTINGS",
+tmp_path / "settings.json",
         )
 
         result = run_sync(meta, cfg)
@@ -924,12 +924,12 @@ class TestRunSyncSandbox:
             "permissions": {"allow": sorted(expected)},
         })
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: local_path,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+local_path,
         )
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: tmp_path / "settings.json",
+            "server.lib.perms_helpers._USER_SETTINGS",
+tmp_path / "settings.json",
         )
 
         result = run_sync(meta, cfg)
@@ -950,12 +950,12 @@ class TestRunSyncSandbox:
             "permissions": {"allow": []},
         })
         monkeypatch.setattr(
-            "server.tools.perms_sync._local_settings_path",
-            lambda: local_path,
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
+local_path,
         )
         monkeypatch.setattr(
-            "server.tools.perms_sync._settings_path",
-            lambda: tmp_path / "settings.json",
+            "server.lib.perms_helpers._USER_SETTINGS",
+tmp_path / "settings.json",
         )
 
         result = run_sync(meta, cfg)

@@ -48,8 +48,6 @@ def _run_proj_init(name: str, path: str) -> str:
     storage.save_meta(cfg, meta)
     entry = ProjectEntry(name=name, tracking_dir=str(tracking), created=today)
     index.projects[name] = entry
-    if not index.active:
-        index.active = name
     storage.save_index(cfg, index)
     return f"Initialized project '{name}'."
 
@@ -60,11 +58,6 @@ class TestProjInit:
         assert "myapp" in result
         index = storage.load_index(cfg)
         assert "myapp" in index.projects
-
-    def test_sets_active(self, cfg: ProjConfig, tmp_path: Path) -> None:
-        _run_proj_init("myapp", str(tmp_path))
-        index = storage.load_index(cfg)
-        assert index.active == "myapp"
 
     def test_creates_tracking_files(self, cfg: ProjConfig, tmp_path: Path) -> None:
         _run_proj_init("myapp", str(tmp_path))
@@ -257,55 +250,6 @@ class TestValidateProjectName:
         # Explicitly check return type for valid name
         result = validate_project_name("valid-name")
         assert result is None
-
-
-class TestProjSetActive:
-    """Tests for proj_set_active fuzzy matching."""
-
-    def _call_proj_set_active(self, name: str) -> str:
-        import asyncio
-
-        from mcp.server.fastmcp import FastMCP
-
-        from server.tools.projects import register
-
-        app = FastMCP("test-set-active")
-        register(app)
-        tool_fn = app._tool_manager.get_tool("proj_set_active")
-        assert tool_fn is not None
-
-        async def _run() -> str:
-            result = await tool_fn.run({"name": name}, {})
-            if isinstance(result, list):
-                return "".join(getattr(c, "text", str(c)) for c in result)
-            return str(result)
-
-        return asyncio.run(_run())
-
-    def test_fuzzy_single_match_sets_active(self, cfg: ProjConfig, tmp_path: Path) -> None:
-        """A partial name that resolves to exactly one project auto-selects it."""
-        _run_proj_init("my-project", str(tmp_path))
-        result = self._call_proj_set_active("my-proje")
-        assert "my-project" in result
-        index = storage.load_index(cfg)
-        assert index.active == "my-project"
-
-    def test_fuzzy_multiple_matches_returns_ambiguous(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """A partial name matching multiple projects returns an ambiguous message."""
-        _run_proj_init("my-project-alpha", str(tmp_path))
-        _run_proj_init("my-project-beta", str(tmp_path))
-        result = self._call_proj_set_active("my-project")
-        assert "Ambiguous match" in result
-        assert "my-project-alpha" in result or "my-project-beta" in result
-
-    def test_fuzzy_no_match_returns_not_found(self, cfg: ProjConfig, tmp_path: Path) -> None:
-        """A name with no close matches returns a not-found message with available list."""
-        _run_proj_init("my-project", str(tmp_path))
-        result = self._call_proj_set_active("zzz-totally-unrelated")
-        assert "not found" in result.lower()
-        assert "my-project" in result
 
 
 class TestProjInitValidation:

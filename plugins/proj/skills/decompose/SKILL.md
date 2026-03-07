@@ -2,16 +2,9 @@
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__claude_ai_Todoist__add-tasks, mcp__sentry__find-projects, Task, mcp__proj__proj_resolve_agent
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__claude_ai_Todoist__add-tasks, mcp__sentry__find-projects, Task
 argument-hint: "<todo-id>"
 ---
-
-**Agent resolution (run first):**
-1. Call `mcp__proj__proj_resolve_agent` with `step="decompose"` (and `project_name` if known)
-2. Parse the JSON result: `{"agent": "<name>", "warning": "<msg or null>"}`
-3. If `warning` is non-null: display it to the user before proceeding
-4. If `agent` is `"general-purpose"`: proceed with the normal skill instructions below
-5. If `agent` differs: use the Task tool to spawn an agent of type `agent` with the full skill instructions below (replacing $ARGUMENTS with the actual todo ID), then return its result
 
 Decompose todo $ARGUMENTS into sub-todos.
 
@@ -44,11 +37,38 @@ Decompose todo $ARGUMENTS into sub-todos.
    - Each leaf sub-task should be implementable in a focused coding session.
 
 4.5. **Analyze shared-file conflicts for safe batching:**
-   - For each proposed subtodo, list the source files it is likely to **write** (not just read), based on the todo title, requirements.md, and research.md.
-   - Identify pairs of subtodos that share at least one predicted write target.
-   - For each such pair, add a `blocked_by` relationship in natural implementation order (the subtodo that lays the groundwork blocks the one that builds on it; when order is ambiguous, prefer the simpler/shallower subtodo as the blocker).
+
+   **Goal**: Predict which files each subtodo will **write** and add `blocked_by` between any pair sharing a write target, so they never land in the same parallel batch.
+
+   **Step A — Predict write files** using these heuristics:
+   - **Research cross-reference**: If research.md names specific files, use those as ground truth.
+   - **Same-module heuristic**: Subtodos touching the same Python module/package likely share `__init__.py`, shared type files, and import re-exports.
+   - **Test co-location**: An implementation subtodo and its corresponding test subtodo share test files (`conftest.py`, fixtures, the test file itself).
+   - **Implicit shared files**: Always check whether subtodos will touch common project-wide files:
+     - `plugin.json`, `marketplace.json` (version bumps)
+     - `CLAUDE.md`, `README.md` (docs updates)
+     - `__init__.py` (module exports)
+     - `conftest.py`, test fixtures (shared test infra)
+     - SKILL.md files (skill instruction updates)
+   - **Title overlap**: Subtodos whose titles reference the same system, feature, or file likely share write targets even if not explicitly stated.
+
+   **Step B — Build conflict table** (internal, not shown to user):
+   ```
+   | Subtodo | Predicted write files       | Shares files with |
+   |---------|-----------------------------|--------------------|
+   | X.1     | models.py, __init__.py      | X.2                |
+   | X.2     | models.py, test_models.py   | X.1                |
+   | X.3     | tools.py                    | (none)             |
+   ```
+
+   **Step C — Add `blocked_by` relationships** for each pair sharing a write target:
+   - The subtodo that lays groundwork blocks the one that builds on it.
+   - When order is ambiguous, prefer the simpler/shallower subtodo as the blocker.
    - Record the shared filename — it will be shown in step 5's display.
-   - If no shared files are found, skip silently (no extra output needed).
+
+   **Safety-first principle**: When in doubt whether two subtodos share a write target, **add the `blocked_by`**. False positives (unnecessary sequential execution) are far less costly than false negatives (parallel write conflicts that corrupt files).
+
+   If no shared files are found after applying all heuristics, skip silently.
 
 5. Present the proposed multi-level breakdown as **indented bullet points**:
    - Root tasks at level 0; each nesting level adds two spaces of indentation.
@@ -92,6 +112,4 @@ Decompose todo $ARGUMENTS into sub-todos.
 
 8. Show the final tree via `mcp__proj__todo_tree`.
 
-9. **Optional auto-research**: Ask "Would you like to research the sub-todos now? (spawns parallel agents)" If yes, use Task tool to spawn parallel Explore agents for each sub-todo.
-
-💡 Suggested next: (1) /proj:execute 1.1 — start with the first sub-todo  (2) /proj:research 1.1,1.2 — research sub-todos in parallel
+💡 Suggested next: (1) /proj:execute 1.1 — start with the first sub-todo  (2) /proj:run 1 — run the full workflow

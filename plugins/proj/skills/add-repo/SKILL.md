@@ -53,4 +53,4 @@ Add a new directory or repository to the active project.
    - Permissions refreshed
    ```
 
-Suggested next: /proj:explore <path> — scan the new repo's codebase
+Suggested next: /proj:status — see updated project overview

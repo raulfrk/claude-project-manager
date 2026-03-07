@@ -2,7 +2,7 @@
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, Bash
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, Bash
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -27,12 +27,14 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
         - Explain: this must match the server key registered in your MCP config (e.g. `claude_ai_Todoist`); used to grant tool permissions and call Todoist APIs
         - Store as `todoist_mcp_server`; default to `"claude_ai_Todoist"` if the user presses Enter without typing
    f. **Git integration** — "Enable git integration? [yes]"
-      - Explain: if enabled, /proj:update will detect recent commits and suggest todo updates
-   g. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
-   h. **Plugins** — "Do you have the `perms` plugin installed? [no]"
-   i. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
+      - Explain: if enabled, /proj:save will detect recent commits and suggest todo updates
+   g. **Zoxide integration** — "Enable zoxide integration? [no]"
+      - Explain: if enabled, project directories are boosted in zoxide's frecency database on init/load for faster `cd` navigation
+   h. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
+   i. **Plugins** — "Do you have the `perms` plugin installed? [no]"
+   j. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
 
-3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`.
+3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`.
 
 4. **If `perms` plugin is installed**: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
    - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
@@ -40,6 +42,7 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    - If `auto_allow_mcps: true` and `worktree_integration: true`, also include: `"plugin_worktree_worktree"`
    - If `auto_allow_mcps: true` and `todoist.enabled: true`, also include: `todoist_mcp_server` (the value collected in step 2e, e.g. `"claude_ai_Todoist"`)
    - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
+   - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"` to allow zoxide commands without prompts.
    If `perms` plugin is not installed, skip silently and note: "perms plugin not found — add MCP allow rules manually if needed."
 
 5. Confirm: "proj plugin configured! Configuration saved to ~/.claude/proj.yaml"

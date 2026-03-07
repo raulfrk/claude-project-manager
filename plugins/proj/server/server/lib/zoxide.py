@@ -38,3 +38,31 @@ def zoxide_remove(path: str) -> None:
         subprocess.run(["zoxide", "remove", path], check=False)  # noqa: S603, S607
     except FileNotFoundError:
         pass  # zoxide not installed — skip silently
+
+
+def list_worktree_paths(base_repo: str) -> list[str]:
+    """Return worktree paths for a git repo, excluding the base repo itself.
+
+    Runs ``git worktree list --porcelain`` and parses lines starting with
+    ``worktree ``.  Returns an empty list if git is not installed, the
+    directory does not exist, or the directory is not a git repository.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603, S607
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=base_repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        paths: list[str] = []
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                wt_path = line[len("worktree ") :]
+                if wt_path != base_repo:
+                    paths.append(wt_path)
+        return paths
+    except (FileNotFoundError, OSError):
+        return []

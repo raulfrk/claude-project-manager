@@ -1,7 +1,0 @@
-name: full-workflow
-description: "Full lifecycle: define → research → decompose → execute"
-steps:
-  - define
-  - research
-  - decompose
-  - execute

@@ -4,6 +4,8 @@ description: Manually trigger a full bidirectional Todoist sync. Always runs reg
 argument-hint: "[all | everything]"
 disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__config_load, mcp__proj__proj_find_archived_by_title, mcp__proj__proj_update_meta
+context: fork
+agent: general-purpose
 ---
 
 Full bidirectional Todoist sync for the active project.
@@ -41,10 +43,9 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
 0. **Guard**: Call `mcp__proj__config_load`. If `todoist.enabled` is false (or absent), stop immediately:
    "Todoist sync is not enabled. Set todoist.enabled: true in ~/.claude/proj.yaml to use /proj:sync."
 
-1. **Setup**: Call `mcp__proj__proj_get_active` — get active project with `todoist_project_id`.
-   - If no `todoist_project_id`, ask: "This project isn't linked to Todoist. Create a Todoist project for it?"
-   - If yes: call `mcp__claude_ai_Todoist__add-projects` and store the returned ID via `mcp__proj__proj_update_meta`.
-   - If no: stop.
+1. **Setup**: Call `mcp__proj__proj_get_active` -- get active project name and `todoist_project_id`.
+   - If no `todoist_project_id`: stop with "Project not linked to Todoist. Set todoist_project_id via mcp__proj__proj_update_meta first."
+   - Pass this `project_name` to all subsequent `mcp__proj__todo_*` tool calls.
 
 2. **Fetch both sides**:
    - Call `mcp__claude_ai_Todoist__find-tasks` with `projectId` (use `limit: 100`). This returns **open (uncompleted) tasks only**. Collect all tasks (paginate if `hasMore: true`).
@@ -60,16 +61,8 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
    For each Todoist task:
    - **Not in local** (no `todoist_task_id` match): This is a new task added in Todoist.
      - **Ghost check**: Before creating, call `mcp__proj__proj_find_archived_by_title` with the Todoist task's `content` as the title.
-       - If result has `exact_match` or `fuzzy_matches` is non-empty: display prompt:
-         ```
-         ⚠️  Ghost detected: Todoist task "<title>" may already be done locally.
-             Closest match in archive: "<archive-title>" (exact|fuzzy, ratio: X.XX)
-
-         1. Skip → Complete the Todoist task and skip creating locally
-         2. Create → Create as new local todo anyway
-         ```
-       - If user picks **Skip**: call `mcp__claude_ai_Todoist__complete-tasks` for this Todoist task ID. Track as `ghost_closed += 1`. Skip to the next Todoist task.
-       - If user picks **Create**: proceed with `todo_add` as normal.
+       - If result has `exact_match` or `fuzzy_matches` is non-empty: auto-skip this task.
+         Call `mcp__claude_ai_Todoist__complete-tasks` for this Todoist task ID. Track as `ghost_closed += 1`. Skip to the next Todoist task.
        - If no match found: proceed with `todo_add` as normal.
      - Call `mcp__proj__todo_add` to create locally. Set title, priority (map from Todoist), notes from description, tags from labels.
      - Then call `mcp__proj__todo_update` to set `todoist_task_id` to this Todoist task's ID. If the Todoist task has a due date (`due.date`), also set `due_date` to that ISO date string (e.g. `"2026-03-15"`).
@@ -145,10 +138,8 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
 
 ## Trello Sync
 
-If `trello.enabled` is true in the config, after completing the Todoist sync above, offer to run a Trello sync:
+If `trello.enabled` is true in the config, after completing the Todoist sync above, output:
+"Todoist sync complete. Trello sync is enabled -- run /proj:trello-sync to also sync root todos with Trello."
 
-```
-Todoist sync complete. Trello sync is enabled — run /proj:trello-sync to also sync root todos with Trello.
-```
-
-Or, if the user invoked this skill with "sync all" or "sync everything", automatically invoke `/proj:trello-sync` after the Todoist sync completes.
+If the user invoked this skill with "sync all" or "sync everything", also output:
+"To sync Trello too, run /proj:trello-sync separately."

@@ -34,8 +34,7 @@ def _isolate_sandbox_detection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     with their own paths.
     """
     nonexistent = tmp_path / "nonexistent-local-settings.json"
-    monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", nonexistent)
-    monkeypatch.setattr("server.tools.perms_sync._local_settings_path", lambda: nonexistent)
+    monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", nonexistent)
 
 
 @pytest.fixture()
@@ -62,8 +61,6 @@ def setup_project(cfg: ProjConfig, name: str, repo_path: str) -> None:
     storage.save_meta(cfg, meta)
     index = storage.load_index(cfg)
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
-    if not index.active:
-        index.active = name
     storage.save_index(cfg, index)
 
 

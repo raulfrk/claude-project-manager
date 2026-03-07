@@ -1,5 +1,19 @@
 # Changelog — proj
 
+## [0.51.0] — 2026-03-07
+### Changed
+- **Merged define + research** into a single `/proj:define` skill (Q&A + codebase research in one step)
+- **Rewrote full-workflow as `/proj:run`** — 3 steps (define, decompose, execute) down from 4; removed convergence system, `--iter-as-needed`, children workflow fallback
+- **Merged quick + quick-workflow** — single `/proj:quick` skill with two modes (new project or new todo)
+- **Merged save + update** — `/proj:save` now includes git reconciliation
+
+### Removed
+- **Agent override system** — 8 skills (agents-set/list/remove, create-agent, agents-create-*) and 4 MCP tools (proj_set_agent, proj_get_agents, proj_remove_agent, proj_resolve_agent)
+- **claude-helper plugin** — removed entirely (5 review skills, unused)
+- Skills: prep-workflow, quick-workflow, research, report, perms-sync, migrate-to-proj, migrate-dirs, migrate-ids, extract-todos, explore, update
+- Skill count: 37 → 18 (51% reduction)
+- MCP tools: 55 → 51
+
 ## [0.23.2] — 2026-02-28
 ### Added
 - `proj_explore_codebase` tool: structured codebase exploration (tech stack, entry points, key dirs, file tree) using Python stdlib — no Bash required
@@ -52,7 +66,7 @@
 ## [0.2.0] — 2026-02-26
 ### Added
 - Initial full implementation: FastMCP server with project lifecycle tools
-  - Project tools: `proj_init`, `proj_list`, `proj_get`, `proj_get_active`, `proj_set_active`, `proj_update_meta`, `proj_archive`
+  - Project tools: `proj_init`, `proj_list`, `proj_get`, `proj_get_active`, `proj_load_session`, `proj_update_meta`, `proj_archive`
   - Todo tools: `todo_add`, `todo_list`, `todo_get`, `todo_update`, `todo_complete`, `todo_block`, `todo_unblock`, `todo_delete`, `todo_ready`, `todo_add_child`
   - Config tool: `config_load`, `config_init`, `config_update`
   - Context/notes tools: `ctx_session_start`, `ctx_session_end`, `notes_append`

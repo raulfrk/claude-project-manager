@@ -166,7 +166,7 @@ class TestGrantInvestigationTools:
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep", "find", "ls"])
@@ -186,7 +186,7 @@ class TestGrantInvestigationTools:
             "Bash(grep //home/user/proj/**)",
             "Bash(grep //tmp/tracking/**)",
         ])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -201,7 +201,7 @@ class TestGrantInvestigationTools:
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(
             repos=[
@@ -222,7 +222,7 @@ class TestGrantInvestigationTools:
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=[])
@@ -236,7 +236,7 @@ class TestGrantInvestigationTools:
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         # Do not create the file
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -254,7 +254,7 @@ class TestGrantInvestigationTools:
             settings_path,
             allow=["Read(//home/user/proj/**)", "mcp__proj__*"],
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -278,7 +278,7 @@ class TestRevokeInvestigationTools:
             settings_path,
             allow=["Bash(grep //home/user/proj/**)", "Bash(find //home/user/proj/**)"],
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep", "find"])
@@ -299,7 +299,7 @@ class TestRevokeInvestigationTools:
                 "Bash(grep //home/user/proj/**)",
             ],
         )
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -316,7 +316,7 @@ class TestRevokeInvestigationTools:
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=["Read(//home/user/proj/**)"])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -330,7 +330,7 @@ class TestRevokeInvestigationTools:
         settings_path = tmp_path / ".claude" / "settings.json"
         original = ["Read(//home/user/proj/**)", "mcp__proj__*"]
         _write_settings(settings_path, allow=original)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep", "ls"])
@@ -348,7 +348,7 @@ class TestSetupPermissions:
     def test_adds_path_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=[])
@@ -363,7 +363,7 @@ class TestSetupPermissions:
     def test_adds_bash_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep", "find"])
@@ -377,7 +377,7 @@ class TestSetupPermissions:
     def test_adds_mcp_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=[])
@@ -396,7 +396,7 @@ class TestSetupPermissions:
     def test_all_rules_in_one_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -417,7 +417,7 @@ class TestSetupPermissions:
     def test_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -429,7 +429,7 @@ class TestSetupPermissions:
     def test_no_flags_adds_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -474,7 +474,7 @@ class TestProjGrantToolPermissionsTool:
 
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app_with_grant, "proj_grant_tool_permissions")
         assert "✅" in result
@@ -511,7 +511,7 @@ class TestProjGrantToolPermissionsTool:
 
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(
             mcp_app_with_grant,
@@ -549,20 +549,20 @@ class TestSandboxModeDetection:
     def test_is_sandbox_enabled_true(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         local_path = tmp_path / ".claude" / "settings.local.json"
         _write_local_settings(local_path, {"sandbox": {"enabled": True}})
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
         assert _is_sandbox_enabled() is True
 
     def test_is_sandbox_enabled_false_when_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         monkeypatch.setattr(
-            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
             tmp_path / "nonexistent.json",
         )
         assert _is_sandbox_enabled() is False
@@ -570,22 +570,22 @@ class TestSandboxModeDetection:
     def test_is_sandbox_enabled_false_when_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         local_path = tmp_path / ".claude" / "settings.local.json"
         _write_local_settings(local_path, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
         assert _is_sandbox_enabled() is False
 
     def test_is_sandbox_enabled_project_level_only(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Sandbox enabled at project level but not user level is detected."""
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         # User-level has no sandbox
         monkeypatch.setattr(
-            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
             tmp_path / "nonexistent.json",
         )
         # Project-level has sandbox enabled
@@ -599,11 +599,11 @@ class TestSandboxModeDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When user-level sandbox is disabled but project-level is enabled, returns True."""
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         user_local = tmp_path / "user" / ".claude" / "settings.local.json"
         _write_local_settings(user_local, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", user_local)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", user_local)
 
         project_dir = tmp_path / "myproject"
         proj_local = project_dir / ".claude" / "settings.local.json"
@@ -615,11 +615,11 @@ class TestSandboxModeDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When both user-level and project-level sandbox are disabled, returns False."""
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         user_local = tmp_path / "user" / ".claude" / "settings.local.json"
         _write_local_settings(user_local, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", user_local)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", user_local)
 
         project_dir = tmp_path / "myproject"
         proj_local = project_dir / ".claude" / "settings.local.json"
@@ -631,10 +631,10 @@ class TestSandboxModeDetection:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When project_dir is None, only user-level is checked (backward compat)."""
-        from server.tools.perms_grant import _is_sandbox_enabled
+        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
 
         monkeypatch.setattr(
-            "server.tools.perms_grant._USER_LOCAL_SETTINGS",
+            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
             tmp_path / "nonexistent.json",
         )
         assert _is_sandbox_enabled(None) is False
@@ -649,8 +649,8 @@ class TestGrantInvestigationToolsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": []},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -672,8 +672,8 @@ class TestSetupPermissionsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": []},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=[])
@@ -700,8 +700,8 @@ class TestSetupPermissionsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": []},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="docs", path="/home/user/docs", reference=True)])
         cfg = _make_cfg(tools=[])
@@ -722,8 +722,8 @@ class TestSetupPermissionsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": []},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -749,8 +749,8 @@ class TestSetupPermissionsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": []},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])
@@ -769,8 +769,8 @@ class TestRevokeInvestigationToolsSandbox:
             "sandbox": {"enabled": True},
             "permissions": {"allow": ["Bash(grep //home/user/proj/**)"]},
         })
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(tools=["grep"])

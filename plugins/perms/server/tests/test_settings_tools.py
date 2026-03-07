@@ -9,7 +9,22 @@ import pytest
 
 from server.lib import storage
 from server.lib.storage import mcp_allow_entry
-from server.tools.settings import add_allow, add_mcp_allow, batch_add_mcp_allow, check_allow, list_allow, remove_allow, remove_mcp_allow
+from server.tools.settings import (
+    add_allow,
+    add_domain,
+    add_mcp_allow,
+    batch_add_mcp_allow,
+    check_allow,
+    deny_read,
+    deny_write,
+    list_allow,
+    remove_allow,
+    remove_deny_read,
+    remove_deny_write,
+    remove_domain,
+    remove_mcp_allow,
+    sandbox_init,
+)
 
 
 def _write_settings(path: Path, data: dict[str, object]) -> None:
@@ -680,3 +695,175 @@ class TestAutoTargetFallsBackToSettings:
         allow = _read_allow(user_settings)
         assert "Read(//home/user/proj/**)" in allow
         assert "Edit(//home/user/proj/**)" in allow
+
+
+# ---------------------------------------------------------------------------
+# sandbox_init
+# ---------------------------------------------------------------------------
+
+
+def _read_sandbox(path: Path) -> dict[str, object]:
+    data: dict[str, object] = json.loads(path.read_text())
+    sandbox = data.get("sandbox", {})
+    assert isinstance(sandbox, dict)
+    return sandbox
+
+
+class TestSandboxInit:
+    def test_init_clean_file(self, user_settings: Path) -> None:
+        result = sandbox_init()
+        assert "initialized" in result.lower() or "enabled" in result.lower()
+        sandbox = _read_sandbox(user_settings)
+        assert sandbox.get("enabled") is True
+        assert sandbox.get("autoAllowBashIfSandboxed") is True
+
+    def test_init_with_path(self, user_settings: Path) -> None:
+        result = sandbox_init(path="/home/user/proj")
+        assert "/home/user/proj" in result
+        sandbox = _read_sandbox(user_settings)
+        fs = sandbox.get("filesystem", {})
+        assert isinstance(fs, dict)
+        assert "/home/user/proj" in fs.get("allowWrite", [])
+
+    def test_auto_migrate_read_edit_rules(self, user_settings: Path) -> None:
+        _write_settings(user_settings, {
+            "permissions": {
+                "allow": [
+                    "Read(//home/user/proj/**)",
+                    "Edit(//home/user/proj/**)",
+                    "Read(//home/user/other/**)",
+                    "mcp__proj__*",
+                ]
+            },
+        })
+        result = sandbox_init()
+        assert "Migrated 2" in result
+        sandbox = _read_sandbox(user_settings)
+        fs = sandbox.get("filesystem", {})
+        assert isinstance(fs, dict)
+        aw = fs.get("allowWrite", [])
+        assert "/home/user/proj" in aw
+        assert "/home/user/other" in aw
+
+    def test_idempotent(self, user_settings: Path) -> None:
+        sandbox_init()
+        result = sandbox_init()
+        assert "already initialized" in result.lower()
+
+    def test_migrate_plus_path(self, user_settings: Path) -> None:
+        _write_settings(user_settings, {
+            "permissions": {"allow": ["Read(//home/user/proj/**)", "Edit(//home/user/proj/**)"]}
+        })
+        result = sandbox_init(path="/extra/path")
+        sandbox = _read_sandbox(user_settings)
+        fs = sandbox.get("filesystem", {})
+        assert isinstance(fs, dict)
+        aw = fs.get("allowWrite", [])
+        assert "/home/user/proj" in aw
+        assert "/extra/path" in aw
+
+
+# ---------------------------------------------------------------------------
+# Domain tools
+# ---------------------------------------------------------------------------
+
+
+def _read_sandbox_domains(path: Path) -> list[str]:
+    sandbox = _read_sandbox(path)
+    net = sandbox.get("network", {})
+    assert isinstance(net, dict)
+    return net.get("allowedDomains", [])  # type: ignore[return-value]
+
+
+class TestAddDomain:
+    def test_adds_domain(self, user_settings: Path) -> None:
+        result = add_domain("github.com")
+        assert "github.com" in result
+        assert "github.com" in _read_sandbox_domains(user_settings)
+
+    def test_idempotent(self, user_settings: Path) -> None:
+        add_domain("github.com")
+        result = add_domain("github.com")
+        assert "already present" in result
+        assert _read_sandbox_domains(user_settings).count("github.com") == 1
+
+
+class TestRemoveDomain:
+    def test_removes_domain(self, user_settings: Path) -> None:
+        add_domain("github.com")
+        result = remove_domain("github.com")
+        assert "Removed" in result
+        assert "github.com" not in _read_sandbox_domains(user_settings)
+
+    def test_not_found(self, user_settings: Path) -> None:
+        result = remove_domain("nonexistent.com")
+        assert "not found" in result
+
+
+# ---------------------------------------------------------------------------
+# Filesystem deny tools
+# ---------------------------------------------------------------------------
+
+
+def _read_sandbox_deny_write(path: Path) -> list[str]:
+    sandbox = _read_sandbox(path)
+    fs = sandbox.get("filesystem", {})
+    assert isinstance(fs, dict)
+    return fs.get("denyWrite", [])  # type: ignore[return-value]
+
+
+def _read_sandbox_deny_read(path: Path) -> list[str]:
+    sandbox = _read_sandbox(path)
+    fs = sandbox.get("filesystem", {})
+    assert isinstance(fs, dict)
+    return fs.get("denyRead", [])  # type: ignore[return-value]
+
+
+class TestDenyWrite:
+    def test_adds_path(self, user_settings: Path) -> None:
+        result = deny_write("/etc/passwd")
+        assert "/etc/passwd" in result
+        assert "/etc/passwd" in _read_sandbox_deny_write(user_settings)
+
+    def test_idempotent(self, user_settings: Path) -> None:
+        deny_write("/etc/passwd")
+        result = deny_write("/etc/passwd")
+        assert "already" in result
+        assert _read_sandbox_deny_write(user_settings).count("/etc/passwd") == 1
+
+
+class TestRemoveDenyWrite:
+    def test_removes_path(self, user_settings: Path) -> None:
+        deny_write("/etc/passwd")
+        result = remove_deny_write("/etc/passwd")
+        assert "Removed" in result
+        assert "/etc/passwd" not in _read_sandbox_deny_write(user_settings)
+
+    def test_not_found(self, user_settings: Path) -> None:
+        result = remove_deny_write("/nonexistent")
+        assert "not in denyWrite" in result
+
+
+class TestDenyRead:
+    def test_adds_path(self, user_settings: Path) -> None:
+        result = deny_read("/etc/shadow")
+        assert "/etc/shadow" in result
+        assert "/etc/shadow" in _read_sandbox_deny_read(user_settings)
+
+    def test_idempotent(self, user_settings: Path) -> None:
+        deny_read("/etc/shadow")
+        result = deny_read("/etc/shadow")
+        assert "already" in result
+        assert _read_sandbox_deny_read(user_settings).count("/etc/shadow") == 1
+
+
+class TestRemoveDenyRead:
+    def test_removes_path(self, user_settings: Path) -> None:
+        deny_read("/etc/shadow")
+        result = remove_deny_read("/etc/shadow")
+        assert "Removed" in result
+        assert "/etc/shadow" not in _read_sandbox_deny_read(user_settings)
+
+    def test_not_found(self, user_settings: Path) -> None:
+        result = remove_deny_read("/nonexistent")
+        assert "not in denyRead" in result

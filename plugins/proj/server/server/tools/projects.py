@@ -15,7 +15,12 @@ from server.lib.models import (
     RepoEntry,
     validate_project_name,
 )
-from server.lib.zoxide import resolve_enabled as _zoxide_enabled, zoxide_boost, zoxide_remove
+from server.lib.zoxide import (
+    list_worktree_paths,
+    resolve_enabled as _zoxide_enabled,
+    zoxide_boost,
+    zoxide_remove,
+)
 from server.tools.config import require_config, require_project
 
 if TYPE_CHECKING:
@@ -32,13 +37,10 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
     todos_yaml = proj_dir / "todos.yaml"
     if not todos_yaml.exists():
         todos_yaml.write_text("todos: []\n")
-    agents_yaml = proj_dir / "agents.yaml"
-    if not agents_yaml.exists():
-        agents_yaml.write_text("version: 1\nagents:\n  define: null\n  research: null\n  decompose: null\n  execute: null\n")
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_init, proj_list, proj_get, proj_get_active, proj_set_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
+    """Register proj_init, proj_list, proj_get, proj_get_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
 
     @app.tool(description="Initialize tracking for a new project. Accepts multiple directories via the dirs parameter (list of {path, label} dicts). The legacy path parameter is kept for backward compatibility and creates a single directory with label 'code'.")
     def proj_init(
@@ -121,9 +123,10 @@ def register(app: FastMCP) -> None:
             tags=tags or [],
         )
         index.projects[name] = entry
-        if index.active is None:
-            index.active = name
         storage.save_index(cfg, index)
+
+        # Auto-set as session active so the newly created project is immediately usable
+        state.set_session_active(name)
 
         return f"Initialized project '{name}' at {tracking}."
 
@@ -171,26 +174,6 @@ def register(app: FastMCP) -> None:
             return "No active project."
         meta = storage.load_meta(cfg, name)
         return json.dumps(meta.to_dict(), indent=2)
-
-    @app.tool(description="Set the active project by name.")
-    def proj_set_active(name: str) -> str:
-        import difflib
-
-        cfg = require_config()
-        index = storage.load_index(cfg)
-        if name not in index.projects:
-            candidates = [k for k, v in index.projects.items() if not v.archived]
-            matches = difflib.get_close_matches(name, candidates, n=3, cutoff=0.4)
-            if not matches:
-                all_names = ", ".join(sorted(candidates)) if candidates else "(none)"
-                return f"Project '{name}' not found. Available: {all_names}"
-            if len(matches) == 1:
-                name = matches[0]
-            else:
-                return f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"
-        index.active = name
-        storage.save_index(cfg, index)
-        return f"Active project set to '{name}'."
 
     @app.tool(description="Update project metadata fields.")
     def proj_update_meta(
@@ -262,13 +245,18 @@ def register(app: FastMCP) -> None:
                 for repo in meta.repos:
                     if repo.path not in skip_paths:
                         zoxide_remove(repo.path)
+                # Also remove worktree paths for base repos
+                for base_path in skip_paths:
+                    for wt_path in list_worktree_paths(base_path):
+                        zoxide_remove(wt_path)
         except FileNotFoundError:
             pass  # No meta file — skip zoxide removal
 
         index.projects[project_name].archived = True
-        if index.active == project_name:
-            index.active = None
         storage.save_index(cfg, index)
+        # Clear session active if archiving the current session project
+        if state.get_session_active() == project_name:
+            state.clear_session_active()
         return f"Archived project '{project_name}'."
 
     @app.tool(description="Add a repository path to a project.")

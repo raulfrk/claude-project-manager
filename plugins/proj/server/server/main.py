@@ -5,12 +5,11 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from server.lib import state
-from server.tools import agents, config, content, context, explore, git, migrate, perms_grant, perms_sync, projects, todos
+from server.tools import config, content, context, explore, git, migrate, perms_grant, perms_sync, projects, todos
 from server.tools.context import ctx_detect_project_name
 
 mcp = FastMCP("proj")
 config.register(mcp)
-agents.register(mcp)
 projects.register(mcp)
 todos.register(mcp)
 content.register(mcp)

@@ -24,7 +24,7 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 
 - **`manual`** — marks a todo as requiring human execution. Claude will not execute it.
   - `/proj:execute <id>` shows a warning and stops: "⚠️ Todo <id> is tagged `manual` — execute it yourself, then run `/proj:todo done <id>`"
-  - `/proj:full-workflow <id>` runs define/research/decompose normally but skips the execute step
+  - `/proj:run <id>` runs define/decompose normally but skips the execute step
   - In range/batch mode, manual todos are skipped at execute with a warning in the summary
   - MCP guard: `todo_check_executable(todo_id)` returns an error for manual-tagged todos
   - Display: `[manual]` badge shown after priority in all todo list/tree/decompose output

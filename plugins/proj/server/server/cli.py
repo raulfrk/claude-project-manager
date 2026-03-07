@@ -16,22 +16,20 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
         return
 
     cfg = storage.load_config()
-    index = storage.load_index(cfg)
 
-    # Auto-detect project from cwd (session-only: do NOT persist to disk)
-    if cwd and not index.active:
-        name = ctx_detect_project_name(cwd)
-        if name:
-            index.active = name
+    # Auto-detect project from cwd (session-only)
+    detected: str | None = None
+    if cwd:
+        detected = ctx_detect_project_name(cwd)
 
-    if not index.active:
+    if not detected:
         return
 
     try:
-        context = _build_context(cfg, index.active, compact=compact)
+        context = _build_context(cfg, detected, compact=compact)
         print(context)
         if not compact:
-            print(f'\n⚡ **Activate**: Call `proj_load_session("{index.active}")` to register this project for MCP tools this session.')
+            print(f'\n⚡ **Activate**: Call `proj_load_session("{detected}")` to register this project for MCP tools this session.')
     except FileNotFoundError:
         print("Warning: project config not found, skipping session context", file=sys.stderr)
 
@@ -41,11 +39,15 @@ def cmd_session_end(cwd: str | None) -> None:
     if not storage.config_exists():
         return
     cfg = storage.load_config()
-    index = storage.load_index(cfg)
-    if not index.active:
+
+    # Detect project from cwd (session-only)
+    detected: str | None = None
+    if cwd:
+        detected = ctx_detect_project_name(cwd)
+    if not detected:
         return
     try:
-        meta = storage.load_meta(cfg, index.active)
+        meta = storage.load_meta(cfg, detected)
         today = str(date.today())
         if meta.dates.last_updated == today:
             return
