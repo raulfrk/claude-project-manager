@@ -67,9 +67,12 @@ Read the sibling `<step>/SKILL.md` file. Extract instructions after the second `
 ### Iteration <i>/<N> complete — Next Action?
 
 1. **Continue** — Start iteration <i+1>
-2. **Edit** — Modify this iteration's output
-3. **Stop** — Exit workflow now (completed steps are saved)
+2. **Skip to execute** — Prep has converged, proceed to execute
+3. **Edit** — Modify this iteration's output
+4. **Stop** — Exit workflow now (completed steps are saved)
 ```
+
+When the user picks option 2, skip all remaining iterations and jump directly to step 5 (Execute).
 
 **5. Execute** (only if `has_execute`)
 
