@@ -35,7 +35,7 @@ def _collect_family(todo_id: str, todos_list: list[Todo]) -> set[str]:
 
 
 def _complete_leaf(
-    cfg: object,
+    cfg: ProjConfig,
     name: str,
     todo: Todo,
     todos: list[Todo],
@@ -61,7 +61,7 @@ def _complete_leaf(
 
 
 def _complete_child(
-    cfg: object,
+    cfg: ProjConfig,
     name: str,
     todo: Todo,
     todos: list[Todo],
@@ -75,7 +75,7 @@ def _complete_child(
 
 
 def _complete_parent(
-    cfg: object,
+    cfg: ProjConfig,
     name: str,
     todo: Todo,
     todos: list[Todo],
@@ -164,6 +164,9 @@ def register(app: FastMCP) -> None:
             parent_todo = next((t for t in todos if t.id == parent), None)
             if not parent_todo:
                 return f"Parent todo '{parent}' not found."
+
+        if due_date is not None and not due_date.strip():
+            return "due_date cannot be empty. Omit it or provide a value (e.g. '2026-03-15' or 'next Friday')."
 
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
@@ -301,6 +304,8 @@ def register(app: FastMCP) -> None:
         if todoist_task_id is not None:
             todo.todoist_task_id = todoist_task_id
         if due_date is not None:
+            if not due_date.strip():
+                return "due_date cannot be empty. Omit it or provide a value."
             todo.due_date = due_date
         todo.updated = _today()
         storage.save_todos(cfg, name, todos)
@@ -363,6 +368,9 @@ def register(app: FastMCP) -> None:
         if not blocker:
             return f"Todo '{todo_id}' not found."
         today = _today()
+        self_refs = [bid for bid in blocks_ids if bid == todo_id]
+        if self_refs:
+            return f"Error: todo cannot block itself ('{todo_id}')."
         for blocked_id in blocks_ids:
             target = todo_map.get(blocked_id)
             if not target:

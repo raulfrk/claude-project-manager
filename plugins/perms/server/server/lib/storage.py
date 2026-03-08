@@ -93,12 +93,17 @@ def resolve_target(target: str, scope: str = "user", project_dir: Path | None = 
 def _atomic_write(path: Path, content: str) -> None:
     """Atomically write content to path via a temp file in the same directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    original_mode: int | None = None
+    if path.exists():
+        original_mode = path.stat().st_mode
     fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     tmp = Path(tmp_str)
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
         tmp.replace(path)
+        if original_mode is not None:
+            path.chmod(original_mode & 0o7777)
     except Exception:
         with contextlib.suppress(OSError):
             tmp.unlink()

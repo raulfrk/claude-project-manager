@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 def add_repo(label: str, path: str, default_branch: str = "main") -> str:
     """Register a new base repository."""
+    if not label or not label.strip():
+        return "Error: label cannot be empty."
     abs_path = str(Path(path).expanduser().resolve())
     if not Path(abs_path).exists():
         return f"Error: path does not exist: {abs_path}"

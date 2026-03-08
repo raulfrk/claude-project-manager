@@ -44,6 +44,8 @@ def create_worktree(
     new_branch: bool = True,
 ) -> str:
     """Create a worktree from a registered base repo."""
+    if not branch or not branch.strip():
+        return "Error: branch name cannot be empty."
     repo = get_repo(repo_label)
     if repo is None:
         return f"Error: no repo with label '{repo_label}'. Run /worktree:add-repo first."
@@ -83,7 +85,8 @@ def list_worktrees(repo_label: str | None = None) -> str:
         for entry in entries:
             status = " [locked]" if entry.locked else ""
             status += " [prunable]" if entry.prunable else ""
-            lines.append(f"  {entry.path}  branch={entry.branch}  head={entry.head[:8]}{status}")
+            head_display = entry.head[:8] or "(none)"
+            lines.append(f"  {entry.path}  branch={entry.branch}  head={head_display}{status}")
 
     return "\n".join(lines) if lines else "No worktrees found."
 
@@ -120,6 +123,8 @@ def prune_worktrees(repo_label: str | None = None) -> str:
     repos = config.base_repos
     if repo_label:
         repos = [r for r in repos if r.label == repo_label]
+        if not repos:
+            return f"No repo with label '{repo_label}'."
 
     results: list[str] = []
     for repo in repos:

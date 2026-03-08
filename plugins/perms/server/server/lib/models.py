@@ -14,7 +14,7 @@ class Permissions:
     allow: list[str] = field(default_factory=list)
     ask: list[str] = field(default_factory=list)
     deny: list[str] = field(default_factory=list)
-    additional_directories: list[str] = field(default_factory=list)
+    additional_directories: list[str] = field(default_factory=list)  # round-trip preservation for Claude Code
 
     def to_dict(self) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {}
@@ -127,7 +127,7 @@ class SandboxConfig:
     enable_weaker_network_isolation: bool = False
     filesystem: SandboxFilesystem = field(default_factory=SandboxFilesystem)
     network: SandboxNetwork = field(default_factory=SandboxNetwork)
-    raw: dict[str, object] = field(default_factory=dict)
+    raw: dict[str, object] = field(default_factory=dict)  # unknown keys preserved for forward compatibility
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = dict(self.raw)
@@ -179,7 +179,7 @@ class SettingsFile:
     path: Path
     permissions: Permissions = field(default_factory=Permissions)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
-    raw: dict[str, object] = field(default_factory=dict)
+    raw: dict[str, object] = field(default_factory=dict)  # unknown keys preserved for forward compatibility
 
     def to_dict(self) -> dict[str, object]:
         result = dict(self.raw)

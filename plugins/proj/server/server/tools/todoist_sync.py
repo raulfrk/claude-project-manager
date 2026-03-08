@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 # ── Priority mapping ─────────────────────────────────────────────────────────
 
-_TODOIST_TO_LOCAL: dict[str, str] = {"p2": "high", "p3": "medium", "p4": "low"}
+_TODOIST_TO_LOCAL: dict[str, str] = {"p1": "high", "p2": "high", "p3": "medium", "p4": "low"}
 _LOCAL_TO_TODOIST: dict[str, str] = {"high": "p2", "medium": "p3", "low": "p4"}
 
 
@@ -36,9 +36,10 @@ def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bo
     """Return True if title matches an archived todo (exact or fuzzy)."""
     if not archived:
         return False
-    if any(t.title.lower() == title.lower() for t in archived):
-        return True
+    lower_title = title.lower()
     titles = [t.title for t in archived]
+    if any(t.lower() == lower_title for t in titles):
+        return True
     return bool(difflib.get_close_matches(title, titles, n=1, cutoff=threshold))
 
 
@@ -399,6 +400,7 @@ def apply_changes(
         counts["completed"] += 1
         # Leaf todos (no parent, no children) get archived
         if not todo.parent and not todo.children:
+            todo.todoist_description_synced = ""
             to_archive.append(todo)
             # Clean up blocking references
             for t in todos:

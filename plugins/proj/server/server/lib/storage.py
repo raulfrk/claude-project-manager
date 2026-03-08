@@ -199,8 +199,8 @@ def append_note(cfg: ProjConfig, project_name: str, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     today = str(date.today())
     entry = f"\n## {today}\n\n{text.strip()}\n"
-    with path.open("a") as f:
-        f.write(entry)
+    existing = path.read_text() if path.exists() else ""
+    _atomic_write_text(path, existing + entry)
 
 
 def read_notes(cfg: ProjConfig, project_name: str, max_chars: int = 2000) -> str:
@@ -286,6 +286,20 @@ def _write_yaml(path: Path, data: dict[str, object]) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Atomically write raw text to a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
         tmp.replace(path)
     except Exception:
         tmp.unlink(missing_ok=True)
