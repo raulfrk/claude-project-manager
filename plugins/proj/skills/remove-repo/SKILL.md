@@ -2,7 +2,7 @@
 name: remove-repo
 description: Remove a directory or repository from the active project by label. Validates the label exists, guards against removing the last repo, confirms with user, revokes permissions. Use when the user says "remove repo", "unregister repo", or "remove directory from project".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__config_load, mcp__proj__proj_remove_repo, mcp__proj__proj_setup_permissions, mcp__perms__perms_remove_allow
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__config_load, mcp__proj__proj_remove_repo, mcp__proj__proj_setup_permissions, mcp__perms__perms_remove_allow, mcp__proj__tracking_git_flush
 argument-hint: "<label>"
 ---
 
@@ -48,3 +48,5 @@ Remove a directory or repository from the active project by label.
    - Permissions revoked
    - Remaining repos: <count>
    ```
+
+10. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Remove repo: {label}"`.

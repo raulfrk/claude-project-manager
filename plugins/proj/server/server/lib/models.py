@@ -42,6 +42,28 @@ class TodoistSync:
 
 
 @dataclass
+class GitTracking:
+    enabled: bool = False
+    github_enabled: bool = False
+    github_repo_format: str = "tracking-{project-name}"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "github_enabled": self.github_enabled,
+            "github_repo_format": self.github_repo_format,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> GitTracking:
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            github_enabled=bool(data.get("github_enabled", False)),
+            github_repo_format=str(data.get("github_repo_format", "tracking-{project-name}")),
+        )
+
+
+@dataclass
 class TrelloListMappings:
     created: str = "Backlog"  # List name or ID where new todos are added as cards
     done: str = "Done"        # List name or ID where completed todos are moved
@@ -126,6 +148,7 @@ class ProjConfig:
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     todoist: TodoistSync = field(default_factory=TodoistSync)
     trello: TrelloSync = field(default_factory=TrelloSync)
+    git_tracking: GitTracking = field(default_factory=GitTracking)
     # Optional integration flags set by /proj:init-plugin
     perms_integration: bool = False
     worktree_integration: bool = False
@@ -141,6 +164,7 @@ class ProjConfig:
             "default_priority": self.default_priority,
             "permissions": self.permissions.to_dict(),
             "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict()},
+            "git_tracking": self.git_tracking.to_dict(),
             "perms_integration": self.perms_integration,
             "worktree_integration": self.worktree_integration,
             "zoxide_integration": self.zoxide_integration,
@@ -163,6 +187,10 @@ class ProjConfig:
         if not isinstance(perms_raw, dict):
             perms_raw = {}
 
+        git_tracking_raw = data.get("git_tracking", {})
+        if not isinstance(git_tracking_raw, dict):
+            git_tracking_raw = {}
+
         pbd = data.get("projects_base_dir")
 
         return cls(
@@ -173,6 +201,7 @@ class ProjConfig:
             permissions=PermissionsConfig.from_dict(perms_raw),
             todoist=TodoistSync.from_dict(todoist_raw),
             trello=TrelloSync.from_dict(trello_raw),
+            git_tracking=GitTracking.from_dict(git_tracking_raw),
             perms_integration=bool(data.get("perms_integration", False)),
             worktree_integration=bool(data.get("worktree_integration", False)),
             zoxide_integration=bool(data.get("zoxide_integration", False)),
@@ -369,6 +398,33 @@ class ProjectTrelloConfig:
 
 
 @dataclass
+class ProjectGitTrackingConfig:
+    """Per-project git tracking config — overrides global GitTracking defaults."""
+
+    enabled: bool | None = None
+    github_enabled: bool | None = None
+    github_repo_format: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "github_enabled": self.github_enabled,
+            "github_repo_format": self.github_repo_format,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ProjectGitTrackingConfig:
+        enabled_raw = data.get("enabled")
+        gh_raw = data.get("github_enabled")
+        fmt_raw = data.get("github_repo_format")
+        return cls(
+            enabled=bool(enabled_raw) if enabled_raw is not None else None,
+            github_enabled=bool(gh_raw) if gh_raw is not None else None,
+            github_repo_format=str(fmt_raw) if isinstance(fmt_raw, str) else None,
+        )
+
+
+@dataclass
 class ProjectMeta:
     name: str
     description: str = ""
@@ -384,6 +440,7 @@ class ProjectMeta:
     permissions: ProjectPermissions = field(default_factory=ProjectPermissions)
     todoist: ProjectTodoistConfig = field(default_factory=ProjectTodoistConfig)
     trello: ProjectTrelloConfig = field(default_factory=ProjectTrelloConfig)
+    git_tracking: ProjectGitTrackingConfig = field(default_factory=ProjectGitTrackingConfig)
     zoxide_integration: bool | None = None  # None = use global config default
     claudemd_management: bool | None = None  # None = use global config default
 
@@ -404,6 +461,7 @@ class ProjectMeta:
             "permissions": self.permissions.to_dict(),
             "todoist": self.todoist.to_dict(),
             "trello": self.trello.to_dict(),
+            "git_tracking": self.git_tracking.to_dict(),
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
         }
@@ -423,6 +481,7 @@ class ProjectMeta:
         dates_raw = data.get("dates", {})
         todoist_raw = data.get("todoist", {})
         trello_raw = data.get("trello", {})
+        git_tracking_raw = data.get("git_tracking", {})
 
         return cls(
             name=str(data.get("name", "")),
@@ -448,6 +507,9 @@ class ProjectMeta:
             ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
             trello=ProjectTrelloConfig.from_dict(
                 trello_raw if isinstance(trello_raw, dict) else {}
+            ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            git_tracking=ProjectGitTrackingConfig.from_dict(
+                git_tracking_raw if isinstance(git_tracking_raw, dict) else {}
             ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
             zoxide_integration=bool(zi_raw) if (zi_raw := data.get("zoxide_integration")) is not None else None,
             claudemd_management=bool(cm_raw) if (cm_raw := data.get("claudemd_management")) is not None else None,

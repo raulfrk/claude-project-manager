@@ -2,7 +2,7 @@
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for root todos. Syncs root-level todos only — child/subtodos are never synced. Use when the user says "sync with Trello", "sync trello", or "trello sync".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__config_load
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__config_load, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose
 ---
@@ -200,6 +200,8 @@ The following operations are performed by other skills (e.g., after `todo_add`, 
 - The `delorenj/mcp-server-trello` tools are: `add_card_to_list`, `update_card_details`, `move_card`, `get_cards_by_list_id`, `get_lists`, `get_recent_activity`.
 - If `update_card_details` does not support `closed`, use `move_card` to the "Done" list as the archive equivalent.
 - `trello_card_id` is stored on the local todo and is the stable link. Never overwrite it with a different card ID.
+
+8. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello"`.
 
 ## Suggested next
 

@@ -2,7 +2,7 @@
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -111,5 +111,7 @@ Decompose todo $ARGUMENTS into sub-todos.
    - (If the decompose target itself lacks a `todoist_task_id`, omit `parentId` — the new subtodos will appear as top-level tasks in Todoist.)
 
 8. Show the final tree via `mcp__proj__todo_tree`.
+
+9. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Decompose: {todo-id}"`.
 
 💡 Suggested next: (1) /proj:execute 1.1 — start with the first sub-todo  (2) /proj:run 1 — run the full workflow

@@ -2,7 +2,7 @@
 name: init
 description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", "set up project tracking for X", "new project", "create project", or "initialize tracking".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, Bash
+allowed-tools: mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__proj__tracking_git_flush, Bash
 argument-hint: "[project-name]"
 ---
 
@@ -132,16 +132,29 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
         - If **yes**: `mkdir -p <path>`, note the fallback.
         - If **no**: note the failure and continue.
 
-9. **Todoist** (if `todoist.enabled: true` in config):
+9. **Git tracking overrides** (if `git_tracking.enabled: true` in config):
+   Ask:
+   ```
+   Per-project git tracking overrides (Enter to use global defaults):
+   - Override git tracking for this project? [use global]:
+   - Override GitHub push for this project? [use global]:
+   - Custom GitHub repo name format? [use global]:
+   ```
+   - If any answer is not "use global" / empty, call `mcp__proj__proj_update_meta` with the corresponding `git_tracking_enabled`, `git_tracking_github_enabled`, or `git_tracking_github_repo_format` values.
+   - If all answers are empty/default: skip (None values inherit global defaults).
+
+10. **Todoist** (if `todoist.enabled: true` in config):
    - Use `mcp__{todoist.mcp_server}__add-projects` with the project name (server name from config)
    - Store todoist_project_id via `mcp__proj__proj_update_meta`
    - If the Todoist tool call fails (server not running or not configured), warn: "Todoist project could not be created. You can link it later via `/proj:sync`." and continue.
 
-10. Show summary of what was created. List all directories:
+11. Show summary of what was created. List all directories:
     ```
     Directories:
       - <label>: <path> (new directory | existing repo | worktree of <repo>, branch: <branch>)
       ...
     ```
+
+12. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
 
 💡 Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview

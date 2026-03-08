@@ -2,7 +2,7 @@
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, Bash
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, Bash, mcp__proj__tracking_git_flush
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -28,13 +28,19 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
         - Store as `todoist_mcp_server`; default to `"claude_ai_Todoist"` if the user presses Enter without typing
    f. **Git integration** — "Enable git integration? [yes]"
       - Explain: if enabled, /proj:save will detect recent commits and suggest todo updates
+   f2. **Git tracking** — "Auto-commit project tracking data (todos, notes, sessions) with git? [no]"
+      - Explain: if enabled, a git repo is created in each project's tracking directory and changes are auto-committed after each skill invocation
+      - If yes: "Also push tracking repos to GitHub as private repos? [no]"
+        - If yes: "GitHub repo name format? [tracking-{project-name}]"
+          - Explain: `{project-name}` is replaced with the project name (e.g. project "my-app" → repo "tracking-my-app")
+          - Store as `git_tracking_github_repo_format`; default to `"tracking-{project-name}"` if the user presses Enter
    g. **Zoxide integration** — "Enable zoxide integration? [no]"
       - Explain: if enabled, project directories are boosted in zoxide's frecency database on init/load for faster `cd` navigation
    h. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
    i. **Plugins** — "Do you have the `perms` plugin installed? [no]"
    j. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
 
-3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`.
+3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
 
 4. **If `perms` plugin is installed**: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
    - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`

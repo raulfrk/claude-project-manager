@@ -2,7 +2,7 @@
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, Task, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, Task, EnterPlanMode, ExitPlanMode
 argument-hint: "[todo-id | range] e.g. 1 or 2-4"
 ---
 
@@ -64,5 +64,7 @@ Phase 2 — Execute (sequential, in dependency order):
 Execute each todo according to its approved plan, one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan, call `todo_complete` when done.
 
 **Note:** Root todo execution does NOT auto-recurse into children. To execute children, specify their IDs explicitly.
+
+6. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Execute: {todo-id}"`.
 
 💡 Suggested next: (1) /proj:save — save session and reconcile git  (2) /proj:status — see updated project overview

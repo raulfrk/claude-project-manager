@@ -30,7 +30,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "author": { "name": "raulfrk" },
       "license": "MIT",
       "category": "productivity",

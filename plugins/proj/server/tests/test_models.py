@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from server.lib.models import Todo, TodoistSync
+from server.lib.models import GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta, Todo, TodoistSync
 
 
 class TestTodoistSyncModel:
@@ -117,3 +117,72 @@ class TestTodoDueDateModel:
         todo = Todo.from_dict(data)
 
         assert todo.due_date is None
+
+
+class TestGitTracking:
+    def test_defaults(self) -> None:
+        gt = GitTracking()
+        assert gt.enabled is False
+        assert gt.github_enabled is False
+        assert gt.github_repo_format == "tracking-{project-name}"
+
+    def test_to_dict_from_dict_roundtrip(self) -> None:
+        gt = GitTracking(enabled=True, github_enabled=True, github_repo_format="custom-{project-name}")
+        data = gt.to_dict()
+        gt2 = GitTracking.from_dict(data)
+        assert gt2.enabled is True
+        assert gt2.github_enabled is True
+        assert gt2.github_repo_format == "custom-{project-name}"
+
+    def test_proj_config_includes_git_tracking(self) -> None:
+        cfg = ProjConfig()
+        d = cfg.to_dict()
+        assert "git_tracking" in d
+        cfg2 = ProjConfig.from_dict(d)
+        assert cfg2.git_tracking.enabled is False
+
+
+class TestProjectGitTrackingConfig:
+    def test_defaults_all_none(self) -> None:
+        pgt = ProjectGitTrackingConfig()
+        assert pgt.enabled is None
+        assert pgt.github_enabled is None
+        assert pgt.github_repo_format is None
+
+    def test_to_dict_from_dict_roundtrip(self) -> None:
+        pgt = ProjectGitTrackingConfig(enabled=True, github_enabled=False, github_repo_format="custom-{project-name}")
+        data = pgt.to_dict()
+        pgt2 = ProjectGitTrackingConfig.from_dict(data)
+        assert pgt2.enabled is True
+        assert pgt2.github_enabled is False
+        assert pgt2.github_repo_format == "custom-{project-name}"
+
+    def test_none_values_roundtrip(self) -> None:
+        pgt = ProjectGitTrackingConfig()
+        data = pgt.to_dict()
+        pgt2 = ProjectGitTrackingConfig.from_dict(data)
+        assert pgt2.enabled is None
+        assert pgt2.github_enabled is None
+        assert pgt2.github_repo_format is None
+
+    def test_project_meta_includes_git_tracking(self) -> None:
+        meta = ProjectMeta(name="test")
+        d = meta.to_dict()
+        assert "git_tracking" in d
+        meta2 = ProjectMeta.from_dict(d)
+        assert meta2.git_tracking.enabled is None
+
+    def test_project_meta_roundtrip_with_overrides(self) -> None:
+        meta = ProjectMeta(name="test")
+        meta.git_tracking = ProjectGitTrackingConfig(enabled=True, github_enabled=True)
+        d = meta.to_dict()
+        meta2 = ProjectMeta.from_dict(d)
+        assert meta2.git_tracking.enabled is True
+        assert meta2.git_tracking.github_enabled is True
+        assert meta2.git_tracking.github_repo_format is None
+
+    def test_backward_compat_no_git_tracking_key(self) -> None:
+        """Old meta without git_tracking key deserializes with all-None defaults."""
+        data: dict[str, object] = {"name": "old-project", "status": "active"}
+        meta = ProjectMeta.from_dict(data)
+        assert meta.git_tracking.enabled is None

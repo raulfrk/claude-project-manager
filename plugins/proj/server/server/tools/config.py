@@ -78,6 +78,9 @@ def register(app: FastMCP) -> None:
             f"  worktree_integration: {cfg.worktree_integration}\n"
             f"  zoxide_integration: {cfg.zoxide_integration}\n"
             f"  claudemd_management: {cfg.claudemd_management}\n"
+            f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
+            f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
+            f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
             f"  config_path: {storage.config_path()}"
         )
 
@@ -103,6 +106,9 @@ def register(app: FastMCP) -> None:
         worktree_integration: bool = False,
         zoxide_integration: bool = False,
         claudemd_management: bool = False,
+        git_tracking_enabled: bool = False,
+        git_tracking_github_enabled: bool = False,
+        git_tracking_github_repo_format: str = "tracking-{project-name}",
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -124,6 +130,9 @@ def register(app: FastMCP) -> None:
         cfg.trello.mcp_server = trello_mcp_server
         cfg.trello.default_board_id = trello_default_board_id
         cfg.trello.on_delete = trello_on_delete
+        cfg.git_tracking.enabled = git_tracking_enabled
+        cfg.git_tracking.github_enabled = git_tracking_github_enabled
+        cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -180,6 +189,9 @@ def register(app: FastMCP) -> None:
         worktree_integration: bool | None = None,
         zoxide_integration: bool | None = None,
         claudemd_management: bool | None = None,
+        git_tracking_enabled: bool | None = None,
+        git_tracking_github_enabled: bool | None = None,
+        git_tracking_github_repo_format: str | None = None,
         investigation_tools: list[str] | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
@@ -221,6 +233,10 @@ def register(app: FastMCP) -> None:
         if trello_on_delete is not None and trello_on_delete not in ("archive", "delete"):
             return "Invalid trello_on_delete: must be 'archive' or 'delete'."
 
+        if git_tracking_github_repo_format is not None:
+            if not git_tracking_github_repo_format or "\x00" in git_tracking_github_repo_format:
+                return "Invalid git_tracking_github_repo_format: must be a non-empty string without null bytes."
+
         cfg = require_config()
         if tracking_dir is not None:
             cfg.tracking_dir = tracking_dir
@@ -256,6 +272,12 @@ def register(app: FastMCP) -> None:
             cfg.zoxide_integration = zoxide_integration
         if claudemd_management is not None:
             cfg.claudemd_management = claudemd_management
+        if git_tracking_enabled is not None:
+            cfg.git_tracking.enabled = git_tracking_enabled
+        if git_tracking_github_enabled is not None:
+            cfg.git_tracking.github_enabled = git_tracking_github_enabled
+        if git_tracking_github_repo_format is not None:
+            cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
         if investigation_tools is not None:
             cfg.permissions.investigation_tools = investigation_tools
         storage.save_config(cfg)

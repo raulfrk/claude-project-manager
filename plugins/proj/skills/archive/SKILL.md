@@ -2,7 +2,7 @@
 name: archive
 description: Archive a completed project, removing it from the active list. Use when the user says "archive project", "mark project complete", or "archive <name>".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_archive, mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__todo_list
+allowed-tools: mcp__proj__proj_archive, mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__todo_list, mcp__proj__tracking_git_flush
 argument-hint: "[project-name]"
 ---
 
@@ -24,5 +24,7 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
 4. Call `mcp__proj__proj_archive`.
 
 5. If this was the active project: "No active project now. Use /proj:switch to set a new one."
+
+6. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Archive: {name}"`.
 
 💡 Suggested next: (1) /proj:switch — switch to another project

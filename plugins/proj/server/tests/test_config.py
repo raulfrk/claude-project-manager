@@ -256,3 +256,34 @@ class TestConfigUpdateIntegrationFlags:
         loaded = storage.load_config()
         assert loaded.perms_integration is False
         assert loaded.worktree_integration is False
+
+
+class TestGitTrackingConfig:
+    @pytest.mark.anyio
+    async def test_config_init_git_tracking(self, mcp_app: Any, cfg: ProjConfig) -> None:
+        result = await call_tool(
+            mcp_app, "config_init",
+            git_tracking_enabled=True,
+            git_tracking_github_enabled=True,
+            git_tracking_github_repo_format="my-{project-name}",
+        )
+        assert "saved" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.git_tracking.enabled is True
+        assert loaded.git_tracking.github_enabled is True
+        assert loaded.git_tracking.github_repo_format == "my-{project-name}"
+
+    @pytest.mark.anyio
+    async def test_config_update_git_tracking(self, mcp_app: Any, cfg: ProjConfig) -> None:
+        result = await call_tool(mcp_app, "config_update", git_tracking_enabled=True)
+        assert "updated" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.git_tracking.enabled is True
+        assert loaded.git_tracking.github_enabled is False  # unchanged
+
+    @pytest.mark.anyio
+    async def test_config_load_shows_git_tracking(self, mcp_app: Any, cfg: ProjConfig) -> None:
+        result = await call_tool(mcp_app, "config_load")
+        assert "git_tracking.enabled" in result
+        assert "git_tracking.github_enabled" in result
+        assert "git_tracking.github_repo_format" in result

@@ -3,7 +3,7 @@ name: sync
 description: Manually trigger a full bidirectional Todoist sync. Always runs regardless of auto_sync setting. Use when the user says "sync with Todoist", "sync todos", or "pull from Todoist".
 argument-hint: "[all | everything]"
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, mcp__proj__config_load
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose
 ---
@@ -83,6 +83,8 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
    Ghosts resolved: {ghost_close_count} Todoist tasks closed (matched archived todos)
    Removed from Todoist (root_only): {root_only_cleanup_count} child tasks deleted
    ```
+
+6. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Todoist"`.
 
 Suggested next: /proj:status -- see updated project overview
 

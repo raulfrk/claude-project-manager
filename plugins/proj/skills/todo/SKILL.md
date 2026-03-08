@@ -2,7 +2,7 @@
 name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta
+allowed-tools: mcp__proj__todo_add, mcp__proj__todo_list, mcp__proj__todo_get, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__todo_block, mcp__proj__todo_unblock, mcp__proj__todo_delete, mcp__proj__todo_ready, mcp__proj__todo_tree, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 context: fork
 agent: general-purpose
@@ -79,6 +79,8 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
 
 If $ARGUMENTS is empty or ambiguous, output usage: "Usage: /proj:todo [add|update|done|list|tree|block|unblock|delete] [args]"
 Always confirm the action taken and show the resulting todo.
+
+**Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Todo update"`.
 
 💡 After adding a vague todo → suggest /proj:define <id>
    After adding a technical todo → suggest /proj:define <id>

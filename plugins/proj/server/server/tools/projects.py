@@ -125,6 +125,13 @@ def register(app: FastMCP) -> None:
         index.projects[name] = entry
         storage.save_index(cfg, index)
 
+        # Initialize git tracking for tracking directory if enabled
+        if cfg.git_tracking.enabled:
+            from server.lib.tracking_git import ensure_git_repo, tracking_commit
+            proj_tracking = Path(cfg.tracking_dir).expanduser() / name
+            if ensure_git_repo(proj_tracking):
+                tracking_commit(proj_tracking, f"Initial commit: project '{name}'")
+
         # Auto-set as session active so the newly created project is immediately usable
         state.set_session_active(name)
 
@@ -186,6 +193,9 @@ def register(app: FastMCP) -> None:
         git_enabled: bool | None = None,
         claudemd_management: bool | None = None,
         zoxide_integration: bool | None = None,
+        git_tracking_enabled: bool | None = None,
+        git_tracking_github_enabled: bool | None = None,
+        git_tracking_github_repo_format: str | None = None,
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
@@ -208,6 +218,12 @@ def register(app: FastMCP) -> None:
             meta.claudemd_management = claudemd_management
         if zoxide_integration is not None:
             meta.zoxide_integration = zoxide_integration
+        if git_tracking_enabled is not None:
+            meta.git_tracking.enabled = git_tracking_enabled
+        if git_tracking_github_enabled is not None:
+            meta.git_tracking.github_enabled = git_tracking_github_enabled
+        if git_tracking_github_repo_format is not None:
+            meta.git_tracking.github_repo_format = git_tracking_github_repo_format
         storage.save_meta(cfg, meta)
         return f"Updated project '{project_name}'."
 

@@ -2,7 +2,7 @@
 name: add-repo
 description: Add a new directory or repository to the active project. Validates the path, detects git repos, registers via proj_add_repo, and auto-grants permissions. Use when the user says "add repo", "add directory to project", or "register another repo".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__config_load, mcp__proj__proj_add_repo, mcp__proj__proj_setup_permissions, Bash
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__config_load, mcp__proj__proj_add_repo, mcp__proj__proj_setup_permissions, mcp__proj__tracking_git_flush, Bash
 argument-hint: "<path> [--label=<label>] [--reference] [--claudemd]"
 ---
 
@@ -52,5 +52,7 @@ Add a new directory or repository to the active project.
    - Mode: reference (read-only) / writable
    - Permissions refreshed
    ```
+
+7. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Add repo: {label}"`.
 
 Suggested next: /proj:status — see updated project overview
