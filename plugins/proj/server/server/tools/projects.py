@@ -128,9 +128,9 @@ def register(app: FastMCP) -> None:
         # Initialize git tracking for tracking directory if enabled
         if cfg.git_tracking.enabled:
             from server.lib.tracking_git import ensure_git_repo, tracking_commit
-            proj_tracking = Path(cfg.tracking_dir).expanduser() / name
-            if ensure_git_repo(proj_tracking):
-                tracking_commit(proj_tracking, f"Initial commit: project '{name}'")
+            root_tracking = Path(cfg.tracking_dir).expanduser()
+            if ensure_git_repo(root_tracking):
+                tracking_commit(root_tracking, f"[{name}] Initial commit: project '{name}'")
 
         # Auto-set as session active so the newly created project is immediately usable
         state.set_session_active(name)

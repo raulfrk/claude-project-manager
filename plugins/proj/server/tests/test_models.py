@@ -124,7 +124,7 @@ class TestGitTracking:
         gt = GitTracking()
         assert gt.enabled is False
         assert gt.github_enabled is False
-        assert gt.github_repo_format == "tracking-{project-name}"
+        assert gt.github_repo_format == "tracking"
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
         gt = GitTracking(enabled=True, github_enabled=True, github_repo_format="custom-{project-name}")

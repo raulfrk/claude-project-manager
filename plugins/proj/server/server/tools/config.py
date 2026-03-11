@@ -108,7 +108,7 @@ def register(app: FastMCP) -> None:
         claudemd_management: bool = False,
         git_tracking_enabled: bool = False,
         git_tracking_github_enabled: bool = False,
-        git_tracking_github_repo_format: str = "tracking-{project-name}",
+        git_tracking_github_repo_format: str = "tracking",
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,

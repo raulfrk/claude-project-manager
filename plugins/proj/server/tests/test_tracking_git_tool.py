@@ -72,7 +72,7 @@ class TestTrackingGitFlush:
         result = await call_tool(mcp_app, "tracking_git_flush")
         data = json.loads(result)
         assert data["status"] == "ok"
-        assert data["message"] == f"Update {project_with_git}"
+        assert data["message"] == f"[{project_with_git}] Update {project_with_git}"
 
     @pytest.mark.anyio
     async def test_flush_per_project_override_disables(self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app) -> None:  # type: ignore[no-untyped-def]

@@ -45,7 +45,7 @@ class TodoistSync:
 class GitTracking:
     enabled: bool = False
     github_enabled: bool = False
-    github_repo_format: str = "tracking-{project-name}"
+    github_repo_format: str = "tracking"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -59,7 +59,7 @@ class GitTracking:
         return cls(
             enabled=bool(data.get("enabled", False)),
             github_enabled=bool(data.get("github_enabled", False)),
-            github_repo_format=str(data.get("github_repo_format", "tracking-{project-name}")),
+            github_repo_format=str(data.get("github_repo_format", "tracking")),
         )
 
 

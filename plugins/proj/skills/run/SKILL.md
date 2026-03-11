@@ -61,7 +61,42 @@ Read the sibling `<step>/SKILL.md` file. Extract instructions after the second `
   - Wait for batch completion. Report failures.
 - After completion: refresh descendant list via `mcp__proj__todo_tree`.
 
+**3.5. Capture iteration snapshots** (only when N > 1)
+
+**Before iteration 1 starts** (after building the initial descendant list but before running any prep steps), capture the pre-existing state as `snapshot_0`:
+- For each todo in the descendant list (including root): read `content_get_requirements` and `content_get_research`
+- Record the descendant list structure: child IDs, titles, and blocked_by for each
+- If descendant list exceeds 15 todos, read content for root-level children only.
+
+**After each iteration's prep steps complete**, capture the current state as `snapshot_<i>` using the same method.
+
 **4. Between-iteration prompt** (skip if last iteration or `--no-interactive`)
+
+**4a. Convergence assessment**
+
+Compare `snapshot_<i>` with `snapshot_<i-1>` across four dimensions:
+
+- **Requirements**: Compare requirements.md text for each todo. Ignore whitespace/formatting/minor rewording. Flag new acceptance criteria, changed goals, or changed testing strategy.
+- **Research**: Compare research.md text. Flag changed recommended approach, new options, or significant new findings.
+- **Structure**: Compare descendant lists. Check for new/removed children or title changes.
+- **Dependencies**: Compare blocked_by relationships. Check for new/removed blocking edges.
+
+Display:
+
+```
+### Convergence Assessment (Iteration <i>)
+
+**Requirements**: [Stable | Minor changes | Significant changes] — <1-line summary>
+**Research**: [Stable | Minor changes | Significant changes] — <1-line summary>
+**Structure**: [Stable | Changed] — <summary>
+**Dependencies**: [Stable | Changed] — <summary>
+
+**Recommendation**: [Ready to execute — prep has converged] OR [Continue iterating — <reason>]
+```
+
+Recommend "Ready to execute" when ALL dimensions are Stable or Minor changes with no new structural additions. Otherwise recommend "Continue iterating".
+
+**4b. Next action prompt**
 
 ```
 ### Iteration <i>/<N> complete — Next Action?
@@ -167,6 +202,25 @@ For each todo in dependency order:
 For each batch in dependency order:
 - Spawn one `general-purpose` Task agent per todo. Each runs `agent_steps` autonomously.
 - Wait for batch completion. Report failures.
+
+**Phase B.5 — Convergence check** (skip if `--no-interactive`, only when N > 1)
+
+**Before iteration 1 starts** (after dependency order but before Phase A), capture pre-existing state as `snapshot_0` for each todo in the input list (requirements, research, tree structure).
+**After each iteration**, capture current state as `snapshot_<i>`.
+
+Compare `snapshot_<i>` with `snapshot_<i-1>` and display:
+
+```
+### Convergence Assessment (Iteration <i>) — Batch
+
+| Todo | Requirements | Research | Structure |
+|------|-------------|----------|-----------|
+| <id> | Stable/Minor/Significant | ... | ... |
+
+**Overall**: [Ready to execute | Continue iterating] — <reason>
+```
+
+Then show the between-iteration prompt (same 4 options as single-ID mode).
 
 **Phase C — Execute (after iteration loop):**
 
