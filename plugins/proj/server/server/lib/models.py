@@ -64,6 +64,18 @@ class GitTracking:
 
 
 @dataclass
+class ArchiveConfig:
+    destination: str = "~/projects/archived"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"destination": self.destination}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ArchiveConfig:
+        return cls(destination=str(data.get("destination", "~/projects/archived")))
+
+
+@dataclass
 class TrelloListMappings:
     created: str = "Backlog"  # List name or ID where new todos are added as cards
     done: str = "Done"        # List name or ID where completed todos are moved
@@ -154,6 +166,7 @@ class ProjConfig:
     worktree_integration: bool = False
     zoxide_integration: bool = False
     claudemd_management: bool = False
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -169,6 +182,7 @@ class ProjConfig:
             "worktree_integration": self.worktree_integration,
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
+            "archive": self.archive.to_dict(),
         }
 
     @classmethod
@@ -191,6 +205,10 @@ class ProjConfig:
         if not isinstance(git_tracking_raw, dict):
             git_tracking_raw = {}
 
+        archive_raw = data.get("archive", {})
+        if not isinstance(archive_raw, dict):
+            archive_raw = {}
+
         pbd = data.get("projects_base_dir")
 
         return cls(
@@ -206,6 +224,7 @@ class ProjConfig:
             worktree_integration=bool(data.get("worktree_integration", False)),
             zoxide_integration=bool(data.get("zoxide_integration", False)),
             claudemd_management=bool(data.get("claudemd_management", False)),
+            archive=ArchiveConfig.from_dict(archive_raw),
         )
 
 

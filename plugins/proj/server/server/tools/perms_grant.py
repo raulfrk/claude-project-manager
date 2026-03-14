@@ -296,6 +296,7 @@ def setup_permissions(
     grant_path_access: bool = True,
     grant_investigation_tools_flag: bool = True,
     mcp_servers: list[str] | None = None,
+    archive_destination: str | None = None,
 ) -> dict[str, int]:
     """Add all project permission rules in a single atomic write.
 
@@ -346,6 +347,37 @@ def setup_permissions(
             new_entries.append(zoxide_entry)
             allow_set.add(zoxide_entry)
             counts["bash_rules"] += 1
+
+    # Archive destination rules
+    if archive_destination:
+        abs_dest = str(Path(archive_destination).expanduser().resolve())
+        # Read/Edit + sandbox write for archive destination
+        for entry in _path_allow_entries(abs_dest):
+            if entry not in allow_set:
+                new_entries.append(entry)
+                allow_set.add(entry)
+                counts["path_rules"] += 1
+        if sandbox_mode and data is not None:
+            if _add_sandbox_write_path(data, abs_dest):
+                counts["path_rules"] += 1
+        # Bash rules for mv/rm/mkdir on archive dest, repo paths, and tracking dir
+        archive_bash_tools = ["mv", "rm", "rm -rf", "mkdir", "mkdir -p"]
+        archive_paths = [abs_dest]
+        for repo in meta.repos:
+            rp = str(Path(repo.path).expanduser().resolve())
+            if rp not in archive_paths:
+                archive_paths.append(rp)
+        if cfg.tracking_dir:
+            tp = str(Path(cfg.tracking_dir).expanduser().resolve())
+            if tp not in archive_paths:
+                archive_paths.append(tp)
+        for path in archive_paths:
+            for tool in archive_bash_tools:
+                entry = _bash_entry(tool, path)
+                if entry not in allow_set:
+                    new_entries.append(entry)
+                    allow_set.add(entry)
+                    counts["bash_rules"] += 1
 
     if new_entries or sum(counts.values()) > 0:
         allow.extend(new_entries)
@@ -410,6 +442,7 @@ def register(app: FastMCP) -> None:
         grant_path_access: bool = True,
         grant_investigation_tools: bool = True,
         mcp_servers: list[str] | None = None,
+        archive_destination: str | None = None,
     ) -> str:
         cfg = require_config()
         index = storage.load_index(cfg)
@@ -425,6 +458,7 @@ def register(app: FastMCP) -> None:
             grant_path_access=grant_path_access,
             grant_investigation_tools_flag=grant_investigation_tools,
             mcp_servers=mcp_servers or [],
+            archive_destination=archive_destination,
         )
         total = sum(counts.values())
         if total == 0:

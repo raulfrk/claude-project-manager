@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from server.lib.models import GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta, Todo, TodoistSync
+from server.lib.models import ArchiveConfig, GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta, Todo, TodoistSync
 
 
 class TestTodoistSyncModel:
@@ -117,6 +117,38 @@ class TestTodoDueDateModel:
         todo = Todo.from_dict(data)
 
         assert todo.due_date is None
+
+
+class TestArchiveConfig:
+    def test_default_destination(self) -> None:
+        ac = ArchiveConfig()
+        assert ac.destination == "~/projects/archived"
+
+    def test_from_dict_custom_destination(self) -> None:
+        ac = ArchiveConfig.from_dict({"destination": "/tmp/my-archive"})
+        assert ac.destination == "/tmp/my-archive"
+
+    def test_roundtrip_preserves_values(self) -> None:
+        original = ArchiveConfig(destination="/custom/archive/dir")
+        result = ArchiveConfig.from_dict(original.to_dict())
+        assert result.destination == original.destination
+
+
+class TestProjConfigArchiveBackwardCompat:
+    def test_from_dict_without_archive_key_uses_defaults(self) -> None:
+        """ProjConfig.from_dict({}) without 'archive' key uses ArchiveConfig defaults."""
+        cfg = ProjConfig.from_dict({})
+        assert cfg.archive.destination == "~/projects/archived"
+
+    def test_from_dict_with_archive_key_preserves_value(self) -> None:
+        cfg = ProjConfig.from_dict({"archive": {"destination": "/opt/archived"}})
+        assert cfg.archive.destination == "/opt/archived"
+
+    def test_proj_config_to_dict_includes_archive(self) -> None:
+        cfg = ProjConfig()
+        d = cfg.to_dict()
+        assert "archive" in d
+        assert d["archive"] == {"destination": "~/projects/archived"}
 
 
 class TestGitTracking:

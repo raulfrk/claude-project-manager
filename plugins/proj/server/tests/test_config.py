@@ -258,6 +258,29 @@ class TestConfigUpdateIntegrationFlags:
         assert loaded.worktree_integration is False
 
 
+@pytest.mark.anyio
+class TestConfigArchiveDestination:
+    async def test_config_update_archive_destination_persisted(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_update", archive_destination="/tmp/arch")
+
+        assert "updated" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.archive.destination == "/tmp/arch"
+
+    async def test_config_load_shows_archive_destination(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_load")
+
+        assert "archive.destination" in result
+
+
 class TestGitTrackingConfig:
     @pytest.mark.anyio
     async def test_config_init_git_tracking(self, mcp_app: Any, cfg: ProjConfig) -> None:

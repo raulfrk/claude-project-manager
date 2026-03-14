@@ -426,6 +426,32 @@ class TestSetupPermissions:
 
         assert sum(counts2.values()) == 0
 
+    def test_archive_destination_adds_bash_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=[])
+        cfg.tracking_dir = "/tmp/tracking"
+        counts = setup_permissions(
+            meta, cfg,
+            grant_path_access=False,
+            grant_investigation_tools_flag=False,
+            archive_destination="/tmp/arch",
+        )
+
+        allow = _read_allow(settings_path)
+        # mv/rm/rm -rf/mkdir/mkdir -p rules for archive dest, repo path, and tracking dir
+        assert any("Bash(mv " in e for e in allow)
+        assert any("Bash(rm " in e for e in allow)
+        assert any("Bash(mkdir " in e for e in allow)
+        # Read+Edit for archive dest
+        assert any("Read(" in e and "arch" in e for e in allow)
+        assert any("Edit(" in e and "arch" in e for e in allow)
+        assert counts["bash_rules"] > 0
+        assert counts["path_rules"] > 0
+
     def test_no_flags_adds_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])

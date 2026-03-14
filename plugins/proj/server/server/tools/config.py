@@ -78,6 +78,7 @@ def register(app: FastMCP) -> None:
             f"  worktree_integration: {cfg.worktree_integration}\n"
             f"  zoxide_integration: {cfg.zoxide_integration}\n"
             f"  claudemd_management: {cfg.claudemd_management}\n"
+            f"  archive.destination: {cfg.archive.destination}\n"
             f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
             f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
             f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
@@ -109,6 +110,7 @@ def register(app: FastMCP) -> None:
         git_tracking_enabled: bool = False,
         git_tracking_github_enabled: bool = False,
         git_tracking_github_repo_format: str = "tracking",
+        archive_destination: str = "~/projects/archived",
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -133,6 +135,7 @@ def register(app: FastMCP) -> None:
         cfg.git_tracking.enabled = git_tracking_enabled
         cfg.git_tracking.github_enabled = git_tracking_github_enabled
         cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
+        cfg.archive.destination = archive_destination
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -193,6 +196,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_enabled: bool | None = None,
         git_tracking_github_repo_format: str | None = None,
         investigation_tools: list[str] | None = None,
+        archive_destination: str | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -237,6 +241,10 @@ def register(app: FastMCP) -> None:
             if not git_tracking_github_repo_format or "\x00" in git_tracking_github_repo_format:
                 return "Invalid git_tracking_github_repo_format: must be a non-empty string without null bytes."
 
+        if archive_destination is not None:
+            if not archive_destination or "\x00" in archive_destination:
+                return "Invalid archive_destination: must be a non-empty string without null bytes."
+
         cfg = require_config()
         if tracking_dir is not None:
             cfg.tracking_dir = tracking_dir
@@ -280,6 +288,8 @@ def register(app: FastMCP) -> None:
             cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
         if investigation_tools is not None:
             cfg.permissions.investigation_tools = investigation_tools
+        if archive_destination is not None:
+            cfg.archive.destination = archive_destination
         storage.save_config(cfg)
         warnings: list[str] = []
         if perms_integration is True:
