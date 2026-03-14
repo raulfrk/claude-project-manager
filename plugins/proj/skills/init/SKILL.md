@@ -82,7 +82,13 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Git integration? [yes]:
    ```
 
-5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled.
+4b. **Zoxide**:
+   - If `zoxide_integration: True` in config: set `_zoxide = true` (inherits global, no question needed).
+   - If `zoxide_integration: False` in config: ask "Enable zoxide for this project? (boosts project dirs for faster cd) [no]"
+     - If yes: set `_zoxide = true`
+     - If no: set `_zoxide = null` (use global default)
+
+5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled, zoxide_integration=_zoxide.
    - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
    Call `mcp__proj__proj_load_session` to set as active for this session.

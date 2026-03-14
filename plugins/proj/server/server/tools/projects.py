@@ -50,6 +50,7 @@ def register(app: FastMCP) -> None:
         description: str = "",
         tags: list[str] | None = None,
         git_enabled: bool = True,
+        zoxide_integration: bool | None = None,
     ) -> str:
         err = validate_project_name(name)
         if err:
@@ -109,6 +110,8 @@ def register(app: FastMCP) -> None:
             meta.repos.append(repo_entry)
         meta.dates.created = today
         meta.dates.last_updated = today
+        if zoxide_integration is not None:
+            meta.zoxide_integration = zoxide_integration
         storage.save_meta(cfg, meta)
 
         # Boost paths in zoxide frecency database if enabled
