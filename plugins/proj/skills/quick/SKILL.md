@@ -48,6 +48,10 @@ Display: `Created todo <new_id>: <title>. Running workflow...`
 Read `<parent-of-this-skill's-base-dir>/run/SKILL.md`. Extract instructions after second `---`.
 Execute with `$ARGUMENTS` = `<new_id> <forwarded-flags>`.
 
+**Plan mode requirements:**
+- For the **define** step: call `EnterPlanMode` / `ExitPlanMode` unless the task is trivial (single-line fix, obvious change).
+- For the **execute** step: ALWAYS call `EnterPlanMode` before implementing, then `ExitPlanMode` for user approval. This is mandatory — never skip plan mode before executing.
+
 ---
 
 ## Project mode (no active project)
@@ -103,6 +107,10 @@ Display: `Project '<name>' created. Todo <new_id>: <todo_title>. Running workflo
 
 Read `<parent-of-this-skill's-base-dir>/run/SKILL.md`. Extract instructions after second `---`.
 Execute with `$ARGUMENTS` = `<new_id> --iter 3`.
+
+**Plan mode requirements:**
+- For the **define** step: call `EnterPlanMode` / `ExitPlanMode` unless the task is trivial (single-line fix, obvious change).
+- For the **execute** step: ALWAYS call `EnterPlanMode` before implementing, then `ExitPlanMode` for user approval. This is mandatory — never skip plan mode before executing.
 
 Suggested next:
 - `/proj:todo list` — review all todos

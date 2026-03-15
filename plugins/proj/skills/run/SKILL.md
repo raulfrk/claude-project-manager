@@ -154,10 +154,14 @@ If `--no-interactive`: skip Phase 1, proceed directly to Phase 2 with execute in
 
 For each batch in dependency order (excluding `manual_skipped_ids`):
 1. Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
-2. Spawn one `general-purpose` Task agent per todo. Each receives: todo details, requirements.md, research.md, parent context, AND the approved plan (or execute instructions if `--no-interactive`). Each implements and calls `todo_complete`.
+2. Spawn one `general-purpose` Task agent per todo. Each receives: todo details, requirements.md, research.md, parent context, AND the approved plan (or execute instructions if `--no-interactive`). Each implements the approved plan. Agents do NOT call `todo_complete`.
 3. Wait for batch completion. Report failures: `Agent for todo <id> failed: <error>`.
+4. **Satisfaction check** (sequential, main conversation): For each completed todo in the batch, run the satisfaction loop:
+   a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
+      1. **Satisfied** — call `mcp__proj__todo_complete` (+ Todoist if applicable)
+      2. **Not satisfied** — ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
 
-Auto-complete parent: if `manual_skipped_ids` is empty, call `mcp__proj__todo_complete` on parent + Todoist complete if applicable. Otherwise display warning.
+Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop for the parent todo before calling `mcp__proj__todo_complete` on parent + Todoist complete if applicable. Otherwise display warning.
 
 **6. Complete**
 

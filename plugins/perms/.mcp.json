@@ -6,7 +6,7 @@
         "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
         "run", "perms-server"
       ],
-      "timeout": 120
+      "timeout": 300
     }
   }
 }

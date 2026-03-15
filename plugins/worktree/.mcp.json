@@ -9,7 +9,7 @@
       "env": {
         "WORKTREE_CONFIG": "~/.claude/worktree.yaml"
       },
-      "timeout": 120
+      "timeout": 300
     }
   }
 }

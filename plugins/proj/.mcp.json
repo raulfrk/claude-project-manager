@@ -9,7 +9,7 @@
       "env": {
         "PROJ_CONFIG": "~/.claude/proj.yaml"
       },
-      "timeout": 120
+      "timeout": 300
     }
   }
 }

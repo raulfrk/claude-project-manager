@@ -37,10 +37,12 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    g. **Zoxide integration** — "Enable zoxide integration? [no]"
       - Explain: if enabled, project directories are boosted in zoxide's frecency database on init/load for faster `cd` navigation
    h. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
+   h2. **Archive purge** — "How many days after archiving should purgeable projects be eligible for purge? Leave empty to never purge. [none]"
+      - Store as `archive_purge_after_days` (None if left blank, integer if provided)
    i. **Plugins** — "Do you have the `perms` plugin installed? [no]"
    j. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
 
-3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
+3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, `archive_purge_after_days`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
 
 4. **If `perms` plugin is installed**: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
    - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`

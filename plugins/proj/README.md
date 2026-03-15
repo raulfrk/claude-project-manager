@@ -161,7 +161,8 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 | `list-proj` | `/proj:list-proj` | List all non-archived tracked projects. |
 | `switch` | `/proj:switch [name]` | Switch the globally active project. |
 | `load` | `/proj:load [name]` | Load a project for this session only. Supports fuzzy matching. |
-| `archive` | `/proj:archive [name]` | Archive a completed project. |
+| `archive` | `/proj:archive [name]` | Archive a completed project. Asks if project is purgeable. |
+| `purge` | `/proj:purge` | Purge archived projects older than `archive.purge_after_days`. |
 
 ### Status and notes
 
@@ -224,7 +225,8 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 | `proj_get_active` | Get the currently active project. |
 | `proj_load_session` | Set the active project for this session (not persisted). |
 | `proj_update_meta` | Update project fields. |
-| `proj_archive` | Archive a project. |
+| `proj_archive` | Archive a project. Sets archive_date and purgeable flag. |
+| `proj_purge_archive` | List or execute purge of archived projects older than purge_after_days. |
 | `proj_add_repo` | Register a repository path. |
 | `proj_remove_repo` | Unregister a repository. |
 | `proj_set_permissions` | Set per-project auto_grant override. |

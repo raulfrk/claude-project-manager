@@ -231,7 +231,7 @@ def register(app: FastMCP) -> None:
         return f"Updated project '{project_name}'."
 
     @app.tool(description="Archive a project (marks as archived, unsets active if needed).")
-    def proj_archive(name: str | None = None) -> str:
+    def proj_archive(name: str | None = None, purgeable: bool = True) -> str:
         result = require_project(name)
         if isinstance(result, str):
             return result
@@ -272,11 +272,50 @@ def register(app: FastMCP) -> None:
             pass  # No meta file — skip zoxide removal
 
         index.projects[project_name].archived = True
+        index.projects[project_name].archive_date = date.today().isoformat()
+        index.projects[project_name].purgeable = purgeable
         storage.save_index(cfg, index)
         # Clear session active if archiving the current session project
         if state.get_session_active() == project_name:
             state.clear_session_active()
         return f"Archived project '{project_name}'."
+
+    @app.tool(description="List or execute purge of archived projects older than purge_after_days.")
+    def proj_purge_archive(confirm: bool = False) -> str:
+        import shutil
+
+        cfg = require_config()
+        if cfg.archive.purge_after_days is None:
+            return "Purge not configured. Set archive.purge_after_days via config_update or /proj:init-plugin."
+
+        index = storage.load_index(cfg)
+        today = date.today()
+        candidates = []
+        for name, entry in list(index.projects.items()):
+            if not entry.archived or not entry.purgeable or not entry.archive_date:
+                continue
+            archive_dt = date.fromisoformat(entry.archive_date)
+            days_since = (today - archive_dt).days
+            if days_since >= cfg.archive.purge_after_days:
+                candidates.append({"name": name, "archive_date": entry.archive_date, "days_since": days_since})
+
+        if not candidates:
+            return "No projects eligible for purge."
+
+        if not confirm:
+            return json.dumps({"candidates": candidates, "count": len(candidates)})
+
+        # Actually purge
+        purged = []
+        for c in candidates:
+            name = c["name"]
+            tracking_path = Path(cfg.tracking_dir).expanduser() / name
+            if tracking_path.exists():
+                shutil.rmtree(tracking_path, ignore_errors=True)
+            del index.projects[name]
+            purged.append(name)
+        storage.save_index(cfg, index)
+        return f"Purged {len(purged)} projects: {', '.join(purged)}"
 
     @app.tool(description="Add a repository path to a project.")
     def proj_add_repo(

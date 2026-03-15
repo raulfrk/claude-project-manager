@@ -30,8 +30,16 @@ Execute todo(s): $ARGUMENTS
 
    Call `ExitPlanMode` to present the plan for user review. The user will approve or request changes before you proceed.
 4. Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions pulled from Todoist) — it should inform your implementation approach.
-5. On completion:
-   - Call `mcp__proj__todo_complete`
+5. On completion — **Satisfaction loop**:
+   a. Ask: "Are you satisfied with the outcome, or is there anything else that needs to be done?"
+      1. **Satisfied** — proceed to step 5c
+      2. **Not satisfied** — describe what's missing
+   b. If not satisfied:
+      - Create a new todo from the user's description (`mcp__proj__todo_add`)
+      - Run the full workflow on the new todo: read `run/SKILL.md` and execute with `$ARGUMENTS = <new_id> --iter 5`
+      - After the run completes, re-ask satisfaction on the original todo (go back to step 5a)
+      - Loop until satisfied
+   c. Call `mcp__proj__todo_complete`
    - If Todoist enabled: call `mcp__{todoist.mcp_server}__complete-tasks`
    - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
    - Append a brief progress note: `mcp__proj__notes_append`
@@ -48,8 +56,13 @@ For each todo in the range:
 Phase 2 — Execute (parallel Task agents):
 After all plans are approved, spawn one `general-purpose` Task agent per todo (excluding manual-skipped ones).
 Each agent receives: the todo details, its requirements.md, its research.md, parent context, AND the approved implementation plan.
-Each agent implements according to its approved plan and calls `todo_complete` when done.
-Main conversation collects results and reports summary, including any skipped manual todos.
+Each agent implements according to its approved plan. Agents do NOT call `todo_complete`.
+
+Phase 3 — Satisfaction check (sequential, main conversation):
+For each completed agent todo (excluding manual-skipped):
+1. Review the agent's output
+2. Run the satisfaction loop (same as step 5a-5c above)
+Main conversation reports summary, including any skipped manual todos.
 
 **For a range with dependencies:**
 
@@ -61,7 +74,7 @@ Execute in topological order (respect blocked_by chains). For each todo:
 4. Call `ExitPlanMode` for user review.
 
 Phase 2 — Execute (sequential, in dependency order):
-Execute each todo according to its approved plan, one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan, call `todo_complete` when done.
+Execute each todo according to its approved plan, one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan. After implementation, run the satisfaction loop (step 5a-5c) before calling `todo_complete`.
 
 **Note:** Root todo execution does NOT auto-recurse into children. To execute children, specify their IDs explicitly.
 

@@ -57,7 +57,10 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
    - Worktrees: confirm removal (default: yes)
    - Tracking dir: move (default), delete, or skip
 
-7. Call `mcp__proj__proj_archive` to mark the project as archived, clear session, and clean zoxide.
+6.5. **Purgeable check**: Ask "Should this project be purgeable? (If no, it will never be deleted by purge) [yes]"
+     Store the answer as `purgeable` (default: true).
+
+7. Call `mcp__proj__proj_archive` with `purgeable=<answer from 6.5>` to mark the project as archived, clear session, and clean zoxide.
 
 8. **Worktree cleanup** (if worktrees found and user confirmed):
    For each worktree path, call `mcp__plugin_worktree_worktree__wt_remove` with `path=<worktree_path>`.

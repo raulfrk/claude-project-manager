@@ -66,13 +66,18 @@ class GitTracking:
 @dataclass
 class ArchiveConfig:
     destination: str = "~/projects/archived"
+    purge_after_days: int | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {"destination": self.destination}
+        return {"destination": self.destination, "purge_after_days": self.purge_after_days}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> ArchiveConfig:
-        return cls(destination=str(data.get("destination", "~/projects/archived")))
+        raw = data.get("purge_after_days")
+        return cls(
+            destination=str(data.get("destination", "~/projects/archived")),
+            purge_after_days=int(raw) if raw is not None else None,
+        )
 
 
 @dataclass
@@ -271,6 +276,8 @@ class ProjectEntry:
     created: str
     archived: bool = False
     tags: list[str] = field(default_factory=list)
+    archive_date: str | None = None
+    purgeable: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -279,6 +286,8 @@ class ProjectEntry:
             "created": self.created,
             "archived": self.archived,
             "tags": self.tags,
+            "archive_date": self.archive_date,
+            "purgeable": self.purgeable,
         }
 
     @classmethod
@@ -290,6 +299,8 @@ class ProjectEntry:
             created=str(data["created"]),
             archived=bool(data.get("archived", False)),
             tags=list(tags) if isinstance(tags, list) else [],
+            archive_date=str(data["archive_date"]) if data.get("archive_date") else None,
+            purgeable=bool(data.get("purgeable", True)),
         )
 
 

@@ -79,6 +79,7 @@ def register(app: FastMCP) -> None:
             f"  zoxide_integration: {cfg.zoxide_integration}\n"
             f"  claudemd_management: {cfg.claudemd_management}\n"
             f"  archive.destination: {cfg.archive.destination}\n"
+            f"  archive.purge_after_days: {cfg.archive.purge_after_days or '(not set)'}\n"
             f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
             f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
             f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
@@ -111,6 +112,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_enabled: bool = False,
         git_tracking_github_repo_format: str = "tracking",
         archive_destination: str = "~/projects/archived",
+        archive_purge_after_days: int | None = None,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -136,6 +138,7 @@ def register(app: FastMCP) -> None:
         cfg.git_tracking.github_enabled = git_tracking_github_enabled
         cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
         cfg.archive.destination = archive_destination
+        cfg.archive.purge_after_days = archive_purge_after_days
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -197,6 +200,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_repo_format: str | None = None,
         investigation_tools: list[str] | None = None,
         archive_destination: str | None = None,
+        archive_purge_after_days: int | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -245,6 +249,10 @@ def register(app: FastMCP) -> None:
             if not archive_destination or "\x00" in archive_destination:
                 return "Invalid archive_destination: must be a non-empty string without null bytes."
 
+        if archive_purge_after_days is not None:
+            if not isinstance(archive_purge_after_days, int) or archive_purge_after_days <= 0:
+                return "Invalid archive_purge_after_days: must be a positive integer."
+
         cfg = require_config()
         if tracking_dir is not None:
             cfg.tracking_dir = tracking_dir
@@ -290,6 +298,8 @@ def register(app: FastMCP) -> None:
             cfg.permissions.investigation_tools = investigation_tools
         if archive_destination is not None:
             cfg.archive.destination = archive_destination
+        if archive_purge_after_days is not None:
+            cfg.archive.purge_after_days = archive_purge_after_days
         storage.save_config(cfg)
         warnings: list[str] = []
         if perms_integration is True:
