@@ -3,7 +3,7 @@ name: quick
 description: Quick-start a project or todo and immediately run the full workflow. Use when the user says "quick project", "proj:quick", or wants to start something new fast.
 disable-model-invocation: "true"
 argument-hint: "[description or project-name]"
-allowed-tools: mcp__proj__config_load, mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__proj_setup_permissions, mcp__proj__claudemd_write, mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_tree, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, Bash, Read, Task, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__proj__config_load, mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__proj_setup_permissions, mcp__proj__claudemd_write, mcp__proj__todo_add, mcp__proj__todo_update, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_identify_batches, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_tree, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, Bash, Read, Task, EnterPlanMode, ExitPlanMode, Skill
 ---
 
 Quick-start: $ARGUMENTS
@@ -45,12 +45,9 @@ If `todoist.enabled` and `todoist.auto_sync`:
 
 Display: `Created todo <new_id>: <title>. Running workflow...`
 
-Read `<parent-of-this-skill's-base-dir>/run/SKILL.md`. Extract instructions after second `---`.
-Execute with `$ARGUMENTS` = `<new_id> <forwarded-flags>`.
+Call the Skill tool: `skill: "proj:run", args: "<new_id> <forwarded-flags>"`
 
-**Plan mode requirements:**
-- For the **define** step: call `EnterPlanMode` / `ExitPlanMode` unless the task is trivial (single-line fix, obvious change).
-- For the **execute** step: ALWAYS call `EnterPlanMode` before implementing, then `ExitPlanMode` for user approval. This is mandatory — never skip plan mode before executing.
+The run skill handles the full define → decompose → execute workflow including plan mode.
 
 ---
 
@@ -105,12 +102,9 @@ If Todoist enabled: sync as in Todo mode step T3.
 
 Display: `Project '<name>' created. Todo <new_id>: <todo_title>. Running workflow...`
 
-Read `<parent-of-this-skill's-base-dir>/run/SKILL.md`. Extract instructions after second `---`.
-Execute with `$ARGUMENTS` = `<new_id> --iter 3`.
+Call the Skill tool: `skill: "proj:run", args: "<new_id> --iter 3"`
 
-**Plan mode requirements:**
-- For the **define** step: call `EnterPlanMode` / `ExitPlanMode` unless the task is trivial (single-line fix, obvious change).
-- For the **execute** step: ALWAYS call `EnterPlanMode` before implementing, then `ExitPlanMode` for user approval. This is mandatory — never skip plan mode before executing.
+The run skill handles the full define → decompose → execute workflow including plan mode.
 
 Suggested next:
 - `/proj:todo list` — review all todos

@@ -1,0 +1,26 @@
+{
+  "skill_name": "proj",
+  "eval_base_dir": "evals",
+  "description": "E2E regression test plans for all proj plugin skills. Each eval creates a temp project, runs test scenarios with real MCP calls, verifies outcomes, and cleans up.",
+  "evals": [
+    { "id": "init-plugin", "skill": "init-plugin", "plan_file": "init-plugin.md", "tier": 1, "requires_external": false },
+    { "id": "init", "skill": "init", "plan_file": "init.md", "tier": 1, "requires_external": false },
+    { "id": "list-proj", "skill": "list-proj", "plan_file": "list-proj.md", "tier": 1, "requires_external": false },
+    { "id": "load", "skill": "load", "plan_file": "load.md", "tier": 2, "requires_external": false },
+    { "id": "switch", "skill": "switch", "plan_file": "switch.md", "tier": 2, "requires_external": false },
+    { "id": "add-repo", "skill": "add-repo", "plan_file": "add-repo.md", "tier": 2, "requires_external": false },
+    { "id": "remove-repo", "skill": "remove-repo", "plan_file": "remove-repo.md", "tier": 2, "requires_external": false },
+    { "id": "status", "skill": "status", "plan_file": "status.md", "tier": 2, "requires_external": false },
+    { "id": "save", "skill": "save", "plan_file": "save.md", "tier": 2, "requires_external": false },
+    { "id": "archive", "skill": "archive", "plan_file": "archive.md", "tier": 2, "requires_external": false },
+    { "id": "purge", "skill": "purge", "plan_file": "purge.md", "tier": 2, "requires_external": false },
+    { "id": "todo", "skill": "todo", "plan_file": "todo.md", "tier": 3, "requires_external": false },
+    { "id": "define", "skill": "define", "plan_file": "define.md", "tier": 4, "requires_external": false },
+    { "id": "decompose", "skill": "decompose", "plan_file": "decompose.md", "tier": 4, "requires_external": false },
+    { "id": "execute", "skill": "execute", "plan_file": "execute.md", "tier": 4, "requires_external": false },
+    { "id": "run", "skill": "run", "plan_file": "run.md", "tier": 4, "requires_external": false },
+    { "id": "quick", "skill": "quick", "plan_file": "quick.md", "tier": 4, "requires_external": false },
+    { "id": "sync", "skill": "sync", "plan_file": "sync.md", "tier": 5, "requires_external": true },
+    { "id": "trello-sync", "skill": "trello-sync", "plan_file": "trello-sync.md", "tier": 5, "requires_external": true }
+  ]
+}

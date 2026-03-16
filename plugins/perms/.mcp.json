@@ -6,6 +6,9 @@
         "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
         "run", "perms-server"
       ],
+      "env": {
+        "UV_LINK_MODE": "copy"
+      },
       "timeout": 300
     }
   }

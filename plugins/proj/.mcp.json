@@ -7,6 +7,7 @@
         "run", "proj-server"
       ],
       "env": {
+        "UV_LINK_MODE": "copy",
         "PROJ_CONFIG": "~/.claude/proj.yaml"
       },
       "timeout": 300
