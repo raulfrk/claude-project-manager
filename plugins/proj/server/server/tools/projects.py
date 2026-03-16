@@ -335,6 +335,8 @@ def register(app: FastMCP) -> None:
             return f"Repo at '{abs_path}' already registered."
         if any(r.label == label for r in meta.repos):
             return f"Label '{label}' already in use. Choose a different label."
+        if not Path(abs_path).is_dir():
+            return f"Path '{abs_path}' does not exist or is not a directory."
         meta.repos.append(RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference))
         storage.save_meta(cfg, meta)
 
@@ -356,11 +358,11 @@ def register(app: FastMCP) -> None:
             return result
         cfg, name = result
         meta = storage.load_meta(cfg, name)
-        if len(meta.repos) <= 1:
-            return "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."
         found = next((r for r in meta.repos if r.label == label), None)
         if found is None:
             return f"No repo with label '{label}' found in project '{name}'."
+        if len(meta.repos) <= 1:
+            return "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."
         meta.repos.remove(found)
         storage.save_meta(cfg, meta)
         ref_note = " (reference, read-only)" if found.reference else ""
