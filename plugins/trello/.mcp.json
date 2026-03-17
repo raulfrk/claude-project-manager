@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "trello": {
+      "command": "uv",
+      "args": [
+        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
+        "run", "trello-server"
+      ],
+      "env": {
+        "UV_LINK_MODE": "copy",
+        "TRELLO_CONFIG": "~/.claude/trello.yaml"
+      },
+      "timeout": 300
+    }
+  }
+}

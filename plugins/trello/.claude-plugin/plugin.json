@@ -1,0 +1,7 @@
+{
+  "name": "trello",
+  "description": "Trello board, card, and list management via REST API.",
+  "version": "1.0.0",
+  "author": { "name": "raulfrk" },
+  "mcpServers": "./.mcp.json"
+}

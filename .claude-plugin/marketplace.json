@@ -35,6 +35,16 @@
       "license": "MIT",
       "category": "productivity",
       "keywords": ["project", "tracking", "todos", "workflow"]
+    },
+    {
+      "name": "trello",
+      "source": "./plugins/trello",
+      "description": "Trello board, card, and list management via REST API — full CRUD for boards, lists, cards, labels, members, comments, checklists, attachments",
+      "version": "1.0.0",
+      "author": { "name": "raulfrk" },
+      "license": "MIT",
+      "category": "integrations",
+      "keywords": ["trello", "boards", "cards", "kanban", "project-management"]
     }
   ]
 }
