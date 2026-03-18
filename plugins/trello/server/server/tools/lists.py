@@ -14,6 +14,7 @@ def register(app: FastMCP) -> None:
     def get_lists(board_id: str) -> str:
         """Get all lists on a Trello board."""
         client = get_client()
+        client.check_board_access(board_id)
         data = client.get(f"/boards/{board_id}/lists")
         return json.dumps(data)
 
@@ -28,6 +29,7 @@ def register(app: FastMCP) -> None:
     def create_list(name: str, board_id: str) -> str:
         """Create a new list on a Trello board."""
         client = get_client()
+        client.check_board_access(board_id)
         data = client.post("/lists", params={"name": name, "idBoard": board_id})
         return json.dumps(data)
 

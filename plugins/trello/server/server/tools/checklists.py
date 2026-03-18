@@ -42,3 +42,21 @@ def register(app: FastMCP) -> None:
         client = get_client()
         client.delete(f"/checklists/{checklist_id}")
         return json.dumps({"deleted": True, "checklist_id": checklist_id})
+
+    @app.tool(description="Rename a checklist item.")
+    def rename_checklist_item(card_id: str, checklist_id: str, item_id: str, name: str) -> str:
+        client = get_client()
+        item = client.put(f"/cards/{card_id}/checkItem/{item_id}", params={"name": name})
+        return json.dumps(item)
+
+    @app.tool(description="Delete a checklist item.")
+    def delete_checklist_item(card_id: str, checklist_id: str, item_id: str) -> str:
+        client = get_client()
+        client.delete(f"/cards/{card_id}/checkItem/{item_id}")
+        return json.dumps({"deleted": True, "card_id": card_id, "item_id": item_id})
+
+    @app.tool(description="Rename a checklist.")
+    def rename_checklist(checklist_id: str, name: str) -> str:
+        client = get_client()
+        checklist = client.put(f"/checklists/{checklist_id}", params={"name": name})
+        return json.dumps(checklist)

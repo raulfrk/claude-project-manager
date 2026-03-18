@@ -3,18 +3,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "proj-mcp-server"
-version = "1.2.0"
-description = "MCP server for project lifecycle management"
+name = "jira-mcp-server"
+version = "1.0.0"
+description = "MCP server for read-only Jira Server issue and project access"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
+    "httpx>=0.28",
     "pyyaml>=6.0",
-    "gitpython>=3.1",
 ]
 
 [project.scripts]
-proj-server = "server.main:main"
+jira-server = "server.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server"]
@@ -29,17 +29,11 @@ test = [
     "pytest>=8.0",
     "pytest-cov>=7.0",
     "pytest-xdist>=3.5",
-    "pytest-asyncio>=0.23",
     "pytest-mock>=3.14",
-    "hypothesis>=6.100",
-    "freezegun>=1.5",
 ]
 lint = [
     "bandit>=1.7",
     "pip-audit>=2.8",
-]
-docs = [
-    "pdoc>=14.0",
 ]
 
 [tool.ruff]
@@ -47,11 +41,11 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "PTH", "S"]
-ignore = ["S603", "S607"]
+select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "S"]
+ignore = ["S603", "S607"]  # subprocess calls are intentional
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108", "TC001", "TC003"]
+"tests/*" = ["S101", "S108", "TC003"]  # assert/tmp paths/runtime Path usage fine in tests
 
 [tool.basedpyright]
 typeCheckingMode = "strict"
@@ -59,8 +53,8 @@ pythonVersion = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=72", "-n", "auto"]
+addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto"]
 
 [tool.coverage.run]
 branch = true
-omit = ["*/tests/*", "server/main.py", "server/cli.py"]
+omit = ["*/tests/*", "server/main.py"]

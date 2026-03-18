@@ -1,8 +1,8 @@
 ---
 name: trello-sync
-description: Manually trigger a full bidirectional Trello sync for root todos. Syncs root-level todos only — child/subtodos are never synced. Use when the user says "sync with Trello", "sync trello", or "trello sync".
+description: Manually trigger a full bidirectional Trello sync for the active project. Each project is a single Trello card; root todos with children become checklists, leaf root todos become items in a "Tasks" checklist. Use when the user says "sync with Trello", "sync trello", or "trello sync".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__config_load, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose
 ---
@@ -14,27 +14,19 @@ agent: general-purpose
 > `mcp__trello__*` would not match a differently-named server. Claude resolves the actual
 > tool names dynamically after reading config and calls them without a pre-declared allow entry.
 
-Full bidirectional Trello sync for root todos in the active project.
+Full bidirectional Trello sync for the active project.
 
-Only root-level todos (those with no parent) are synced. Child todos are silently skipped.
+**Model**: one Trello card per project. Root todos with children become checklists (name = todo title). Their flattened descendants become checklist items (prefixed with ID path). Root leaf todos go into a "Tasks" catch-all checklist.
 
 ## Trello Tool Resolution
 
 The Trello MCP server name is configurable. **Before making any Trello tool call**, read
 `trello.mcp_server` from the config (via `mcp__proj__config_load`) and substitute it as the
-prefix. All `mcp__trello__<tool>` references below are templates — replace `trello` with the
+prefix. All `mcp__trello__<tool>` references below are templates -- replace `trello` with the
 actual server name from config.
 
-Example: if `trello.mcp_server` is `my_trello`, call `mcp__my_trello__get_lists` not
-`mcp__trello__get_lists`.
-
-## Field Mapping
-
-| Local field | Trello card field |
-|---|---|
-| `title` | card name |
-| `status` (done) | card moved to "done" list |
-| `due_date` (ISO date string) | card due date |
+Example: if `trello.mcp_server` is `my_trello`, call `mcp__my_trello__get_board_labels` not
+`mcp__trello__get_board_labels`.
 
 ## Prerequisites
 
@@ -42,31 +34,19 @@ Before syncing, verify:
 1. `trello.enabled` is `true` in config. If not, stop and tell the user to enable it with `mcp__proj__config_update(trello_enabled=True)`.
 2. The active project has a `trello.board_id` set (from per-project config) or `trello.default_board_id` set globally. If neither is set, stop and ask the user to configure a board ID.
 
-## List Resolution
-
-Trello list IDs must be resolved before creating or moving cards. The config stores list names (or IDs) in `list_mappings.created` and `list_mappings.done`.
-
-To resolve list names to IDs:
-- Call `mcp__trello__get_lists` with `boardId` set to the effective board ID.
-- Match by exact name (case-insensitive). If already an ID (all hex characters, length ~24), use as-is.
-- If a configured list name is not found among the board's lists, follow the **Failure: list name mismatch** path in Step 1.
-- Cache resolved IDs for the duration of the sync run.
-
-Effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
-Effective list mappings = per-project `trello.list_mappings` if set, else global `trello.list_mappings`.
-
 ## Steps
 
 ### 1. Setup
 
-- Call `mcp__proj__config_load` — read `trello.*` config values.
-- Call `mcp__proj__proj_get_active` — get active project name and per-project trello config.
+- Call `mcp__proj__config_load` -- read `trello.*` config values. Note `mcp_server`, `default_board_id`, `default_list`.
+- Call `mcp__proj__proj_get_active` -- get active project name, per-project trello config, and `trello_card_id` from project meta.
 - Check prerequisites (enabled, board ID set). Stop with a clear message if not met.
-- Resolve list names to IDs using `mcp__trello__get_lists`.
+- Resolve the Trello MCP server name for all subsequent calls.
+- Resolve effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
 
 **Failure: Trello MCP server unavailable**
-If the Trello MCP server is not reachable — for example, `mcp__<server>__get_lists` raises a
-tool-not-found error, returns a connection error, or is simply not registered — stop immediately
+If the Trello MCP server is not reachable -- for example, a tool call raises a
+tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
 > "Trello MCP server '<server_name>' is not available. Verify the server is running and that
@@ -74,137 +54,113 @@ and say:
 
 Do not proceed with any further sync steps.
 
-**Failure: list name mismatch**
-After calling `mcp__trello__get_lists`, if a list name from `list_mappings.created` or
-`list_mappings.done` cannot be matched (case-insensitively) to any list on the board, stop and say:
+### 2. Ensure `proj` label exists
 
-> "Trello list '<name>' not found on board '<board_id>'. Check your `trello.list_mappings`
-> config. Available lists: <comma-separated list of board list names>."
+- Call `mcp__trello__get_board_labels` with `boardId` set to the effective board ID.
+- If no label named `proj` exists, call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`.
+- Record the label ID for use in card creation.
 
-Do not proceed with any further sync steps.
+### 3. Ensure project card exists
 
-### 2. Fetch both sides
+- If `trello_card_id` is set on the project meta, call `mcp__trello__get_card` to verify the card exists.
+  - If the card is missing or archived, treat as needing a new card (proceed below).
+  - If the card exists and is valid, skip to step 4.
+- If no card exists:
+  - Resolve the target list: call `mcp__trello__get_lists` with `boardId` and find the list matching `trello.default_list` (default: "Active") by name (case-insensitive). If not found, use the first list on the board.
+  - Call `mcp__trello__create_card` (or `mcp__trello__add_card_to_list`) with:
+    - `listId` = resolved list ID
+    - `name` = project name
+    - `idLabels` = the `proj` label ID
+  - Record the returned card ID.
+  - Call `mcp__proj__proj_trello_apply` with `link_trello_card_id` set to the new card ID.
 
-- Call `mcp__trello__get_cards_by_list_id` for the "created" list ID — collect open cards.
-- Call `mcp__trello__get_cards_by_list_id` for the "done" list ID — collect done cards.
-- Call `mcp__proj__todo_list` — get all active local root todos (filter: `parent` is null).
-- Build lookup maps:
-  - `trello_open_by_id`: card ID → open Trello card object (from created list)
-  - `trello_done_by_id`: card ID → done Trello card object (from done list)
-  - `local_by_card_id`: `trello_card_id` → local todo
-  - `local_unlinked`: local root todos where `trello_card_id` is null
+### 4. Fetch card state
 
-### 3. Trello → Local (pull)
+- Call `mcp__trello__get_card_checklists` (or `mcp__trello__get_checklists` or similar) with `cardId` = the project's `trello_card_id`.
+- The result should be a JSON array of checklists, each with `id`, `name`, and `checkItems` array (each item has `id`, `name`, `state`).
+- Format this as: `{"checklists": [<the array>]}`
 
-**Cards in the "done" list** (from `trello_done_by_id`):
-- For each done card:
-  - If matched to a local todo (via `trello_card_id`): call `mcp__proj__todo_complete` if local is not already done.
-  - If not matched: skip (card predates this integration or was created outside the plugin).
-- Track: `closed_locally += 1`
+### 5. Compute diff
 
-**Cards in the "created" list** (from `trello_open_by_id`):
-- For each open card:
-  - If matched to a local todo (via `trello_card_id`):
-    - Compare card `name` vs local `title`. If different: call `mcp__proj__todo_update` with updated title. Track: `updated_locally += 1`.
-    - Compare card `due` date vs local `due_date`. If different: call `mcp__proj__todo_update` with updated `due_date`. Track: `updated_locally += 1` (only once per todo, even if both fields changed).
-  - If not matched: This is a card created in Trello outside the plugin. Skip for now (v1 does not auto-import external Trello cards).
+- Call `mcp__proj__proj_trello_diff` with:
+  - `trello_card_json` = the formatted card state JSON from step 4
+  - `auto_apply` = `true`
+  - `project_name` = active project name (optional if already active)
+- The response includes:
+  - `plan` -- the full diff with all push/pull operations
+  - `project_info` -- mcp_server, board_id, trello_card_id, default_list
+  - `auto_applied` -- counts of pull operations already applied locally
 
-### 4. Local → Trello (push)
+### 6. Execute push operations
 
-Process **root todos only** (skip any todo where `parent` is not null).
+Process each push operation from the plan by calling the appropriate Trello MCP tools.
+All Trello tool names use the resolved `mcp_server` prefix.
 
-For each local root todo:
-- **No `trello_card_id`** (unlinked): New local todo — push to Trello.
-  - Call `mcp__trello__add_card_to_list` with:
-    - `listId` = resolved "created" list ID
-    - `name` = todo title
-    - `desc` = todo notes (if any)
-    - `due` = todo `due_date` (if set, as ISO date string)
-  - Call `mcp__proj__todo_update` to store the returned card ID as `trello_card_id`.
-  - Track: `created_in_trello += 1`
+**Create checklists** (`push_create_checklist`):
+For each entry:
+- Call `mcp__trello__create_checklist` with `cardId` = trello_card_id, `name` = entry name.
+- Record the returned checklist ID. Call `mcp__proj__proj_trello_apply` to link:
+  ```json
+  {"link_trello_ids": [{"todo_id": "<todo_id>", "trello_checklist_id": "<new_id>"}]}
+  ```
 
-- **Has `trello_card_id`** and the card is in the open list: Update if local title or due_date differ.
-  - Call `mcp__trello__update_card_details` with updated `name` and/or `due` as needed.
-  - Track: `updated_in_trello += 1`
+**Create items** (`push_create_item`):
+For each entry:
+- Resolve `checklist_id`: use the entry's `checklist_id` if set, or the newly created checklist ID (from the step above, matched by todo's parent).
+- Call `mcp__trello__create_checkitem` (or similar) with `checklistId`, `name`, `checked` (as "true"/"false" or state "complete"/"incomplete").
+- Record the returned item ID. Call `mcp__proj__proj_trello_apply` to link:
+  ```json
+  {"link_trello_ids": [{"todo_id": "<todo_id>", "trello_checklist_item_id": "<new_id>"}]}
+  ```
 
-- **Has `trello_card_id`** and local todo is done but card is still in the created list:
-  - Call `mcp__trello__move_card` to move to the "done" list ID.
-  - Track: `updated_in_trello += 1`
+**Update items** (`push_update_item`):
+For each entry:
+- Call the appropriate Trello MCP tool to update the check item name.
 
-### 5. Deleted/archived card propagation
+**Complete items** (`push_complete_item`):
+For each entry:
+- Call the appropriate Trello MCP tool to mark the check item as complete.
 
-For local open root todos where `trello_card_id` is set but the card appears in neither the "created" nor "done" lists:
-- The card was likely archived or deleted externally. Complete the local todo.
-- Track: `closed_locally += 1`
+**Delete items** (`push_delete_item`):
+For each entry:
+- Call the appropriate Trello MCP tool to delete the check item.
 
-### 6. On-delete handling (local → Trello)
+**Rename checklists** (`push_rename_checklist`):
+For each entry:
+- Call the appropriate Trello MCP tool to rename the checklist.
 
-When a todo is deleted locally (detected if `trello_card_id` is set but the todo no longer appears in `todo_list`), this cannot be detected reliably without tombstones. Skip in v1 — note the limitation in the summary if relevant.
+**Batch linking**: When multiple IDs need linking, batch them into a single `proj_trello_apply` call.
 
-Note: actual card archiving/deletion on local todo delete is handled by the push step in the individual todo management workflow, not this full-sync skill. This skill is for reconciliation only.
+### 7. Git tracking flush
 
-### 7. Summary
+- Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello"`.
+
+### 8. Summary
 
 Display only if changes occurred:
 
 ```
 Trello sync complete.
-← Pulled from Trello: {updated_locally} updated, {closed_locally} closed
-→ Pushed to Trello:   {created_in_trello} created, {updated_in_trello} updated
+<- Pulled from Trello: {created} created, {updated} updated, {completed} completed, {reopened} reopened
+-> Pushed to Trello:   {checklists_created} checklists, {items_created} items created, {items_updated} updated, {items_completed} completed
 ```
 
 If all counts are zero: "Trello sync complete. Everything up to date."
 
 ---
 
-## Push-Only Operations (called from other skills/tools)
-
-The following operations are performed by other skills (e.g., after `todo_add`, `todo_complete`, `todo_update`) when `trello.enabled` is true and the todo is a root todo. They are documented here for reference.
-
-### Create card (on todo_add)
-
-1. Verify todo has no parent. If it has a parent, skip silently.
-2. Resolve list IDs (call `mcp__trello__get_lists` if not already resolved).
-3. Call `mcp__trello__add_card_to_list` with `listId` = "created" list, `name` = title, `due` = due_date if set.
-4. Store returned card ID via `mcp__proj__todo_update(trello_card_id=<id>)`.
-
-### Update card title (on todo title change)
-
-1. Verify todo is a root todo with `trello_card_id` set.
-2. Call `mcp__trello__update_card_details` with `cardId` = `trello_card_id`, `name` = new title.
-
-### Complete card (on todo_complete)
-
-1. Verify todo is a root todo with `trello_card_id` set.
-2. Resolve "done" list ID.
-3. Call `mcp__trello__move_card` with `cardId` = `trello_card_id`, `listId` = "done" list ID.
-
-### Update due date (on due_date change)
-
-1. Verify todo is a root todo with `trello_card_id` set.
-2. Call `mcp__trello__update_card_details` with `cardId` = `trello_card_id`, `due` = new due_date (or `null` to clear).
-
-### Archive/delete card (on todo_delete)
-
-1. Verify todo is a root todo with `trello_card_id` set.
-2. Read `on_delete` config (effective: per-project override or global default).
-3. If `on_delete == "archive"`: Call `mcp__trello__update_card_details` with `cardId` = `trello_card_id`, `closed` = true.
-   - If the MCP server does not support `closed`, fall back to `mcp__trello__move_card` to the "done" list.
-4. If `on_delete == "delete"`: Call `mcp__trello__delete_card` with `cardId` = `trello_card_id` (if available), or `mcp__trello__update_card_details` with `closed` = true as fallback.
-
----
-
 ## Notes
 
 - All Trello MCP tool names use the pattern `mcp__<mcp_server>__<tool_name>` where `<mcp_server>` comes from `trello.mcp_server` in config.
-- The `delorenj/mcp-server-trello` tools are: `add_card_to_list`, `update_card_details`, `move_card`, `get_cards_by_list_id`, `get_lists`, `get_recent_activity`.
-- If `update_card_details` does not support `closed`, use `move_card` to the "Done" list as the archive equivalent.
-- `trello_card_id` is stored on the local todo and is the stable link. Never overwrite it with a different card ID.
-
-8. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello"`.
+- The `delorenj/mcp-server-trello` tools include: `add_card_to_list`, `update_card_details`, `move_card`, `get_cards_by_list_id`, `get_lists`, `get_recent_activity`, `create_checklist`, `get_card_checklists`, `create_checkitem`, `update_checkitem`, `delete_checkitem`.
+- `trello_card_id` on project meta is the stable link to the project's Trello card.
+- `trello_checklist_id` on root todos links to the Trello checklist.
+- `trello_checklist_item_id` on all todos links to the Trello check item.
+- Checklist item names for non-root descendants use ID prefixes (e.g., `1.1: Child title`) for disambiguation.
+- The "Tasks" checklist is a catch-all for root leaf todos (those with no children).
 
 ## Suggested next
 
-- `/proj:todo list` — review todos after sync
-- `/proj:todo add` — add a new root todo (will be pushed to Trello on next sync)
-- `/proj:trello-sync` — run another sync after making local changes
+- `/proj:todo list` -- review todos after sync
+- `/proj:todo add` -- add a new todo (will be pushed to Trello on next sync)
+- `/proj:trello-sync` -- run another sync after making local changes

@@ -8,12 +8,14 @@ from server.tools import (
     cards,
     checklists,
     comments,
+    init,
     labels,
     lists,
     members,
 )
 
 mcp = FastMCP("trello")
+init.register(mcp)
 boards.register(mcp)
 lists.register(mcp)
 cards.register(mcp)

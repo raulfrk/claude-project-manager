@@ -117,7 +117,8 @@ def register(app: FastMCP) -> None:
         # Boost paths in zoxide frecency database if enabled
         if _zoxide_enabled(cfg, meta):
             for repo_entry in repo_entries:
-                zoxide_boost(repo_entry.path)
+                if Path(repo_entry.path).is_dir():
+                    zoxide_boost(repo_entry.path)
 
         entry = ProjectEntry(
             name=name,

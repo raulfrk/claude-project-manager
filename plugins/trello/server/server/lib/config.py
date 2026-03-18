@@ -17,6 +17,7 @@ class TrelloConfig:
     token: str
     default_board_id: str = ""
     rate_limit_per_10s: int = 100
+    allowed_board_ids: list[str] = field(default_factory=list)
 
 
 _cached_config: TrelloConfig | None = None
@@ -45,6 +46,7 @@ def load_config() -> TrelloConfig:
             token=data.get("token", ""),
             default_board_id=data.get("default_board_id", ""),
             rate_limit_per_10s=data.get("rate_limit_per_10s", 100),
+            allowed_board_ids=data.get("allowed_board_ids", []),
         )
         if not _cached_config.api_key or not _cached_config.token:
             msg = f"Trello YAML config at {config_path} is missing api_key or token."

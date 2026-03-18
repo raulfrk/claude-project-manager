@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "jira": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "run",
+        "jira-server"
+      ],
+      "env": {
+        "UV_LINK_MODE": "copy",
+        "JIRA_CONFIG": "~/.claude/jira.yaml"
+      },
+      "timeout": 300
+    }
+  }
+}

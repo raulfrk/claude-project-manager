@@ -209,6 +209,48 @@ class TestDeleteChecklist:
         assert parsed["checklist_id"] == "cl1"
 
 
+class TestRenameChecklistItem:
+    def test_renames_item(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        updated = {"id": "ci1", "name": "New Name"}
+        mock_trello_client.put.return_value = updated
+
+        result = tools["rename_checklist_item"]("c1", "cl1", "ci1", "New Name")
+
+        mock_trello_client.put.assert_called_once_with(
+            "/cards/c1/checkItem/ci1", params={"name": "New Name"}
+        )
+        assert json.loads(result) == updated
+
+
+class TestDeleteChecklistItem:
+    def test_deletes_item(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.delete.return_value = None
+
+        result = tools["delete_checklist_item"]("c1", "cl1", "ci1")
+
+        mock_trello_client.delete.assert_called_once_with("/cards/c1/checkItem/ci1")
+        parsed = json.loads(result)
+        assert parsed["deleted"] is True
+        assert parsed["card_id"] == "c1"
+        assert parsed["item_id"] == "ci1"
+
+
+class TestRenameChecklist:
+    def test_renames_checklist(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        updated = {"id": "cl1", "name": "Renamed"}
+        mock_trello_client.put.return_value = updated
+
+        result = tools["rename_checklist"]("cl1", "Renamed")
+
+        mock_trello_client.put.assert_called_once_with(
+            "/checklists/cl1", params={"name": "Renamed"}
+        )
+        assert json.loads(result) == updated
+
+
 # ========== Attachments ==========
 
 

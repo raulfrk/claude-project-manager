@@ -88,7 +88,9 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      - If yes: set `_zoxide = true`
      - If no: set `_zoxide = null` (use global default)
 
-5. Call `mcp__proj__proj_init` with name, dirs=_dirs, description, tags, git_enabled, zoxide_integration=_zoxide.
+5. Before calling `proj_init`, filter `_dirs` to exclude any entries whose path matches a `_worktree_entries` path. Store the excluded entries separately as `_deferred_dirs` — they will be registered via `proj_add_repo` after worktree creation in step 8.
+
+   Call `mcp__proj__proj_init` with name, dirs=<filtered _dirs (without deferred worktree entries)>, description, tags, git_enabled, zoxide_integration=_zoxide.
    - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
    Call `mcp__proj__proj_load_session` to set as active for this session.
@@ -132,7 +134,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
         - `branch`: entry's branch name
         - `new_branch`: true
         - `path`: entry's worktree path
-     2. **On success**: inform the user — "Worktree created at `<path>` on branch `<branch>`."
+     2. **On success**: call `mcp__proj__proj_add_repo` with `repo_path=<worktree path>` and `label=<entry's label>` to register the repo path and boost zoxide (the path now exists). Then inform the user — "Worktree created at `<path>` on branch `<branch>`."
      3. **On failure**: inform the user of the error. Offer fallback:
         "Worktree creation failed for '<label>'. Fall back to creating a new directory? [yes/no]"
         - If **yes**: `mkdir -p <path>`, note the fallback.

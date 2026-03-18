@@ -21,6 +21,13 @@ class TrelloClient:
         self._http = httpx.Client(base_url=BASE_URL, timeout=30)
         self._request_timestamps: deque[float] = deque()
 
+    def check_board_access(self, board_id: str) -> None:
+        """Raise if board_id is not in the configured whitelist."""
+        if not self._config.allowed_board_ids:
+            raise RuntimeError("No boards in whitelist. Run trello_init to configure allowed boards.")
+        if board_id not in self._config.allowed_board_ids:
+            raise RuntimeError(f"Board '{board_id}' not in whitelist. Allowed: {self._config.allowed_board_ids}")
+
     def _auth_params(self) -> dict[str, str]:
         return {"key": self._config.api_key, "token": self._config.token}
 

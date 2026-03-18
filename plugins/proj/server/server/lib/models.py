@@ -103,6 +103,7 @@ class TrelloSync:
     enabled: bool = False
     mcp_server: str = "trello"
     default_board_id: str = ""
+    default_list: str = "Active"
     list_mappings: TrelloListMappings = field(default_factory=TrelloListMappings)
     on_delete: str = "archive"  # "archive" or "delete"
 
@@ -111,6 +112,7 @@ class TrelloSync:
             "enabled": self.enabled,
             "mcp_server": self.mcp_server,
             "default_board_id": self.default_board_id,
+            "default_list": self.default_list,
             "list_mappings": self.list_mappings.to_dict(),
             "on_delete": self.on_delete,
         }
@@ -122,8 +124,33 @@ class TrelloSync:
             enabled=bool(data.get("enabled", False)),
             mcp_server=str(data.get("mcp_server", "trello")),
             default_board_id=str(data.get("default_board_id", "")),
+            default_list=str(data.get("default_list", "Active")),
             list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),  # type: ignore[arg-type]
             on_delete=str(data.get("on_delete", "archive")),
+        )
+
+
+@dataclass
+class JiraSync:
+    """Global Jira sync configuration stored under sync.jira in proj.yaml."""
+
+    enabled: bool = False
+    mcp_server: str = "jira"
+    default_user: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "mcp_server": self.mcp_server,
+            "default_user": self.default_user,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> JiraSync:
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            mcp_server=str(data.get("mcp_server", "jira")),
+            default_user=str(data.get("default_user", "")),
         )
 
 
@@ -165,6 +192,7 @@ class ProjConfig:
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     todoist: TodoistSync = field(default_factory=TodoistSync)
     trello: TrelloSync = field(default_factory=TrelloSync)
+    jira: JiraSync = field(default_factory=JiraSync)
     git_tracking: GitTracking = field(default_factory=GitTracking)
     # Optional integration flags set by /proj:init-plugin
     perms_integration: bool = False
@@ -181,7 +209,7 @@ class ProjConfig:
             "git_integration": self.git_integration,
             "default_priority": self.default_priority,
             "permissions": self.permissions.to_dict(),
-            "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict()},
+            "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict(), "jira": self.jira.to_dict()},
             "git_tracking": self.git_tracking.to_dict(),
             "perms_integration": self.perms_integration,
             "worktree_integration": self.worktree_integration,
@@ -201,6 +229,9 @@ class ProjConfig:
         trello_raw = sync.get("trello", {})
         if not isinstance(trello_raw, dict):
             trello_raw = {}
+        jira_raw = sync.get("jira", {})
+        if not isinstance(jira_raw, dict):
+            jira_raw = {}
 
         perms_raw = data.get("permissions", {})
         if not isinstance(perms_raw, dict):
@@ -224,6 +255,7 @@ class ProjConfig:
             permissions=PermissionsConfig.from_dict(perms_raw),
             todoist=TodoistSync.from_dict(todoist_raw),
             trello=TrelloSync.from_dict(trello_raw),
+            jira=JiraSync.from_dict(jira_raw),
             git_tracking=GitTracking.from_dict(git_tracking_raw),
             perms_integration=bool(data.get("perms_integration", False)),
             worktree_integration=bool(data.get("worktree_integration", False)),
@@ -467,6 +499,7 @@ class ProjectMeta:
     next_todo_id: int = 1
     git_enabled: bool = True
     todoist_project_id: str | None = None
+    trello_card_id: str | None = None
     permissions: ProjectPermissions = field(default_factory=ProjectPermissions)
     todoist: ProjectTodoistConfig = field(default_factory=ProjectTodoistConfig)
     trello: ProjectTrelloConfig = field(default_factory=ProjectTrelloConfig)
@@ -488,6 +521,7 @@ class ProjectMeta:
             "next_todo_id": self.next_todo_id,
             "git_enabled": self.git_enabled,
             "todoist_project_id": self.todoist_project_id,
+            "trello_card_id": self.trello_card_id,
             "permissions": self.permissions.to_dict(),
             "todoist": self.todoist.to_dict(),
             "trello": self.trello.to_dict(),
@@ -528,6 +562,9 @@ class ProjectMeta:
             git_enabled=bool(data.get("git_enabled", True)),
             todoist_project_id=data.get("todoist_project_id")
             if isinstance(data.get("todoist_project_id"), str)
+            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            trello_card_id=data.get("trello_card_id")
+            if isinstance(data.get("trello_card_id"), str)
             else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
             permissions=ProjectPermissions.from_dict(
                 perms_raw if isinstance(perms_raw, dict) else {}
@@ -587,6 +624,9 @@ class Todo:
     todoist_task_id: str | None = None
     todoist_description_synced: str = ""  # last Todoist description pulled; used to detect changes and avoid duplicate appends
     trello_card_id: str | None = None  # set when synced with Trello; stable link to the Trello card
+    trello_checklist_id: str | None = None  # set for root todos that become Trello checklists
+    trello_checklist_item_id: str | None = None  # set for todos that become Trello checklist items
+    jira_issue_key: str | None = None  # set when synced with Jira; stable link to the Jira issue
     due_date: str | None = None  # ISO 8601 date string (YYYY-MM-DD) or None
 
     def to_dict(self) -> dict[str, object]:
@@ -610,6 +650,9 @@ class Todo:
             "todoist_task_id": self.todoist_task_id,
             "todoist_description_synced": self.todoist_description_synced,
             "trello_card_id": self.trello_card_id,
+            "trello_checklist_id": self.trello_checklist_id,
+            "trello_checklist_item_id": self.trello_checklist_item_id,
+            "jira_issue_key": self.jira_issue_key,
             "due_date": self.due_date,
         }
 
@@ -639,6 +682,15 @@ class Todo:
             todoist_description_synced=str(data.get("todoist_description_synced", "")),
             trello_card_id=data.get("trello_card_id")
             if isinstance(data.get("trello_card_id"), str)
+            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            trello_checklist_id=data.get("trello_checklist_id")
+            if isinstance(data.get("trello_checklist_id"), str)
+            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            trello_checklist_item_id=data.get("trello_checklist_item_id")
+            if isinstance(data.get("trello_checklist_item_id"), str)
+            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            jira_issue_key=data.get("jira_issue_key")
+            if isinstance(data.get("jira_issue_key"), str)
             else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
             due_date=data.get("due_date", None)  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
             if isinstance(data.get("due_date"), str)
