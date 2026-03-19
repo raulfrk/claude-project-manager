@@ -436,12 +436,14 @@ def register(app: FastMCP) -> None:
             "When auto_apply=True, pull operations (pull_create, pull_update, "
             "pull_complete) are applied locally immediately and the response "
             "includes project_info (mcp_server, todoist_project_id) so the "
-            "caller can skip separate config_load/proj_get_active calls."
+            "caller can skip separate config_load/proj_get_active calls. "
+            "Set summary_only=True to return only summary counts, not full plan arrays."
         )
     )
     def proj_todoist_diff(
         todoist_tasks_json: str,
         auto_apply: bool = False,
+        summary_only: bool = False,
         project_name: str | None = None,
     ) -> str:
         result = require_project(project_name)
@@ -457,12 +459,16 @@ def register(app: FastMCP) -> None:
         plan = compute_diff(todoist_tasks, cfg, name)
 
         if not auto_apply:
-            return json.dumps(plan.to_dict(), indent=2)
+            plan_dict = plan.to_dict()
+            if summary_only:
+                return json.dumps({"summary": plan_dict["summary"]}, indent=2)
+            return json.dumps(plan_dict, indent=2)
 
         # auto_apply mode: apply pull operations server-side
         meta = storage.load_meta(cfg, name)
+        plan_dict = plan.to_dict()
         response: dict[str, object] = {
-            "plan": plan.to_dict(),
+            "plan": {"summary": plan_dict["summary"]} if summary_only else plan_dict,
             "project_info": {
                 "mcp_server": cfg.todoist.mcp_server,
                 "todoist_project_id": meta.todoist_project_id or "",

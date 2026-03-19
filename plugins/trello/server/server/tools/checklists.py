@@ -60,3 +60,72 @@ def register(app: FastMCP) -> None:
         client = get_client()
         checklist = client.put(f"/checklists/{checklist_id}", params={"name": name})
         return json.dumps(checklist)
+
+    @app.tool(
+        description=(
+            "Add multiple items to a checklist in one call. "
+            "Each item dict has 'name' (required) and 'checked' (optional bool, default false). "
+            "Returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def batch_add_checklist_items(checklist_id: str, items: list[dict[str, object]]) -> str:
+        client = get_client()
+        successes: list[dict[str, object]] = []
+        failures: list[dict[str, object]] = []
+        for idx, item in enumerate(items):
+            try:
+                name = str(item.get("name", ""))
+                if not name:
+                    failures.append({"index": idx, "error": "Missing 'name' field"})
+                    continue
+                params: dict[str, str] = {"name": name}
+                if item.get("checked"):
+                    params["checked"] = "true"
+                created = client.post(
+                    f"/checklists/{checklist_id}/checkItems", params=params
+                )
+                successes.append(created)
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"index": idx, "name": item.get("name", ""), "error": str(exc)})
+        return json.dumps({"successes": successes, "failures": failures})
+
+    @app.tool(
+        description=(
+            "Update multiple checklist items in one call. "
+            "Each update dict has 'checklist_id', 'item_id' (both required), "
+            "and optional 'name' and 'state' ('complete' or 'incomplete'). "
+            "Returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def batch_update_checklist_items(
+        card_id: str, updates: list[dict[str, str]]
+    ) -> str:
+        client = get_client()
+        successes: list[dict[str, object]] = []
+        failures: list[dict[str, object]] = []
+        for idx, update in enumerate(updates):
+            try:
+                cl_id = update.get("checklist_id", "")
+                it_id = update.get("item_id", "")
+                if not cl_id or not it_id:
+                    failures.append({
+                        "index": idx,
+                        "error": "Missing 'checklist_id' or 'item_id'",
+                    })
+                    continue
+                params: dict[str, str] = {}
+                if "name" in update:
+                    params["name"] = update["name"]
+                if "state" in update:
+                    params["state"] = update["state"]
+                if not params:
+                    failures.append({"index": idx, "error": "No fields to update"})
+                    continue
+                result = client.put(
+                    f"/cards/{card_id}/checklist/{cl_id}/checkItem/{it_id}",
+                    params=params,
+                )
+                successes.append(result)
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"index": idx, "item_id": it_id, "error": str(exc)})
+        return json.dumps({"successes": successes, "failures": failures})

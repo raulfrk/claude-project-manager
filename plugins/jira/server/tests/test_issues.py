@@ -178,3 +178,177 @@ class TestJiraGetUserIssues:
         params = mock_jira_client.get.call_args[1]["params"]
         jql = params["jql"]
         assert "project in" not in jql
+
+
+class TestJiraBulkCreateIssues:
+    def test_posts_bulk_payload(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        bulk_response = {
+            "issues": [{"id": "10001", "key": "PROJ-100"}],
+            "errors": [],
+        }
+        mock_jira_client.post.return_value = bulk_response
+
+        payload = json.dumps({
+            "issueUpdates": [
+                {
+                    "fields": {
+                        "project": {"key": "PROJ"},
+                        "summary": "New issue",
+                        "issuetype": {"name": "Task"},
+                    }
+                }
+            ]
+        })
+
+        result = issue_tools["jira_bulk_create_issues"](issues_json=payload)
+
+        mock_jira_client.post.assert_called_once_with(
+            "/rest/api/2/issue/bulk",
+            json_body={
+                "issueUpdates": [
+                    {
+                        "fields": {
+                            "project": {"key": "PROJ"},
+                            "summary": "New issue",
+                            "issuetype": {"name": "Task"},
+                        }
+                    }
+                ]
+            },
+        )
+        assert json.loads(result) == bulk_response
+
+    def test_invalid_json_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        result = issue_tools["jira_bulk_create_issues"](issues_json="not valid json")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "Invalid JSON" in parsed["error"]
+
+    def test_missing_issueUpdates_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        result = issue_tools["jira_bulk_create_issues"](issues_json=json.dumps({"foo": "bar"}))
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "issueUpdates" in parsed["error"]
+
+
+class TestJiraBulkUpdateIssues:
+    def test_updates_multiple_issues(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.put.return_value = None
+
+        payload = json.dumps({
+            "updates": [
+                {"key": "PROJ-1", "fields": {"summary": "Updated 1"}},
+                {"key": "PROJ-2", "fields": {"priority": {"name": "High"}}},
+            ]
+        })
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert len(parsed["successes"]) == 2
+        assert len(parsed["failures"]) == 0
+        assert parsed["successes"][0] == {"key": "PROJ-1", "status": "updated"}
+        assert parsed["successes"][1] == {"key": "PROJ-2", "status": "updated"}
+
+        calls = mock_jira_client.put.call_args_list
+        assert calls[0] == (
+            ("/rest/api/2/issue/PROJ-1",),
+            {"json_body": {"fields": {"summary": "Updated 1"}}},
+        )
+        assert calls[1] == (
+            ("/rest/api/2/issue/PROJ-2",),
+            {"json_body": {"fields": {"priority": {"name": "High"}}}},
+        )
+
+    def test_invalid_json_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        result = issue_tools["jira_bulk_update_issues"](updates_json="bad json")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "Invalid JSON" in parsed["error"]
+
+    def test_missing_updates_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        result = issue_tools["jira_bulk_update_issues"](
+            updates_json=json.dumps({"foo": "bar"})
+        )
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "updates" in parsed["error"]
+
+    def test_missing_key_recorded_as_failure(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        payload = json.dumps({
+            "updates": [
+                {"fields": {"summary": "No key"}},
+            ]
+        })
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "Missing 'key'" in parsed["failures"][0]["error"]
+
+    def test_no_fields_recorded_as_failure(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        payload = json.dumps({
+            "updates": [
+                {"key": "PROJ-1", "fields": {}},
+            ]
+        })
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "No fields" in parsed["failures"][0]["error"]
+
+    def test_api_error_captured_as_failure(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.put.side_effect = [
+            RuntimeError("Jira API error 500: server error"),
+            None,
+        ]
+
+        payload = json.dumps({
+            "updates": [
+                {"key": "PROJ-1", "fields": {"summary": "Fails"}},
+                {"key": "PROJ-2", "fields": {"summary": "Works"}},
+            ]
+        })
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "500" in parsed["failures"][0]["error"]
+        assert len(parsed["successes"]) == 1
+        assert parsed["successes"][0]["key"] == "PROJ-2"
+
+    def test_empty_updates_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        payload = json.dumps({"updates": []})
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert "error" in parsed

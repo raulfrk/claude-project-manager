@@ -36,11 +36,17 @@ Execute todo(s): $ARGUMENTS
       2. **Not satisfied** — describe what's missing
    b. If not satisfied:
       - Create a new todo from the user's description (`mcp__proj__todo_add`)
+      - If Trello auto-sync (trello.enabled=true via config_load, project has trello_card_id):
+        - Determine checklist: if parent todo has `trello_checklist_id`, use that. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find existing "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on the root todo.
+        - Call `mcp__trello__add_checklist_item(checklist_id, name=title)`
+        - Store returned item ID: call `mcp__proj__todo_update` with `trello_checklist_item_id=<returned id>`
       - Run the full workflow on the new todo: read `run/SKILL.md` and execute with `$ARGUMENTS = <new_id> --iter 5`
       - After the run completes, re-ask satisfaction on the original todo (go back to step 5a)
       - Loop until satisfied
    c. Call `mcp__proj__todo_complete`
    - If Todoist enabled: call `mcp__{todoist.mcp_server}__complete-tasks`
+   - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+     - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
    - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
    - Append a brief progress note: `mcp__proj__notes_append`
 

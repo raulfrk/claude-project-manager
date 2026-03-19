@@ -88,3 +88,61 @@ def register(app: FastMCP) -> None:
             },
         )
         return json.dumps(data)
+
+    @app.tool(
+        description=(
+            "Bulk-create Jira issues using the bulk endpoint (POST /rest/api/2/issue/bulk). "
+            "issues_json is a JSON string with an 'issueUpdates' array. "
+            "Each entry has 'fields' with at minimum 'project.key', 'summary', 'issuetype.name'. "
+            "Returns the Jira bulk-create response with created issue keys."
+        ),
+    )
+    def jira_bulk_create_issues(issues_json: str) -> str:
+        client = get_client()
+        try:
+            payload = json.loads(issues_json)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"error": f"Invalid JSON: {exc}"})
+
+        if "issueUpdates" not in payload:
+            return json.dumps({"error": "Missing 'issueUpdates' key in payload"})
+
+        data = client.post("/rest/api/2/issue/bulk", json_body=payload)
+        return json.dumps(data)
+
+    @app.tool(
+        description=(
+            "Bulk-update Jira issues. updates_json is a JSON string with an 'updates' array. "
+            "Each entry has 'key' (issue key, required) and 'fields' (dict of fields to update). "
+            "Loops PUT /rest/api/2/issue/{key} internally with rate limiting. "
+            "Returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def jira_bulk_update_issues(updates_json: str) -> str:
+        client = get_client()
+        try:
+            payload = json.loads(updates_json)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"error": f"Invalid JSON: {exc}"})
+
+        updates = payload.get("updates", [])
+        if not updates:
+            return json.dumps({"error": "Missing or empty 'updates' array in payload"})
+
+        successes: list[dict[str, object]] = []
+        failures: list[dict[str, object]] = []
+        for idx, update in enumerate(updates):
+            try:
+                key = update.get("key", "")
+                if not key:
+                    failures.append({"index": idx, "error": "Missing 'key' field"})
+                    continue
+                fields = update.get("fields", {})
+                if not fields:
+                    failures.append({"index": idx, "key": key, "error": "No fields to update"})
+                    continue
+                client.put(f"/rest/api/2/issue/{key}", json_body={"fields": fields})
+                successes.append({"key": key, "status": "updated"})
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
+        return json.dumps({"successes": successes, "failures": failures})

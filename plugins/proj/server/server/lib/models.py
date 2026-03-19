@@ -84,15 +84,28 @@ class ArchiveConfig:
 class TrelloListMappings:
     created: str = "Backlog"  # List name or ID where new todos are added as cards
     done: str = "Done"        # List name or ID where completed todos are moved
+    # Project-status-based list mappings (map project status to Trello list name)
+    active: str = ""          # List name for active projects (empty = not configured)
+    pending: str = ""         # List name for paused/blocked projects (empty = not configured)
+    archived: str = ""        # List name for archived projects (empty = not configured)
 
     def to_dict(self) -> dict[str, object]:
-        return {"created": self.created, "done": self.done}
+        return {
+            "created": self.created,
+            "done": self.done,
+            "active": self.active,
+            "pending": self.pending,
+            "archived": self.archived,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> TrelloListMappings:
         return cls(
             created=str(data.get("created", "Backlog")),
             done=str(data.get("done", "Done")),
+            active=str(data.get("active", "")),
+            pending=str(data.get("pending", "")),
+            archived=str(data.get("archived", "")),
         )
 
 
@@ -101,7 +114,6 @@ class TrelloSync:
     """Global Trello sync configuration stored under sync.trello in proj.yaml."""
 
     enabled: bool = False
-    mcp_server: str = "trello"
     default_board_id: str = ""
     default_list: str = "Active"
     list_mappings: TrelloListMappings = field(default_factory=TrelloListMappings)
@@ -110,7 +122,6 @@ class TrelloSync:
     def to_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
-            "mcp_server": self.mcp_server,
             "default_board_id": self.default_board_id,
             "default_list": self.default_list,
             "list_mappings": self.list_mappings.to_dict(),
@@ -122,7 +133,6 @@ class TrelloSync:
         lm_raw = data.get("list_mappings", {})
         return cls(
             enabled=bool(data.get("enabled", False)),
-            mcp_server=str(data.get("mcp_server", "trello")),
             default_board_id=str(data.get("default_board_id", "")),
             default_list=str(data.get("default_list", "Active")),
             list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),  # type: ignore[arg-type]
@@ -135,13 +145,11 @@ class JiraSync:
     """Global Jira sync configuration stored under sync.jira in proj.yaml."""
 
     enabled: bool = False
-    mcp_server: str = "jira"
     default_user: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
-            "mcp_server": self.mcp_server,
             "default_user": self.default_user,
         }
 
@@ -149,7 +157,6 @@ class JiraSync:
     def from_dict(cls, data: dict[str, object]) -> JiraSync:
         return cls(
             enabled=bool(data.get("enabled", False)),
-            mcp_server=str(data.get("mcp_server", "jira")),
             default_user=str(data.get("default_user", "")),
         )
 
@@ -506,6 +513,7 @@ class ProjectMeta:
     git_tracking: ProjectGitTrackingConfig = field(default_factory=ProjectGitTrackingConfig)
     zoxide_integration: bool | None = None  # None = use global config default
     claudemd_management: bool | None = None  # None = use global config default
+    jira_issue_key: str | None = None  # set when project was created from a Jira epic; stable link
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -528,6 +536,7 @@ class ProjectMeta:
             "git_tracking": self.git_tracking.to_dict(),
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
+            "jira_issue_key": self.jira_issue_key,
         }
 
     @classmethod
@@ -580,10 +589,37 @@ class ProjectMeta:
             ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
             zoxide_integration=bool(zi_raw) if (zi_raw := data.get("zoxide_integration")) is not None else None,
             claudemd_management=bool(cm_raw) if (cm_raw := data.get("claudemd_management")) is not None else None,
+            jira_issue_key=data.get("jira_issue_key")
+            if isinstance(data.get("jira_issue_key"), str)
+            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
         )
 
 
 # ── Todos ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class TrelloSyncState:
+    """Snapshot of last-synced state for a todo's Trello representation."""
+
+    last_sync: str = ""       # ISO 8601 datetime of last successful sync
+    synced_name: str = ""     # name as it was on Trello after last sync
+    synced_state: str = ""    # "complete" or "incomplete" after last sync
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "last_sync": self.last_sync,
+            "synced_name": self.synced_name,
+            "synced_state": self.synced_state,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> TrelloSyncState:
+        return cls(
+            last_sync=str(data.get("last_sync", "")),
+            synced_name=str(data.get("synced_name", "")),
+            synced_state=str(data.get("synced_state", "")),
+        )
 
 
 @dataclass
@@ -627,7 +663,9 @@ class Todo:
     trello_checklist_id: str | None = None  # set for root todos that become Trello checklists
     trello_checklist_item_id: str | None = None  # set for todos that become Trello checklist items
     jira_issue_key: str | None = None  # set when synced with Jira; stable link to the Jira issue
+    jira_synced_comment_ids: list[str] = field(default_factory=list)  # Jira comment IDs already pulled into notes
     due_date: str | None = None  # ISO 8601 date string (YYYY-MM-DD) or None
+    trello_sync_state: TrelloSyncState | None = None  # last-synced snapshot for Trello
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -653,7 +691,9 @@ class Todo:
             "trello_checklist_id": self.trello_checklist_id,
             "trello_checklist_item_id": self.trello_checklist_item_id,
             "jira_issue_key": self.jira_issue_key,
+            "jira_synced_comment_ids": self.jira_synced_comment_ids,
             "due_date": self.due_date,
+            "trello_sync_state": self.trello_sync_state.to_dict() if self.trello_sync_state is not None else None,
         }
 
     @classmethod
@@ -692,7 +732,11 @@ class Todo:
             jira_issue_key=data.get("jira_issue_key")
             if isinstance(data.get("jira_issue_key"), str)
             else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            jira_synced_comment_ids=[str(x) for x in jsci] if isinstance((jsci := data.get("jira_synced_comment_ids")), list) else [],
             due_date=data.get("due_date", None)  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
             if isinstance(data.get("due_date"), str)
+            else None,
+            trello_sync_state=TrelloSyncState.from_dict(tss_raw)  # type: ignore[arg-type]
+            if isinstance((tss_raw := data.get("trello_sync_state")), dict)
             else None,
         )

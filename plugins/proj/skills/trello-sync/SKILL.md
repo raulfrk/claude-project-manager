@@ -2,31 +2,21 @@
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Each project is a single Trello card; root todos with children become checklists, leaf root todos become items in a "Tasks" checklist. Use when the user says "sync with Trello", "sync trello", or "trello sync".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
 context: fork
 agent: general-purpose
 ---
 
-> **Note on allowed-tools:** Trello MCP tools (`mcp__{trello.mcp_server}__*`) are intentionally
-> absent from `allowed-tools`. The Trello MCP server name is user-configurable via
-> `trello.mcp_server` in the proj config (e.g. `"trello"`, `"my_trello"`, `"mcp-trello"`).
-> Because the server name is only known at runtime, a static wildcard like
-> `mcp__trello__*` would not match a differently-named server. Claude resolves the actual
-> tool names dynamically after reading config and calls them without a pre-declared allow entry.
-
 Full bidirectional Trello sync for the active project.
 
+**Sub-skill chain**: This skill chains five sub-skills in sequence:
+1. `/proj:trello-setup` -- ensure proj label and project card exist on the board
+2. `/proj:trello-fetch` -- fetch card state (checklists, items)
+3. `/proj:trello-diff` -- compute diff between local todos and Trello state
+4. `/proj:trello-push` -- execute push operations to Trello
+5. `/proj:trello-link` -- link returned Trello IDs to local todos and flush git
+
 **Model**: one Trello card per project. Root todos with children become checklists (name = todo title). Their flattened descendants become checklist items (prefixed with ID path). Root leaf todos go into a "Tasks" catch-all checklist.
-
-## Trello Tool Resolution
-
-The Trello MCP server name is configurable. **Before making any Trello tool call**, read
-`trello.mcp_server` from the config (via `mcp__proj__config_load`) and substitute it as the
-prefix. All `mcp__trello__<tool>` references below are templates -- replace `trello` with the
-actual server name from config.
-
-Example: if `trello.mcp_server` is `my_trello`, call `mcp__my_trello__get_board_labels` not
-`mcp__trello__get_board_labels`.
 
 ## Prerequisites
 
@@ -38,10 +28,9 @@ Before syncing, verify:
 
 ### 1. Setup
 
-- Call `mcp__proj__config_load` -- read `trello.*` config values. Note `mcp_server`, `default_board_id`, `default_list`.
+- Call `mcp__proj__config_load` -- read `trello.*` config values. Note `default_board_id`, `default_list`.
 - Call `mcp__proj__proj_get_active` -- get active project name, per-project trello config, and `trello_card_id` from project meta.
 - Check prerequisites (enabled, board ID set). Stop with a clear message if not met.
-- Resolve the Trello MCP server name for all subsequent calls.
 - Resolve effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
 
 **Failure: Trello MCP server unavailable**
@@ -49,8 +38,8 @@ If the Trello MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Trello MCP server '<server_name>' is not available. Verify the server is running and that
-> `trello.mcp_server` in your proj config matches the registered MCP server name."
+> "Trello MCP server 'trello' is not available. Verify the server is running and that the
+> MCP server is registered with the name `trello`."
 
 Do not proceed with any further sync steps.
 
@@ -88,13 +77,13 @@ Do not proceed with any further sync steps.
   - `project_name` = active project name (optional if already active)
 - The response includes:
   - `plan` -- the full diff with all push/pull operations
-  - `project_info` -- mcp_server, board_id, trello_card_id, default_list
+  - `project_info` -- board_id, trello_card_id, default_list
   - `auto_applied` -- counts of pull operations already applied locally
 
 ### 6. Execute push operations
 
 Process each push operation from the plan by calling the appropriate Trello MCP tools.
-All Trello tool names use the resolved `mcp_server` prefix.
+All Trello tool names use the `mcp__trello__` prefix.
 
 **Create checklists** (`push_create_checklist`):
 For each entry:
@@ -105,21 +94,26 @@ For each entry:
   ```
 
 **Create items** (`push_create_item`):
-For each entry:
+When multiple items target the same checklist, prefer `mcp__trello__batch_add_checklist_items` to
+create them in a single call (each item dict has `name` and optional `checked`). The response
+contains `successes` and `failures` arrays. For items across different checklists, group by
+checklist ID and make one batch call per checklist.
+
+For single items or fallback:
 - Resolve `checklist_id`: use the entry's `checklist_id` if set, or the newly created checklist ID (from the step above, matched by todo's parent).
-- Call `mcp__trello__create_checkitem` (or similar) with `checklistId`, `name`, `checked` (as "true"/"false" or state "complete"/"incomplete").
+- Call `mcp__trello__add_checklist_item` with `checklistId`, `name`.
 - Record the returned item ID. Call `mcp__proj__proj_trello_apply` to link:
   ```json
   {"link_trello_ids": [{"todo_id": "<todo_id>", "trello_checklist_item_id": "<new_id>"}]}
   ```
 
-**Update items** (`push_update_item`):
-For each entry:
-- Call the appropriate Trello MCP tool to update the check item name.
+**Update items** (`push_update_item`) and **Complete items** (`push_complete_item`):
+When multiple items need updating on the same card, prefer `mcp__trello__batch_update_checklist_items`
+with `card_id` and an `updates` array (each entry has `checklist_id`, `item_id`, and optional
+`name`/`state`). The response contains `successes` and `failures` arrays.
 
-**Complete items** (`push_complete_item`):
-For each entry:
-- Call the appropriate Trello MCP tool to mark the check item as complete.
+For single items or fallback:
+- Call the appropriate Trello MCP tool to update the check item name or mark it complete.
 
 **Delete items** (`push_delete_item`):
 For each entry:
@@ -151,11 +145,13 @@ If all counts are zero: "Trello sync complete. Everything up to date."
 
 ## Notes
 
-- All Trello MCP tool names use the pattern `mcp__<mcp_server>__<tool_name>` where `<mcp_server>` comes from `trello.mcp_server` in config.
+- All Trello MCP tool names use the pattern `mcp__trello__<tool_name>`.
 - The `delorenj/mcp-server-trello` tools include: `add_card_to_list`, `update_card_details`, `move_card`, `get_cards_by_list_id`, `get_lists`, `get_recent_activity`, `create_checklist`, `get_card_checklists`, `create_checkitem`, `update_checkitem`, `delete_checkitem`.
+- Batch tools: `batch_create_cards`, `batch_add_checklist_items`, `batch_update_checklist_items`. These reduce round-trips when syncing multiple items and return `{successes, failures}` for partial-failure handling.
 - `trello_card_id` on project meta is the stable link to the project's Trello card.
 - `trello_checklist_id` on root todos links to the Trello checklist.
 - `trello_checklist_item_id` on all todos links to the Trello check item.
+- **Auto-linking on pull-create**: When `auto_apply=true`, items created in Trello and pulled locally get their `trello_checklist_item_id` (or `trello_checklist_id` for root checklists) stored on the newly created local todo atomically in the same `apply_changes` call. A `trello_sync_state` snapshot is also recorded on every synced todo after apply, enabling last-changed-wins on subsequent syncs.
 - Checklist item names for non-root descendants use ID prefixes (e.g., `1.1: Child title`) for disambiguation.
 - The "Tasks" checklist is a catch-all for root leaf todos (those with no children).
 

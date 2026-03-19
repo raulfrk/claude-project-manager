@@ -8,6 +8,8 @@ argument-hint: "[--user <username>] [--projects <key1,key2>]"
 
 Convenience wrapper that chains `/proj:jira-sync` and `/proj:trello-sync` in sequence.
 
+**Full sub-skill chain**: jira-fetch -> jira-map -> jira-apply -> trello-setup -> trello-fetch -> trello-diff -> trello-push -> trello-link. See each parent skill for details on sub-skill responsibilities.
+
 ## Steps
 
 ### 1. Check prerequisites

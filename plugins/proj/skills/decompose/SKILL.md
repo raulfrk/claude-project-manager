@@ -2,7 +2,7 @@
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush, mcp__trello__add_checklist_item, mcp__trello__create_checklist, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -109,6 +109,15 @@ Decompose todo $ARGUMENTS into sub-todos.
         - Use the `todoist_task_id` stored in the previous pass as their `parentId`.
         - For each returned task: call `mcp__proj__todo_update` to store `todoist_task_id`.
    - (If the decompose target itself lacks a `todoist_task_id`, omit `parentId` — the new subtodos will appear as top-level tasks in Todoist.)
+
+7.6. **Auto-sync new sub-todos to Trello** (if enabled):
+   - Call `mcp__proj__config_load`. If `trello.enabled` is false: skip silently.
+   - Call `mcp__proj__proj_get_active` to check `trello_card_id`.
+   - If no `trello_card_id`: skip silently.
+   - For each root-level subtodo (parent = decompose target):
+     - If the decompose target has `trello_checklist_id`: call `mcp__trello__add_checklist_item(checklist_id, name=title)`. Store returned ID via `mcp__proj__todo_update(todo_id, trello_checklist_item_id=<id>)`.
+     - If the decompose target does NOT have `trello_checklist_id`: call `mcp__trello__create_checklist(card_id, name=decompose_target_title)` first, store `trello_checklist_id` on the decompose target, then add items.
+   - For nested children (parent = another new subtodo): these map to checklist items with nesting prefix (e.g., "2.3.1 — title"). If the parent subtodo just had a checklist created for it, add items to that checklist with the nesting prefix in the name.
 
 8. Show the final tree via `mcp__proj__todo_tree`.
 

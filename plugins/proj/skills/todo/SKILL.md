@@ -27,6 +27,10 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - If `todoist_project_id` is null: stop with "Todoist project not linked. Set todoist_project_id via mcp__proj__proj_update_meta first."
     - Call `mcp__{todoist.mcp_server}__add-tasks` with content (title), priority (local to Todoist mapped: high->p2, medium->p3, low->p4), labels (from tags -- pass the tags list directly as labels), `projectId` = `todoist_project_id`, and -- if `due` was set -- `dueString` = `<due value>`.
     - Store the returned task ID: call `mcp__proj__todo_update` with `todo_id=<local todo id>` and `todoist_task_id=<id returned by add-tasks>`.
+  - If Trello auto-sync (trello.enabled=true via config_load, project has trello_card_id):
+    - Determine checklist: if parent todo has `trello_checklist_id`, use that. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find existing "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on the root todo.
+    - Call `mcp__trello__add_checklist_item(checklist_id, name=title)`
+    - Store returned item ID: call `mcp__proj__todo_update` with `trello_checklist_item_id=<returned id>`
 
 **update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update a todo's fields
   - Parse the key=value pairs from the arguments
@@ -36,11 +40,15 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - If `notes` were changed: include `description` set to the new notes value in the Todoist update (immediately pushes to Todoist without waiting for `/proj:sync`)
     - If `due_date` was changed: include `dueString` set to the new `due_date` value in the Todoist update
     - Combine all changed fields into a single `mcp__{todoist.mcp_server}__update-tasks` call
+  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+    - If `title` was changed: call `mcp__trello__rename_checklist_item(card_id, checklist_id, item_id, name=new_title)` where card_id comes from project's `trello_card_id`, checklist_id from todo's parent's `trello_checklist_id`
   - Show the updated todo
 
 **done** `<id>` — mark a todo complete (e.g. "done 2")
   - Call `mcp__proj__todo_complete`
   - If Todoist auto_sync: call `mcp__{todoist.mcp_server}__complete-tasks`
+  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+    - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
 
 **list** [all|pending|ready|blocked] — list todos with optional filter
   - Default (no filter): call `mcp__proj__todo_tree` — shows open tasks as a hierarchy, filtering out done todos
@@ -75,7 +83,10 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
   - Call `mcp__proj__todo_unblock`
 
 **delete** `<id>` -- delete a todo
+  - Before deleting, call `mcp__proj__todo_get` to read the todo's `trello_checklist_item_id` for the Trello delete call.
   - Call `mcp__proj__todo_delete`
+  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+    - Call `mcp__trello__delete_checklist_item(card_id, checklist_id, item_id)` where card_id from project's `trello_card_id`
 
 If $ARGUMENTS is empty or ambiguous, output usage: "Usage: /proj:todo [add|update|done|list|tree|block|unblock|delete] [args]"
 Always confirm the action taken and show the resulting todo.

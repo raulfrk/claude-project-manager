@@ -41,6 +41,18 @@ If `todoist.enabled` and `todoist.auto_sync`:
 - Call `mcp__{todoist.mcp_server}__add-tasks` with the todo. Store returned task ID.
 - Call `mcp__proj__todo_update` with `todoist_task_id`.
 
+**T3b. Trello sync (if enabled)**
+
+If Trello auto-sync (trello.enabled=true via config_load, project has trello_card_id):
+- Determine checklist: if parent todo has `trello_checklist_id`, use that. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find existing "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on the root todo.
+- Call `mcp__trello__add_checklist_item(checklist_id, name=title)`
+- Store returned item ID: call `mcp__proj__todo_update` with `trello_checklist_item_id=<returned id>`
+
+**T3c. Trello title update sync**
+
+If `mcp__proj__todo_update` is called with a `title` change AND the todo has `trello_checklist_item_id`:
+- Call `mcp__trello__rename_checklist_item(card_id, checklist_id, item_id, name=new_title)` where card_id comes from project's `trello_card_id`, checklist_id from todo's parent's `trello_checklist_id`
+
 **T4. Launch workflow**
 
 Display: `Created todo <new_id>: <title>. Running workflow...`
@@ -48,6 +60,11 @@ Display: `Created todo <new_id>: <title>. Running workflow...`
 Call the Skill tool: `skill: "proj:run", args: "<new_id> <forwarded-flags>"`
 
 The run skill handles the full define → decompose → execute workflow including plan mode.
+
+**T5. Done/complete** (when the run skill completes and the todo is marked done)
+
+- If Trello auto-sync AND todo has `trello_checklist_item_id`:
+  - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
 
 ---
 

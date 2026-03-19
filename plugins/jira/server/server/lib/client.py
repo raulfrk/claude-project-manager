@@ -58,6 +58,30 @@ class JiraClient:
         self._rate_limit()
         return self._handle_response(self._http.get(path, params=params or {}))
 
+    def post(  # noqa: ANN401
+        self,
+        path: str,
+        json_body: dict[str, Any] | list[Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Send a POST request to the Jira REST API."""
+        self._rate_limit()
+        return self._handle_response(
+            self._http.post(path, json=json_body, params=params or {})
+        )
+
+    def put(  # noqa: ANN401
+        self,
+        path: str,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Send a PUT request to the Jira REST API."""
+        self._rate_limit()
+        return self._handle_response(
+            self._http.put(path, json=json_body, params=params or {})
+        )
+
 
 _cached_client: JiraClient | None = None
 

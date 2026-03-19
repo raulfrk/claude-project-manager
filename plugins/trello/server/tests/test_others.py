@@ -251,6 +251,140 @@ class TestRenameChecklist:
         assert json.loads(result) == updated
 
 
+# ========== Batch Checklist Tools ==========
+
+
+class TestBatchAddChecklistItems:
+    def test_creates_multiple_items(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.side_effect = [
+            {"id": "ci1", "name": "Item A", "state": "incomplete"},
+            {"id": "ci2", "name": "Item B", "state": "complete"},
+        ]
+
+        result = tools["batch_add_checklist_items"](
+            "cl1",
+            [{"name": "Item A"}, {"name": "Item B", "checked": True}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["successes"]) == 2
+        assert len(parsed["failures"]) == 0
+        assert parsed["successes"][0]["id"] == "ci1"
+        assert parsed["successes"][1]["id"] == "ci2"
+
+        # Verify checked param was passed for second item
+        calls = mock_trello_client.post.call_args_list
+        assert calls[0][0][0] == "/checklists/cl1/checkItems"
+        assert calls[0][1]["params"] == {"name": "Item A"}
+        assert calls[1][1]["params"] == {"name": "Item B", "checked": "true"}
+
+    def test_missing_name_recorded_as_failure(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.return_value = {"id": "ci1", "name": "Good"}
+
+        result = tools["batch_add_checklist_items"](
+            "cl1",
+            [{"name": ""}, {"name": "Good"}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert parsed["failures"][0]["index"] == 0
+        assert "Missing" in parsed["failures"][0]["error"]
+        assert len(parsed["successes"]) == 1
+
+    def test_api_error_captured_as_failure(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.side_effect = [
+            RuntimeError("Trello API error 429: rate limited"),
+            {"id": "ci2", "name": "Second"},
+        ]
+
+        result = tools["batch_add_checklist_items"](
+            "cl1",
+            [{"name": "First"}, {"name": "Second"}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "429" in parsed["failures"][0]["error"]
+        assert len(parsed["successes"]) == 1
+
+    def test_empty_items_list(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+
+        result = tools["batch_add_checklist_items"]("cl1", [])
+
+        parsed = json.loads(result)
+        assert parsed["successes"] == []
+        assert parsed["failures"] == []
+
+
+class TestBatchUpdateChecklistItems:
+    def test_updates_multiple_items(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.put.side_effect = [
+            {"id": "ci1", "name": "Renamed", "state": "incomplete"},
+            {"id": "ci2", "state": "complete"},
+        ]
+
+        result = tools["batch_update_checklist_items"](
+            "c1",
+            [
+                {"checklist_id": "cl1", "item_id": "ci1", "name": "Renamed"},
+                {"checklist_id": "cl1", "item_id": "ci2", "state": "complete"},
+            ],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["successes"]) == 2
+        assert len(parsed["failures"]) == 0
+
+        calls = mock_trello_client.put.call_args_list
+        assert calls[0][0][0] == "/cards/c1/checklist/cl1/checkItem/ci1"
+        assert calls[0][1]["params"] == {"name": "Renamed"}
+        assert calls[1][0][0] == "/cards/c1/checklist/cl1/checkItem/ci2"
+        assert calls[1][1]["params"] == {"state": "complete"}
+
+    def test_missing_ids_recorded_as_failure(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+
+        result = tools["batch_update_checklist_items"](
+            "c1",
+            [{"checklist_id": "", "item_id": "ci1", "state": "complete"}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "Missing" in parsed["failures"][0]["error"]
+
+    def test_no_fields_to_update(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+
+        result = tools["batch_update_checklist_items"](
+            "c1",
+            [{"checklist_id": "cl1", "item_id": "ci1"}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert "No fields" in parsed["failures"][0]["error"]
+
+    def test_api_error_captured_as_failure(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.put.side_effect = RuntimeError("API error")
+
+        result = tools["batch_update_checklist_items"](
+            "c1",
+            [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+        )
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 1
+        assert len(parsed["successes"]) == 0
+
+
 # ========== Attachments ==========
 
 

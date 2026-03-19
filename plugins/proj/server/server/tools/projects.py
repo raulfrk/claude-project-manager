@@ -21,7 +21,18 @@ from server.lib.zoxide import (
     zoxide_boost,
     zoxide_remove,
 )
+from server.lib.models import TrelloListMappings
 from server.tools.config import require_config, require_project
+
+
+def _resolve_list_mappings(cfg: object, meta: ProjectMeta) -> TrelloListMappings:
+    """Resolve effective Trello list mappings: per-project override falls back to global."""
+    from server.lib.models import ProjConfig  # local import to avoid circularity at module level
+
+    assert isinstance(cfg, ProjConfig)
+    if meta.trello.list_mappings is not None:
+        return meta.trello.list_mappings
+    return cfg.trello.list_mappings
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -208,6 +219,7 @@ def register(app: FastMCP) -> None:
         meta = storage.load_meta(cfg, project_name)
         if description is not None:
             meta.description = description
+        old_status = meta.status
         if status is not None:
             meta.status = status
         if priority is not None:
@@ -229,7 +241,28 @@ def register(app: FastMCP) -> None:
         if git_tracking_github_repo_format is not None:
             meta.git_tracking.github_repo_format = git_tracking_github_repo_format
         storage.save_meta(cfg, meta)
-        return f"Updated project '{project_name}'."
+
+        # Build trello_move hint if status changed and project has Trello card
+        trello_move_hint = ""
+        if status is not None and status != old_status and meta.trello_card_id:
+            try:
+                mappings = _resolve_list_mappings(cfg, meta)
+                # Map status to target list
+                status_list_map = {
+                    "active": mappings.active,
+                    "paused": mappings.pending,
+                    "blocked": mappings.pending,
+                }
+                target_list = status_list_map.get(status, "")
+                if target_list:
+                    trello_move_hint = (
+                        f"\ntrello_move: {{\"card_id\": \"{meta.trello_card_id}\", "
+                        f"\"target_list\": \"{target_list}\"}}"
+                    )
+            except Exception:  # noqa: BLE001
+                pass  # Update succeeds even if hint generation fails
+
+        return f"Updated project '{project_name}'.{trello_move_hint}"
 
     @app.tool(description="Archive a project (marks as archived, unsets active if needed).")
     def proj_archive(name: str | None = None, purgeable: bool = True) -> str:
@@ -279,7 +312,42 @@ def register(app: FastMCP) -> None:
         # Clear session active if archiving the current session project
         if state.get_session_active() == project_name:
             state.clear_session_active()
-        return f"Archived project '{project_name}'."
+
+        # Revoke all permissions granted by setup_permissions
+        revoke_summary = ""
+        try:
+            from server.tools.perms_grant import revoke_all_permissions
+            meta = storage.load_meta(cfg, project_name)
+            counts = revoke_all_permissions(meta, cfg)
+            total = sum(counts.values())
+            if total > 0:
+                parts = []
+                if counts["path_rules"]:
+                    parts.append(f"{counts['path_rules']} path")
+                if counts["bash_rules"]:
+                    parts.append(f"{counts['bash_rules']} Bash")
+                if counts["mcp_rules"]:
+                    parts.append(f"{counts['mcp_rules']} MCP")
+                revoke_summary = f" Revoked {total} permission rule(s) ({', '.join(parts)})."
+        except Exception:  # noqa: BLE001
+            pass  # Archive succeeds even if revocation fails
+
+        # Build trello_move hint if project has a Trello card and archived list mapping
+        trello_move_hint = ""
+        try:
+            if not meta:
+                meta = storage.load_meta(cfg, project_name)
+            if meta.trello_card_id:
+                mappings = _resolve_list_mappings(cfg, meta)
+                if mappings.archived:
+                    trello_move_hint = (
+                        f"\ntrello_move: {{\"card_id\": \"{meta.trello_card_id}\", "
+                        f"\"target_list\": \"{mappings.archived}\"}}"
+                    )
+        except Exception:  # noqa: BLE001
+            pass  # Archive succeeds even if hint generation fails
+
+        return f"Archived project '{project_name}'.{revoke_summary}{trello_move_hint}"
 
     @app.tool(description="List or execute purge of archived projects older than purge_after_days.")
     def proj_purge_archive(confirm: bool = False) -> str:

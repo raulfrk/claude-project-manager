@@ -3,11 +3,14 @@
     "perms": {
       "command": "uv",
       "args": [
-        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
-        "run", "perms-server"
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "run",
+        "perms-server"
       ],
       "env": {
-        "UV_LINK_MODE": "copy"
+        "UV_LINK_MODE": "copy",
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv"
       },
       "timeout": 300
     }

@@ -3,11 +3,14 @@
     "proj": {
       "command": "uv",
       "args": [
-        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
-        "run", "proj-server"
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "run",
+        "proj-server"
       ],
       "env": {
         "UV_LINK_MODE": "copy",
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv",
         "PROJ_CONFIG": "~/.claude/proj.yaml"
       },
       "timeout": 300

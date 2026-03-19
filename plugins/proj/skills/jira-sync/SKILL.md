@@ -1,83 +1,84 @@
 ---
 name: jira-sync
-description: Pull Jira issues for the configured user and sync them to local projects/todos. Works without loading a project first. Shows a dry-run mapping for user confirmation before applying.
+description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
 disable-model-invocation: "true"
-allowed-tools: mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append
+allowed-tools: mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_get_epic_issues, mcp__jira__jira_get_user_issues, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 ---
 
-> **Note on allowed-tools:** Jira MCP tools (`mcp__{jira.mcp_server}__*`) are intentionally
-> absent from `allowed-tools`. The Jira MCP server name is user-configurable via
-> `jira.mcp_server` in the proj config (e.g. `"jira"`, `"atlassian"`, `"mcp-jira"`).
-> Because the server name is only known at runtime, a static wildcard like
-> `mcp__jira__*` would not match a differently-named server. Claude resolves the actual
-> tool names dynamically after reading config and calls them without a pre-declared allow entry.
+Pull Jira issues for a user and sync them to local projects/todos using **epic-first mapping**.
+This skill operates across all projects -- it does NOT require loading a project first.
 
-Pull Jira issues for a user and sync them to local projects/todos. This skill operates
-across all projects -- it does NOT require loading a project first.
+**Sub-skill chain**: This skill chains three sub-skills in sequence:
+1. `/proj:jira-fetch` -- fetch issues from Jira
+2. `/proj:jira-map` -- compute epic-first mapping and display dry-run
+3. `/proj:jira-apply` -- apply confirmed mapping, create projects/todos
 
-## Jira Tool Resolution
+## Epic-first mapping logic
 
-The Jira MCP server name is configurable. **Before making any Jira tool call**, read
-`jira.mcp_server` from the config (via `mcp__proj__config_load`) and substitute it as the
-prefix. All `mcp__jira__<tool>` references below are templates -- replace `jira` with the
-actual server name from config.
-
-Example: if `jira.mcp_server` is `atlassian`, call `mcp__atlassian__jira_get_user_issues` not
-`mcp__jira__jira_get_user_issues`.
+1. **Epics become projects** -- each Jira epic maps to one local project. The project's `jira_issue_key` is set to the epic key for instant re-matching on future runs.
+2. **Issues under an epic** -- become todos in that epic's project.
+3. **Standalone issues (no epic)** -- flagged as `needs_user_decision`. The user must assign them to an existing project or create a new one. There is NO automatic catchall or default project.
+4. **Re-run matching** -- projects are matched by `jira_issue_key` first (instant, stable), then by fuzzy name. This makes re-runs idempotent.
 
 ## Steps
 
 ### 1. Setup
 
-- Call `mcp__proj__config_load` -- read `jira.*` config values. Note `jira.enabled`, `jira.mcp_server`, `jira.default_user`.
+- Call `mcp__proj__config_load` -- read `jira.*` config values. Note `jira.enabled`, `jira.default_user`.
 - If `jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
 - Parse optional `--user` and `--projects` from skill arguments:
   - `--user <username>` overrides `jira.default_user`
   - `--projects <key1,key2>` filters to specific Jira project keys
 - If no user is resolved (neither argument nor config default): stop with "No Jira user configured. Pass `--user <username>` or set `jira.default_user` in `~/.claude/proj.yaml`."
-- Resolve the Jira MCP server name for all subsequent calls.
 
 **Failure: Jira MCP server unavailable**
 If the Jira MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Jira MCP server '<server_name>' is not available. Verify the server is running and that
-> `jira.mcp_server` in your proj config matches the registered MCP server name."
+> "Jira MCP server 'jira' is not available. Verify the server is running and that the
+> MCP server is registered with the name `jira`."
 
 Do not proceed with any further sync steps.
 
 ### 2. Fetch issues from Jira
 
-- Resolve the Jira MCP tool name: `mcp__{jira.mcp_server}__jira_get_user_issues`
-- Call with the resolved username and project keys (if provided).
+- Call `mcp__jira__jira_get_user_issues` with the resolved username and project keys (if provided).
 - If no issues are returned: "No open issues found." Stop.
 
 ### 3. Compute mapping
 
 - Call `mcp__proj__proj_jira_map` with the fetched issues JSON.
-- The response includes a mapping plan: groups of issues (by epic or Jira project key) mapped to suggested local projects.
+- The response includes a mapping plan with two sections:
+  - **Auto-mapped** (epic groups): epics matched to existing or new projects
+  - **Needs input** (standalone groups): issues with no epic that require user assignment
 
 ### 4. Display dry-run
 
-Show the proposed mapping as a table:
+Show the proposed mapping in two sections:
 
 ```
-### Proposed Jira -> Local Mapping
+### Auto-mapped (epic-based)
 
-| # | Jira Source | Local Project | Status |
-|---|------------|---------------|--------|
-| 1 | PROJ-123 (Epic: User Auth) | user-auth | Existing |
-| 2 | PROJ-456 (Epic: API v2) | api-v2 | Will create |
-| 3 | PROJ-789 (Story: Fix login) | (unassigned) | Needs mapping |
+| # | Epic | Local Project | Issues | Status |
+|---|------|---------------|--------|--------|
+| 1 | PROJ-5 (User Auth) | user-auth | 4 | Existing (jira_issue_key match) |
+| 2 | PROJ-12 (API v2) | api-v2 | 3 | Will create |
 
-Issues to sync: 15
+### Needs input (no epic)
+
+| # | Issue | Summary | Suggested Project |
+|---|-------|---------|-------------------|
+| 3 | PROJ-789 | Fix login bug | (unmapped) |
+| 4 | PROJ-801 | Update docs | (unmapped) |
+
+Issues to sync: 10 (7 auto-mapped, 3 need input)
 ```
 
-- **Existing** -- maps to an already-tracked local project
-- **Will create** -- a new local project will be created
-- **Needs mapping** -- no automatic match; user must assign manually
+- **Existing** -- maps to an already-tracked local project (matched by jira_issue_key or fuzzy name)
+- **Will create** -- a new local project will be created from the epic
+- **(unmapped)** -- standalone issue with no automatic match; user must assign
 
 ### 5. User confirmation/editing
 
@@ -85,15 +86,15 @@ Present options:
 
 ```
 Options:
-1. **Apply** -- proceed with this mapping
-2. **Edit** -- reassign issues to different projects
+1. **Apply** -- proceed with auto-mapped groups; skip unmapped issues
+2. **Edit** -- assign unmapped issues to projects
 3. **Cancel** -- abort sync
 ```
 
 If the user chooses **Edit**: ask which row number to change. The user can:
 - Assign to an existing project (list projects via `mcp__proj__proj_list`)
 - Create a new project (ask for name, call `mcp__proj__proj_init`)
-- Skip an issue (exclude from sync)
+- Skip an issue (leave unmapped -- it will not be synced)
 
 Repeat editing until the user confirms with **Apply** or aborts with **Cancel**.
 
@@ -106,6 +107,7 @@ Repeat editing until the user confirms with **Apply** or aborts with **Cancel**.
   Projects created: X
   Todos created: Y
   Todos updated: Z
+  Skipped (unmapped): W
   ```
 
 ### 7. Git tracking flush
@@ -124,12 +126,14 @@ Suggest next steps:
 
 ## Notes
 
-- All Jira MCP tool names use the pattern `mcp__<mcp_server>__<tool_name>` where `<mcp_server>` comes from `jira.mcp_server` in config.
+- All Jira MCP tool names use the pattern `mcp__jira__<tool_name>`.
 - This skill works WITHOUT loading a project first -- it operates across all projects.
-- Each non-epic issue maps to a SPECIFIC local project (no catch-all).
-- A single local project can receive issues from multiple Jira sources (different epics, different Jira project keys).
-- Re-running is idempotent: existing todos are updated, no duplicates are created.
-- Epics are used as grouping hints for mapping, not synced as todos themselves.
+- Epics become projects with `jira_issue_key` set on ProjectMeta for stable re-matching.
+- Standalone issues (no epic) are NOT auto-assigned to any project. They require explicit user input.
+- A single local project can receive issues from multiple Jira epics if the user edits the mapping.
+- Re-running is idempotent: existing todos are updated by `jira_issue_key` lookup, no duplicates created.
+- Epics themselves are NOT synced as todos -- they define the project boundary.
+- Bulk tools: `jira_bulk_create_issues` (POST /rest/api/2/issue/bulk) and `jira_bulk_update_issues` (loops PUT per issue with rate limiting). Both return `{successes, failures}` for partial-failure handling.
 
 ## Suggested next
 

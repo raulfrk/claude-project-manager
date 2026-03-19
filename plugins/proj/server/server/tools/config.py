@@ -71,11 +71,12 @@ def register(app: FastMCP) -> None:
             f"  todoist.mcp_server: {cfg.todoist.mcp_server}\n"
             f"  todoist.root_only: {cfg.todoist.root_only}\n"
             f"  trello.enabled: {cfg.trello.enabled}\n"
-            f"  trello.mcp_server: {cfg.trello.mcp_server}\n"
             f"  trello.default_board_id: {cfg.trello.default_board_id or '(not set)'}\n"
             f"  trello.on_delete: {cfg.trello.on_delete}\n"
+            f"  trello.list_mappings.active: {cfg.trello.list_mappings.active or '(not set)'}\n"
+            f"  trello.list_mappings.pending: {cfg.trello.list_mappings.pending or '(not set)'}\n"
+            f"  trello.list_mappings.archived: {cfg.trello.list_mappings.archived or '(not set)'}\n"
             f"  jira.enabled: {cfg.jira.enabled}\n"
-            f"  jira.mcp_server: {cfg.jira.mcp_server}\n"
             f"  jira.default_user: {cfg.jira.default_user or '(not set)'}\n"
             f"  perms_integration: {cfg.perms_integration}\n"
             f"  worktree_integration: {cfg.worktree_integration}\n"
@@ -102,11 +103,12 @@ def register(app: FastMCP) -> None:
         todoist_mcp_server: str = "claude_ai_Todoist",
         todoist_root_only: bool = False,
         trello_enabled: bool = False,
-        trello_mcp_server: str = "trello",
         trello_default_board_id: str = "",
         trello_on_delete: str = "archive",
+        trello_list_active: str = "",
+        trello_list_pending: str = "",
+        trello_list_archived: str = "",
         jira_enabled: bool = False,
-        jira_mcp_server: str = "jira",
         jira_default_user: str = "",
         git_integration: bool = True,
         default_priority: str = "medium",
@@ -137,11 +139,12 @@ def register(app: FastMCP) -> None:
         cfg.todoist.mcp_server = todoist_mcp_server
         cfg.todoist.root_only = todoist_root_only
         cfg.trello.enabled = trello_enabled
-        cfg.trello.mcp_server = trello_mcp_server
         cfg.trello.default_board_id = trello_default_board_id
         cfg.trello.on_delete = trello_on_delete
+        cfg.trello.list_mappings.active = trello_list_active
+        cfg.trello.list_mappings.pending = trello_list_pending
+        cfg.trello.list_mappings.archived = trello_list_archived
         cfg.jira.enabled = jira_enabled
-        cfg.jira.mcp_server = jira_mcp_server
         cfg.jira.default_user = jira_default_user
         cfg.git_tracking.enabled = git_tracking_enabled
         cfg.git_tracking.github_enabled = git_tracking_github_enabled
@@ -195,11 +198,12 @@ def register(app: FastMCP) -> None:
         todoist_mcp_server: str | None = None,
         todoist_root_only: bool | None = None,
         trello_enabled: bool | None = None,
-        trello_mcp_server: str | None = None,
         trello_default_board_id: str | None = None,
         trello_on_delete: str | None = None,
+        trello_list_active: str | None = None,
+        trello_list_pending: str | None = None,
+        trello_list_archived: str | None = None,
         jira_enabled: bool | None = None,
-        jira_mcp_server: str | None = None,
         jira_default_user: str | None = None,
         git_integration: bool | None = None,
         default_priority: str | None = None,
@@ -244,18 +248,6 @@ def register(app: FastMCP) -> None:
                     "Invalid todoist_mcp_server: must be a non-empty string without null bytes."
                 )
 
-        if trello_mcp_server is not None:
-            if not trello_mcp_server or "\x00" in trello_mcp_server:
-                return (
-                    "Invalid trello_mcp_server: must be a non-empty string without null bytes."
-                )
-
-        if jira_mcp_server is not None:
-            if not jira_mcp_server or "\x00" in jira_mcp_server:
-                return (
-                    "Invalid jira_mcp_server: must be a non-empty string without null bytes."
-                )
-
         if trello_on_delete is not None and trello_on_delete not in ("archive", "delete"):
             return "Invalid trello_on_delete: must be 'archive' or 'delete'."
 
@@ -288,16 +280,18 @@ def register(app: FastMCP) -> None:
             cfg.todoist.root_only = todoist_root_only
         if trello_enabled is not None:
             cfg.trello.enabled = trello_enabled
-        if trello_mcp_server is not None:
-            cfg.trello.mcp_server = trello_mcp_server
         if trello_default_board_id is not None:
             cfg.trello.default_board_id = trello_default_board_id
         if trello_on_delete is not None:
             cfg.trello.on_delete = trello_on_delete
+        if trello_list_active is not None:
+            cfg.trello.list_mappings.active = trello_list_active
+        if trello_list_pending is not None:
+            cfg.trello.list_mappings.pending = trello_list_pending
+        if trello_list_archived is not None:
+            cfg.trello.list_mappings.archived = trello_list_archived
         if jira_enabled is not None:
             cfg.jira.enabled = jira_enabled
-        if jira_mcp_server is not None:
-            cfg.jira.mcp_server = jira_mcp_server
         if jira_default_user is not None:
             cfg.jira.default_user = jira_default_user
         if git_integration is not None:

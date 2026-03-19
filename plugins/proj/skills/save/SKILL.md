@@ -14,6 +14,8 @@ Save session context and reconcile git activity for the active project.
 3. **Git reconciliation** (if git_enabled):
    - Call `mcp__proj__proj_git_reconcile_todos` with `since_days=1` to detect recent commits.
    - If suggestions are returned: display them. For each todo that looks completed based on commit messages, ask the user if it should be marked done. Call `mcp__proj__todo_complete` for confirmed ones.
+     - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+       - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
    - If no suggestions: skip silently.
 
 4. Ask the user: "Anything you'd like to add to this session summary? (press Enter to skip)"

@@ -24,6 +24,7 @@ from server.tools.perms_grant import (
     _bash_entry,
     collect_paths,
     grant_investigation_tools,
+    revoke_all_permissions,
     revoke_investigation_tools,
     setup_permissions,
 )
@@ -805,6 +806,221 @@ class TestRevokeInvestigationToolsSandbox:
         assert removed == 1
         allow = _read_local_allow(local_path)
         assert "Bash(grep //home/user/proj/**)" not in allow
+
+
+# ── revoke_all_permissions ─────────────────────────────────────────────────────
+
+
+class TestRevokeAllPermissions:
+    def test_setup_then_revoke_removes_path_and_bash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep", "find"])
+        cfg.tracking_dir = "/tmp/tracking"
+
+        # Setup permissions first
+        setup_permissions(
+            meta, cfg,
+            grant_path_access=True,
+            grant_investigation_tools_flag=True,
+            mcp_servers=["plugin_proj_proj"],
+        )
+        allow_after_setup = _read_allow(settings_path)
+        assert len(allow_after_setup) > 0
+
+        # Revoke all (without mcp_servers — MCP rules are shared across projects)
+        counts = revoke_all_permissions(meta, cfg)
+        total = sum(counts.values())
+        assert total > 0
+        assert counts["path_rules"] > 0
+        assert counts["bash_rules"] > 0
+        # MCP rules are NOT removed by default (shared across projects)
+        allow_after = _read_allow(settings_path)
+        assert "mcp__plugin_proj_proj__*" in allow_after
+
+    def test_revoke_with_mcp_servers_removes_mcp_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        cfg.tracking_dir = "/tmp/tracking"
+
+        setup_permissions(
+            meta, cfg,
+            grant_path_access=True,
+            grant_investigation_tools_flag=True,
+            mcp_servers=["plugin_proj_proj"],
+        )
+
+        # Revoke with explicit mcp_servers — MCP rules should also be removed
+        counts = revoke_all_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
+        assert counts["mcp_rules"] == 1
+        assert _read_allow(settings_path) == []
+
+    def test_revoke_no_permissions_returns_zero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+
+        counts = revoke_all_permissions(meta, cfg)
+        assert sum(counts.values()) == 0
+        assert _read_allow(settings_path) == []
+
+    def test_revoke_preserves_unrelated_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        unrelated = ["Read(//some/other/path/**)", "mcp__unrelated_server__*", "Bash(grep //other/**"]
+        _write_settings(settings_path, allow=unrelated + [
+            "Read(//home/user/proj/**)",
+            "Edit(//home/user/proj/**)",
+        ])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=[])
+        cfg.tracking_dir = ""
+
+        counts = revoke_all_permissions(meta, cfg)
+        assert counts["path_rules"] > 0
+        allow = _read_allow(settings_path)
+        # Unrelated rules should remain
+        for rule in unrelated:
+            assert rule in allow
+
+    def test_revoke_idempotent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        cfg.tracking_dir = "/tmp/tracking"
+
+        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True)
+        revoke_all_permissions(meta, cfg)
+        counts2 = revoke_all_permissions(meta, cfg)
+        assert sum(counts2.values()) == 0
+
+    def test_revoke_removes_sandbox_write_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(tools=["grep"])
+        cfg.tracking_dir = "/tmp/tracking"
+
+        # Setup permissions in sandbox mode
+        setup_permissions(
+            meta, cfg,
+            grant_path_access=True,
+            grant_investigation_tools_flag=True,
+        )
+        aw_before = _read_sandbox_allow_write(local_path)
+        assert "/home/user/proj" in aw_before
+
+        # Revoke all
+        counts = revoke_all_permissions(meta, cfg)
+        assert sum(counts.values()) > 0
+        aw_after = _read_sandbox_allow_write(local_path)
+        assert "/home/user/proj" not in aw_after
+        allow = _read_local_allow(local_path)
+        assert len(allow) == 0
+
+
+# ── proj_archive revokes permissions ──────────────────────────────────────────
+
+
+class TestArchiveRevokesPermissions:
+    @pytest.mark.anyio
+    async def test_archive_revokes_permissions(
+        self,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        mcp_app_with_grant,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from tests.conftest import call_tool, setup_project
+
+        repo_path = str(tmp_path / "myrepo")
+        Path(repo_path).mkdir(parents=True, exist_ok=True)
+        setup_project(cfg, "myproject", repo_path)
+        state.set_session_active("myproject")
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        # Setup permissions
+        await call_tool(
+            mcp_app_with_grant,
+            "proj_setup_permissions",
+            grant_path_access=True,
+            grant_investigation_tools=True,
+            mcp_servers=["plugin_proj_proj"],
+        )
+        allow_before = _read_allow(settings_path)
+        assert len(allow_before) > 0
+
+        # Archive the project
+        result = await call_tool(mcp_app_with_grant, "proj_archive", name="myproject")
+        assert "Archived" in result
+        assert "Revoked" in result
+
+        # Path and Bash rules should be removed; MCP rules remain (shared)
+        allow_after = _read_allow(settings_path)
+        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in allow_after)
+        assert not any(r.startswith("Bash(") for r in allow_after)
+        # MCP rules stay because they are shared across projects
+        assert "mcp__plugin_proj_proj__*" in allow_after
+
+    @pytest.mark.anyio
+    async def test_archive_succeeds_without_permissions(
+        self,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        mcp_app_with_grant,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from tests.conftest import call_tool, setup_project
+
+        repo_path = str(tmp_path / "myrepo")
+        Path(repo_path).mkdir(parents=True, exist_ok=True)
+        setup_project(cfg, "myproject", repo_path)
+        state.set_session_active("myproject")
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        # Archive without setting up permissions first
+        result = await call_tool(mcp_app_with_grant, "proj_archive", name="myproject")
+        assert "Archived" in result
+        # No "Revoked" since there were no permissions to revoke
+        assert _read_allow(settings_path) == []
 
 
 # ── Fixture ───────────────────────────────────────────────────────────────────

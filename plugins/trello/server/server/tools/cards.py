@@ -66,3 +66,38 @@ def register(app: FastMCP) -> None:
         client = get_client()
         client.delete(f"/cards/{card_id}")
         return json.dumps({"deleted": True, "card_id": card_id})
+
+    @app.tool(
+        description=(
+            "Create multiple cards in one call. "
+            "Each card dict has 'list_id' and 'name' (required), "
+            "plus optional 'desc' and 'due'. "
+            "Returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def batch_create_cards(cards: list[dict[str, str]]) -> str:
+        client = get_client()
+        successes: list[dict[str, object]] = []
+        failures: list[dict[str, object]] = []
+        for idx, card in enumerate(cards):
+            try:
+                list_id = card.get("list_id", "")
+                name = card.get("name", "")
+                if not list_id or not name:
+                    failures.append({
+                        "index": idx,
+                        "error": "Missing 'list_id' or 'name'",
+                    })
+                    continue
+                params: dict[str, str] = {"idList": list_id, "name": name}
+                desc = card.get("desc", "")
+                if desc:
+                    params["desc"] = desc
+                due = card.get("due")
+                if due is not None:
+                    params["due"] = due
+                created = client.post("/cards", params=params)
+                successes.append(created)
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"index": idx, "name": card.get("name", ""), "error": str(exc)})
+        return json.dumps({"successes": successes, "failures": failures})

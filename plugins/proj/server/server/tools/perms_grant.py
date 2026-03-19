@@ -127,6 +127,24 @@ def _add_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
     return False
 
 
+def _remove_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
+    """Remove a path from sandbox.filesystem.allowWrite. Returns True if removed."""
+    sandbox = data.get("sandbox")
+    if not isinstance(sandbox, dict):
+        return False
+    fs = sandbox.get("filesystem")
+    if not isinstance(fs, dict):
+        return False
+    aw = fs.get("allowWrite")
+    if not isinstance(aw, list):
+        return False
+    clean = abs_path.rstrip("/")
+    if clean in aw:
+        aw.remove(clean)
+        return True
+    return False
+
+
 # ── Grant / revoke ─────────────────────────────────────────────────────────────
 
 
@@ -388,11 +406,129 @@ def setup_permissions(
     return counts
 
 
+# ── Revoke all (inverse of setup_permissions) ─────────────────────────────────
+
+
+def _collect_all_allow_rules(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    mcp_servers: list[str] | None = None,
+) -> set[str]:
+    """Derive the full set of allow rules that setup_permissions would create.
+
+    MCP rules are only included when ``mcp_servers`` is explicitly provided,
+    because MCP wildcard rules (e.g. ``mcp__plugin_proj_proj__*``) are shared
+    across all projects and should not be revoked on single-project archive
+    unless explicitly requested.
+    """
+    rules: set[str] = set()
+
+    # Path rules: Read+Edit for each repo, Read-only for reference repos
+    for repo in meta.repos:
+        abs_path = str(Path(repo.path).expanduser().resolve())
+        prefix = f"//{abs_path.strip('/')}"
+        rules.add(f"Read({prefix}/**)")
+        if not repo.reference:
+            rules.add(f"Edit({prefix}/**)")
+
+    # Tracking dir path rules
+    if cfg.tracking_dir:
+        abs_tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
+        for entry in _path_allow_entries(abs_tracking):
+            rules.add(entry)
+
+    # Bash investigation-tool rules
+    if cfg.permissions.investigation_tools:
+        for path in collect_paths(meta, cfg):
+            for tool in cfg.permissions.investigation_tools:
+                rules.add(_bash_entry(tool, path))
+
+    # Zoxide rule
+    from server.lib.zoxide import resolve_enabled as _zoxide_enabled
+    if _zoxide_enabled(cfg, meta):
+        rules.add("Bash(zoxide *)")
+
+    # MCP wildcard rules — only when explicitly provided
+    if mcp_servers:
+        for server in mcp_servers:
+            rules.add(_mcp_allow_entry(server))
+
+    return rules
+
+
+def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
+    """Derive the sandbox.filesystem.allowWrite paths that setup_permissions would create."""
+    paths: set[str] = set()
+    for repo in meta.repos:
+        if not repo.reference:
+            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    if cfg.tracking_dir:
+        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
+    return paths
+
+
+def revoke_all_permissions(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    mcp_servers: list[str] | None = None,
+) -> dict[str, int]:
+    """Remove all permission rules that setup_permissions would have created.
+
+    Inverse of setup_permissions — removes path rules, Bash rules,
+    and sandbox.filesystem.allowWrite entries.
+    MCP wildcard rules are only removed when ``mcp_servers`` is explicitly
+    provided, because they are shared across projects.
+
+    Returns a dict with counts: {"path_rules": N, "bash_rules": N, "mcp_rules": N}.
+    Idempotent — removing non-existent rules is a no-op.
+    """
+    project_dirs = project_dirs_from_meta(meta)
+    project_dir = project_dirs[0] if project_dirs else None
+    sandbox_mode = is_sandbox_enabled(project_dirs=project_dirs)
+    data = _load_settings(project_dir)
+    perms = data.get("permissions", {})
+    if not isinstance(perms, dict):
+        perms = {}
+    allow = perms.get("allow", [])
+    if not isinstance(allow, list):
+        allow = []
+
+    to_remove = _collect_all_allow_rules(meta, cfg, mcp_servers=mcp_servers)
+    new_allow = [r for r in allow if r not in to_remove]
+    removed_rules = set(allow) - set(new_allow)
+
+    counts = {
+        "path_rules": sum(
+            1 for r in removed_rules if r.startswith("Read(") or r.startswith("Edit(")
+        ),
+        "bash_rules": sum(1 for r in removed_rules if r.startswith("Bash(")),
+        "mcp_rules": sum(1 for r in removed_rules if r.startswith("mcp__")),
+    }
+
+    # Remove sandbox write paths
+    sandbox_removed = 0
+    if sandbox_mode:
+        for p in _collect_sandbox_write_paths(meta, cfg):
+            if _remove_sandbox_write_path(data, p):
+                sandbox_removed += 1
+    counts["path_rules"] += sandbox_removed
+
+    total = sum(counts.values())
+    if total > 0:
+        perms["allow"] = new_allow
+        data["permissions"] = perms
+        _save_settings(data, project_dir)
+
+    return counts
+
+
 # ── MCP tool registration ──────────────────────────────────────────────────────
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_grant_tool_permissions, proj_setup_permissions, and proj_revoke_tool_permissions tools with the MCP app."""
+    """Register proj_grant_tool_permissions, proj_setup_permissions, proj_revoke_tool_permissions, and proj_revoke_all_permissions tools with the MCP app."""
 
     @app.tool(
         description=(
@@ -493,3 +629,38 @@ def register(app: FastMCP) -> None:
         if removed == 0:
             return f"✅ No investigation tool rules found for '{name}' — nothing to remove."
         return f"✅ Removed {removed} Bash allow rule(s) for '{name}'."
+
+    @app.tool(
+        description=(
+            "Remove ALL permission rules for a project (path rules, Bash rules, "
+            "sandbox write paths). Inverse of proj_setup_permissions. "
+            "MCP wildcard rules are only removed when mcp_servers is provided, "
+            "because they are shared across projects. "
+            "Automatically called by proj_archive. Idempotent. "
+            "Automatically detects sandbox mode."
+        )
+    )
+    def proj_revoke_all_permissions(
+        project_name: str | None = None,
+        mcp_servers: list[str] | None = None,
+    ) -> str:
+        cfg = require_config()
+        index = storage.load_index(cfg)
+        name = state.resolve_project(project_name)
+        if not name:
+            return "No active project."
+        if name not in index.projects:
+            return f"Project '{name}' not found."
+        meta = storage.load_meta(cfg, name)
+        counts = revoke_all_permissions(meta, cfg, mcp_servers=mcp_servers)
+        total = sum(counts.values())
+        if total == 0:
+            return f"✅ No permission rules found for '{name}' — nothing to remove."
+        parts = []
+        if counts["path_rules"]:
+            parts.append(f"{counts['path_rules']} path rule(s)")
+        if counts["bash_rules"]:
+            parts.append(f"{counts['bash_rules']} Bash rule(s)")
+        if counts["mcp_rules"]:
+            parts.append(f"{counts['mcp_rules']} MCP rule(s)")
+        return f"✅ Removed {total} rule(s) for '{name}': {', '.join(parts)}."

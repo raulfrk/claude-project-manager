@@ -3,11 +3,14 @@
     "worktree": {
       "command": "uv",
       "args": [
-        "--directory", "${CLAUDE_PLUGIN_ROOT}/server",
-        "run", "worktree-server"
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "run",
+        "worktree-server"
       ],
       "env": {
         "UV_LINK_MODE": "copy",
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv",
         "WORKTREE_CONFIG": "~/.claude/worktree.yaml"
       },
       "timeout": 300

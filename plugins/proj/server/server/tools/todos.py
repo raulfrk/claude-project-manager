@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from server.lib import storage
@@ -15,8 +15,12 @@ from server.tools.config import require_project
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-def _today() -> str:
-    return str(date.today())
+_UTC = timezone.utc
+
+
+def _now() -> str:
+    """Return current UTC datetime as ISO 8601 string for time precision."""
+    return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
 
 
 def _save(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
@@ -158,7 +162,7 @@ def register(app: FastMCP) -> None:
 
         meta = storage.load_meta(cfg, name)
         todos = storage.load_todos(cfg, name)
-        today = _today()
+        today = _now()
         parent_todo = None
         if parent:
             parent_todo = next((t for t in todos if t.id == parent), None)
@@ -194,7 +198,9 @@ def register(app: FastMCP) -> None:
             "status='active' (default) returns pending+in_progress only; "
             "status='open' returns all non-done/non-cancelled todos; "
             "pass status=None to return all statuses including done. "
-            "Use limit and offset for pagination (limit=0 means no limit)."
+            "Use limit and offset for pagination (limit=0 means no limit). "
+            "Set compact=True for one-line summaries to reduce context usage. "
+            "Set max_items>0 to truncate output."
         )
     )
     def todo_list(
@@ -204,6 +210,8 @@ def register(app: FastMCP) -> None:
         blocked: bool | None = None,
         limit: int = 0,
         offset: int = 0,
+        compact: bool = False,
+        max_items: int = 0,
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -222,7 +230,22 @@ def register(app: FastMCP) -> None:
         )
         if not filtered:
             return "No todos matching filters."
-        return json.dumps([t.to_dict() for t in filtered], indent=2)
+        truncated = 0
+        if max_items > 0 and len(filtered) > max_items:
+            truncated = len(filtered) - max_items
+            filtered = filtered[:max_items]
+        if compact:
+            lines = []
+            for t in filtered:
+                tags_str = ",".join(t.tags) if t.tags else ""
+                lines.append(f"{t.id} | {t.status} | {t.title} | {t.priority} | {tags_str}")
+            if truncated:
+                lines.append(f"... {truncated} more items")
+            return "\n".join(lines)
+        result_json = json.dumps([t.to_dict() for t in filtered], indent=2)
+        if truncated:
+            result_json += f"\n... {truncated} more items"
+        return result_json
 
     @app.tool(
         description=(
@@ -307,7 +330,7 @@ def register(app: FastMCP) -> None:
             if not due_date.strip():
                 return "due_date cannot be empty. Omit it or provide a value."
             todo.due_date = due_date
-        todo.updated = _today()
+        todo.updated = _now()
         storage.save_todos(cfg, name, todos)
         return f"Updated todo {todo_id}."
 
@@ -321,7 +344,7 @@ def register(app: FastMCP) -> None:
         todo = next((t for t in todos if t.id == todo_id), None)
         if not todo:
             return f"Todo '{todo_id}' not found."
-        today = _today()
+        today = _now()
 
         if todo.parent:
             return _complete_child(cfg, name, todo, todos, today)
@@ -367,7 +390,7 @@ def register(app: FastMCP) -> None:
         blocker = todo_map.get(todo_id)
         if not blocker:
             return f"Todo '{todo_id}' not found."
-        today = _today()
+        today = _now()
         self_refs = [bid for bid in blocks_ids if bid == todo_id]
         if self_refs:
             return f"Error: todo cannot block itself ('{todo_id}')."
@@ -392,7 +415,7 @@ def register(app: FastMCP) -> None:
         cfg, name = result
         todos = storage.load_todos(cfg, name)
         todo_map = {t.id: t for t in todos}
-        today = _today()
+        today = _now()
         todo = todo_map.get(todo_id)
         if not todo:
             return f"Todo '{todo_id}' not found."
@@ -413,7 +436,7 @@ def register(app: FastMCP) -> None:
             return result
         cfg, name = result
         todos = storage.load_todos(cfg, name)
-        today = _today()
+        today = _now()
         # Clean up references
         for t in todos:
             if todo_id in t.blocks:
@@ -475,7 +498,7 @@ def register(app: FastMCP) -> None:
         parent = next((t for t in todos if t.id == parent_id), None)
         if not parent:
             return f"Parent todo '{parent_id}' not found."
-        today = _today()
+        today = _now()
         child = Todo(
             id=next_todo_id(meta, parent=parent),
             title=title,
@@ -519,14 +542,58 @@ def register(app: FastMCP) -> None:
         out["_children"] = filtered  # type: ignore[assignment]  # filtered is list[dict]; value slot is object
         return out
 
+    _STATUS_EMOJI: dict[str, str] = {
+        "pending": "\U0001f532",       # 🔲
+        "in_progress": "\U0001f504",   # 🔄
+        "done": "\u2705",             # ✅
+    }
+
+    def _compact_tree_line(node: dict[str, object], depth: int = 0) -> list[str]:
+        """Render a tree node as compact indented lines."""
+        indent = "  " * depth
+        status = str(node.get("status", "pending"))
+        emoji = _STATUS_EMOJI.get(status, "\U0001f532")
+        nid = str(node.get("id", ""))
+        title = str(node.get("title", ""))[:60]
+        priority = str(node.get("priority", "medium"))
+        blocked_by = node.get("blocked_by", [])
+        blocked_info = ""
+        if isinstance(blocked_by, list) and blocked_by:
+            blocked_info = f" [blocked by {','.join(str(b) for b in blocked_by)}]"
+        line = f"{indent}{emoji} {nid} \u2014 {title} ({priority}){blocked_info}"
+        lines = [line]
+        children = node.get("_children", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    lines.extend(_compact_tree_line(child, depth + 1))
+        return lines
+
+    def _count_tree_nodes(roots: list[dict[str, object]]) -> int:
+        """Count total nodes in a tree structure."""
+        count = 0
+        for node in roots:
+            count += 1
+            children = node.get("_children", [])
+            if isinstance(children, list):
+                count += _count_tree_nodes(children)  # type: ignore[arg-type]
+        return count
+
     @app.tool(
         description=(
             "Return todos as a tree structure (JSON with nested children). "
             "By default excludes done todos; done parents are kept when they have "
-            "non-done descendants. Pass include_done=True to return all todos."
+            "non-done descendants. Pass include_done=True to return all todos. "
+            "Set compact=True for indented one-line summaries to reduce context usage. "
+            "Set max_items>0 to truncate output."
         )
     )
-    def todo_tree(project_name: str | None = None, include_done: bool = False) -> str:
+    def todo_tree(
+        project_name: str | None = None,
+        include_done: bool = False,
+        compact: bool = False,
+        max_items: int = 0,
+    ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
             return result
@@ -554,7 +621,27 @@ def register(app: FastMCP) -> None:
             orphaned = [o for o in orphaned if _filter_tree_node(o) is not None]
         if orphaned:
             roots.append({"id": "__orphaned__", "title": "⚠️ Orphaned", "_children": orphaned})
-        return json.dumps(roots, indent=2)
+
+        total_nodes = _count_tree_nodes(roots)
+        truncated = 0
+        if max_items > 0 and total_nodes > max_items:
+            truncated = total_nodes - max_items
+
+        if compact:
+            lines: list[str] = []
+            for root in roots:
+                lines.extend(_compact_tree_line(root))
+            if max_items > 0 and len(lines) > max_items:
+                truncated = len(lines) - max_items
+                lines = lines[:max_items]
+            if truncated:
+                lines.append(f"... {truncated} more items")
+            return "\n".join(lines)
+
+        result_json = json.dumps(roots, indent=2)
+        if truncated:
+            result_json += f"\n... {truncated} more items"
+        return result_json
 
     @app.tool(
         description=(
@@ -666,7 +753,7 @@ def register(app: FastMCP) -> None:
             todo.has_requirements = has_requirements
         if has_research is not None:
             todo.has_research = has_research
-        todo.updated = _today()
+        todo.updated = _now()
         storage.save_todos(cfg, name, todos)
         return f"Updated content flags for {todo_id}."
 
