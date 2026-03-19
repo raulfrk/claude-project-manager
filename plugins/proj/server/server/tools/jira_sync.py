@@ -6,7 +6,7 @@ import difflib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import datetime, date, timezone
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
@@ -28,6 +28,14 @@ _JIRA_TO_LOCAL: dict[str, str] = {
     "low": "low",
     "lowest": "low",
 }
+
+
+_UTC = timezone.utc
+
+
+def _now() -> str:
+    """Return current UTC datetime as ISO 8601 string for time precision."""
+    return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
 
 
 def _today() -> str:
@@ -442,7 +450,7 @@ def apply_mapping(
     """
     if comments_by_key is None:
         comments_by_key = {}
-    today = _today()
+    today = _now()
     counts = {
         "projects_created": 0,
         "todos_created": 0,

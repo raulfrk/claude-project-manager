@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 import json
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import datetime, date, timezone
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 
 _TODOIST_TO_LOCAL: dict[str, str] = {"p1": "high", "p2": "high", "p3": "medium", "p4": "low"}
 _LOCAL_TO_TODOIST: dict[str, str] = {"high": "p2", "medium": "p3", "low": "p4"}
+
+
+_UTC = timezone.utc
+
+
+def _now() -> str:
+    """Return current UTC datetime as ISO 8601 string for time precision."""
+    return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
 
 
 def _today() -> str:
@@ -315,7 +323,7 @@ def apply_changes(
     meta = storage.load_meta(cfg, name)
     todos = storage.load_todos(cfg, name)
     todo_map = {t.id: t for t in todos}
-    today = _today()
+    today = _now()
 
     counts = {
         "created": 0,

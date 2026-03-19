@@ -36,12 +36,6 @@ def _now() -> str:
     return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
 
 
-def _today() -> str:
-    """Legacy date-only helper kept for backward compat in apply_changes."""
-    from datetime import date as _date
-    return str(_date.today())
-
-
 # ── Data structures ──────────────────────────────────────────────────────────
 
 
