@@ -1,17 +1,13 @@
 {
   "mcpServers": {
     "proj": {
-      "command": "uv",
+      "command": "bash",
       "args": [
-        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
         "${CLAUDE_PLUGIN_ROOT}/server",
-        "run",
-        "--frozen",
         "proj-server"
       ],
       "env": {
-        "UV_LINK_MODE": "copy",
-        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv",
         "PROJ_CONFIG": "~/.claude/proj.yaml"
       },
       "timeout": 120

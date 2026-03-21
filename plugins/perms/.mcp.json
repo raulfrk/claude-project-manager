@@ -1,18 +1,12 @@
 {
   "mcpServers": {
     "perms": {
-      "command": "uv",
+      "command": "bash",
       "args": [
-        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
         "${CLAUDE_PLUGIN_ROOT}/server",
-        "run",
-        "--frozen",
         "perms-server"
       ],
-      "env": {
-        "UV_LINK_MODE": "copy",
-        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv"
-      },
       "timeout": 120
     }
   }
