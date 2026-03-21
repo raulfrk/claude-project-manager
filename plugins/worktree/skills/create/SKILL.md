@@ -1,7 +1,6 @@
 ---
 name: create
 description: Create a git worktree from a registered base repository. Use when the user says "create a worktree", "new worktree", or "worktree for branch X".
-disable-model-invocation: "true"
 allowed-tools: mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_perms_perms__perms_add_allow
 argument-hint: "[repo-label] [branch-name]"
 ---

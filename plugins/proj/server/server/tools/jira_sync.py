@@ -158,6 +158,16 @@ class JiraMappingPlan:
         return {
             "groups": [g.to_dict() for g in self.groups],
             "total_issues": self.total_issues,
+            "summary": {
+                "total_issues": self.total_issues,
+                "group_count": len(self.groups),
+                "auto_mapped_count": sum(1 for g in self.groups if not g.needs_user_decision),
+                "needs_input_count": sum(1 for g in self.groups if g.needs_user_decision),
+                "needs_input_groups": [
+                    {"jira_key": g.jira_key, "name": g.name, "issue_count": len(g.issues)}
+                    for g in self.groups if g.needs_user_decision
+                ],
+            },
         }
 
 
@@ -217,6 +227,69 @@ def _append_jira_comments(
         todo.notes = todo.notes.rstrip() + "\n" + comments_header if todo.notes.strip() else comments_header
     todo.notes = todo.notes.rstrip() + "\n" + "\n".join(new_parts)
     todo.jira_synced_comment_ids.extend(new_ids)
+
+
+def _sync_root_issue_to_notes(
+    cfg: Any,
+    project_name: str,
+    meta: Any,
+    issue: dict[str, Any],
+    comments: list[dict[str, Any]],
+) -> None:
+    """Sync the root Jira issue (1:1 with project) to NOTES.md instead of a todo.
+
+    Appends description (under ``## Jira: <key>``) and new comments, deduplicating
+    by checking the existing NOTES.md content for the header and using
+    ``meta.jira_synced_comment_ids`` for comment-level dedup.
+    """
+    issue_key = str(issue.get("key", ""))
+    description = str(issue.get("description", "") or "").strip()
+
+    notes_file = storage.notes_path(cfg, project_name)
+    existing = notes_file.read_text() if notes_file.exists() else ""
+
+    jira_header = f"## Jira: {issue_key}"
+    parts: list[str] = []
+
+    # Append description block if not already present
+    if description and jira_header not in existing:
+        parts.append(f"{jira_header}\n### Description\n{description}")
+
+    # Append only new comments (dedup by ID)
+    existing_ids = set(meta.jira_synced_comment_ids)
+    new_comment_lines: list[str] = []
+    new_ids: list[str] = []
+    for comment in comments:
+        cid = str(comment.get("id", ""))
+        if not cid or cid in existing_ids:
+            continue
+        author_raw = comment.get("author")
+        if isinstance(author_raw, dict):
+            author = str(author_raw.get("displayName", "") or author_raw.get("name", ""))
+        elif isinstance(author_raw, str):
+            author = author_raw
+        else:
+            author = "Unknown"
+        created = str(comment.get("created", ""))[:10]
+        body = str(comment.get("body", "")).strip()
+        new_comment_lines.append(f"**{author}** ({created}): {body}")
+        new_ids.append(cid)
+
+    if new_comment_lines:
+        # Add ### Comments header if not yet in the file
+        if "### Comments" not in existing and "### Comments" not in "\n".join(parts):
+            parts.append("### Comments")
+        parts.append("\n".join(new_comment_lines))
+
+    if parts:
+        block = "\n".join(parts)
+        notes_file.parent.mkdir(parents=True, exist_ok=True)
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        notes_file.write_text(existing + block + "\n")
+
+    if new_ids:
+        meta.jira_synced_comment_ids.extend(new_ids)
 
 
 # ── Core logic (standalone functions) ─────────────────────────────────────────
@@ -519,6 +592,10 @@ def apply_mapping(
                     note_parts.append("### Comments\n" + "\n".join(comment_lines))
                 if note_parts:
                     storage.append_note(cfg, project_name, "\n".join(note_parts))
+                # Track epic comment IDs on meta to avoid duplicates on re-sync
+                if epic_comments:
+                    meta.jira_synced_comment_ids = [str(ec.get("id", "")) for ec in epic_comments if ec.get("id")]
+                    storage.save_meta(cfg, meta)
 
         # Process issues
         issues = group.get("issues", [])
@@ -548,6 +625,11 @@ def apply_mapping(
                 continue
             issue_key = str(issue.get("key", ""))
             if not issue_key:
+                continue
+
+            if issue_key == meta.jira_issue_key:
+                # Root issue -> NOTES.md, not a todo
+                _sync_root_issue_to_notes(cfg, project_name, meta, issue, comments_by_key.get(issue_key, []))
                 continue
 
             summary = str(issue.get("summary", ""))
@@ -671,6 +753,7 @@ def register(app: FastMCP) -> None:
     def proj_jira_map(
         jira_issues_json: str,
         project_name: str | None = None,
+        summary_only: bool = False,
     ) -> str:
         try:
             cfg = require_project(project_name)
@@ -681,12 +764,18 @@ def register(app: FastMCP) -> None:
                 plan = compute_mapping(
                     json.loads(jira_issues_json), cfg_obj, project_name,
                 )
-                return json.dumps(plan.to_dict(), indent=2)
+                plan_dict = plan.to_dict()
+                if summary_only:
+                    return json.dumps({"summary": plan_dict["summary"]}, indent=2)
+                return json.dumps(plan_dict, indent=2)
             cfg_obj, name = cfg
             plan = compute_mapping(
                 json.loads(jira_issues_json), cfg_obj, name if project_name else None,
             )
-            return json.dumps(plan.to_dict(), indent=2)
+            plan_dict = plan.to_dict()
+            if summary_only:
+                return json.dumps({"summary": plan_dict["summary"]}, indent=2)
+            return json.dumps(plan_dict, indent=2)
         except json.JSONDecodeError as e:
             return f"Invalid JSON: {e}"
 

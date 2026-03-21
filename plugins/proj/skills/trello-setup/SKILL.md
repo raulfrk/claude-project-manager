@@ -1,7 +1,6 @@
 ---
 name: trello-setup
 description: Ensure the proj label and project card exist on the Trello board. Sub-skill of trello-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_get_active, mcp__proj__config_load
 argument-hint: ""
 ---

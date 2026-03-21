@@ -1,7 +1,6 @@
 ---
 name: trello-push
 description: Execute push operations to Trello (create/update/complete/delete checklists and items). Sub-skill of trello-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__trello__create_checklist, mcp__trello__batch_add_checklist_items, mcp__trello__batch_update_checklist_items, mcp__trello__update_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist, mcp__trello__rename_checklist_item
 argument-hint: "<diff-plan-json>"
 ---

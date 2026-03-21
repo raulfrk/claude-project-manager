@@ -1,7 +1,6 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, Task, EnterPlanMode, ExitPlanMode
 argument-hint: "[todo-id | range] e.g. 1 or 2-4"
 ---

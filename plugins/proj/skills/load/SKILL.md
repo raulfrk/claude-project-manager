@@ -1,7 +1,6 @@
 ---
 name: load
 description: Load a specific project for this session, even if Claude was not started in that project's directory. Use when asked "load project", "switch to project", or "open project".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, Bash, Read
 argument-hint: "[project-name]"
 ---

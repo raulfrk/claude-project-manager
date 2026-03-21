@@ -28,6 +28,7 @@ from server.tools.jira_sync import (
     _fuzzy_match_project,
     _parse_jira_priority,
     _slugify,
+    _sync_root_issue_to_notes,
     apply_mapping,
     compute_mapping,
 )
@@ -1121,3 +1122,353 @@ class TestApplyDescriptionAndComments:
         todos = storage.load_todos(cfg, name)
         assert "**X** (2026-03-19): note" in todos[0].notes
         assert todos[0].jira_synced_comment_ids == ["c1"]
+
+
+# ── Root issue -> NOTES.md routing tests (todo 242) ──────────────────────────
+
+
+class TestRootIssueToNotes:
+    """When a Jira issue maps 1:1 to a project (issue_key == meta.jira_issue_key),
+    its description and comments go to NOTES.md, not a todo."""
+
+    def test_root_issue_goes_to_notes_not_todo(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Root issue (key == meta.jira_issue_key) routes to NOTES.md."""
+        cfg, name = cfg_with_project
+        # Set jira_issue_key on the project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-5"
+        storage.save_meta(cfg, meta)
+
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-5", "summary": "Root issue", "priority": "medium", "status": "To Do",
+                 "description": "Root description"},
+                {"key": "PROJ-10", "summary": "Child task", "priority": "high", "status": "To Do",
+                 "description": "Child desc"},
+            ],
+        }])
+        comments = {
+            "PROJ-5": [{"id": "r1", "author": "PM", "created": "2026-03-19", "body": "Root comment"}],
+            "PROJ-10": [{"id": "c1", "author": "Dev", "created": "2026-03-20", "body": "Child comment"}],
+        }
+        counts = apply_mapping(data, cfg, comments_by_key=comments)
+
+        # Root issue should NOT create a todo
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1  # only the child
+        assert todos[0].jira_issue_key == "PROJ-10"
+
+        # Root issue should go to NOTES.md
+        notes = storage.read_notes(cfg, name, max_chars=10000)
+        assert "## Jira: PROJ-5" in notes
+        assert "Root description" in notes
+        assert "**PM** (2026-03-19): Root comment" in notes
+
+        # meta should track root comment IDs
+        meta = storage.load_meta(cfg, name)
+        assert "r1" in meta.jira_synced_comment_ids
+
+    def test_root_issue_description_dedup_on_resync(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Re-syncing root issue does not duplicate the description in NOTES.md."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-5"
+        storage.save_meta(cfg, meta)
+
+        group = {
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-5", "summary": "Root", "priority": "medium", "status": "To Do",
+                 "description": "The description"},
+            ],
+        }
+
+        # First sync
+        apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        notes_v1 = storage.read_notes(cfg, name, max_chars=10000)
+        assert notes_v1.count("## Jira: PROJ-5") == 1
+
+        # Second sync
+        apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        notes_v2 = storage.read_notes(cfg, name, max_chars=10000)
+        assert notes_v2.count("## Jira: PROJ-5") == 1  # not duplicated
+
+    def test_root_issue_comment_id_dedup(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Re-syncing root issue with same comments does not duplicate them."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-5"
+        storage.save_meta(cfg, meta)
+
+        group = {
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-5", "summary": "Root", "priority": "medium", "status": "To Do",
+                 "description": "Desc"},
+            ],
+        }
+        comments = {
+            "PROJ-5": [{"id": "r1", "author": "Alice", "created": "2026-03-19", "body": "First"}],
+        }
+
+        # First sync
+        apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments)
+        meta = storage.load_meta(cfg, name)
+        assert "r1" in meta.jira_synced_comment_ids
+
+        # Second sync with same + new comment
+        comments_v2 = {
+            "PROJ-5": [
+                {"id": "r1", "author": "Alice", "created": "2026-03-19", "body": "First"},
+                {"id": "r2", "author": "Bob", "created": "2026-03-20", "body": "Second"},
+            ],
+        }
+        apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments_v2)
+        meta = storage.load_meta(cfg, name)
+        assert meta.jira_synced_comment_ids.count("r1") == 1  # not duplicated
+        assert "r2" in meta.jira_synced_comment_ids
+
+        notes = storage.read_notes(cfg, name, max_chars=10000)
+        assert notes.count("First") == 1  # not duplicated
+        assert "**Bob** (2026-03-20): Second" in notes
+
+    def test_epic_comment_tracking_on_creation(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When creating project from epic, comment IDs are tracked in meta."""
+        cfg, name = cfg_with_project
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "epic-proj",
+            "project_exists": False,
+            "create_project": True,
+            "is_epic": True,
+            "jira_key": "EP-1",
+            "name": "Epic",
+            "description": "Epic desc",
+            "issues": [
+                {"key": "EP-10", "summary": "Task", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        comments = {
+            "EP-1": [
+                {"id": "ec1", "author": "PM", "created": "2026-03-19", "body": "Kickoff"},
+                {"id": "ec2", "author": "Dev", "created": "2026-03-20", "body": "Started"},
+            ],
+        }
+        apply_mapping(data, cfg, comments_by_key=comments)
+
+        meta = storage.load_meta(cfg, "epic-proj")
+        assert "ec1" in meta.jira_synced_comment_ids
+        assert "ec2" in meta.jira_synced_comment_ids
+
+    def test_child_issues_still_become_todos(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Non-root issues in same group still become todos as usual."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-5"
+        storage.save_meta(cfg, meta)
+
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-5", "summary": "Root", "priority": "medium", "status": "To Do",
+                 "description": "Root desc"},
+                {"key": "PROJ-10", "summary": "Child A", "priority": "high", "status": "To Do"},
+                {"key": "PROJ-11", "summary": "Child B", "priority": "low", "status": "Done"},
+            ],
+        }])
+        counts = apply_mapping(data, cfg)
+        assert counts["todos_created"] == 2
+
+        todos = storage.load_todos(cfg, name)
+        keys = {t.jira_issue_key for t in todos}
+        assert "PROJ-10" in keys
+        assert "PROJ-11" in keys
+        assert "PROJ-5" not in keys  # root issue is NOT a todo
+
+    def test_backward_compat_no_jira_synced_comment_ids(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Old projects without jira_synced_comment_ids on meta still work."""
+        cfg, name = cfg_with_project
+        # Simulate an old meta without jira_synced_comment_ids
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-5"
+        # Save, then reload to prove from_dict handles missing field
+        storage.save_meta(cfg, meta)
+
+        # Manually strip jira_synced_comment_ids from the saved file
+        meta_path = storage.tracking_dir(cfg, name) / "meta.yaml"
+        import yaml
+        raw = yaml.safe_load(meta_path.read_text())
+        raw.pop("jira_synced_comment_ids", None)
+        meta_path.write_text(yaml.dump(raw))
+
+        # Reload — should default to empty list
+        meta = storage.load_meta(cfg, name)
+        assert meta.jira_synced_comment_ids == []
+
+        # Apply should still work
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-5", "summary": "Root", "priority": "medium", "status": "To Do",
+                 "description": "Desc"},
+            ],
+        }])
+        comments = {
+            "PROJ-5": [{"id": "r1", "author": "Alice", "created": "2026-03-19", "body": "Hello"}],
+        }
+        apply_mapping(data, cfg, comments_by_key=comments)
+
+        meta = storage.load_meta(cfg, name)
+        assert "r1" in meta.jira_synced_comment_ids
+        notes = storage.read_notes(cfg, name, max_chars=10000)
+        assert "## Jira: PROJ-5" in notes
+
+
+# ── Summary & summary_only tests (todo 244) ──────────────────────────────────
+
+
+class TestPlanSummary:
+    def test_plan_to_dict_includes_summary(self) -> None:
+        """Verify summary key exists in to_dict() with correct counts."""
+        from server.tools.jira_sync import JiraGroup
+
+        plan = JiraMappingPlan(
+            groups=[
+                JiraGroup(
+                    source="epic", jira_key="EP-1", name="Auth",
+                    suggested_project="auth", is_epic=True, project_exists=True,
+                    needs_user_decision=False,
+                    issues=[{"key": "EP-10", "summary": "Login"}],
+                ),
+                JiraGroup(
+                    source="standalone", jira_key="PROJ-99", name="Orphan",
+                    suggested_project="", is_epic=False, project_exists=False,
+                    needs_user_decision=True,
+                    issues=[{"key": "PROJ-99", "summary": "Orphan task"}],
+                ),
+            ],
+            total_issues=3,
+        )
+        d = plan.to_dict()
+        assert "summary" in d
+        summary = d["summary"]
+        assert summary["total_issues"] == 3
+        assert summary["group_count"] == 2
+        assert summary["auto_mapped_count"] == 1
+        assert summary["needs_input_count"] == 1
+
+    def test_plan_summary_needs_input_groups(self) -> None:
+        """Verify needs_input_groups lists only groups requiring user decision."""
+        from server.tools.jira_sync import JiraGroup
+
+        plan = JiraMappingPlan(
+            groups=[
+                JiraGroup(
+                    source="epic", jira_key="EP-1", name="Auth",
+                    suggested_project="auth", is_epic=True, project_exists=True,
+                    needs_user_decision=False,
+                    issues=[{"key": "EP-10", "summary": "Login"}, {"key": "EP-11", "summary": "Logout"}],
+                ),
+                JiraGroup(
+                    source="standalone", jira_key="PROJ-50", name="Bug Fix",
+                    suggested_project="", is_epic=False, project_exists=False,
+                    needs_user_decision=True,
+                    issues=[{"key": "PROJ-50", "summary": "Fix it"}],
+                ),
+                JiraGroup(
+                    source="standalone", jira_key="PROJ-60", name="Docs Update",
+                    suggested_project="", is_epic=False, project_exists=False,
+                    needs_user_decision=True,
+                    issues=[{"key": "PROJ-60", "summary": "Update docs"}, {"key": "PROJ-61", "summary": "Review docs"}],
+                ),
+            ],
+            total_issues=5,
+        )
+        d = plan.to_dict()
+        summary = d["summary"]
+        nig = summary["needs_input_groups"]
+        assert len(nig) == 2
+        keys = {g["jira_key"] for g in nig}
+        assert keys == {"PROJ-50", "PROJ-60"}
+        # Verify issue_count
+        by_key = {g["jira_key"]: g for g in nig}
+        assert by_key["PROJ-50"]["issue_count"] == 1
+        assert by_key["PROJ-60"]["issue_count"] == 2
+
+
+class TestSummaryOnlyFlag:
+    def _get_tools(self) -> dict[str, object]:
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools
+
+    def test_proj_jira_map_summary_only_true(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When summary_only=True, only the summary key is returned."""
+        cfg, name = cfg_with_project
+        tools = self._get_tools()
+        map_fn = tools["proj_jira_map"]
+        issues = [
+            _make_epic_issue("PROJ-5", "Auth"),
+            _make_jira_issue("PROJ-10", "Login", parent=_make_epic_parent("PROJ-5", "Auth")),
+            _make_jira_issue("PROJ-20", "Standalone task"),
+        ]
+        result = json.loads(map_fn(  # type: ignore[operator]
+            jira_issues_json=json.dumps(issues),
+            project_name=name,
+            summary_only=True,
+        ))
+        # Only summary key present, no groups
+        assert "summary" in result
+        assert "groups" not in result
+        assert result["summary"]["total_issues"] == 3
+        assert result["summary"]["group_count"] == 2  # 1 epic + 1 standalone
+
+    def test_proj_jira_map_summary_only_false(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When summary_only=False (default), full plan is returned (backward compat)."""
+        cfg, name = cfg_with_project
+        tools = self._get_tools()
+        map_fn = tools["proj_jira_map"]
+        issues = [
+            _make_epic_issue("PROJ-5", "Auth"),
+            _make_jira_issue("PROJ-10", "Login", parent=_make_epic_parent("PROJ-5", "Auth")),
+        ]
+        result = json.loads(map_fn(  # type: ignore[operator]
+            jira_issues_json=json.dumps(issues),
+            project_name=name,
+            summary_only=False,
+        ))
+        # Full plan includes both groups and summary
+        assert "groups" in result
+        assert "total_issues" in result
+        assert "summary" in result
+        assert result["total_issues"] == 2

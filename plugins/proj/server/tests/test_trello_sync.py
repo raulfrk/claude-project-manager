@@ -1627,3 +1627,137 @@ class TestPushCompleteItem:
         assert result["plan"]["summary"]["push_complete_item_count"] == 1
         assert len(result["plan"]["push_complete_item"]) == 1
         assert result["plan"]["push_complete_item"][0]["item_id"] == "item1"
+
+
+class TestTasksChecklistIdLookup:
+    """Tests for ID-based Tasks checklist lookup (todo 243)."""
+
+    def test_stored_id_used_when_valid(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When meta has a stored Tasks checklist ID that exists in Trello, use it."""
+        cfg, name = cfg_with_project
+
+        # Store a Tasks checklist ID on meta
+        meta = storage.load_meta(cfg, name)
+        meta.trello.trello_tasks_checklist_id = "cl_tasks_stored"
+        storage.save_meta(cfg, meta)
+
+        # Create a leaf todo
+        t1 = _make_todo(cfg, name, "Leaf task", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [t1])
+
+        # Trello has the Tasks checklist with the stored ID
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_tasks_stored", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Leaf task"),
+            ]),
+        ])
+
+        plan = compute_diff(card_json, cfg, name)
+
+        # Verify stored ID was not cleared/changed
+        meta_after = storage.load_meta(cfg, name)
+        assert meta_after.trello.trello_tasks_checklist_id == "cl_tasks_stored"
+        # The plan should be clean (no creates needed)
+        assert not plan.push_create_checklist
+
+    def test_name_fallback_when_no_stored_id(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When no stored ID, fall back to name-based scan and store the found ID."""
+        cfg, name = cfg_with_project
+
+        # No stored ID
+        meta = storage.load_meta(cfg, name)
+        assert meta.trello.trello_tasks_checklist_id is None
+
+        # Create a leaf todo
+        t1 = _make_todo(cfg, name, "Leaf task", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [t1])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_found_by_name", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Leaf task"),
+            ]),
+        ])
+
+        plan = compute_diff(card_json, cfg, name)
+
+        # Should have stored the ID found by name
+        meta_after = storage.load_meta(cfg, name)
+        assert meta_after.trello.trello_tasks_checklist_id == "cl_found_by_name"
+        assert not plan.push_create_checklist
+
+    def test_stale_id_recovery(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When stored ID no longer exists in Trello, fall back to name scan."""
+        cfg, name = cfg_with_project
+
+        # Store a stale ID
+        meta = storage.load_meta(cfg, name)
+        meta.trello.trello_tasks_checklist_id = "cl_old_gone"
+        storage.save_meta(cfg, meta)
+
+        # Create a leaf todo
+        t1 = _make_todo(cfg, name, "Leaf task", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [t1])
+
+        # Trello has the Tasks checklist with a DIFFERENT ID (old one is gone)
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_new_id", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Leaf task"),
+            ]),
+        ])
+
+        plan = compute_diff(card_json, cfg, name)
+
+        # Should have recovered to the new ID
+        meta_after = storage.load_meta(cfg, name)
+        assert meta_after.trello.trello_tasks_checklist_id == "cl_new_id"
+        assert not plan.push_create_checklist
+
+    def test_apply_stores_tasks_checklist_id(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When linking _tasks sentinel, apply_changes stores ID on meta."""
+        cfg, name = cfg_with_project
+
+        meta = storage.load_meta(cfg, name)
+        assert meta.trello.trello_tasks_checklist_id is None
+
+        data = TrelloApplyInput(
+            link_trello_ids=[
+                {"todo_id": "_tasks", "trello_checklist_id": "cl_tasks_new"},
+            ],
+        )
+        counts = apply_changes(data, cfg, name)
+        assert counts["linked"] == 1
+
+        meta_after = storage.load_meta(cfg, name)
+        assert meta_after.trello.trello_tasks_checklist_id == "cl_tasks_new"
+
+    def test_backward_compat_no_stored_id_no_tasks_checklist(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """With no stored ID and no Tasks checklist in Trello, push_create_checklist is emitted."""
+        cfg, name = cfg_with_project
+
+        # No stored ID
+        meta = storage.load_meta(cfg, name)
+        assert meta.trello.trello_tasks_checklist_id is None
+
+        # Create a leaf todo (not yet linked to Trello)
+        t1 = _make_todo(cfg, name, "Leaf task")
+        storage.save_todos(cfg, name, [t1])
+
+        # Trello card has no checklists at all
+        card_json = _make_trello_card_json([])
+
+        plan = compute_diff(card_json, cfg, name)
+
+        # Should request creating the Tasks checklist
+        tasks_creates = [c for c in plan.push_create_checklist if c["name"] == TASKS_CHECKLIST_NAME]
+        assert len(tasks_creates) == 1
+        assert tasks_creates[0]["todo_id"] == "_tasks"

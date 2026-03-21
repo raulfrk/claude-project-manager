@@ -442,6 +442,7 @@ class ProjectTrelloConfig:
     board_id: str | None = None          # Trello board ID for this project
     list_mappings: TrelloListMappings | None = None  # None = use global defaults
     on_delete: str | None = None         # "archive" | "delete" | None = use global default
+    trello_tasks_checklist_id: str | None = None  # cached ID of the "Tasks" catch-all checklist
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -449,6 +450,7 @@ class ProjectTrelloConfig:
             "board_id": self.board_id,
             "list_mappings": self.list_mappings.to_dict() if self.list_mappings is not None else None,
             "on_delete": self.on_delete,
+            "trello_tasks_checklist_id": self.trello_tasks_checklist_id,
         }
 
     @classmethod
@@ -458,11 +460,13 @@ class ProjectTrelloConfig:
         enabled_raw = data.get("enabled")
         on_delete_raw = data.get("on_delete")
         board_id_raw = data.get("board_id")
+        tcl_raw = data.get("trello_tasks_checklist_id")
         return cls(
             enabled=bool(enabled_raw) if enabled_raw is not None else None,
             board_id=str(board_id_raw) if isinstance(board_id_raw, str) else None,
             list_mappings=lm,
             on_delete=str(on_delete_raw) if isinstance(on_delete_raw, str) else None,
+            trello_tasks_checklist_id=str(tcl_raw) if isinstance(tcl_raw, str) else None,
         )
 
 
@@ -514,6 +518,7 @@ class ProjectMeta:
     zoxide_integration: bool | None = None  # None = use global config default
     claudemd_management: bool | None = None  # None = use global config default
     jira_issue_key: str | None = None  # set when project was created from a Jira epic; stable link
+    jira_synced_comment_ids: list[str] = field(default_factory=list)  # Jira comment IDs already synced to NOTES.md
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -537,6 +542,7 @@ class ProjectMeta:
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
             "jira_issue_key": self.jira_issue_key,
+            "jira_synced_comment_ids": self.jira_synced_comment_ids,
         }
 
     @classmethod
@@ -592,6 +598,7 @@ class ProjectMeta:
             jira_issue_key=data.get("jira_issue_key")
             if isinstance(data.get("jira_issue_key"), str)
             else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            jira_synced_comment_ids=[str(x) for x in data.get("jira_synced_comment_ids", [])] if isinstance(data.get("jira_synced_comment_ids"), list) else [],
         )
 
 

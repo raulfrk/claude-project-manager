@@ -393,12 +393,22 @@ def compute_diff(
                     })
 
     # Push items for the "Tasks" catch-all checklist
-    # Find if "Tasks" checklist exists in Trello
+    # Find Tasks checklist: prefer stored ID, fall back to name-based scan
     tasks_cl_id: str | None = None
-    for cl_id, cl in trello_checklists_by_id.items():
-        if str(cl.get("name", "")) == TASKS_CHECKLIST_NAME:
-            tasks_cl_id = cl_id
-            break
+    stored_tasks_id = meta.trello.trello_tasks_checklist_id
+    if stored_tasks_id and stored_tasks_id in trello_checklists_by_id:
+        # Stored ID is still valid
+        tasks_cl_id = stored_tasks_id
+    else:
+        # Stored ID missing or stale — fall back to name-based scan
+        for cl_id, cl in trello_checklists_by_id.items():
+            if str(cl.get("name", "")) == TASKS_CHECKLIST_NAME:
+                tasks_cl_id = cl_id
+                break
+        # Update stored ID if we found it by name (or clear if gone)
+        if tasks_cl_id != stored_tasks_id:
+            meta.trello.trello_tasks_checklist_id = tasks_cl_id
+            storage.save_meta(cfg, meta)
 
     if expected_tasks_items and not tasks_cl_id:
         # Need to create "Tasks" checklist
@@ -666,6 +676,11 @@ def apply_changes(
     # 4. Link Trello IDs (after push operations return Trello IDs)
     for item in data.link_trello_ids:
         todo_id = str(item.get("todo_id", ""))
+        # Handle _tasks sentinel: store checklist ID on meta instead of a todo
+        if todo_id == "_tasks" and "trello_checklist_id" in item:
+            meta.trello.trello_tasks_checklist_id = str(item["trello_checklist_id"]) if item.get("trello_checklist_id") else None
+            counts["linked"] += 1
+            continue
         todo = todo_map.get(todo_id)
         if not todo:
             continue

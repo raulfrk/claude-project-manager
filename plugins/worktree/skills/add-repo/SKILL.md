@@ -1,7 +1,6 @@
 ---
 name: add-repo
 description: Register a new base git repository for worktree creation. Use when the user says "add repo", "register repo", or "add <path> as a base repo".
-disable-model-invocation: "true"
 allowed-tools: mcp__plugin_worktree_worktree__wt_add_repo, mcp__plugin_worktree_worktree__wt_list_repos
 argument-hint: "<path> [label] [default_branch]"
 ---

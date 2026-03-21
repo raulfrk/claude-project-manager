@@ -1,7 +1,6 @@
 ---
 name: trello-link
 description: Link returned Trello IDs to local todos and flush git tracking. Sub-skill of trello-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_trello_apply, mcp__proj__tracking_git_flush
 argument-hint: "<creation-results-json>"
 ---

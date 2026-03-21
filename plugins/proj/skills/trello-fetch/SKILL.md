@@ -1,7 +1,6 @@
 ---
 name: trello-fetch
 description: Fetch the Trello card state (checklists and items) for the active project. Sub-skill of trello-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__trello__get_card_checklists, mcp__proj__proj_get_active
 argument-hint: ""
 ---

@@ -1,9 +1,10 @@
 ---
 name: jira-sync
 description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_get_epic_issues, mcp__jira__jira_get_user_issues, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
+context: fork
+agent: general-purpose
 ---
 
 Pull Jira issues for a user and sync them to local projects/todos using **epic-first mapping**.

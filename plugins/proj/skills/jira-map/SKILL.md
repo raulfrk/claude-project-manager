@@ -1,7 +1,6 @@
 ---
 name: jira-map
 description: Compute Jira-to-local mapping using epic-first logic and display a dry-run. Sub-skill of jira-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_jira_map, mcp__proj__config_load, mcp__jira__jira_get_epic_issues
 argument-hint: "<issues-json>"
 ---

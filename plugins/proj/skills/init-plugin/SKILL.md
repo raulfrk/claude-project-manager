@@ -1,7 +1,6 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, Bash, mcp__proj__tracking_git_flush
 ---
 

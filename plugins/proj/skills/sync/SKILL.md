@@ -2,7 +2,6 @@
 name: sync
 description: Manually trigger a full bidirectional Todoist sync. Always runs regardless of auto_sync setting. Use when the user says "sync with Todoist", "sync todos", or "pull from Todoist".
 argument-hint: "[all | everything]"
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose

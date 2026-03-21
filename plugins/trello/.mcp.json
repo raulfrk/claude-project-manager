@@ -6,6 +6,7 @@
         "--directory",
         "${CLAUDE_PLUGIN_ROOT}/server",
         "run",
+        "--frozen",
         "trello-server"
       ],
       "env": {
@@ -13,7 +14,7 @@
         "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv",
         "TRELLO_CONFIG": "~/.claude/trello.yaml"
       },
-      "timeout": 300
+      "timeout": 120
     }
   }
 }

@@ -1,7 +1,6 @@
 ---
 name: switch
 description: Switch the active project context. Use when the user says "switch to <project>", "change project", or "work on <project>".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start
 argument-hint: "[project-name]"
 ---

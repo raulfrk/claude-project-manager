@@ -1,7 +1,6 @@
 ---
 name: jira-apply
 description: Apply a confirmed Jira mapping to create/update local projects and todos. Sub-skill of jira-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush
 argument-hint: "<confirmed-mapping-json>"
 ---

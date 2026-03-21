@@ -1,7 +1,6 @@
 ---
 name: save
 description: Save session notes, reconcile git activity with todos, and update project context. Use when asked "save session", "proj:save", or at the end of a work session.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_get_active, mcp__proj__config_load, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, Bash, Write
 ---
 

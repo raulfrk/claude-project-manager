@@ -1,7 +1,6 @@
 ---
 name: setup
 description: Set up the worktree plugin. Run this once to configure the default worktree directory and register base repositories. Use when the user says "set up worktrees", "configure worktree plugin", or "worktree setup".
-disable-model-invocation: "true"
 allowed-tools: mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_add_repo, Bash
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush, mcp__trello__add_checklist_item, mcp__trello__create_checklist, Task
 argument-hint: "<todo-id>"
 ---

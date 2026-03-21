@@ -6,6 +6,7 @@
         "--directory",
         "${CLAUDE_PLUGIN_ROOT}/server",
         "run",
+        "--frozen",
         "jira-server"
       ],
       "env": {
@@ -13,7 +14,7 @@
         "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_ROOT}/server/.venv",
         "JIRA_CONFIG": "~/.claude/jira.yaml"
       },
-      "timeout": 300
+      "timeout": 120
     }
   }
 }

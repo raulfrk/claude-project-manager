@@ -1,7 +1,6 @@
 ---
 name: jira-fetch
 description: Fetch all Jira issues assigned to the configured user. Sub-skill of jira-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__jira__jira_get_user_issues, mcp__proj__config_load
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 ---

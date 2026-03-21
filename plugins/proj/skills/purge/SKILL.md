@@ -1,7 +1,6 @@
 ---
 name: purge
 description: Purge archived projects older than the configured purge_after_days threshold. Use when asked "purge old projects", "clean up archives", or "purge archives".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_purge_archive, mcp__proj__config_load, mcp__proj__tracking_git_flush
 ---
 

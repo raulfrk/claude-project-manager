@@ -1,7 +1,6 @@
 ---
 name: trello-diff
 description: Compute the diff between local todos and Trello card state. Sub-skill of trello-sync.
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_trello_diff, mcp__proj__proj_get_active
 argument-hint: "<card-data-json>"
 ---

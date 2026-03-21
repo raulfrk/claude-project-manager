@@ -1,9 +1,10 @@
 ---
 name: jira-sync-trello
 description: Pull Jira issues to local projects, then push to Trello. Equivalent to running /proj:jira-sync followed by /proj:trello-sync.
-disable-model-invocation: "false"
 allowed-tools: mcp__proj__config_load
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
+context: fork
+agent: general-purpose
 ---
 
 Convenience wrapper that chains `/proj:jira-sync` and `/proj:trello-sync` in sequence.

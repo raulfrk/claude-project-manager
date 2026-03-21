@@ -1,7 +1,6 @@
 ---
 name: init
 description: Initialize project tracking for a project. Use when the user says "start tracking this project", "init project", "track this project", "set up project tracking for X", "new project", "create project", or "initialize tracking".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__proj_add_repo, mcp__proj__claudemd_write, mcp__proj__claudemd_read, mcp__proj__config_load, mcp__proj__proj_set_permissions, mcp__proj__proj_setup_permissions, mcp__proj__proj_explore_codebase, mcp__proj__notes_append, mcp__proj__proj_update_meta, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__proj__tracking_git_flush, Bash
 argument-hint: "[project-name]"
 ---

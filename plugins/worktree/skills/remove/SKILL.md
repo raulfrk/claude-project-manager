@@ -1,7 +1,6 @@
 ---
 name: remove
 description: Remove a git worktree. Use when the user says "remove worktree", "delete worktree", or "clean up worktree at <path>".
-disable-model-invocation: "true"
 allowed-tools: mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove
 argument-hint: "[path]"
 ---

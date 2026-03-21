@@ -1,7 +1,6 @@
 ---
 name: archive
 description: Archive a completed project, removing it from the active list. Use when the user says "archive project", "mark project complete", or "archive <name>".
-disable-model-invocation: "true"
 allowed-tools: mcp__proj__proj_archive, mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__todo_list, mcp__proj__config_load, mcp__proj__proj_setup_permissions, mcp__proj__tracking_git_flush, mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove, Bash
 argument-hint: "[project-name]"
 ---

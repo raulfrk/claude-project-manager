@@ -1,13 +1,104 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Each project is a single Trello card; root todos with children become checklists, leaf root todos become items in a "Tasks" checklist. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-disable-model-invocation: "true"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
+allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
 context: fork
 agent: general-purpose
 ---
 
-Full bidirectional Trello sync for the active project.
+Full bidirectional Trello sync. Supports two modes:
+- **Single-project mode**: when an active project is set, sync that project only.
+- **Batch mode**: when no active project is set, sync all Trello-enabled projects.
+
+## Mode Detection
+
+Call `mcp__proj__proj_get_active`.
+- If an active project is returned → run **single-project mode** (the existing flow below, starting at "Sub-skill chain").
+- If no active project is returned (error or empty) → run **batch mode** (see "Batch Mode" section).
+
+---
+
+## Batch Mode
+
+When no active project is set, sync all Trello-enabled projects in a single run.
+
+### Batch 1. Load global config and project list
+
+- Call `mcp__proj__config_load` to get global trello config (`trello.enabled`, `trello.default_board_id`, `trello.default_list`).
+- Call `mcp__proj__proj_list` to get all non-archived projects.
+
+### Batch 2. Gather project metadata
+
+For each project returned by `proj_list`, call `mcp__proj__proj_get` with `project_name=<name>` to get full metadata including per-project trello config and `trello_card_id`.
+
+### Batch 3. Categorize projects
+
+Sort each project into one of three buckets:
+
+- **Linked**: has `trello_card_id` set → will sync.
+- **Unlinked but Trello-enabled**: Trello is enabled (either per-project `trello.enabled` is `true`, or the global `trello.enabled` is `true` and the project does not explicitly disable it) but no `trello_card_id` → offer to link.
+- **Trello not enabled**: Trello is not enabled for this project → skip silently.
+
+Display a categorization summary:
+
+```
+Trello batch sync — project scan:
+  Linked (will sync):        project-a, project-b
+  Unlinked (Trello-enabled): project-c, project-d
+  Skipped (not enabled):     project-e
+```
+
+### Batch 4. Sync linked projects
+
+For each **linked** project, run the full single-project sync flow (steps 1–8 below) with `project_name=<name>` passed explicitly to each MCP tool call instead of relying on the active project. Specifically:
+- In step 1 (Setup), use the project's metadata from Batch 2 instead of calling `proj_get_active`.
+- In step 5 (Compute diff), pass `project_name=<name>` to `mcp__proj__proj_trello_diff`.
+- In step 6 (Push), pass `project_name=<name>` to `mcp__proj__proj_trello_apply`.
+- In step 7 (Git flush), call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello (<name>)"`.
+
+Collect per-project results (success/failure, counts).
+
+### Batch 5. Offer to link unlinked projects
+
+If there are **unlinked but Trello-enabled** projects, present them to the user:
+
+```
+These projects have Trello enabled but no linked card:
+  1. project-c
+  2. project-d
+
+Link these projects to Trello? (y/n/select)
+```
+
+- **y**: link all listed projects.
+- **n**: skip all.
+- **select**: let the user pick which ones to link (e.g., "1,2" or "project-c").
+
+For each confirmed project, create a Trello card using the same pattern as steps 2–3 of the single-project flow:
+1. Resolve effective board ID (per-project `trello.board_id` or global `trello.default_board_id`).
+2. Ensure the `proj` label exists on the board (call `mcp__trello__get_board` with `boardId`, create label if missing).
+3. Resolve the target list (matching `trello.default_list`, default "Active", case-insensitive; fallback to first list).
+4. Create a card with `name` = project name, `idLabels` = the `proj` label ID.
+5. Store the card ID: call `mcp__proj__proj_trello_apply` with `project_name=<name>` and `link_trello_card_id=<new_card_id>`.
+6. Run the full sync flow (steps 4–8) for the newly linked project.
+
+### Batch 6. Final summary
+
+Display a summary of the entire batch run:
+
+```
+Trello batch sync complete.
+  Synced:       N projects
+  Newly linked: M projects
+  Skipped:      K projects
+  Failures:     F projects [list names if any]
+```
+
+If there were failures, list the project name and a brief error description for each.
+
+---
+
+## Single-Project Mode
 
 **Sub-skill chain**: This skill chains five sub-skills in sequence:
 1. `/proj:trello-setup` -- ensure proj label and project card exist on the board
