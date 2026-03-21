@@ -37,6 +37,8 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
             rules.add("mcp__worktree__*")
         if cfg.todoist.enabled:
             rules.add(f"mcp__{cfg.todoist.mcp_server}__*")
+        if cfg.jira.enabled:
+            rules.add("mcp__jira__*")
     # Global Claude.ai MCP servers — always expected, unconditionally
     rules.add("mcp__claude_ai_Excalidraw__*")
     rules.add("mcp__claude_ai_Mermaid_Chart__*")
