@@ -49,6 +49,7 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    - If `auto_allow_mcps: true` and `worktree_integration: true`, also include: `"plugin_worktree_worktree"`
    - If `auto_allow_mcps: true` and `todoist.enabled: true`, also include: `todoist_mcp_server` (the value collected in step 2e, e.g. `"claude_ai_Todoist"`)
    - If `auto_allow_mcps: true` and `jira.enabled: true`, also include: `"jira"`
+   - If `auto_allow_mcps: true` and `trello.enabled: true`, also include: `"trello"`
    - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
    - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"` to allow zoxide commands without prompts.
    If `perms` plugin is not installed, skip silently and note: "perms plugin not found — add MCP allow rules manually if needed."

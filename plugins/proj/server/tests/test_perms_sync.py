@@ -19,6 +19,7 @@ from server.lib.models import (
     ProjectMeta,
     RepoEntry,
     TodoistSync,
+    TrelloSync,
 )
 from server.tools.perms_sync import _derive_expected_rules, _load_actual_rules, run_sync
 
@@ -30,6 +31,7 @@ def _make_cfg(
     auto_allow_mcps: bool = True,
     todoist_enabled: bool = False,
     jira_enabled: bool = False,
+    trello_enabled: bool = False,
     tracking_dir: str = "/tmp/tracking",
     perms_integration: bool = False,
     worktree_integration: bool = False,
@@ -42,6 +44,7 @@ def _make_cfg(
     cfg.permissions = PermissionsConfig(auto_grant=True, auto_allow_mcps=auto_allow_mcps)
     cfg.todoist = TodoistSync(enabled=todoist_enabled)
     cfg.jira = JiraSync(enabled=jira_enabled)
+    cfg.trello = TrelloSync(enabled=trello_enabled)
     return cfg
 
 
@@ -129,12 +132,29 @@ class TestDeriveExpectedRules:
 
         assert "mcp__jira__*" not in rules
 
+    def test_trello_enabled_adds_trello_mcp_rule(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=True)
+
+        rules = _derive_expected_rules(meta, cfg)
+
+        assert "mcp__trello__*" in rules
+
+    def test_trello_disabled_no_trello_mcp_rule(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=False)
+
+        rules = _derive_expected_rules(meta, cfg)
+
+        assert "mcp__trello__*" not in rules
+
     def test_auto_allow_mcps_false_no_plugin_mcp_rules(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(
             auto_allow_mcps=False,
             todoist_enabled=True,
             jira_enabled=True,
+            trello_enabled=True,
             perms_integration=True,
             worktree_integration=True,
         )
@@ -147,6 +167,7 @@ class TestDeriveExpectedRules:
         assert "mcp__worktree__*" not in rules
         assert "mcp__claude_ai_Todoist__*" not in rules
         assert "mcp__jira__*" not in rules
+        assert "mcp__trello__*" not in rules
         # Global Claude.ai servers are always present regardless
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules

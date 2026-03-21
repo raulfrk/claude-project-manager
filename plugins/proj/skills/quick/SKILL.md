@@ -102,7 +102,7 @@ Call `mcp__proj__proj_load_session`.
 **P5. Permissions**
 
 If `perms_integration: true`:
-- Build MCP server list: `["plugin_proj_proj", "plugin_perms_perms"]` + worktree if enabled + todoist server if enabled + `"jira"` if jira.enabled.
+- Build MCP server list: `["plugin_proj_proj", "plugin_perms_perms"]` + worktree if enabled + todoist server if enabled + `"jira"` if jira.enabled + `"trello"` if trello.enabled.
 - Call `mcp__proj__proj_setup_permissions` silently.
 
 **P6. CLAUDE.md**

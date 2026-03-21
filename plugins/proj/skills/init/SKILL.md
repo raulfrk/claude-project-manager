@@ -100,7 +100,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
      - `mcp_servers=[<list>]` — build list when second answer is yes:
        always include `"plugin_proj_proj"`, `"plugin_perms_perms"`;
-       add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled; add `"jira"` if jira.enabled
+       add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled; add `"jira"` if jira.enabled; add `"trello"` if trello.enabled
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`
    - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Install the perms plugin when available." and continue.
