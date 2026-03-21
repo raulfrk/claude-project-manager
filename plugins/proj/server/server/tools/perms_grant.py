@@ -74,10 +74,6 @@ def _mcp_allow_entry(server_name: str) -> str:
     return f"mcp__{server_name}__*"
 
 
-# Built-in tools that should always be allowed (read-only, no security risk)
-_ALWAYS_ALLOWED_TOOLS: list[str] = ["Search"]
-
-
 # ── Sandbox-aware helpers ──────────────────────────────────────────────────────
 
 
@@ -215,20 +211,6 @@ def _apply_mcp_rules(
     return count
 
 
-def _apply_builtin_rules(
-    allow_set: set[str],
-    new_entries: list[str],
-) -> int:
-    """Add built-in tool allow rules. Returns count added."""
-    count = 0
-    for tool in _ALWAYS_ALLOWED_TOOLS:
-        if tool not in allow_set:
-            new_entries.append(tool)
-            allow_set.add(tool)
-            count += 1
-    return count
-
-
 def setup_permissions(
     meta: ProjectMeta,
     cfg: ProjConfig,
@@ -236,7 +218,7 @@ def setup_permissions(
     mcp_servers: list[str] | None = None,
     archive_destination: str | None = None,
 ) -> dict[str, int]:
-    """Add sandbox allowWrite paths, MCP wildcard rules, and built-in tool rules.
+    """Add sandbox allowWrite paths + MCP wildcard rules in a single atomic write.
 
     Targets settings.local.json (sandbox mode) or settings.json (fallback).
 
@@ -246,10 +228,9 @@ def setup_permissions(
     - sandbox.filesystem.denyWrite paths for reference repos (defense-in-depth)
     - permissions.deny entries for sensitive paths (~/.ssh, ~/.gnupg, ~/.aws)
     - MCP server wildcard rules in permissions.allow
-    - Built-in tool rules in permissions.allow (e.g. Search)
 
     Returns a dict with counts: {"sandbox_paths": N, "deny_write_paths": N,
-    "sensitive_deny_rules": N, "mcp_rules": N, "builtin_rules": N}.
+    "sensitive_deny_rules": N, "mcp_rules": N}.
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
@@ -266,7 +247,7 @@ def setup_permissions(
     allow_set: set[str] = set(allow)
 
     new_entries: list[str] = []
-    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "sensitive_deny_rules": 0, "mcp_rules": 0, "builtin_rules": 0}
+    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "sensitive_deny_rules": 0, "mcp_rules": 0}
 
     # Sandbox allowWrite paths for writable repos and tracking dir
     if sandbox_mode:
@@ -291,9 +272,6 @@ def setup_permissions(
     # MCP wildcard rules
     if mcp_servers:
         counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
-
-    # Built-in tool rules (always allowed)
-    counts["builtin_rules"] = _apply_builtin_rules(allow_set, new_entries)
 
     # Archive destination: only sandbox write path
     if archive_destination:
@@ -461,8 +439,6 @@ def register(app: FastMCP) -> None:
             parts.append(f"{counts['sensitive_deny_rules']} sensitive deny rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        if counts.get("builtin_rules"):
-            parts.append(f"{counts['builtin_rules']} built-in tool rule(s)")
         return f"Added {total} rule(s) for '{name}': {', '.join(parts)}."
 
     @app.tool(

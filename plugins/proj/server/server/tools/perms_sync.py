@@ -40,8 +40,6 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     # Global Claude.ai MCP servers — always expected, unconditionally
     rules.add("mcp__claude_ai_Excalidraw__*")
     rules.add("mcp__claude_ai_Mermaid_Chart__*")
-    # Built-in tools that should always be allowed
-    rules.add("Search")
     return rules
 
 
@@ -121,9 +119,8 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
     if not missing and not missing_sandbox_paths:
         return f"✅ {target_name} is in sync — all expected rules are present."
 
-    # Group by type
+    # Group by type (only MCP rules expected in permissions.allow now)
     missing_mcp = sorted(r for r in missing if r.startswith("mcp__"))
-    missing_builtin = sorted(r for r in missing if not r.startswith("mcp__"))
 
     if apply:
         from server.tools.perms_grant import setup_permissions
@@ -142,8 +139,6 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        if counts.get("builtin_rules"):
-            parts.append(f"{counts['builtin_rules']} built-in tool rule(s)")
         applied_total = total
         return f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
 
@@ -151,9 +146,6 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
     if missing_mcp:
         lines.append("**MCP rules:**")
         lines.extend(f"  - `{r}`" for r in missing_mcp)
-    if missing_builtin:
-        lines.append("**Built-in tools:**")
-        lines.extend(f"  - `{r}`" for r in missing_builtin)
     if missing_sandbox_paths:
         lines.append("\n**Sandbox allowWrite paths:**")
         lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))

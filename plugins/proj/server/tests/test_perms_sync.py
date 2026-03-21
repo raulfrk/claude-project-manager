@@ -77,11 +77,10 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # Only global Claude.ai MCP rules + built-in tools expected (no Read/Edit/Bash rules)
+        # Only global Claude.ai MCP rules expected (no Read/Edit/Bash rules)
         expected = {
             "mcp__claude_ai_Excalidraw__*",
             "mcp__claude_ai_Mermaid_Chart__*",
-            "Search",
         }
         assert rules == expected
         # No Read/Edit/Bash rules
@@ -193,8 +192,8 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # Only global Claude.ai MCP rules + built-in tools
-        assert rules == {"mcp__claude_ai_Excalidraw__*", "mcp__claude_ai_Mermaid_Chart__*", "Search"}
+        # Only global Claude.ai MCP rules
+        assert rules == {"mcp__claude_ai_Excalidraw__*", "mcp__claude_ai_Mermaid_Chart__*"}
         # No Read/Edit/Bash rules
         assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
 

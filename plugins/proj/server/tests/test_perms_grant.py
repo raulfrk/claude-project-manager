@@ -20,7 +20,6 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.perms_grant import (
-    _ALWAYS_ALLOWED_TOOLS,
     _SENSITIVE_DENY_RULES,
     _add_sandbox_deny_write_path,
     _add_sensitive_deny_rules,
@@ -177,35 +176,6 @@ class TestSetupPermissions:
 
         assert sum(counts2.values()) == 0
 
-    def test_adds_builtin_tools(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        counts = setup_permissions(meta, cfg, mcp_servers=[])
-
-        allow = _read_allow(settings_path)
-        assert "Search" in allow
-        assert counts["builtin_rules"] == 1
-
-    def test_builtin_tools_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=["Search"])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        counts = setup_permissions(meta, cfg, mcp_servers=[])
-
-        assert counts["builtin_rules"] == 0
-        allow = _read_allow(settings_path)
-        assert allow.count("Search") == 1
-
-    def test_builtin_tools_constant(self) -> None:
-        assert "Search" in _ALWAYS_ALLOWED_TOOLS
-
     def test_sensitive_deny_rules_always_added(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
@@ -219,9 +189,7 @@ class TestSetupPermissions:
         assert counts["sensitive_deny_rules"] == 3
         assert counts["sandbox_paths"] == 0
         assert counts["mcp_rules"] == 0
-        assert counts["builtin_rules"] == 1
-        allow = _read_allow(settings_path)
-        assert allow == ["Search"]
+        assert _read_allow(settings_path) == []
         data = json.loads(settings_path.read_text())
         deny = data.get("permissions", {}).get("deny", [])
         assert "Read(~/.ssh/**)" in deny
@@ -642,9 +610,7 @@ class TestRevokeAllPermissions:
         # Revoke with explicit mcp_servers -- MCP rules should also be removed
         counts = revoke_all_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
         assert counts["mcp_rules"] == 1
-        allow = _read_allow(settings_path)
-        assert "mcp__plugin_proj_proj__*" not in allow
-        assert "Search" in allow  # Built-in tools are never revoked
+        assert _read_allow(settings_path) == []
 
     def test_revoke_no_permissions_returns_zero(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -720,7 +686,7 @@ class TestRevokeAllPermissions:
         aw_after = _read_sandbox_allow_write(local_path)
         assert "/home/user/proj" not in aw_after
         allow = _read_local_allow(local_path)
-        assert allow == ["Search"]  # Built-in tools are never revoked
+        assert len(allow) == 0
 
     def test_revoke_removes_deny_write_paths_for_reference_repos(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
