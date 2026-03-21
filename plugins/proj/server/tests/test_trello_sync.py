@@ -28,6 +28,7 @@ from server.tools.trello_sync import (
     TrelloApplyInput,
     TrelloSyncPlan,
     _flatten_descendants,
+    _ghost_check,
     _strip_id_prefix,
     apply_changes,
     build_expected_state,
@@ -1761,3 +1762,428 @@ class TestTasksChecklistIdLookup:
         tasks_creates = [c for c in plan.push_create_checklist if c["name"] == TASKS_CHECKLIST_NAME]
         assert len(tasks_creates) == 1
         assert tasks_creates[0]["todo_id"] == "_tasks"
+
+
+# ── Bug fix tests ────────────────────────────────────────────────────────────
+
+
+class TestArchivedTodosDontCreateDuplicates:
+    """Bug 1: Archived todos' Trello items must not be pulled as new."""
+
+    def test_archived_linked_item_not_pulled(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """An archived todo's Trello item should NOT be pulled as a new todo."""
+        cfg, name = cfg_with_project
+        # Create and archive a todo that was linked to a Trello item
+        todo = _make_todo(cfg, name, "Old task", trello_checklist_item_id="item1")
+        todo.status = "done"
+        storage.save_todos(cfg, name, [])  # empty active list
+        storage.archive_and_remove_todos(cfg, name, [], [todo])
+
+        # Trello still has the item (checked)
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Old task", state="complete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        # Should NOT pull_create a duplicate
+        assert len(plan.pull_create) == 0
+        assert len(plan.pull_create_root) == 0
+
+    def test_archived_unchecked_item_pushes_complete(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """An archived todo's unchecked Trello item should be pushed complete."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Finished task", trello_checklist_item_id="item1")
+        todo.status = "done"
+        storage.save_todos(cfg, name, [])
+        storage.archive_and_remove_todos(cfg, name, [], [todo])
+
+        # Trello still has the item unchecked
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Finished task", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.pull_create) == 0
+        assert len(plan.push_complete_item) == 1
+        assert plan.push_complete_item[0]["item_id"] == "item1"
+
+    def test_archived_checklist_not_pulled_as_root(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """A checklist linked to an archived root todo should not create a new root."""
+        cfg, name = cfg_with_project
+        root = _make_todo(cfg, name, "Old feature", trello_checklist_id="cl1")
+        root.status = "done"
+        storage.save_todos(cfg, name, [])
+        storage.archive_and_remove_todos(cfg, name, [], [root])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Old feature"),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.pull_create_root) == 0
+
+    def test_archived_item_not_push_deleted(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Bug 7: Trello items linked to archived todos should not be deleted."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Archived task", trello_checklist_item_id="item1")
+        todo.status = "done"
+        storage.save_todos(cfg, name, [])
+        storage.archive_and_remove_todos(cfg, name, [], [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Archived task", state="complete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_delete_item) == 0
+
+
+class TestGhostCheck:
+    """Bug 2: Ghost check prevents duplicates from name-matching archived todos."""
+
+    def test_ghost_check_exact_match(self) -> None:
+        archived = [Todo(id="1", title="Fix login bug")]
+        assert _ghost_check("Fix login bug", archived) is True
+
+    def test_ghost_check_case_insensitive(self) -> None:
+        archived = [Todo(id="1", title="Fix Login Bug")]
+        assert _ghost_check("fix login bug", archived) is True
+
+    def test_ghost_check_fuzzy_match(self) -> None:
+        archived = [Todo(id="1", title="Fix login bug")]
+        assert _ghost_check("Fix login bugs", archived) is True
+
+    def test_ghost_check_no_match(self) -> None:
+        archived = [Todo(id="1", title="Fix login bug")]
+        assert _ghost_check("Add new feature", archived) is False
+
+    def test_ghost_check_empty_archive(self) -> None:
+        assert _ghost_check("Anything", []) is False
+
+    def test_ghost_deletes_matching_trello_item(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Trello items matching archived todos should be push-deleted, not pulled."""
+        cfg, name = cfg_with_project
+        # Archive a todo
+        todo = _make_todo(cfg, name, "Fix login bug")
+        todo.status = "done"
+        storage.save_todos(cfg, name, [])
+        storage.archive_and_remove_todos(cfg, name, [], [todo])
+
+        # Trello has an unlinked item with similar name
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item_ghost", "Fix login bug"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.pull_create) == 0
+        assert len(plan.push_delete_item) == 1
+        assert plan.push_delete_item[0]["item_id"] == "item_ghost"
+
+
+class TestNewChecklistItemsGetParent:
+    """Bug 3: Items in new checklists must become children, not orphan roots."""
+
+    def test_items_in_new_checklist_have_parent_ref(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """pull_create entries for items in new checklists store parent_checklist_id."""
+        cfg, name = cfg_with_project
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_new", "New Feature", [
+                _make_check_item("item1", "Subtask 1"),
+                _make_check_item("item2", "Subtask 2"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.pull_create_root) == 1
+        assert len(plan.pull_create) == 2
+        for pc in plan.pull_create:
+            assert pc["parent"] is None  # no parent yet
+            assert pc["parent_checklist_id"] == "cl_new"  # ref to resolve later
+
+    def test_apply_resolves_parent_from_checklist_id(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """apply_changes resolves parent_checklist_id to actual parent todo."""
+        cfg, name = cfg_with_project
+        # First apply: create the root
+        data_root = TrelloApplyInput(
+            created_root_locally=[{
+                "title": "New Feature",
+                "trello_checklist_id": "cl_new",
+            }],
+        )
+        apply_changes(data_root, cfg, name)
+        todos = storage.load_todos(cfg, name)
+        root = next(t for t in todos if t.title == "New Feature")
+
+        # Second apply: create child with parent_checklist_id
+        data_child = TrelloApplyInput(
+            created_locally=[{
+                "title": "Subtask",
+                "parent": None,
+                "parent_checklist_id": "cl_new",
+                "trello_checklist_item_id": "item1",
+                "checked": False,
+            }],
+        )
+        apply_changes(data_child, cfg, name)
+        todos = storage.load_todos(cfg, name)
+        child = next(t for t in todos if t.title == "Subtask")
+        assert child.parent == root.id
+        root_reloaded = next(t for t in todos if t.id == root.id)
+        assert child.id in root_reloaded.children
+
+    def test_auto_apply_new_checklist_with_items(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """auto_apply creates root + children with correct parent relationship."""
+        cfg, name = cfg_with_project
+        from unittest.mock import MagicMock
+        from server.tools.trello_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        diff_fn = tools["proj_trello_diff"]
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_new", "Feature X", [
+                _make_check_item("item_a", "Task A"),
+                _make_check_item("item_b", "Task B"),
+            ]),
+        ])
+        result = json.loads(diff_fn(
+            trello_card_json=card_json,
+            auto_apply=True,
+            project_name=name,
+        ))
+        assert result["auto_applied"]["created_root"] == 1
+        assert result["auto_applied"]["created"] == 2
+
+        todos = storage.load_todos(cfg, name)
+        root = next(t for t in todos if t.title == "Feature X")
+        children = [t for t in todos if t.parent == root.id]
+        assert len(children) == 2
+        assert root.trello_checklist_id == "cl_new"
+
+
+class TestClosurePropagation:
+    """Bug 4: Deleted Trello items should close local todos."""
+
+    def test_deleted_trello_item_closes_local_todo(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When a Trello item is deleted, the linked local todo should be completed."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Task", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [todo])
+
+        # Trello card exists but the item is gone
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert todo.id in plan.pull_complete
+
+    def test_deleted_trello_item_not_recreated(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Bug 5: Deleted Trello items should NOT be re-pushed."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Task", trello_checklist_item_id="item_gone")
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        # Should NOT try to re-create the item
+        assert not any(
+            pi.get("todo_id") == todo.id for pi in plan.push_create_item
+        )
+
+    def test_closure_skips_already_done(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Already-done todos with stale links should not generate operations."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Done", status="done", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert todo.id not in plan.pull_complete
+
+    def test_closure_skips_invalid_card(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Closure propagation should not fire on invalid/empty card JSON."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Task", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [todo])
+
+        plan = compute_diff("", cfg, name)
+        assert todo.id not in plan.pull_complete
+
+
+class TestFirstSyncChecklistId:
+    """Bug 6: first-sync push operations must include checklist_id."""
+
+    def test_first_sync_push_update_has_checklist_id(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Local title", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Different name", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_update_item) == 1
+        assert plan.push_update_item[0]["checklist_id"] == "cl1"
+
+    def test_first_sync_push_complete_has_checklist_id(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        cfg, name = cfg_with_project
+        todo = _make_todo(
+            cfg, name, "Done locally",
+            status="done",
+            trello_checklist_item_id="item1",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Done locally", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_complete_item) == 1
+        assert plan.push_complete_item[0]["checklist_id"] == "cl1"
+
+
+class TestIdempotency:
+    """Running sync twice without changes must be a no-op on the second run."""
+
+    def test_second_sync_is_noop(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """After a full sync cycle, a second diff should produce an empty plan."""
+        cfg, name = cfg_with_project
+        # Set up: local todo linked to Trello item, sync state recorded
+        t0 = "2026-03-19T10:00:00"
+        todo = _make_todo(
+            cfg, name, "Synced task",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Synced task",
+                synced_state="incomplete",
+            ),
+        )
+        todo.updated = "2026-03-19T09:00:00"  # before last sync
+        storage.save_todos(cfg, name, [todo])
+
+        # Store Tasks checklist ID
+        meta = storage.load_meta(cfg, name)
+        meta.trello.trello_tasks_checklist_id = "cl_tasks"
+        storage.save_meta(cfg, meta)
+
+        # Trello matches exactly
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_tasks", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Synced task", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert plan.is_empty(), f"Expected empty plan, got: {plan.to_dict()}"
+
+    def test_second_sync_after_auto_apply_is_noop(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """After auto_apply, re-running diff with same Trello state is a no-op."""
+        cfg, name = cfg_with_project
+        parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
+        storage.save_todos(cfg, name, [parent])  # save parent first for child ID
+        child = _make_todo(
+            cfg, name, "Child",
+            parent=parent.id,
+            trello_checklist_item_id="item1",
+        )
+        parent.children.append(child.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Parent", [
+                _make_check_item("item1", f"{child.id} \u2014 Child"),
+            ]),
+        ])
+
+        # First sync with auto_apply
+        from unittest.mock import MagicMock
+        from server.tools.trello_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        diff_fn = tools["proj_trello_diff"]
+
+        diff_fn(
+            trello_card_json=card_json,
+            auto_apply=True,
+            project_name=name,
+        )
+
+        # Second sync: should be no-op
+        plan = compute_diff(card_json, cfg, name)
+        assert plan.is_empty(), f"Expected empty plan, got: {plan.to_dict()}"
+
+    def test_second_sync_with_root_leaf_is_noop(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Root leaf todo in Tasks checklist: second sync is no-op."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        todo = _make_todo(
+            cfg, name, "Leaf task",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Leaf task",
+                synced_state="incomplete",
+            ),
+        )
+        todo.updated = "2026-03-19T09:00:00"
+        storage.save_todos(cfg, name, [todo])
+
+        meta = storage.load_meta(cfg, name)
+        meta.trello.trello_tasks_checklist_id = "cl_tasks"
+        storage.save_meta(cfg, meta)
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl_tasks", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Leaf task", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert plan.is_empty(), f"Expected empty plan, got: {plan.to_dict()}"

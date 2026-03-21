@@ -12,6 +12,7 @@ snapshot (Trello changed).
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 from dataclasses import dataclass, field
@@ -34,6 +35,17 @@ _UTC = timezone.utc
 def _now() -> str:
     """Return current UTC datetime as ISO 8601 string."""
     return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
+
+
+def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bool:
+    """Return True if title matches an archived todo (exact or fuzzy)."""
+    if not archived:
+        return False
+    lower_title = title.lower()
+    titles = [t.title for t in archived]
+    if any(t.lower() == lower_title for t in titles):
+        return True
+    return bool(difflib.get_close_matches(title, titles, n=1, cutoff=threshold))
 
 
 # ── Data structures ──────────────────────────────────────────────────────────
@@ -208,6 +220,7 @@ def compute_diff(
     """
     meta = storage.load_meta(cfg, name)
     todos = storage.load_todos(cfg, name)
+    archived = storage.load_archived_todos(cfg, name)
 
     plan = TrelloSyncPlan()
 
@@ -222,6 +235,7 @@ def compute_diff(
         trello_data = {}
 
     trello_checklists: list[dict[str, Any]] = trello_data.get("checklists", [])
+    valid_card = "checklists" in trello_data
 
     # Build Trello lookups
     trello_items_by_id: dict[str, dict[str, Any]] = {}  # item_id -> item data
@@ -248,10 +262,21 @@ def compute_diff(
         if todo.trello_checklist_id:
             local_by_checklist_id[todo.trello_checklist_id] = todo
 
+    # Build archive lookup (Bug 1 fix: detect items linked to archived todos)
+    archived_by_checklist_item_id: dict[str, Todo] = {}
+    archived_by_checklist_id: dict[str, Todo] = {}
+    for todo in archived:
+        if todo.trello_checklist_item_id:
+            archived_by_checklist_item_id[todo.trello_checklist_item_id] = todo
+        if todo.trello_checklist_id:
+            archived_by_checklist_id[todo.trello_checklist_id] = todo
+
     # Build expected local state
     expected_checklists, expected_tasks_items = build_expected_state(todos)
 
     # ── Linked items: last-changed-wins ──────────────────────────────
+
+    ghost_deleted_ids: set[str] = set()
 
     for item_id, item in trello_items_by_id.items():
         item_name = str(item.get("name", ""))
@@ -272,10 +297,11 @@ def compute_diff(
             if ss is None or not ss.last_sync:
                 # ── First-sync migration (232.8): no snapshot yet ────
                 # Fall back to direct comparison for one cycle
+                checklist_id = str(item.get("_checklist_id", ""))
                 _first_sync_diff(
                     plan, local_todo, item_name, item_state, is_checked,
                     local_is_done, local_display_name, expected_checklists,
-                    expected_tasks_items,
+                    expected_tasks_items, checklist_id,
                 )
             else:
                 # ── Last-changed-wins logic (232.5) ──────────────────
@@ -312,20 +338,49 @@ def compute_diff(
                     )
                 # else: neither changed -> skip
 
+        elif item_id in archived_by_checklist_item_id:
+            # Bug 1 fix: Item is linked to an archived todo — don't pull as new.
+            # If Trello item is still unchecked, push complete to keep in sync.
+            if not is_checked:
+                plan.push_complete_item.append({
+                    "item_id": item_id,
+                    "checklist_id": str(item.get("_checklist_id", "")),
+                    "state": "complete",
+                })
+            # If already checked: skip — both sides agree it's done.
+
         else:
             # New item in Trello not linked locally — create
             actual_title = _strip_id_prefix(item_name)
+
+            # Bug 2 fix: ghost check against archived todos
+            if _ghost_check(actual_title, archived):
+                # Matches a recently archived todo — don't pull duplicate.
+                # Push delete to clean up the Trello side.
+                plan.push_delete_item.append({
+                    "item_id": item_id,
+                    "checklist_id": str(item.get("_checklist_id", "")),
+                })
+                ghost_deleted_ids.add(item_id)
+                continue
+
             cl_id = str(item.get("_checklist_id", ""))
 
             # Determine parent: if checklist is linked to a root todo, parent = that root
             parent_id: str | None = None
+            parent_checklist_id: str | None = None
             if cl_id and cl_id in local_by_checklist_id:
                 parent_todo = local_by_checklist_id[cl_id]
                 parent_id = parent_todo.id
+            elif cl_id and str(item.get("_checklist_name", "")) != TASKS_CHECKLIST_NAME:
+                # Bug 3 fix: item is in a new checklist (will be pull_create_root)
+                # Store the checklist ID so apply_changes can resolve the parent
+                parent_checklist_id = cl_id
 
             plan.pull_create.append({
                 "title": actual_title,
                 "parent": parent_id,
+                "parent_checklist_id": parent_checklist_id,
                 "trello_checklist_item_id": item_id,
                 "checked": is_checked,
             })
@@ -333,11 +388,29 @@ def compute_diff(
     # New checklists not linked locally -> potentially new root todos
     for cl_id, cl in trello_checklists_by_id.items():
         cl_name = str(cl.get("name", ""))
-        if cl_id not in local_by_checklist_id and cl_name != TASKS_CHECKLIST_NAME:
+        # Bug 1 fix: also skip checklists linked to archived root todos
+        if (
+            cl_id not in local_by_checklist_id
+            and cl_id not in archived_by_checklist_id
+            and cl_name != TASKS_CHECKLIST_NAME
+        ):
             plan.pull_create_root.append({
                 "title": cl_name,
                 "trello_checklist_id": cl_id,
             })
+
+    # ── Closure propagation (Bug 4 fix) ──────────────────────────────
+    # Like Todoist sync: if a linked todo's Trello item was deleted, close it.
+    stale_links: set[str] = set()
+    if valid_card:
+        for todo in todos:
+            if (
+                todo.trello_checklist_item_id
+                and todo.trello_checklist_item_id not in trello_items_by_id
+                and todo.status not in TERMINAL_STATUSES
+            ):
+                stale_links.add(todo.trello_checklist_item_id)
+                plan.pull_complete.append(todo.id)
 
     # ── Push phase: Local -> Trello (unlinked items) ─────────────────
 
@@ -375,7 +448,8 @@ def compute_diff(
                 if item_todo is None:
                     continue
                 # Only push-create for items not yet linked; linked items
-                # are handled by the last-changed-wins loop above
+                # are handled by the last-changed-wins loop above.
+                # Bug 5 fix: skip items with stale links (handled by closure propagation)
                 if not item_todo.trello_checklist_item_id:
                     plan.push_create_item.append({
                         "todo_id": item_todo.id,
@@ -383,14 +457,8 @@ def compute_diff(
                         "checklist_id": root_todo.trello_checklist_id,
                         "checked": bool(item_spec.get("checked", False)),  # type: ignore[union-attr]
                     })
-                elif item_todo.trello_checklist_item_id not in trello_items_by_id:
-                    # Item was deleted in Trello, re-create it
-                    plan.push_create_item.append({
-                        "todo_id": item_todo.id,
-                        "name": str(item_spec.get("name", "")),  # type: ignore[union-attr]
-                        "checklist_id": root_todo.trello_checklist_id,
-                        "checked": bool(item_spec.get("checked", False)),  # type: ignore[union-attr]
-                    })
+                # Stale links (item deleted in Trello) are handled by closure
+                # propagation above — no re-creation.
 
     # Push items for the "Tasks" catch-all checklist
     # Find Tasks checklist: prefer stored ID, fall back to name-based scan
@@ -423,6 +491,7 @@ def compute_diff(
         if item_todo is None:
             continue
         # Only push-create for items not yet linked
+        # Bug 5 fix: skip items with stale links (handled by closure propagation)
         if not item_todo.trello_checklist_item_id:
             plan.push_create_item.append({
                 "todo_id": item_todo.id,
@@ -430,20 +499,19 @@ def compute_diff(
                 "checklist_id": tasks_cl_id,
                 "checked": bool(item_spec.get("checked", False)),
             })
-        elif item_todo.trello_checklist_item_id not in trello_items_by_id:
-            # Item was deleted in Trello, re-create it
-            plan.push_create_item.append({
-                "todo_id": item_todo.id,
-                "name": str(item_spec.get("name", "")),
-                "checklist_id": tasks_cl_id,
-                "checked": bool(item_spec.get("checked", False)),
-            })
+        # Stale links (item deleted in Trello) are handled by closure
+        # propagation above — no re-creation.
 
-    # Push delete: items in Trello not linked to any local todo and not being pulled
+    # Push delete: items in Trello not linked to any local or archived todo
+    # Bug 7 fix: include archived todos' links to prevent deleting their items
     linked_trello_item_ids = {
         t.trello_checklist_item_id for t in todos if t.trello_checklist_item_id
+    } | {
+        t.trello_checklist_item_id for t in archived if t.trello_checklist_item_id
     }
     for item_id in trello_items_by_id:
+        if item_id in ghost_deleted_ids:
+            continue  # already queued for deletion by ghost check
         if item_id not in linked_trello_item_ids and item_id not in {
             str(pc.get("trello_checklist_item_id", ""))
             for pc in plan.pull_create
@@ -491,6 +559,7 @@ def _first_sync_diff(
     local_display_name: str,
     expected_checklists: list[dict[str, object]],
     expected_tasks_items: list[dict[str, object]],
+    checklist_id: str = "",
 ) -> None:
     """First-sync migration: no snapshot yet, use direct comparison (232.8).
 
@@ -504,14 +573,14 @@ def _first_sync_diff(
         plan.push_update_item.append({
             "item_id": local_todo.trello_checklist_item_id,
             "name": local_display_name,
-            "checklist_id": "",  # filled by caller if needed
+            "checklist_id": checklist_id,
         })
 
     # State difference -> push local state
     if local_is_done and not is_checked:
         plan.push_complete_item.append({
             "item_id": local_todo.trello_checklist_item_id,
-            "checklist_id": "",
+            "checklist_id": checklist_id,
             "state": "complete",
         })
     elif not local_is_done and is_checked:
@@ -642,9 +711,18 @@ def apply_changes(
         todo_map[todo.id] = todo
         counts["created_root"] += 1
 
+    # Build lookup: trello_checklist_id -> todo_id (for resolving new checklist parents)
+    checklist_id_to_todo: dict[str, str] = {}
+    for todo in todos:
+        if todo.trello_checklist_id:
+            checklist_id_to_todo[todo.trello_checklist_id] = todo.id
+
     # 2. Create new child todos (from pull_create -- new checklist items)
     for item in data.created_locally:
         parent_id = str(item["parent"]) if item.get("parent") else None
+        # Bug 3 fix: resolve parent from parent_checklist_id if parent is None
+        if not parent_id and item.get("parent_checklist_id"):
+            parent_id = checklist_id_to_todo.get(str(item["parent_checklist_id"]))
         parent_todo = todo_map.get(parent_id) if parent_id else None
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),

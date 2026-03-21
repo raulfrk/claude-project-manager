@@ -185,3 +185,86 @@ class TestLockUnlock:
             result = unlock_worktree("/repo/main")
         assert "Unlocked" in result
         mock_unlock.assert_called_once()
+
+
+# ── Zoxide integration tests ────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def zoxide_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Config with zoxide_integration enabled and a real git repo."""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    worktrees_dir = tmp_path / "worktrees"
+
+    subprocess.run(["git", "init", "-b", "main", str(repo_dir)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.email", "test@test.com"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.name", "Test User"],
+        check=True, capture_output=True,
+    )
+    (repo_dir / "README.md").write_text("init")
+    subprocess.run(["git", "-C", str(repo_dir), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "commit", "-m", "init"],
+        check=True, capture_output=True,
+    )
+
+    config_path = tmp_path / "worktree.yaml"
+    monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
+    monkeypatch.delenv("WORKTREE_CONFIG", raising=False)
+    config = WorktreeConfig(
+        default_worktree_dir=str(worktrees_dir),
+        base_repos=[BaseRepo(label="myapp", path=str(repo_dir), default_branch="main")],
+        zoxide_integration=True,
+    )
+    storage.save(config)
+    return repo_dir
+
+
+class TestZoxideIntegration:
+    def test_create_boosts_zoxide_when_enabled(self, zoxide_config: Path) -> None:
+        with patch("server.tools.worktrees.zoxide_boost") as mock_boost:
+            result = create_worktree("myapp", "feature/x")
+        assert "Created" in result
+        mock_boost.assert_called_once()
+        path_arg = mock_boost.call_args[0][0]
+        assert "feature-x" in path_arg
+
+    def test_create_skips_zoxide_when_disabled(self, real_git_repo: Path) -> None:
+        with patch("server.tools.worktrees.zoxide_boost") as mock_boost:
+            result = create_worktree("myapp", "feature/y")
+        assert "Created" in result
+        mock_boost.assert_not_called()
+
+    def test_remove_cleans_zoxide_when_enabled(self, zoxide_config: Path) -> None:
+        # First create a worktree
+        create_worktree("myapp", "feature/z")
+        worktree_path = str(zoxide_config.parent / "worktrees" / "myapp" / "feature-z")
+
+        with patch("server.tools.worktrees.zoxide_remove") as mock_remove:
+            result = remove_worktree(worktree_path)
+        assert "Removed" in result
+        mock_remove.assert_called_once_with(worktree_path)
+
+    def test_remove_skips_zoxide_when_disabled(self, real_git_repo: Path) -> None:
+        create_worktree("myapp", "feature/w")
+        worktree_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-w")
+
+        with patch("server.tools.worktrees.zoxide_remove") as mock_remove:
+            result = remove_worktree(worktree_path)
+        assert "Removed" in result
+        mock_remove.assert_not_called()
+
+    def test_zoxide_boost_silent_when_not_installed(self) -> None:
+        from server.lib.zoxide import zoxide_boost
+        with patch("server.lib.zoxide.subprocess.run", side_effect=FileNotFoundError):
+            zoxide_boost("/some/path")  # should not raise
+
+    def test_zoxide_remove_silent_when_not_installed(self) -> None:
+        from server.lib.zoxide import zoxide_remove
+        with patch("server.lib.zoxide.subprocess.run", side_effect=FileNotFoundError):
+            zoxide_remove("/some/path")  # should not raise

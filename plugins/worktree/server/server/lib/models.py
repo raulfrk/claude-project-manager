@@ -55,12 +55,14 @@ class WorktreeEntry:
 class WorktreeConfig:
     default_worktree_dir: str = "~/worktrees"
     base_repos: list[BaseRepo] = field(default_factory=list)
+    zoxide_integration: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
             "version": 1,
             "default_worktree_dir": self.default_worktree_dir,
             "base_repos": [r.to_dict() for r in self.base_repos],
+            "zoxide_integration": self.zoxide_integration,
         }
 
     @classmethod
@@ -71,4 +73,5 @@ class WorktreeConfig:
         return cls(
             default_worktree_dir=str(data.get("default_worktree_dir", "~/worktrees")),
             base_repos=[BaseRepo.from_dict(r) for r in repos_raw],  # type: ignore[arg-type]  # list[object] from YAML; items are dicts at runtime
+            zoxide_integration=bool(data.get("zoxide_integration", False)),
         )
