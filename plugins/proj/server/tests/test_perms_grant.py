@@ -1,4 +1,4 @@
-"""Tests for proj_grant_tool_permissions / proj_revoke_tool_permissions."""
+"""Tests for proj_setup_permissions / proj_revoke_all_permissions."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import yaml
 
 from server.lib import state, storage
 from server.lib.models import (
-    DEFAULT_INVESTIGATION_TOOLS,
     PermissionsConfig,
     ProjConfig,
     ProjectDates,
@@ -21,11 +20,12 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.perms_grant import (
-    _bash_entry,
+    _SENSITIVE_DENY_RULES,
+    _add_sandbox_deny_write_path,
+    _add_sensitive_deny_rules,
+    _remove_sandbox_deny_write_path,
     collect_paths,
-    grant_investigation_tools,
     revoke_all_permissions,
-    revoke_investigation_tools,
     setup_permissions,
 )
 
@@ -34,14 +34,12 @@ from server.tools.perms_grant import (
 
 
 def _make_cfg(
-    tools: list[str] | None = None,
     worktree_integration: bool = False,
 ) -> ProjConfig:
     cfg = ProjConfig(tracking_dir="/tmp/tracking", worktree_integration=worktree_integration)
     cfg.permissions = PermissionsConfig(
         auto_grant=True,
         auto_allow_mcps=True,
-        investigation_tools=tools if tools is not None else list(DEFAULT_INVESTIGATION_TOOLS),
     )
     cfg.todoist = TodoistSync(enabled=False)
     return cfg
@@ -66,22 +64,9 @@ def _read_allow(path: Path) -> list[str]:
     return data.get("permissions", {}).get("allow", [])
 
 
-# ── _bash_entry ───────────────────────────────────────────────────────────────
-
-
-class TestBashEntry:
-    def test_produces_double_slash_prefix(self) -> None:
-        result = _bash_entry("grep", "/home/user/proj")
-        assert result == "Bash(grep //home/user/proj/**)"
-
-    def test_strips_trailing_slash(self) -> None:
-        result = _bash_entry("find", "/home/user/proj/")
-        assert result == "Bash(find //home/user/proj/**)"
-
-    def test_various_tools(self) -> None:
-        for tool in DEFAULT_INVESTIGATION_TOOLS:
-            entry = _bash_entry(tool, "/some/path")
-            assert entry.startswith(f"Bash({tool} //some/path/**)")
+def _read_deny(path: Path) -> list[str]:
+    data = json.loads(path.read_text())
+    return data.get("permissions", {}).get("deny", [])
 
 
 # ── collect_paths ─────────────────────────────────────────────────────────────
@@ -158,234 +143,19 @@ class TestCollectPaths:
         assert len(paths) == 2  # repo + tracking_dir
 
 
-# ── grant_investigation_tools ─────────────────────────────────────────────────
-
-
-class TestGrantInvestigationTools:
-    def test_adds_bash_rules_for_all_tools(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep", "find", "ls"])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 6  # 3 tools × 2 paths (repo + tracking_dir)
-        allow = _read_allow(settings_path)
-        assert "Bash(grep //home/user/proj/**)" in allow
-        assert "Bash(find //home/user/proj/**)" in allow
-        assert "Bash(ls //home/user/proj/**)" in allow
-
-    def test_idempotent_no_duplicates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[
-            "Bash(grep //home/user/proj/**)",
-            "Bash(grep //tmp/tracking/**)",
-        ])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 0
-        allow = _read_allow(settings_path)
-        assert allow.count("Bash(grep //home/user/proj/**)") == 1
-
-    def test_multiple_repos_all_get_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(
-            repos=[
-                RepoEntry(label="a", path="/home/user/proj-a"),
-                RepoEntry(label="b", path="/home/user/proj-b"),
-            ]
-        )
-        cfg = _make_cfg(tools=["grep"])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 3  # 1 tool × 3 paths (2 repos + tracking_dir)
-        allow = _read_allow(settings_path)
-        assert "Bash(grep //home/user/proj-a/**)" in allow
-        assert "Bash(grep //home/user/proj-b/**)" in allow
-
-    def test_empty_tool_list_adds_nothing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 0
-        assert _read_allow(settings_path) == []
-
-    def test_creates_settings_file_if_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        # Do not create the file
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 2  # 1 tool × 2 paths (repo + tracking_dir)
-        assert settings_path.exists()
-        assert "Bash(grep //home/user/proj/**)" in _read_allow(settings_path)
-
-    def test_existing_unrelated_rules_preserved(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(
-            settings_path,
-            allow=["Read(//home/user/proj/**)", "mcp__proj__*"],
-        )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        grant_investigation_tools(meta, cfg)
-
-        allow = _read_allow(settings_path)
-        assert "Read(//home/user/proj/**)" in allow
-        assert "mcp__proj__*" in allow
-        assert "Bash(grep //home/user/proj/**)" in allow
-
-
-# ── revoke_investigation_tools ────────────────────────────────────────────────
-
-
-class TestRevokeInvestigationTools:
-    def test_removes_bash_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(
-            settings_path,
-            allow=["Bash(grep //home/user/proj/**)", "Bash(find //home/user/proj/**)"],
-        )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep", "find"])
-        removed = revoke_investigation_tools(meta, cfg)
-
-        assert removed == 2
-        assert _read_allow(settings_path) == []
-
-    def test_does_not_remove_unrelated_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(
-            settings_path,
-            allow=[
-                "Read(//home/user/proj/**)",
-                "mcp__proj__*",
-                "Bash(grep //home/user/proj/**)",
-            ],
-        )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        removed = revoke_investigation_tools(meta, cfg)
-
-        assert removed == 1
-        allow = _read_allow(settings_path)
-        assert "Read(//home/user/proj/**)" in allow
-        assert "mcp__proj__*" in allow
-        assert "Bash(grep //home/user/proj/**)" not in allow
-
-    def test_no_rules_to_remove_returns_zero(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=["Read(//home/user/proj/**)"])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        removed = revoke_investigation_tools(meta, cfg)
-
-        assert removed == 0
-
-    def test_grant_then_revoke_restores_original(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        original = ["Read(//home/user/proj/**)", "mcp__proj__*"]
-        _write_settings(settings_path, allow=original)
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep", "ls"])
-
-        grant_investigation_tools(meta, cfg)
-        revoke_investigation_tools(meta, cfg)
-
-        assert sorted(_read_allow(settings_path)) == sorted(original)
-
-
 # ── setup_permissions ─────────────────────────────────────────────────────────
 
 
 class TestSetupPermissions:
-    def test_adds_path_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
-        cfg.tracking_dir = "/tmp/tracking"
-        counts = setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=False)
-
-        allow = _read_allow(settings_path)
-        assert "Read(//home/user/proj/**)" in allow
-        assert "Edit(//home/user/proj/**)" in allow
-        assert counts["path_rules"] >= 2
-
-    def test_adds_bash_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep", "find"])
-        counts = setup_permissions(meta, cfg, grant_path_access=False, grant_investigation_tools_flag=True)
-
-        allow = _read_allow(settings_path)
-        assert "Bash(grep //home/user/proj/**)" in allow
-        assert "Bash(find //home/user/proj/**)" in allow
-        assert counts["bash_rules"] == 4  # 2 tools × 2 paths (repo + tracking_dir)
-
     def test_adds_mcp_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
+        cfg = _make_cfg()
         counts = setup_permissions(
             meta, cfg,
-            grant_path_access=False,
-            grant_investigation_tools_flag=False,
             mcp_servers=["plugin_proj_proj", "plugin_perms_perms"],
         )
 
@@ -394,127 +164,43 @@ class TestSetupPermissions:
         assert "mcp__plugin_perms_perms__*" in allow
         assert counts["mcp_rules"] == 2
 
-    def test_all_rules_in_one_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        counts = setup_permissions(
-            meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
-            mcp_servers=["plugin_proj_proj"],
-        )
-
-        allow = _read_allow(settings_path)
-        assert "Read(//home/user/proj/**)" in allow
-        assert "Edit(//home/user/proj/**)" in allow
-        assert "Bash(grep //home/user/proj/**)" in allow
-        assert "mcp__plugin_proj_proj__*" in allow
-        assert sum(counts.values()) > 0
-
     def test_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
-        counts2 = setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
+        cfg = _make_cfg()
+        setup_permissions(meta, cfg, mcp_servers=["proj"])
+        counts2 = setup_permissions(meta, cfg, mcp_servers=["proj"])
 
         assert sum(counts2.values()) == 0
 
-    def test_archive_destination_adds_bash_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_sensitive_deny_rules_always_added(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
-        cfg.tracking_dir = "/tmp/tracking"
-        counts = setup_permissions(
-            meta, cfg,
-            grant_path_access=False,
-            grant_investigation_tools_flag=False,
-            archive_destination="/tmp/arch",
-        )
+        cfg = _make_cfg()
+        counts = setup_permissions(meta, cfg, mcp_servers=[])
 
-        allow = _read_allow(settings_path)
-        # mv/rm/rm -rf/mkdir/mkdir -p rules for archive dest, repo path, and tracking dir
-        assert any("Bash(mv " in e for e in allow)
-        assert any("Bash(rm " in e for e in allow)
-        assert any("Bash(mkdir " in e for e in allow)
-        # Read+Edit for archive dest
-        assert any("Read(" in e and "arch" in e for e in allow)
-        assert any("Edit(" in e and "arch" in e for e in allow)
-        assert counts["bash_rules"] > 0
-        assert counts["path_rules"] > 0
-
-    def test_no_flags_adds_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        counts = setup_permissions(meta, cfg, grant_path_access=False, grant_investigation_tools_flag=False, mcp_servers=[])
-
-        assert sum(counts.values()) == 0
+        # Sensitive deny rules are always added regardless of other flags
+        assert counts["sensitive_deny_rules"] == 3
+        assert counts["sandbox_paths"] == 0
+        assert counts["mcp_rules"] == 0
         assert _read_allow(settings_path) == []
+        data = json.loads(settings_path.read_text())
+        deny = data.get("permissions", {}).get("deny", [])
+        assert "Read(~/.ssh/**)" in deny
+        assert "Read(~/.gnupg/**)" in deny
+        assert "Read(~/.aws/**)" in deny
 
 
 # ── MCP tool integration ──────────────────────────────────────────────────────
 
 
-class TestProjGrantToolPermissionsTool:
-    @pytest.mark.anyio
-    async def test_tool_registered(self, mcp_app_with_grant) -> None:  # type: ignore[no-untyped-def]
-        from tests.conftest import call_tool
-
-        result = await call_tool(mcp_app_with_grant, "proj_grant_tool_permissions")
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    @pytest.mark.anyio
-    async def test_no_active_project(self, cfg: ProjConfig, mcp_app_with_grant) -> None:  # type: ignore[no-untyped-def]
-        from tests.conftest import call_tool
-
-        result = await call_tool(mcp_app_with_grant, "proj_grant_tool_permissions")
-        assert "No active project" in result
-
-    @pytest.mark.anyio
-    async def test_grants_rules_for_active_project(
-        self,
-        cfg: ProjConfig,
-        tmp_path: Path,
-        mcp_app_with_grant,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:  # type: ignore[no-untyped-def]
-        from tests.conftest import call_tool, setup_project
-
-        repo_path = str(tmp_path / "myrepo")
-        setup_project(cfg, "myproject", repo_path)
-        state.set_session_active("myproject")
-
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        result = await call_tool(mcp_app_with_grant, "proj_grant_tool_permissions")
-        assert "✅" in result
-        allow = _read_allow(settings_path)
-        assert any(e.startswith("Bash(grep ") for e in allow)
-
-    @pytest.mark.anyio
-    async def test_revoke_tool_registered(self, mcp_app_with_grant) -> None:  # type: ignore[no-untyped-def]
-        from tests.conftest import call_tool
-
-        result = await call_tool(mcp_app_with_grant, "proj_revoke_tool_permissions")
-        assert isinstance(result, str)
-
+class TestProjSetupPermissionsTool:
     @pytest.mark.anyio
     async def test_setup_permissions_tool_registered(self, mcp_app_with_grant) -> None:  # type: ignore[no-untyped-def]
         from tests.conftest import call_tool
@@ -523,7 +209,7 @@ class TestProjGrantToolPermissionsTool:
         assert isinstance(result, str)
 
     @pytest.mark.anyio
-    async def test_setup_permissions_adds_all_rules(
+    async def test_setup_permissions_adds_mcp_rules(
         self,
         cfg: ProjConfig,
         tmp_path: Path,
@@ -543,14 +229,10 @@ class TestProjGrantToolPermissionsTool:
         result = await call_tool(
             mcp_app_with_grant,
             "proj_setup_permissions",
-            grant_path_access=True,
-            grant_investigation_tools=True,
             mcp_servers=["plugin_proj_proj"],
         )
-        assert "✅" in result
+        assert "rule(s)" in result or "up to date" in result
         allow = _read_allow(settings_path)
-        assert any("Read(" in e for e in allow)
-        assert any("Bash(" in e for e in allow)
         assert "mcp__plugin_proj_proj__*" in allow
 
 
@@ -570,6 +252,82 @@ def _read_local_allow(path: Path) -> list[str]:
 def _read_sandbox_allow_write(path: Path) -> list[str]:
     data = json.loads(path.read_text())
     return data.get("sandbox", {}).get("filesystem", {}).get("allowWrite", [])
+
+
+def _read_sandbox_deny_write(path: Path) -> list[str]:
+    data = json.loads(path.read_text())
+    return data.get("sandbox", {}).get("filesystem", {}).get("denyWrite", [])
+
+
+# ── sandbox deny_write helpers ────────────────────────────────────────────────
+
+
+class TestSandboxDenyWriteHelpers:
+    def test_add_deny_write_path(self) -> None:
+        data: dict[str, object] = {}
+        assert _add_sandbox_deny_write_path(data, "/home/user/docs") is True
+        dw = data["sandbox"]["filesystem"]["denyWrite"]  # type: ignore[index]
+        assert "/home/user/docs" in dw
+
+    def test_add_deny_write_path_idempotent(self) -> None:
+        data: dict[str, object] = {}
+        _add_sandbox_deny_write_path(data, "/home/user/docs")
+        assert _add_sandbox_deny_write_path(data, "/home/user/docs") is False
+        dw = data["sandbox"]["filesystem"]["denyWrite"]  # type: ignore[index]
+        assert dw.count("/home/user/docs") == 1
+
+    def test_remove_deny_write_path(self) -> None:
+        data: dict[str, object] = {}
+        _add_sandbox_deny_write_path(data, "/home/user/docs")
+        assert _remove_sandbox_deny_write_path(data, "/home/user/docs") is True
+        dw = data["sandbox"]["filesystem"]["denyWrite"]  # type: ignore[index]
+        assert "/home/user/docs" not in dw
+
+    def test_remove_deny_write_path_missing(self) -> None:
+        data: dict[str, object] = {}
+        assert _remove_sandbox_deny_write_path(data, "/home/user/docs") is False
+
+    def test_strips_trailing_slash(self) -> None:
+        data: dict[str, object] = {}
+        _add_sandbox_deny_write_path(data, "/home/user/docs/")
+        dw = data["sandbox"]["filesystem"]["denyWrite"]  # type: ignore[index]
+        assert "/home/user/docs" in dw
+
+
+# ── sensitive deny rules ──────────────────────────────────────────────────────
+
+
+class TestSensitiveDenyRules:
+    def test_adds_all_three_rules(self) -> None:
+        data: dict[str, object] = {}
+        count = _add_sensitive_deny_rules(data)
+        assert count == 3
+        deny = data["permissions"]["deny"]  # type: ignore[index]
+        assert "Read(~/.ssh/**)" in deny
+        assert "Read(~/.gnupg/**)" in deny
+        assert "Read(~/.aws/**)" in deny
+
+    def test_idempotent(self) -> None:
+        data: dict[str, object] = {}
+        _add_sensitive_deny_rules(data)
+        count = _add_sensitive_deny_rules(data)
+        assert count == 0
+        deny = data["permissions"]["deny"]  # type: ignore[index]
+        assert len(deny) == 3
+
+    def test_preserves_existing_deny_rules(self) -> None:
+        data: dict[str, object] = {"permissions": {"deny": ["Write(~/.bashrc)"]}}
+        _add_sensitive_deny_rules(data)
+        deny = data["permissions"]["deny"]  # type: ignore[index]
+        assert "Write(~/.bashrc)" in deny
+        assert "Read(~/.ssh/**)" in deny
+        assert len(deny) == 4
+
+    def test_constant_has_expected_rules(self) -> None:
+        assert len(_SENSITIVE_DENY_RULES) == 3
+        assert "Read(~/.ssh/**)" in _SENSITIVE_DENY_RULES
+        assert "Read(~/.gnupg/**)" in _SENSITIVE_DENY_RULES
+        assert "Read(~/.aws/**)" in _SENSITIVE_DENY_RULES
 
 
 class TestSandboxModeDetection:
@@ -667,29 +425,6 @@ class TestSandboxModeDetection:
         assert _is_sandbox_enabled(None) is False
 
 
-class TestGrantInvestigationToolsSandbox:
-    def test_writes_to_local_settings_when_sandbox_enabled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        added = grant_investigation_tools(meta, cfg)
-
-        assert added == 2  # 1 tool × 2 paths (repo + tracking_dir)
-        allow = _read_local_allow(local_path)
-        assert "Bash(grep //home/user/proj/**)" in allow
-        # Standard settings.json must NOT be created
-        assert not (tmp_path / "settings.json").exists()
-
-
 class TestSetupPermissionsSandbox:
     def test_adds_sandbox_write_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -703,23 +438,15 @@ class TestSetupPermissionsSandbox:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
+        cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
-        counts = setup_permissions(
-            meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=False,
-        )
+        counts = setup_permissions(meta, cfg)
 
-        # Path rules include Read+Edit in permissions.allow AND sandbox.filesystem.allowWrite
-        allow = _read_local_allow(local_path)
-        assert "Read(//home/user/proj/**)" in allow
-        assert "Edit(//home/user/proj/**)" in allow
         aw = _read_sandbox_allow_write(local_path)
         assert "/home/user/proj" in aw
-        assert counts["path_rules"] > 0
+        assert counts["sandbox_paths"] > 0
 
-    def test_reference_repo_not_in_sandbox_allow_write(
+    def test_reference_repo_in_deny_write_not_allow_write(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         local_path = tmp_path / ".claude" / "settings.local.json"
@@ -731,17 +458,46 @@ class TestSetupPermissionsSandbox:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="docs", path="/home/user/docs", reference=True)])
-        cfg = _make_cfg(tools=[])
+        cfg = _make_cfg()
         cfg.tracking_dir = ""
-        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=False)
+        counts = setup_permissions(meta, cfg)
 
         aw = _read_sandbox_allow_write(local_path)
         assert "/home/user/docs" not in aw
-        # Read rule should still be in permissions.allow
-        allow = _read_local_allow(local_path)
-        assert "Read(//home/user/docs/**)" in allow
+        dw = _read_sandbox_deny_write(local_path)
+        assert "/home/user/docs" in dw
+        assert counts["deny_write_paths"] == 1
+        assert counts["sandbox_paths"] == 0
 
-    def test_all_rules_sandbox(
+    def test_mixed_repos_writable_and_reference(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg()
+        cfg.tracking_dir = "/tmp/tracking"
+        counts = setup_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
+
+        aw = _read_sandbox_allow_write(local_path)
+        dw = _read_sandbox_deny_write(local_path)
+        assert "/home/user/proj" in aw
+        assert "/home/user/docs" not in aw
+        assert "/home/user/docs" in dw
+        assert "/home/user/proj" not in dw
+        assert counts["sandbox_paths"] >= 1  # proj + tracking
+        assert counts["deny_write_paths"] == 1  # docs
+
+    def test_sensitive_deny_rules_in_sandbox_mode(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         local_path = tmp_path / ".claude" / "settings.local.json"
@@ -753,16 +509,35 @@ class TestSetupPermissionsSandbox:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
+        cfg = _make_cfg()
+        counts = setup_permissions(meta, cfg)
+
+        assert counts["sensitive_deny_rules"] == 3
+        data = json.loads(local_path.read_text())
+        deny = data.get("permissions", {}).get("deny", [])
+        assert "Read(~/.ssh/**)" in deny
+        assert "Read(~/.gnupg/**)" in deny
+        assert "Read(~/.aws/**)" in deny
+
+    def test_mcp_rules_and_sandbox_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg()
         counts = setup_permissions(
             meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
             mcp_servers=["plugin_proj_proj"],
         )
 
         allow = _read_local_allow(local_path)
-        assert "Bash(grep //home/user/proj/**)" in allow
         assert "mcp__plugin_proj_proj__*" in allow
         aw = _read_sandbox_allow_write(local_path)
         assert "/home/user/proj" in aw
@@ -780,39 +555,18 @@ class TestSetupPermissionsSandbox:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
-        counts2 = setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True, mcp_servers=["proj"])
+        cfg = _make_cfg()
+        setup_permissions(meta, cfg, mcp_servers=["proj"])
+        counts2 = setup_permissions(meta, cfg, mcp_servers=["proj"])
 
         assert sum(counts2.values()) == 0
-
-
-class TestRevokeInvestigationToolsSandbox:
-    def test_revokes_from_local_settings(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": ["Bash(grep //home/user/proj/**)"]},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
-        removed = revoke_investigation_tools(meta, cfg)
-
-        assert removed == 1
-        allow = _read_local_allow(local_path)
-        assert "Bash(grep //home/user/proj/**)" not in allow
 
 
 # ── revoke_all_permissions ─────────────────────────────────────────────────────
 
 
 class TestRevokeAllPermissions:
-    def test_setup_then_revoke_removes_path_and_bash(
+    def test_setup_then_revoke_removes_mcp_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
@@ -820,25 +574,19 @@ class TestRevokeAllPermissions:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep", "find"])
+        cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
         # Setup permissions first
         setup_permissions(
             meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
             mcp_servers=["plugin_proj_proj"],
         )
         allow_after_setup = _read_allow(settings_path)
         assert len(allow_after_setup) > 0
 
-        # Revoke all (without mcp_servers — MCP rules are shared across projects)
+        # Revoke all (without mcp_servers -- MCP rules are shared across projects)
         counts = revoke_all_permissions(meta, cfg)
-        total = sum(counts.values())
-        assert total > 0
-        assert counts["path_rules"] > 0
-        assert counts["bash_rules"] > 0
         # MCP rules are NOT removed by default (shared across projects)
         allow_after = _read_allow(settings_path)
         assert "mcp__plugin_proj_proj__*" in allow_after
@@ -851,17 +599,15 @@ class TestRevokeAllPermissions:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
+        cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
         setup_permissions(
             meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
             mcp_servers=["plugin_proj_proj"],
         )
 
-        # Revoke with explicit mcp_servers — MCP rules should also be removed
+        # Revoke with explicit mcp_servers -- MCP rules should also be removed
         counts = revoke_all_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
         assert counts["mcp_rules"] == 1
         assert _read_allow(settings_path) == []
@@ -874,7 +620,7 @@ class TestRevokeAllPermissions:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
+        cfg = _make_cfg()
 
         counts = revoke_all_permissions(meta, cfg)
         assert sum(counts.values()) == 0
@@ -884,19 +630,15 @@ class TestRevokeAllPermissions:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         settings_path = tmp_path / ".claude" / "settings.json"
-        unrelated = ["Read(//some/other/path/**)", "mcp__unrelated_server__*", "Bash(grep //other/**"]
-        _write_settings(settings_path, allow=unrelated + [
-            "Read(//home/user/proj/**)",
-            "Edit(//home/user/proj/**)",
-        ])
+        unrelated = ["Read(//some/other/path/**)", "mcp__unrelated_server__*"]
+        _write_settings(settings_path, allow=unrelated)
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=[])
+        cfg = _make_cfg()
         cfg.tracking_dir = ""
 
         counts = revoke_all_permissions(meta, cfg)
-        assert counts["path_rules"] > 0
         allow = _read_allow(settings_path)
         # Unrelated rules should remain
         for rule in unrelated:
@@ -910,10 +652,10 @@ class TestRevokeAllPermissions:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
+        cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
-        setup_permissions(meta, cfg, grant_path_access=True, grant_investigation_tools_flag=True)
+        setup_permissions(meta, cfg)
         revoke_all_permissions(meta, cfg)
         counts2 = revoke_all_permissions(meta, cfg)
         assert sum(counts2.values()) == 0
@@ -930,25 +672,106 @@ class TestRevokeAllPermissions:
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(tools=["grep"])
+        cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
         # Setup permissions in sandbox mode
-        setup_permissions(
-            meta, cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
-        )
+        setup_permissions(meta, cfg)
         aw_before = _read_sandbox_allow_write(local_path)
         assert "/home/user/proj" in aw_before
 
         # Revoke all
         counts = revoke_all_permissions(meta, cfg)
-        assert sum(counts.values()) > 0
+        assert counts["sandbox_paths"] > 0
         aw_after = _read_sandbox_allow_write(local_path)
         assert "/home/user/proj" not in aw_after
         allow = _read_local_allow(local_path)
         assert len(allow) == 0
+
+    def test_revoke_removes_deny_write_paths_for_reference_repos(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg()
+        cfg.tracking_dir = "/tmp/tracking"
+
+        setup_permissions(meta, cfg)
+        dw_before = _read_sandbox_deny_write(local_path)
+        assert "/home/user/docs" in dw_before
+
+        counts = revoke_all_permissions(meta, cfg)
+        assert counts["deny_write_paths"] == 1
+        dw_after = _read_sandbox_deny_write(local_path)
+        assert "/home/user/docs" not in dw_after
+
+    def test_revoke_preserves_sensitive_deny_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sensitive path deny rules are global safety and NOT removed on revoke."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        _write_settings(settings_path, allow=[])
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg()
+
+        setup_permissions(meta, cfg, mcp_servers=["proj"])
+        deny_before = _read_deny(settings_path)
+        assert "Read(~/.ssh/**)" in deny_before
+
+        revoke_all_permissions(meta, cfg, mcp_servers=["proj"])
+        deny_after = _read_deny(settings_path)
+        # Sensitive deny rules must survive revocation
+        assert "Read(~/.ssh/**)" in deny_after
+        assert "Read(~/.gnupg/**)" in deny_after
+        assert "Read(~/.aws/**)" in deny_after
+
+    def test_revoke_mixed_repos(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
+        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
+
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg()
+        cfg.tracking_dir = "/tmp/tracking"
+
+        setup_permissions(meta, cfg, mcp_servers=["proj"])
+
+        # Verify setup state
+        aw = _read_sandbox_allow_write(local_path)
+        dw = _read_sandbox_deny_write(local_path)
+        assert "/home/user/proj" in aw
+        assert "/home/user/docs" in dw
+
+        counts = revoke_all_permissions(meta, cfg, mcp_servers=["proj"])
+        assert counts["sandbox_paths"] > 0
+        assert counts["deny_write_paths"] == 1
+        assert counts["mcp_rules"] == 1
+
+        aw_after = _read_sandbox_allow_write(local_path)
+        dw_after = _read_sandbox_deny_write(local_path)
+        assert "/home/user/proj" not in aw_after
+        assert "/home/user/docs" not in dw_after
 
 
 # ── proj_archive revokes permissions ──────────────────────────────────────────
@@ -978,8 +801,6 @@ class TestArchiveRevokesPermissions:
         await call_tool(
             mcp_app_with_grant,
             "proj_setup_permissions",
-            grant_path_access=True,
-            grant_investigation_tools=True,
             mcp_servers=["plugin_proj_proj"],
         )
         allow_before = _read_allow(settings_path)
@@ -988,13 +809,9 @@ class TestArchiveRevokesPermissions:
         # Archive the project
         result = await call_tool(mcp_app_with_grant, "proj_archive", name="myproject")
         assert "Archived" in result
-        assert "Revoked" in result
 
-        # Path and Bash rules should be removed; MCP rules remain (shared)
-        allow_after = _read_allow(settings_path)
-        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in allow_after)
-        assert not any(r.startswith("Bash(") for r in allow_after)
         # MCP rules stay because they are shared across projects
+        allow_after = _read_allow(settings_path)
         assert "mcp__plugin_proj_proj__*" in allow_after
 
     @pytest.mark.anyio

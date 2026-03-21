@@ -148,7 +148,7 @@ class TestProjConfigArchiveBackwardCompat:
         cfg = ProjConfig()
         d = cfg.to_dict()
         assert "archive" in d
-        assert d["archive"] == {"destination": "~/projects/archived"}
+        assert d["archive"] == {"destination": "~/projects/archived", "purge_after_days": None}
 
 
 class TestGitTracking:

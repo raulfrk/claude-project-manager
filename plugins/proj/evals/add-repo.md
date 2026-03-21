@@ -25,7 +25,7 @@ This is a TRUE end-to-end eval. The agent MUST:
   - Bash check: `test -d /tmp/claude-1000/eval-add-repo/docs` returns `exists`.
   - Bash check: `test -d /tmp/claude-1000/eval-add-repo/docs/.git` returns `plain`.
   - `mcp__proj__proj_add_repo` called with `repo_path="/tmp/claude-1000/eval-add-repo/docs"`, `label="docs"`, `claudemd=false`, `reference=false`.
-  - `mcp__proj__proj_setup_permissions` called with `grant_path_access=true`, `grant_investigation_tools=true`.
+  - `mcp__proj__proj_setup_permissions` called to refresh sandbox write paths.
   - `mcp__proj__tracking_git_flush` called with `commit_message="Add repo: docs"`.
   - Output includes confirmation: label `docs`, path, git repo: no, mode: writable.
 - **Assert**:

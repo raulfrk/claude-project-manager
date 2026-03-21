@@ -1,4 +1,4 @@
-"""Grant / revoke Bash investigation-tool permissions for project paths."""
+"""Grant / revoke sandbox allowWrite paths and MCP wildcard rules for project paths."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from server.lib.perms_helpers import (
     _WORKTREE_CONFIG,
     effective_settings_path,
     is_sandbox_enabled,
-    project_dir_from_meta,
     project_dirs_from_meta,
 )
 from server.tools.config import require_config
@@ -41,17 +40,8 @@ def _save_settings(data: dict[str, object], project_dir: Path | None = None) -> 
 # ── Path helpers ───────────────────────────────────────────────────────────────
 
 
-def _bash_entry(tool: str, abs_path: str) -> str:
-    """Build a scoped Bash allow rule: ``Bash(grep //home/user/proj/**)``.
-
-    The double-slash prefix is required by Claude Code for absolute paths.
-    """
-    prefix = f"//{abs_path.strip('/')}"
-    return f"Bash({tool} {prefix}/**)"
-
-
 def collect_paths(meta: ProjectMeta, cfg: ProjConfig) -> list[str]:
-    """Collect all paths that should receive investigation-tool access.
+    """Collect all project-related paths.
 
     Includes all registered project repo paths, the tracking directory (if set),
     and when worktree_integration is enabled, any base-repo paths from
@@ -78,15 +68,6 @@ def collect_paths(meta: ProjectMeta, cfg: ProjConfig) -> list[str]:
             pass  # Gracefully skip if worktree config is unavailable
 
     return paths
-
-
-# ── Path-rule helpers ──────────────────────────────────────────────────────────
-
-
-def _path_allow_entries(abs_path: str) -> list[str]:
-    """Return ``Read`` and ``Edit`` allow rules for an absolute path."""
-    prefix = f"//{abs_path.strip('/')}"
-    return [f"Read({prefix}/**)", f"Edit({prefix}/**)"]
 
 
 def _mcp_allow_entry(server_name: str) -> str:
@@ -145,150 +126,73 @@ def _remove_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
     return False
 
 
-# ── Grant / revoke ─────────────────────────────────────────────────────────────
+def _add_sandbox_deny_write_path(data: dict[str, object], abs_path: str) -> bool:
+    """Add a path to sandbox.filesystem.denyWrite. Returns True if added."""
+    data = _ensure_sandbox_section(data)
+    sandbox = data["sandbox"]
+    assert isinstance(sandbox, dict)
+    fs = sandbox["filesystem"]
+    assert isinstance(fs, dict)
+    dw = fs.get("denyWrite")
+    if not isinstance(dw, list):
+        dw = []
+        fs["denyWrite"] = dw
+    clean = abs_path.rstrip("/")
+    if clean not in dw:
+        dw.append(clean)
+        return True
+    return False
 
 
-def grant_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
-    """Add scoped Bash allow rules for investigation tools.
+def _remove_sandbox_deny_write_path(data: dict[str, object], abs_path: str) -> bool:
+    """Remove a path from sandbox.filesystem.denyWrite. Returns True if removed."""
+    sandbox = data.get("sandbox")
+    if not isinstance(sandbox, dict):
+        return False
+    fs = sandbox.get("filesystem")
+    if not isinstance(fs, dict):
+        return False
+    dw = fs.get("denyWrite")
+    if not isinstance(dw, list):
+        return False
+    clean = abs_path.rstrip("/")
+    if clean in dw:
+        dw.remove(clean)
+        return True
+    return False
 
-    Idempotent — existing rules are not duplicated.
 
-    Returns the number of new rules added.
-    """
-    paths = collect_paths(meta, cfg)
-    tools = cfg.permissions.investigation_tools
-    if not tools or not paths:
-        return 0
+# ── Sensitive-path deny helpers ───────────────────────────────────────────────
 
-    project_dirs = project_dirs_from_meta(meta)
-    project_dir = project_dirs[0] if project_dirs else None
-    data = _load_settings(project_dir)
+_SENSITIVE_DENY_RULES: list[str] = [
+    "Read(~/.ssh/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.aws/**)",
+]
+
+
+def _add_sensitive_deny_rules(data: dict[str, object]) -> int:
+    """Add permissions.deny entries for sensitive paths. Returns count added."""
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
         perms = {}
-    allow = perms.get("allow", [])
-    if not isinstance(allow, list):
-        allow = []
-
-    allow_set: set[str] = set(allow)
-    new_entries: list[str] = []
-    for path in paths:
-        for tool in tools:
-            entry = _bash_entry(tool, path)
-            if entry not in allow_set:
-                new_entries.append(entry)
-                allow_set.add(entry)
-
-    if new_entries:
-        allow.extend(new_entries)
-        perms["allow"] = allow
+    deny = perms.get("deny", [])
+    if not isinstance(deny, list):
+        deny = []
+    deny_set: set[str] = set(deny)
+    count = 0
+    for rule in _SENSITIVE_DENY_RULES:
+        if rule not in deny_set:
+            deny.append(rule)
+            deny_set.add(rule)
+            count += 1
+    if count:
+        perms["deny"] = deny
         data["permissions"] = perms
-        _save_settings(data, project_dir)
-
-    return len(new_entries)
-
-
-def revoke_investigation_tools(meta: ProjectMeta, cfg: ProjConfig) -> int:
-    """Remove scoped Bash allow rules for investigation tools.
-
-    Only removes rules that match the current tool list and project paths.
-    Unrelated allow rules are never touched.
-    Idempotent.
-
-    Returns the number of rules removed.
-    """
-    paths = collect_paths(meta, cfg)
-    tools = cfg.permissions.investigation_tools
-    if not tools or not paths:
-        return 0
-
-    to_remove: set[str] = {_bash_entry(tool, path) for path in paths for tool in tools}
-
-    project_dirs = project_dirs_from_meta(meta)
-    project_dir = project_dirs[0] if project_dirs else None
-    data = _load_settings(project_dir)
-    perms = data.get("permissions", {})
-    if not isinstance(perms, dict):
-        return 0
-    allow = perms.get("allow", [])
-    if not isinstance(allow, list):
-        return 0
-
-    new_allow = [r for r in allow if r not in to_remove]
-    removed = len(allow) - len(new_allow)
-
-    if removed:
-        perms["allow"] = new_allow
-        data["permissions"] = perms
-        _save_settings(data, project_dir)
-
-    return removed
+    return count
 
 
 # ── Setup (one-shot atomic write) ─────────────────────────────────────────────
-
-
-def _apply_path_rules(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    allow_set: set[str],
-    new_entries: list[str],
-    *,
-    sandbox_mode: bool = False,
-    data: dict[str, object] | None = None,
-) -> int:
-    """Add Read+Edit rules for writable repo paths and Read-only for reference repos and tracking dir.
-
-    In sandbox mode, writable paths are also added to sandbox.filesystem.allowWrite.
-    Returns count added.
-    """
-    count = 0
-    for repo in meta.repos:
-        abs_path = str(Path(repo.path).expanduser().resolve())
-        prefix = f"//{abs_path.strip('/')}"
-        entries = [f"Read({prefix}/**)"]
-        if not repo.reference:
-            entries.append(f"Edit({prefix}/**)")
-            # In sandbox mode, also add to sandbox.filesystem.allowWrite
-            if sandbox_mode and data is not None:
-                if _add_sandbox_write_path(data, abs_path):
-                    count += 1
-        for entry in entries:
-            if entry not in allow_set:
-                new_entries.append(entry)
-                allow_set.add(entry)
-                count += 1
-    if cfg.tracking_dir:
-        abs_path = str(Path(cfg.tracking_dir).expanduser().resolve())
-        if sandbox_mode and data is not None:
-            if _add_sandbox_write_path(data, abs_path):
-                count += 1
-        for entry in _path_allow_entries(abs_path):
-            if entry not in allow_set:
-                new_entries.append(entry)
-                allow_set.add(entry)
-                count += 1
-    return count
-
-
-def _apply_bash_rules(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    allow_set: set[str],
-    new_entries: list[str],
-) -> int:
-    """Add scoped Bash investigation-tool rules. Returns count added."""
-    if not cfg.permissions.investigation_tools:
-        return 0
-    count = 0
-    for path in collect_paths(meta, cfg):
-        for tool in cfg.permissions.investigation_tools:
-            entry = _bash_entry(tool, path)
-            if entry not in allow_set:
-                new_entries.append(entry)
-                allow_set.add(entry)
-                count += 1
-    return count
 
 
 def _apply_mcp_rules(
@@ -311,22 +215,22 @@ def setup_permissions(
     meta: ProjectMeta,
     cfg: ProjConfig,
     *,
-    grant_path_access: bool = True,
-    grant_investigation_tools_flag: bool = True,
     mcp_servers: list[str] | None = None,
     archive_destination: str | None = None,
 ) -> dict[str, int]:
-    """Add all project permission rules in a single atomic write.
+    """Add sandbox allowWrite paths + MCP wildcard rules in a single atomic write.
 
-    Targets settings.json or settings.local.json depending on sandbox mode.
+    Targets settings.local.json (sandbox mode) or settings.json (fallback).
 
-    Consolidates what would otherwise be 5-7 sequential tool calls:
-    - Read+Edit rules for each repo path and the tracking dir
-    - Bash investigation-tool rules (scoped to project paths)
-    - MCP server wildcard rules
-    - (sandbox mode) sandbox.filesystem.allowWrite paths
+    Writes:
+    - sandbox.filesystem.allowWrite paths for writable repos, tracking dir,
+      and archive destination (if provided)
+    - sandbox.filesystem.denyWrite paths for reference repos (defense-in-depth)
+    - permissions.deny entries for sensitive paths (~/.ssh, ~/.gnupg, ~/.aws)
+    - MCP server wildcard rules in permissions.allow
 
-    Returns a dict with counts: {"path_rules": N, "bash_rules": N, "mcp_rules": N}.
+    Returns a dict with counts: {"sandbox_paths": N, "deny_write_paths": N,
+    "sensitive_deny_rules": N, "mcp_rules": N}.
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
@@ -343,64 +247,44 @@ def setup_permissions(
     allow_set: set[str] = set(allow)
 
     new_entries: list[str] = []
-    counts = {"path_rules": 0, "bash_rules": 0, "mcp_rules": 0}
+    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "sensitive_deny_rules": 0, "mcp_rules": 0}
 
-    if grant_path_access:
-        counts["path_rules"] = _apply_path_rules(
-            meta, cfg, allow_set, new_entries,
-            sandbox_mode=sandbox_mode, data=data,
-        )
+    # Sandbox allowWrite paths for writable repos and tracking dir
+    if sandbox_mode:
+        data = _ensure_sandbox_section(data)
+        for repo in meta.repos:
+            abs_path = str(Path(repo.path).expanduser().resolve())
+            if repo.reference:
+                # Defense-in-depth: explicitly deny writes to reference repos
+                if _add_sandbox_deny_write_path(data, abs_path):
+                    counts["deny_write_paths"] += 1
+            else:
+                if _add_sandbox_write_path(data, abs_path):
+                    counts["sandbox_paths"] += 1
+        if cfg.tracking_dir:
+            abs_tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
+            if _add_sandbox_write_path(data, abs_tracking):
+                counts["sandbox_paths"] += 1
 
-    if grant_investigation_tools_flag:
-        counts["bash_rules"] = _apply_bash_rules(meta, cfg, allow_set, new_entries)
+    # Sensitive path deny rules (always applied, not sandbox-specific)
+    counts["sensitive_deny_rules"] = _add_sensitive_deny_rules(data)
 
+    # MCP wildcard rules
     if mcp_servers:
         counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
 
-    # Add Bash(zoxide *) rule when zoxide integration is enabled
-    from server.lib.zoxide import resolve_enabled as _zoxide_enabled
-    if _zoxide_enabled(cfg, meta):
-        zoxide_entry = "Bash(zoxide *)"
-        if zoxide_entry not in allow_set:
-            new_entries.append(zoxide_entry)
-            allow_set.add(zoxide_entry)
-            counts["bash_rules"] += 1
-
-    # Archive destination rules
+    # Archive destination: only sandbox write path
     if archive_destination:
         abs_dest = str(Path(archive_destination).expanduser().resolve())
-        # Read/Edit + sandbox write for archive destination
-        for entry in _path_allow_entries(abs_dest):
-            if entry not in allow_set:
-                new_entries.append(entry)
-                allow_set.add(entry)
-                counts["path_rules"] += 1
-        if sandbox_mode and data is not None:
+        if sandbox_mode:
             if _add_sandbox_write_path(data, abs_dest):
-                counts["path_rules"] += 1
-        # Bash rules for mv/rm/mkdir on archive dest, repo paths, and tracking dir
-        archive_bash_tools = ["mv", "rm", "rm -rf", "mkdir", "mkdir -p"]
-        archive_paths = [abs_dest]
-        for repo in meta.repos:
-            rp = str(Path(repo.path).expanduser().resolve())
-            if rp not in archive_paths:
-                archive_paths.append(rp)
-        if cfg.tracking_dir:
-            tp = str(Path(cfg.tracking_dir).expanduser().resolve())
-            if tp not in archive_paths:
-                archive_paths.append(tp)
-        for path in archive_paths:
-            for tool in archive_bash_tools:
-                entry = _bash_entry(tool, path)
-                if entry not in allow_set:
-                    new_entries.append(entry)
-                    allow_set.add(entry)
-                    counts["bash_rules"] += 1
+                counts["sandbox_paths"] += 1
 
     if new_entries or sum(counts.values()) > 0:
-        allow.extend(new_entries)
-        perms["allow"] = allow
-        data["permissions"] = perms
+        if new_entries:
+            allow.extend(new_entries)
+            perms["allow"] = allow
+            data["permissions"] = perms
         _save_settings(data, project_dir)
 
     return counts
@@ -417,37 +301,13 @@ def _collect_all_allow_rules(
 ) -> set[str]:
     """Derive the full set of allow rules that setup_permissions would create.
 
+    Only MCP wildcard rules are managed in permissions.allow now.
     MCP rules are only included when ``mcp_servers`` is explicitly provided,
     because MCP wildcard rules (e.g. ``mcp__plugin_proj_proj__*``) are shared
     across all projects and should not be revoked on single-project archive
     unless explicitly requested.
     """
     rules: set[str] = set()
-
-    # Path rules: Read+Edit for each repo, Read-only for reference repos
-    for repo in meta.repos:
-        abs_path = str(Path(repo.path).expanduser().resolve())
-        prefix = f"//{abs_path.strip('/')}"
-        rules.add(f"Read({prefix}/**)")
-        if not repo.reference:
-            rules.add(f"Edit({prefix}/**)")
-
-    # Tracking dir path rules
-    if cfg.tracking_dir:
-        abs_tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
-        for entry in _path_allow_entries(abs_tracking):
-            rules.add(entry)
-
-    # Bash investigation-tool rules
-    if cfg.permissions.investigation_tools:
-        for path in collect_paths(meta, cfg):
-            for tool in cfg.permissions.investigation_tools:
-                rules.add(_bash_entry(tool, path))
-
-    # Zoxide rule
-    from server.lib.zoxide import resolve_enabled as _zoxide_enabled
-    if _zoxide_enabled(cfg, meta):
-        rules.add("Bash(zoxide *)")
 
     # MCP wildcard rules — only when explicitly provided
     if mcp_servers:
@@ -468,21 +328,32 @@ def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]
     return paths
 
 
+def _collect_sandbox_deny_write_paths(meta: ProjectMeta) -> set[str]:
+    """Derive the sandbox.filesystem.denyWrite paths for reference repos."""
+    paths: set[str] = set()
+    for repo in meta.repos:
+        if repo.reference:
+            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    return paths
+
+
 def revoke_all_permissions(
     meta: ProjectMeta,
     cfg: ProjConfig,
     *,
     mcp_servers: list[str] | None = None,
 ) -> dict[str, int]:
-    """Remove all permission rules that setup_permissions would have created.
+    """Remove MCP wildcard rules from permissions.allow, sandbox allowWrite and denyWrite paths.
 
-    Inverse of setup_permissions — removes path rules, Bash rules,
-    and sandbox.filesystem.allowWrite entries.
+    Inverse of setup_permissions. Only MCP rules + sandbox paths are managed now.
     MCP wildcard rules are only removed when ``mcp_servers`` is explicitly
     provided, because they are shared across projects.
 
-    Returns a dict with counts: {"path_rules": N, "bash_rules": N, "mcp_rules": N}.
-    Idempotent — removing non-existent rules is a no-op.
+    Note: sensitive path deny rules (permissions.deny for ~/.ssh, ~/.gnupg,
+    ~/.aws) are NOT removed -- those are global safety rules.
+
+    Returns a dict with counts: {"sandbox_paths": N, "deny_write_paths": N, "mcp_rules": N}.
+    Idempotent -- removing non-existent rules is a no-op.
     """
     project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
@@ -495,25 +366,21 @@ def revoke_all_permissions(
     if not isinstance(allow, list):
         allow = []
 
+    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "mcp_rules": 0}
+
+    # Remove MCP wildcard rules from permissions.allow
     to_remove = _collect_all_allow_rules(meta, cfg, mcp_servers=mcp_servers)
     new_allow = [r for r in allow if r not in to_remove]
-    removed_rules = set(allow) - set(new_allow)
+    counts["mcp_rules"] = len(allow) - len(new_allow)
 
-    counts = {
-        "path_rules": sum(
-            1 for r in removed_rules if r.startswith("Read(") or r.startswith("Edit(")
-        ),
-        "bash_rules": sum(1 for r in removed_rules if r.startswith("Bash(")),
-        "mcp_rules": sum(1 for r in removed_rules if r.startswith("mcp__")),
-    }
-
-    # Remove sandbox write paths
-    sandbox_removed = 0
+    # Remove sandbox write paths and deny-write paths for reference repos
     if sandbox_mode:
         for p in _collect_sandbox_write_paths(meta, cfg):
             if _remove_sandbox_write_path(data, p):
-                sandbox_removed += 1
-    counts["path_rules"] += sandbox_removed
+                counts["sandbox_paths"] += 1
+        for p in _collect_sandbox_deny_write_paths(meta):
+            if _remove_sandbox_deny_write_path(data, p):
+                counts["deny_write_paths"] += 1
 
     total = sum(counts.values())
     if total > 0:
@@ -528,55 +395,21 @@ def revoke_all_permissions(
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_grant_tool_permissions, proj_setup_permissions, proj_revoke_tool_permissions, and proj_revoke_all_permissions tools with the MCP app."""
+    """Register proj_setup_permissions and proj_revoke_all_permissions tools with the MCP app."""
 
     @app.tool(
         description=(
-            "Grant Bash allow rules for read-only investigation tools (grep, find, ls, etc.) "
-            "for a project's directories and worktree paths. "
-            "Rules are scoped to the project paths. Idempotent — safe to call multiple times. "
-            "Automatically detects sandbox mode and writes to settings.local.json if enabled."
-        )
-    )
-    def proj_grant_tool_permissions(project_name: str | None = None) -> str:
-        cfg = require_config()
-        index = storage.load_index(cfg)
-        name = state.resolve_project(project_name)
-        if not name:
-            return "No active project."
-        if name not in index.projects:
-            return f"Project '{name}' not found."
-        meta = storage.load_meta(cfg, name)
-        added = grant_investigation_tools(meta, cfg)
-        paths = collect_paths(meta, cfg)
-        tools = cfg.permissions.investigation_tools
-        if added == 0:
-            return (
-                f"✅ Investigation tool permissions already up to date for '{name}' "
-                f"({len(tools)} tools, {len(paths)} path(s))."
-            )
-        return (
-            f"✅ Added {added} Bash allow rule(s) for '{name}' "
-            f"({len(tools)} tools × {len(paths)} path(s))."
-        )
-
-    @app.tool(
-        description=(
-            "Grant all permission rules for a project in one atomic write. "
-            "Replaces calling perms_add_allow + proj_grant_tool_permissions + perms_add_mcp_allow "
-            "separately. Idempotent. "
+            "Grant sandbox allowWrite paths + MCP wildcard rules for a project "
+            "in one atomic write. Idempotent. "
             "Automatically detects sandbox mode and writes to settings.local.json if enabled. "
-            "In sandbox mode, writable paths are also added to sandbox.filesystem.allowWrite. "
-            "grant_path_access=true adds Read+Edit rules for repo paths and tracking dir. "
-            "grant_investigation_tools=true adds scoped Bash rules (grep, find, ls, etc.). "
+            "Writable repo paths and the tracking dir are added to sandbox.filesystem.allowWrite. "
+            "Reference repos are added to sandbox.filesystem.denyWrite (defense-in-depth). "
             "mcp_servers is a list of server names to add wildcard allow rules for "
             "(e.g. ['plugin_proj_proj', 'plugin_perms_perms', 'trello'])."
         )
     )
     def proj_setup_permissions(
         project_name: str | None = None,
-        grant_path_access: bool = True,
-        grant_investigation_tools: bool = True,
         mcp_servers: list[str] | None = None,
         archive_destination: str | None = None,
     ) -> str:
@@ -591,49 +424,27 @@ def register(app: FastMCP) -> None:
         counts = setup_permissions(
             meta,
             cfg,
-            grant_path_access=grant_path_access,
-            grant_investigation_tools_flag=grant_investigation_tools,
             mcp_servers=mcp_servers or [],
             archive_destination=archive_destination,
         )
         total = sum(counts.values())
         if total == 0:
-            return f"✅ All permission rules already up to date for '{name}'."
+            return f"All permission rules already up to date for '{name}'."
         parts = []
-        if counts["path_rules"]:
-            parts.append(f"{counts['path_rules']} path rule(s)")
-        if counts["bash_rules"]:
-            parts.append(f"{counts['bash_rules']} Bash rule(s)")
+        if counts["sandbox_paths"]:
+            parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
+        if counts.get("deny_write_paths"):
+            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
+        if counts.get("sensitive_deny_rules"):
+            parts.append(f"{counts['sensitive_deny_rules']} sensitive deny rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        return f"✅ Added {total} rule(s) for '{name}': {', '.join(parts)}."
+        return f"Added {total} rule(s) for '{name}': {', '.join(parts)}."
 
     @app.tool(
         description=(
-            "Remove Bash allow rules for investigation tools for a project's directories. "
-            "Only removes rules that were added by proj_grant_tool_permissions — "
-            "other allow rules are never touched. Idempotent. "
-            "Automatically detects sandbox mode."
-        )
-    )
-    def proj_revoke_tool_permissions(project_name: str | None = None) -> str:
-        cfg = require_config()
-        index = storage.load_index(cfg)
-        name = state.resolve_project(project_name)
-        if not name:
-            return "No active project."
-        if name not in index.projects:
-            return f"Project '{name}' not found."
-        meta = storage.load_meta(cfg, name)
-        removed = revoke_investigation_tools(meta, cfg)
-        if removed == 0:
-            return f"✅ No investigation tool rules found for '{name}' — nothing to remove."
-        return f"✅ Removed {removed} Bash allow rule(s) for '{name}'."
-
-    @app.tool(
-        description=(
-            "Remove ALL permission rules for a project (path rules, Bash rules, "
-            "sandbox write paths). Inverse of proj_setup_permissions. "
+            "Remove MCP wildcard rules and sandbox write paths for a project. "
+            "Inverse of proj_setup_permissions. "
             "MCP wildcard rules are only removed when mcp_servers is provided, "
             "because they are shared across projects. "
             "Automatically called by proj_archive. Idempotent. "
@@ -655,12 +466,12 @@ def register(app: FastMCP) -> None:
         counts = revoke_all_permissions(meta, cfg, mcp_servers=mcp_servers)
         total = sum(counts.values())
         if total == 0:
-            return f"✅ No permission rules found for '{name}' — nothing to remove."
+            return f"No permission rules found for '{name}' -- nothing to remove."
         parts = []
-        if counts["path_rules"]:
-            parts.append(f"{counts['path_rules']} path rule(s)")
-        if counts["bash_rules"]:
-            parts.append(f"{counts['bash_rules']} Bash rule(s)")
+        if counts["sandbox_paths"]:
+            parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
+        if counts.get("deny_write_paths"):
+            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        return f"✅ Removed {total} rule(s) for '{name}': {', '.join(parts)}."
+        return f"Removed {total} rule(s) for '{name}': {', '.join(parts)}."

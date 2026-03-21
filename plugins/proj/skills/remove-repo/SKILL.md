@@ -36,7 +36,7 @@ Remove a directory or repository from the active project by label.
 
 8. Revoke permissions for the removed repo path:
    - Call `mcp__perms__perms_remove_allow` with `path=<repo_path>` to remove Read and Edit allow rules for that directory.
-   - If the config has `perms_integration: true`, call `mcp__proj__proj_setup_permissions` with `grant_path_access=true` and `grant_investigation_tools=true` to refresh Bash investigation-tool rules from the remaining repos.
+   - If the config has `perms_integration: true`, call `mcp__proj__proj_setup_permissions` to refresh sandbox write paths from the remaining repos.
 
 9. Display confirmation summary:
    ```

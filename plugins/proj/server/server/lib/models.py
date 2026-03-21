@@ -6,15 +6,6 @@ from dataclasses import dataclass, field
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DEFAULT_INVESTIGATION_TOOLS: list[str] = [
-    "grep", "find", "ls", "cat", "head", "tail", "wc", "tree", "du", "file",
-    "mkdir", "cd",
-    "git status", "git diff", "git log", "git branch", "git show",
-    "git stash", "git fetch", "git checkout", "git switch", "git remote",
-    "git tag", "git blame", "git reflog", "git rev-parse", "git ls-files",
-    "git config",
-]
-
 
 @dataclass
 class TodoistSync:
@@ -165,28 +156,20 @@ class JiraSync:
 class PermissionsConfig:
     auto_grant: bool = True
     auto_allow_mcps: bool = True  # add mcp__<server>__* allow rules at init time
-    investigation_tools: list[str] = field(
-        default_factory=lambda: list(DEFAULT_INVESTIGATION_TOOLS)
-    )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "auto_grant": self.auto_grant,
             "auto_allow_mcps": self.auto_allow_mcps,
-            "investigation_tools": self.investigation_tools,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> PermissionsConfig:
-        tools_raw = data.get("investigation_tools", DEFAULT_INVESTIGATION_TOOLS)
+        # Note: "investigation_tools" was removed in v0.37 (sandbox-primary).
+        # Old YAML files may still contain it; it is silently ignored here.
         return cls(
             auto_grant=bool(data.get("auto_grant", True)),
             auto_allow_mcps=bool(data.get("auto_allow_mcps", True)),
-            investigation_tools=(
-                list(tools_raw)
-                if isinstance(tools_raw, list)
-                else list(DEFAULT_INVESTIGATION_TOOLS)
-            ),
         )
 
 

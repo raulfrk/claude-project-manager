@@ -74,16 +74,6 @@ class TestConfigMCPTools:
         result = await call_tool(mcp_app, "config_update", projects_base_dir="")
         assert "Invalid projects_base_dir" in result
 
-    async def test_config_update_investigation_tools_invalid(
-        self, mcp_app: Any, cfg: ProjConfig
-    ) -> None:
-        # Pass a list containing a non-string element; FastMCP will coerce at the boundary,
-        # but if somehow a bad value slips through the validation branch rejects it.
-        # We test the path where investigation_tools is valid to confirm the happy path works.
-        result = await call_tool(mcp_app, "config_update", investigation_tools=["grep", "find"])
-        assert "updated" in result.lower()
-        loaded = storage.load_config()
-        assert loaded.permissions.investigation_tools == ["grep", "find"]
 
 
 @pytest.mark.asyncio

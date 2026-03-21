@@ -289,9 +289,8 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 
 | Tool | Description |
 |------|-------------|
-| `proj_setup_permissions` | Grant all permission rules atomically. |
-| `proj_grant_tool_permissions` | Add scoped Bash investigation-tool rules. |
-| `proj_revoke_tool_permissions` | Remove scoped Bash investigation-tool rules. |
+| `proj_setup_permissions` | Grant sandbox allowWrite paths + MCP wildcard rules atomically. |
+| `proj_revoke_all_permissions` | Remove MCP wildcard rules and sandbox write paths. |
 | `proj_perms_sync` | Compare expected vs actual permission rules. |
 
 ---

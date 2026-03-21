@@ -214,7 +214,6 @@ def register(app: FastMCP) -> None:
         git_tracking_enabled: bool | None = None,
         git_tracking_github_enabled: bool | None = None,
         git_tracking_github_repo_format: str | None = None,
-        investigation_tools: list[str] | None = None,
         archive_destination: str | None = None,
         archive_purge_after_days: int | None = None,
     ) -> str:
@@ -235,12 +234,6 @@ def register(app: FastMCP) -> None:
                     return (
                         f"Invalid {field_name}: must be a non-empty string without null bytes."
                     )
-
-        if investigation_tools is not None:
-            if not isinstance(investigation_tools, list) or not all(
-                isinstance(t, str) for t in investigation_tools
-            ):
-                return "Invalid investigation_tools: must be a list of strings."
 
         if todoist_mcp_server is not None:
             if not todoist_mcp_server or "\x00" in todoist_mcp_server:
@@ -312,8 +305,6 @@ def register(app: FastMCP) -> None:
             cfg.git_tracking.github_enabled = git_tracking_github_enabled
         if git_tracking_github_repo_format is not None:
             cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
-        if investigation_tools is not None:
-            cfg.permissions.investigation_tools = investigation_tools
         if archive_destination is not None:
             cfg.archive.destination = archive_destination
         if archive_purge_after_days is not None:

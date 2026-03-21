@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -250,6 +252,7 @@ def batch_add_mcp_allow(servers: list[str], scope: str = "user", target: str = "
 
 
 _PATH_RULE_RE = re.compile(r"^(?:Read|Edit)\(//(.+?)/\*\*\)$")
+_STALE_RULE_RE = re.compile(r"^(?:Read|Edit|Bash)\(")
 
 
 def _extract_paths_from_allow(allow: list[str]) -> list[str]:
@@ -280,6 +283,9 @@ def sandbox_init(path: str | None = None) -> str:
     if not settings.sandbox.auto_allow_bash_if_sandboxed:
         settings.sandbox.auto_allow_bash_if_sandboxed = True
         actions.append("sandbox.autoAllowBashIfSandboxed = true")
+    if settings.sandbox.allow_unsandboxed_commands is not False:
+        settings.sandbox.allow_unsandboxed_commands = False
+        actions.append("sandbox.allowUnsandboxedCommands = false")
 
     aw_set = set(settings.sandbox.filesystem.allow_write)
 
@@ -290,6 +296,14 @@ def sandbox_init(path: str | None = None) -> str:
             settings.sandbox.filesystem.allow_write.append(p)
             aw_set.add(p)
             migrated.append(p)
+
+    # After migration, strip the source Read/Edit rules from permissions.allow
+    allow_before = len(settings.permissions.allow)
+    cleaned = [r for r in settings.permissions.allow if not _PATH_RULE_RE.match(r)]
+    stripped_count = allow_before - len(cleaned)
+    if stripped_count:
+        settings.permissions.allow = cleaned
+        actions.append(f"Stripped {stripped_count} Read/Edit rule(s) from permissions.allow")
 
     # Optional extra path
     if path:
@@ -387,6 +401,57 @@ def deny_read(path: str) -> str:
 def remove_deny_read(path: str) -> str:
     """Remove a path from sandbox.filesystem.denyRead. Idempotent."""
     return _remove_from_deny_list(path, "deny_read")
+
+
+def backup() -> str:
+    """Create timestamped backups of settings.json and settings.local.json."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backed_up: list[str] = []
+    for name in ("settings.json", "settings.local.json"):
+        src = Path.home() / ".claude" / name
+        if src.exists():
+            dst = src.with_suffix(f".pre-sandbox-{timestamp}.json")
+            shutil.copy2(src, dst)
+            backed_up.append(str(dst))
+    return f"Backed up {len(backed_up)} file(s) with suffix .pre-sandbox-{timestamp}.json"
+
+
+def restore(timestamp: str) -> str:
+    """Restore settings files from a timestamped backup."""
+    restored: list[str] = []
+    for name in ("settings.json", "settings.local.json"):
+        backup_path = Path.home() / ".claude" / f"{Path(name).stem}.pre-sandbox-{timestamp}.json"
+        target = Path.home() / ".claude" / name
+        if backup_path.exists():
+            shutil.copy2(backup_path, target)
+            restored.append(name)
+    return f"Restored {len(restored)} file(s) from .pre-sandbox-{timestamp} backups"
+
+
+def cleanup_stale() -> str:
+    """Strip Read/Edit/Bash rules from both settings files, keeping only MCP + WebFetch rules."""
+    results = []
+    loaders = [
+        ("settings.json", lambda: storage.load("user")),
+        ("settings.local.json", lambda: storage.load_local("user")),
+    ]
+    for name, loader in loaders:
+        path = Path.home() / ".claude" / name
+        if not path.exists():
+            continue
+        data = loader()
+        allow = data.permissions.allow
+        before = len(allow)
+        # Keep only mcp__* rules and WebFetch() rules
+        cleaned = [r for r in allow if not _STALE_RULE_RE.match(r)]
+        after = len(cleaned)
+        if before != after:
+            data.permissions.allow = cleaned
+            storage.save(data)
+            results.append(f"{name}: {before} -> {after} rules ({before - after} removed)")
+        else:
+            results.append(f"{name}: {before} rules (no stale rules found)")
+    return "\n".join(results) if results else "No settings files found."
 
 
 def register(app: FastMCP) -> None:
@@ -507,3 +572,34 @@ def register(app: FastMCP) -> None:
     )
     def perms_remove_deny_read(path: str) -> str:
         return remove_deny_read(path)
+
+    @app.tool(
+        description=(
+            "Create timestamped backups of ~/.claude/settings.json and "
+            "~/.claude/settings.local.json. Use before making bulk permission changes "
+            "so you can roll back with perms_restore."
+        )
+    )
+    def perms_backup() -> str:
+        return backup()
+
+    @app.tool(
+        description=(
+            "Restore settings files from a timestamped backup created by perms_backup. "
+            "Pass the timestamp string (e.g. '20260321-143000') to restore from "
+            ".pre-sandbox-<timestamp>.json files."
+        )
+    )
+    def perms_restore(timestamp: str) -> str:
+        return restore(timestamp)
+
+    @app.tool(
+        description=(
+            "Strip stale Read/Edit/Bash rules from permissions.allow in both "
+            "~/.claude/settings.json and ~/.claude/settings.local.json, keeping only "
+            "MCP wildcard (mcp__*) and WebFetch rules. Useful after migrating to "
+            "sandbox mode where file-path rules are no longer needed."
+        )
+    )
+    def perms_cleanup_stale() -> str:
+        return cleanup_stale()

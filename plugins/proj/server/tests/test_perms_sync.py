@@ -62,9 +62,7 @@ def _write_settings(tmp_path: Path, allow: list[str]) -> Path:
 
 
 class TestDeriveExpectedRules:
-    def test_two_repos_produce_read_and_edit_rules(self) -> None:
-        from server.lib.models import DEFAULT_INVESTIGATION_TOOLS
-
+    def test_two_repos_only_mcp_rules_returned(self) -> None:
         repos = [
             "/home/user/project-a",
             "/home/user/project-b",
@@ -79,23 +77,14 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # collect_paths() includes repos + tracking_dir for Bash rules
-        all_bash_paths = repos + ["/tmp/tracking"]
-        expected: set[str] = set()
-        for path in repos:
-            prefix = f"/{path}"
-            expected.add(f"Read({prefix}/**)")
-            expected.add(f"Edit({prefix}/**)")
-        for path in all_bash_paths:
-            prefix = f"/{path}"
-            for tool in DEFAULT_INVESTIGATION_TOOLS:
-                expected.add(f"Bash({tool} {prefix}/**)")
-        # Always-present global Claude.ai MCP rules (auto_allow_mcps=False only
-        # suppresses plugin-specific MCP rules, not global ones)
-        expected.add("mcp__claude_ai_Excalidraw__*")
-        expected.add("mcp__claude_ai_Mermaid_Chart__*")
-
+        # Only global Claude.ai MCP rules expected (no Read/Edit/Bash rules)
+        expected = {
+            "mcp__claude_ai_Excalidraw__*",
+            "mcp__claude_ai_Mermaid_Chart__*",
+        }
         assert rules == expected
+        # No Read/Edit/Bash rules
+        assert not any(r.startswith("Read(") or r.startswith("Edit(") or r.startswith("Bash(") for r in rules)
 
     def test_auto_allow_mcps_true_adds_mcp_rules(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -141,16 +130,16 @@ class TestDeriveExpectedRules:
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
-    def test_trailing_slash_in_path_is_stripped(self) -> None:
+    def test_no_path_rules_regardless_of_trailing_slash(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj/")])
         cfg = _make_cfg(auto_allow_mcps=False)
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "Read(//home/user/proj/**)" in rules
-        assert "Edit(//home/user/proj/**)" in rules
-        # Double trailing slash variant must NOT appear
-        assert "Read(//home/user/proj//**)" not in rules
+        # No Read/Edit rules — only MCP rules
+        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in rules)
+        assert "mcp__claude_ai_Excalidraw__*" in rules
+        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
     def test_no_repos_auto_allow_only_mcp_rules(self) -> None:
         meta = _make_meta(repos=[])
@@ -162,8 +151,8 @@ class TestDeriveExpectedRules:
         assert "mcp__proj__*" in rules
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
-        # Bash rules for tracking_dir also present (no repos, but tracking_dir is set)
-        assert any("Bash(" in r and "/tmp/tracking" in r for r in rules)
+        # No Bash rules — only MCP rules now
+        assert not any(r.startswith("Bash(") for r in rules)
 
     def test_no_repos_auto_allow_with_integrations(self) -> None:
         meta = _make_meta(repos=[])
@@ -197,22 +186,21 @@ class TestDeriveExpectedRules:
         assert "mcp__worktree__*" in rules
         assert "mcp__perms__*" not in rules
 
-    def test_no_repos_no_mcps_empty_set(self) -> None:
+    def test_no_repos_no_mcps_only_global_mcp_rules(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(auto_allow_mcps=False)
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # MCP rules + Bash rules for tracking_dir
-        assert "mcp__claude_ai_Excalidraw__*" in rules
-        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
-        # No Read/Edit rules since no repos
-        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in rules)
+        # Only global Claude.ai MCP rules
+        assert rules == {"mcp__claude_ai_Excalidraw__*", "mcp__claude_ai_Mermaid_Chart__*"}
+        # No Read/Edit/Bash rules
+        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
 
-    def test_worktree_integration_false_with_worktree_config_no_extra_bash_rules(
+    def test_worktree_integration_false_no_path_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Extra paths in worktree.yaml are ignored when worktree_integration=False."""
+        """_derive_expected_rules returns only MCP rules, not path rules."""
         wt_config = tmp_path / "worktree.yaml"
         wt_config.write_text(
             yaml.dump({
@@ -228,16 +216,15 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # The extra worktree path must not appear in any expected rule
+        # Only global MCP rules — no path rules of any kind
         assert not any("/extra/worktree/path" in r for r in rules)
-        # The repo path is still present
-        assert "Read(//home/user/proj/**)" in rules
-        assert "Edit(//home/user/proj/**)" in rules
+        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
+        assert "mcp__claude_ai_Excalidraw__*" in rules
 
-    def test_worktree_integration_true_with_worktree_config_adds_bash_rules(
+    def test_worktree_integration_true_no_path_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Extra paths in worktree.yaml produce Bash rules when worktree_integration=True."""
+        """_derive_expected_rules returns only MCP rules, even with worktree_integration=True."""
         wt_config = tmp_path / "worktree.yaml"
         wt_config.write_text(
             yaml.dump({
@@ -253,8 +240,11 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        # The extra worktree path appears in Bash rules (investigation tools are on by default)
-        assert any("/extra/worktree/path" in r for r in rules)
+        # Only MCP rules — no path or Bash rules
+        assert not any("/extra/worktree/path" in r for r in rules)
+        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
+        # worktree MCP rule present (auto_allow_mcps=False, so no plugin MCPs)
+        assert "mcp__claude_ai_Excalidraw__*" in rules
 
 
 # ── _derive_expected_rules — custom mcp_server ────────────────────────────────
@@ -359,9 +349,10 @@ settings_path,
         assert "✅" in result
         assert "in sync" in result
 
-    def test_missing_path_rules_reported(
+    def test_missing_mcp_rules_only_reported(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """With auto_allow_mcps=False, only global MCP rules are expected and reported missing."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
         # settings.json has no rules at all
@@ -374,9 +365,11 @@ settings_path,
         result = run_sync(meta, cfg)
 
         assert "❌" in result
-        assert "Read(//home/user/proj/**)" in result
-        assert "Edit(//home/user/proj/**)" in result
-        assert "Directory rules" in result
+        # Only MCP rules reported missing — no Read/Edit/Bash rules
+        assert "MCP rules" in result
+        assert "mcp__claude_ai_Excalidraw__*" in result
+        assert "Read(" not in result
+        assert "Edit(" not in result
 
     def test_missing_mcp_rules_reported(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -503,18 +496,15 @@ settings_path,
         assert "✅" in result
         assert "in sync" in result
 
-    def test_partial_rule_match_read_present_edit_missing(
+    def test_partial_mcp_rules_present_reports_only_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When Read rule is present but Edit rule is missing, only Edit is reported as missing."""
+        """When some MCP rules are present but others missing, only missing ones are reported."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
-        # Build expected rules and derive all expected rules
         expected = _derive_expected_rules(meta, cfg)
-        # Provide all expected rules except Edit for the repo path
-        partial_rules = [r for r in sorted(expected) if r != "Edit(//home/user/proj/**)"]
-        assert "Read(//home/user/proj/**)" in partial_rules  # Read IS present
-        assert "Edit(//home/user/proj/**)" not in partial_rules  # Edit is NOT present
+        # Provide one global MCP rule but not the other
+        partial_rules = ["mcp__claude_ai_Excalidraw__*"]
         settings_path = _write_settings(tmp_path, allow=partial_rules)
         monkeypatch.setattr(
             "server.lib.perms_helpers._USER_SETTINGS",
@@ -523,22 +513,16 @@ settings_path,
 
         result = run_sync(meta, cfg)
 
-        # Edit rule must be reported as missing
         assert "❌" in result
-        assert "Edit(//home/user/proj/**)" in result
-        # Read rule must NOT be reported as missing (it's already present)
-        # Check that Read does not appear in the missing section
-        # The result lists missing rules; Read should not be among them
-        lines = result.splitlines()
-        missing_lines = [line for line in lines if "Read(" in line]
-        # Any mention of Read in the output should not be in a "missing" context
-        # Since only Edit is missing, Read should not appear in the missing list at all
-        assert not any("Read(//home/user/proj/**)" in line for line in missing_lines)
+        # Mermaid Chart is missing
+        assert "mcp__claude_ai_Mermaid_Chart__*" in result
+        # Excalidraw is NOT missing
+        assert "mcp__claude_ai_Excalidraw__*" not in result
 
-    def test_worktree_integration_true_missing_worktree_bash_rules_reported(
+    def test_worktree_integration_true_no_bash_rules_expected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When worktree_integration=True, Bash rules for worktree extra paths are expected and reported if missing."""
+        """Bash rules are no longer expected in permissions.allow, even with worktree_integration=True."""
         wt_config = tmp_path / "worktree.yaml"
         wt_config.write_text(
             yaml.dump({
@@ -551,12 +535,9 @@ settings_path,
 
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=True)
-        # settings.json has repo rules but not worktree path Bash rules
-        repo_rules = [
-            "Read(//home/user/proj/**)",
-            "Edit(//home/user/proj/**)",
-        ]
-        settings_path = _write_settings(tmp_path, allow=repo_rules)
+        # Provide all expected rules (only global MCP rules)
+        expected = _derive_expected_rules(meta, cfg)
+        settings_path = _write_settings(tmp_path, allow=sorted(expected))
         monkeypatch.setattr(
             "server.lib.perms_helpers._USER_SETTINGS",
 settings_path,
@@ -564,9 +545,9 @@ settings_path,
 
         result = run_sync(meta, cfg)
 
-        # Missing Bash rules for the worktree path must be reported
-        assert "❌" in result
-        assert "/extra/worktree/path" in result
+        # All in sync — no Bash rules expected
+        assert "✅" in result
+        assert "in sync" in result
 
     def test_run_sync_reports_missing_custom_todoist_rule(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -585,10 +566,10 @@ settings_path,
         assert "mcp__sentry__*" in result
         assert "mcp__claude_ai_Todoist__*" not in result
 
-    def test_apply_true_writes_missing_rules(
+    def test_apply_true_writes_missing_mcp_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply=True writes missing rules into settings.json and returns a success message."""
+        """apply=True writes missing MCP rules into settings.json and returns a success message."""
         repo_path = str(tmp_path / "myrepo")
         meta = _make_meta(repos=[RepoEntry(label="code", path=repo_path)])
         cfg = _make_cfg(auto_allow_mcps=False)
@@ -605,13 +586,6 @@ settings_path,
         # Return value must be a success string, not a "❌ Missing" report
         assert "✅" in result
         assert "❌" not in result
-        # settings.json must now contain the Read and Edit rules
-        actual = json.loads(settings_path.read_text())
-        allow = actual.get("permissions", {}).get("allow", [])
-        allow_set = set(allow)
-        prefix = f"//{repo_path.strip('/')}"
-        assert f"Read({prefix}/**)" in allow_set
-        assert f"Edit({prefix}/**)" in allow_set
 
     def test_apply_true_already_in_sync_is_noop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -741,13 +715,6 @@ settings_path,
         # Tool must report success, not a "❌ Missing" report
         assert "✅" in result
         assert "❌ Missing" not in result
-
-        # settings.json must now contain the expected path rules
-        actual = json.loads(settings_path.read_text())
-        allow_set = set(actual.get("permissions", {}).get("allow", []))
-        prefix = f"//{repo_path.strip('/')}"
-        assert f"Read({prefix}/**)" in allow_set
-        assert f"Edit({prefix}/**)" in allow_set
 
 
 # ── Sandbox mode tests ────────────────────────────────────────────────────────
@@ -962,4 +929,6 @@ tmp_path / "settings.json",
 
         assert "❌" in result
         assert "settings.local.json" in result
-        assert "Read(//home/user/proj/**)" in result
+        # Only MCP and sandbox path rules reported — no Read/Edit rules
+        assert "MCP rules" in result or "Sandbox allowWrite" in result
+        assert "Read(" not in result

@@ -322,10 +322,8 @@ def register(app: FastMCP) -> None:
             total = sum(counts.values())
             if total > 0:
                 parts = []
-                if counts["path_rules"]:
-                    parts.append(f"{counts['path_rules']} path")
-                if counts["bash_rules"]:
-                    parts.append(f"{counts['bash_rules']} Bash")
+                if counts["sandbox_paths"]:
+                    parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
                 if counts["mcp_rules"]:
                     parts.append(f"{counts['mcp_rules']} MCP")
                 revoke_summary = f" Revoked {total} permission rule(s) ({', '.join(parts)})."

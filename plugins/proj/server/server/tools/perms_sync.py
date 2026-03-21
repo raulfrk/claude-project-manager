@@ -20,22 +20,12 @@ if TYPE_CHECKING:
 
 
 def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
-    from server.tools.perms_grant import collect_paths
+    """Derive expected permissions.allow rules.
 
+    Only MCP wildcard rules are expected now — Read/Edit/Bash rules are no
+    longer managed in permissions.allow (sandbox allowWrite handles file access).
+    """
     rules: set[str] = set()
-    for repo in meta.repos:
-        # Double-slash prefix required by Claude Code for absolute paths
-        prefix = f"//{repo.path.strip('/')}"
-        rules.add(f"Read({prefix}/**)")
-        if not repo.reference:
-            rules.add(f"Edit({prefix}/**)")
-
-    # Bash rules for read-only investigation tools
-    if cfg.permissions.investigation_tools:
-        for path in collect_paths(meta, cfg):
-            prefix = f"//{path.strip('/')}"
-            for tool in cfg.permissions.investigation_tools:
-                rules.add(f"Bash({tool} {prefix}/**)")
 
     if cfg.permissions.auto_allow_mcps:
         # proj is always present — it's the running plugin itself
@@ -129,12 +119,8 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
     if not missing and not missing_sandbox_paths:
         return f"✅ {target_name} is in sync — all expected rules are present."
 
-    # Group by type
-    missing_path = sorted(
-        r for r in missing if r.startswith("Read(") or r.startswith("Edit(")
-    )
+    # Group by type (only MCP rules expected in permissions.allow now)
     missing_mcp = sorted(r for r in missing if r.startswith("mcp__"))
-    missing_bash = sorted(r for r in missing if r.startswith("Bash("))
 
     if apply:
         from server.tools.perms_grant import setup_permissions
@@ -143,40 +129,28 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
         counts = setup_permissions(
             meta,
             cfg,
-            grant_path_access=True,
-            grant_investigation_tools_flag=True,
             mcp_servers=mcp_servers,
         )
         total = sum(counts.values())
         if total == 0 and not missing_sandbox_paths:
             return f"✅ {target_name} is in sync — all expected rules are present."
         parts: list[str] = []
-        if counts["path_rules"]:
-            parts.append(f"{counts['path_rules']} path rule(s)")
-        if counts["bash_rules"]:
-            parts.append(f"{counts['bash_rules']} Bash rule(s)")
+        if counts["sandbox_paths"]:
+            parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
         applied_total = total
         return f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
 
     lines = [f"❌ Missing rules in {target_name}:\n"]
-    if missing_path:
-        lines.append("**Directory rules:**")
-        lines.extend(f"  - `{r}`" for r in missing_path)
-    if missing_bash:
-        lines.append("\n**Bash tool rules:**")
-        lines.extend(f"  - `{r}`" for r in missing_bash)
     if missing_mcp:
-        lines.append("\n**MCP rules:**")
+        lines.append("**MCP rules:**")
         lines.extend(f"  - `{r}`" for r in missing_mcp)
     if missing_sandbox_paths:
         lines.append("\n**Sandbox allowWrite paths:**")
         lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))
     lines.append(
         "\nRun `proj_setup_permissions` to add all missing rules at once, "
-        "or `proj_grant_tool_permissions` (Bash rules), "
-        "`perms_add_allow` (directory rules), "
         "or `perms_add_mcp_allow` / `perms_batch_add_mcp_allow` (MCP rules) individually."
     )
     return "\n".join(lines)

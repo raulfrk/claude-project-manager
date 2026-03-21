@@ -98,8 +98,6 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"
    - Ask: "Auto-allow plugin MCP tools for this project? [yes/no/use global: yes]"
    - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
-     - `grant_path_access=<first answer is yes>`
-     - `grant_investigation_tools=<first answer is yes>` (same as grant_path_access)
      - `mcp_servers=[<list>]` — build list when second answer is yes:
        always include `"plugin_proj_proj"`, `"plugin_perms_perms"`;
        add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled

@@ -121,7 +121,7 @@ class SandboxConfig:
 
     enabled: bool = False
     auto_allow_bash_if_sandboxed: bool = False
-    allow_unsandboxed_commands: bool = False
+    allow_unsandboxed_commands: bool | None = None
     excluded_commands: list[str] = field(default_factory=list)
     enable_weaker_nested_sandbox: bool = False
     enable_weaker_network_isolation: bool = False
@@ -135,8 +135,8 @@ class SandboxConfig:
             result["enabled"] = True
         if self.auto_allow_bash_if_sandboxed:
             result["autoAllowBashIfSandboxed"] = True
-        if self.allow_unsandboxed_commands:
-            result["allowUnsandboxedCommands"] = True
+        if self.allow_unsandboxed_commands is not None:
+            result["allowUnsandboxedCommands"] = self.allow_unsandboxed_commands
         if self.excluded_commands:
             result["excludedCommands"] = self.excluded_commands
         if self.enable_weaker_nested_sandbox:
@@ -164,7 +164,7 @@ class SandboxConfig:
         return cls(
             enabled=bool(data.get("enabled", False)),
             auto_allow_bash_if_sandboxed=bool(data.get("autoAllowBashIfSandboxed", False)),
-            allow_unsandboxed_commands=bool(data.get("allowUnsandboxedCommands", False)),
+            allow_unsandboxed_commands=bool(data["allowUnsandboxedCommands"]) if "allowUnsandboxedCommands" in data else None,
             excluded_commands=list(data.get("excludedCommands", [])),  # type: ignore[arg-type]
             enable_weaker_nested_sandbox=bool(data.get("enableWeakerNestedSandbox", False)),
             enable_weaker_network_isolation=bool(data.get("enableWeakerNetworkIsolation", False)),

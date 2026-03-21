@@ -40,7 +40,7 @@ Add a new directory or repository to the active project.
 
    If the tool returns an error (e.g., duplicate repo), display the error and stop.
 
-5. Call `mcp__proj__proj_setup_permissions` with `grant_path_access=true` and `grant_investigation_tools=true` to refresh permissions for the project including the new repo path.
+5. Call `mcp__proj__proj_setup_permissions` to refresh sandbox write paths for the project including the new repo path.
 
 6. Display confirmation summary:
    ```
