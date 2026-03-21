@@ -299,9 +299,11 @@ def _collect_all_allow_rules(
     *,
     mcp_servers: list[str] | None = None,
 ) -> set[str]:
-    """Derive the full set of allow rules that setup_permissions would create.
+    """Derive MCP wildcard rules for revocation.
 
-    Only MCP wildcard rules are managed in permissions.allow now.
+    Only MCP wildcard rules are collected here. Other rule types managed by
+    ``setup_permissions`` (sandbox paths, sensitive deny rules) are handled
+    separately and are deliberately excluded from revocation.
     MCP rules are only included when ``mcp_servers`` is explicitly provided,
     because MCP wildcard rules (e.g. ``mcp__plugin_proj_proj__*``) are shared
     across all projects and should not be revoked on single-project archive

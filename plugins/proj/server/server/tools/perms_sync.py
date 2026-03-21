@@ -137,6 +137,10 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
         parts: list[str] = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
+        if counts.get("deny_write_paths"):
+            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
+        if counts.get("sensitive_deny_rules"):
+            parts.append(f"{counts['sensitive_deny_rules']} sensitive deny rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
         applied_total = total
@@ -149,10 +153,13 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
     if missing_sandbox_paths:
         lines.append("\n**Sandbox allowWrite paths:**")
         lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))
-    lines.append(
-        "\nRun `proj_setup_permissions` to add all missing rules at once, "
-        "or `perms_add_mcp_allow` / `perms_batch_add_mcp_allow` (MCP rules) individually."
-    )
+    hint = "\nRun `proj_setup_permissions` to add all missing rules at once."
+    if missing_mcp:
+        hint += (
+            "\nOr use `perms_add_mcp_allow` / `perms_batch_add_mcp_allow` "
+            "to add MCP rules individually."
+        )
+    lines.append(hint)
     return "\n".join(lines)
 
 

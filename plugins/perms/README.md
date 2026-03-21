@@ -1,10 +1,10 @@
 # perms
 
-Manage Claude Code `settings.json` permissions from within Claude sessions. Provides MCP tools to add and remove allow rules for project directories and MCP server tool access — no manual JSON editing required.
+Manage Claude Code permissions from within Claude sessions. Provides MCP tools to add and remove allow rules for project directories, MCP server tool access, sandbox paths, and deny rules — no manual JSON editing required.
 
 ## What it does
 
-Claude Code controls file access and tool execution via `permissions.allow` in `settings.json`. Entries must follow specific formats (double-slash prefix for absolute paths, `mcp__<server>__*` for MCP tools). This plugin exposes MCP tools that handle those formats correctly and write to `settings.json` atomically.
+Claude Code controls file access and tool execution via `permissions.allow` in `settings.json` (or `settings.local.json` when sandbox mode is enabled). In **sandbox mode** (the recommended configuration), the perms plugin manages `sandbox.filesystem.allowWrite` paths instead of `Read`/`Edit` allow rules. MCP tool wildcards use the `mcp__<server>__*` format. This plugin handles those formats correctly and writes atomically.
 
 Changes take effect immediately — no restart required.
 

@@ -324,6 +324,8 @@ def register(app: FastMCP) -> None:
                 parts = []
                 if counts["sandbox_paths"]:
                     parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
+                if counts.get("deny_write_paths"):
+                    parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
                 if counts["mcp_rules"]:
                     parts.append(f"{counts['mcp_rules']} MCP")
                 revoke_summary = f" Revoked {total} permission rule(s) ({', '.join(parts)})."

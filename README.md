@@ -30,7 +30,7 @@ Three focused plugins that work independently or together:
 
 | Plugin | What it does | Type |
 |--------|-------------|------|
-| **perms** | Auto-manages `settings.json` permissions — directory Read/Edit rules and MCP tool wildcards | MCP server |
+| **perms** | Auto-manages sandbox allowWrite paths, deny rules, and MCP tool wildcards | MCP server |
 | **worktree** | Registry-based git worktree management — create, list, and clean up isolated worktrees | MCP server + 6 skills |
 | **proj** | Full project lifecycle — todos with nested dependencies, notes, Todoist/Trello sync, AI-powered workflows | MCP server + 18 skills + hooks |
 
@@ -184,7 +184,7 @@ The `proj` plugin is configured via `~/.claude/proj.yaml`, written during `/proj
 | `projects_base_dir` | string | — | Base directory for new projects |
 | `git_integration` | boolean | `true` | Enable git activity detection |
 | `default_priority` | string | `medium` | Default todo priority (`low`/`medium`/`high`) |
-| `permissions.auto_grant` | boolean | `true` | Auto-add Read/Edit rules for project dirs |
+| `permissions.auto_grant` | boolean | `true` | Auto-grant sandbox paths and MCP rules for project dirs |
 | `permissions.auto_allow_mcps` | boolean | `true` | Auto-allow plugin MCP tools |
 | `todoist.enabled` | boolean | `false` | Enable Todoist sync |
 | `todoist.auto_sync` | boolean | `true` | Auto-sync on every proj command |
@@ -298,7 +298,7 @@ sequenceDiagram
         CC->>proj: config_init(project_dir)
         activate proj
         proj->>perms: perms_add_allow(project_dir)
-        perms->>settings: Write Read/Edit rules
+        perms->>settings: Write sandbox/MCP rules
         perms-->>proj: OK
         proj->>perms: perms_add_mcp_allow("proj")
         perms->>settings: Add mcp__plugin_proj_proj__*
@@ -313,7 +313,7 @@ sequenceDiagram
         CC->>wt: wt_add_repo(repo_path)
         activate wt
         wt->>perms: perms_add_allow(worktree_base)
-        perms->>settings: Write Read/Edit rules
+        perms->>settings: Write sandbox/MCP rules
         perms-->>wt: OK
         wt-->>CC: Repo registered
         deactivate wt
