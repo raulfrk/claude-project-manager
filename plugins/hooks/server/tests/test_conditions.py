@@ -85,6 +85,80 @@ class TestEvaluateCondition:
         proj_yaml.write_text("- item1\n- item2\n")
         assert evaluate_condition("any.path", config_path=proj_yaml) is False
 
+    # ── compound conditions (and/or) ──────────────────────────────────────
+
+    def test_and_both_true(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": True, "b": True}))
+        assert evaluate_condition("a and b", config_path=proj_yaml) is True
+
+    def test_and_one_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": True, "b": False}))
+        assert evaluate_condition("a and b", config_path=proj_yaml) is False
+
+    def test_and_both_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": False, "b": False}))
+        assert evaluate_condition("a and b", config_path=proj_yaml) is False
+
+    def test_or_both_true(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": True, "b": True}))
+        assert evaluate_condition("a or b", config_path=proj_yaml) is True
+
+    def test_or_one_true(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": False, "b": True}))
+        assert evaluate_condition("a or b", config_path=proj_yaml) is True
+
+    def test_or_both_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": False, "b": False}))
+        assert evaluate_condition("a or b", config_path=proj_yaml) is False
+
+    def test_and_with_dot_paths(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({
+            "todoist": {"enabled": True, "auto_sync": True},
+            "project": {"todoist_project_id": "abc123"},
+        }))
+        assert evaluate_condition(
+            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) is True
+
+    def test_and_with_dot_paths_one_missing(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({
+            "todoist": {"enabled": True, "auto_sync": True},
+        }))
+        assert evaluate_condition(
+            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) is False
+
+    def test_or_with_and_precedence(self, proj_yaml: Path):
+        """'a and b or c' means '(a and b) or c'."""
+        proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": True}))
+        assert evaluate_condition("a and b or c", config_path=proj_yaml) is True
+
+    def test_or_with_and_precedence_all_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": False}))
+        assert evaluate_condition("a and b or c", config_path=proj_yaml) is False
+
+    def test_negation_in_compound(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": True, "b": False}))
+        assert evaluate_condition("a and !b", config_path=proj_yaml) is True
+
+    def test_todoist_real_condition(self, proj_yaml: Path):
+        """Real condition from todoist default-hooks.yaml."""
+        proj_yaml.write_text(yaml.dump({
+            "todoist": {"enabled": True, "auto_sync": True},
+            "project": {"todoist_project_id": "6g5Rc5v5WjJCHHgX"},
+        }))
+        assert evaluate_condition(
+            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) is True
+
+    def test_zoxide_simple_condition(self, proj_yaml: Path):
+        """Real condition from zoxide default-hooks.yaml."""
+        proj_yaml.write_text(yaml.dump({"zoxide": {"enabled": True}}))
+        assert evaluate_condition("zoxide.enabled", config_path=proj_yaml) is True
+
 
 # ── resolve_condition_status ─────────────────────────────────────────────────
 

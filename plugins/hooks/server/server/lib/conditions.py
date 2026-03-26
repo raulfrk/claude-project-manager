@@ -59,6 +59,22 @@ def _walk_dot_path(obj: Any, path: str) -> Any:
     return current
 
 
+def _evaluate_single(expr: str, config: dict[str, Any]) -> bool:
+    """Evaluate a single dot-path expression against config.
+
+    A leading ``!`` inverts the result.
+    """
+    expr = expr.strip()
+    negate = False
+    if expr.startswith("!"):
+        negate = True
+        expr = expr[1:].strip()
+
+    val = _walk_dot_path(config, expr)
+    result = bool(val)
+    return (not result) if negate else result
+
+
 def evaluate_condition(
     condition: str | None,
     *,
@@ -68,24 +84,25 @@ def evaluate_condition(
 
     Rules:
     * ``None`` or empty string — always fires (no condition).
-    * A leading ``!`` inverts the result.
-    * The dot-path is resolved against the live ``~/.claude/proj.yaml``.
+    * Supports compound expressions with ``and`` / ``or`` operators.
+    * ``and`` has higher precedence than ``or`` (standard boolean logic).
+    * A leading ``!`` on any term inverts that term.
+    * Each dot-path is resolved against the live ``~/.claude/proj.yaml``.
     * Missing config / missing key / unparseable file — treated as ``False``
       (hook is silently skipped, never an error).
     """
     if not condition:
         return True
 
-    negate = False
-    expr = condition.strip()
-    if expr.startswith("!"):
-        negate = True
-        expr = expr[1:].strip()
-
     config = _load_proj_config(config_path)
-    val = _walk_dot_path(config, expr)
-    result = bool(val)
-    return (not result) if negate else result
+
+    # Split by 'or' first (lower precedence), then 'and' (higher precedence)
+    or_groups = [g.strip() for g in condition.split(" or ")]
+    for or_group in or_groups:
+        and_terms = [t.strip() for t in or_group.split(" and ")]
+        if all(_evaluate_single(term, config) for term in and_terms):
+            return True
+    return False
 
 
 def resolve_condition_status(
