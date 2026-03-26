@@ -1,0 +1,163 @@
+"""YAML load/save for ~/.claude/hooks.yaml and failure logging."""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from server.lib.models import HookRegistry
+
+logger = logging.getLogger(__name__)
+
+_HOOKS_FILE = Path.home() / ".claude" / "hooks.yaml"
+_FAILURES_FILE = Path.home() / ".claude" / "hooks-failures.yaml"
+_MAX_FAILURES = 200  # rolling cap — oldest entries are trimmed
+
+
+def hooks_path() -> Path:
+    """Return the path to the hooks.yaml file."""
+    return _HOOKS_FILE
+
+
+def failures_path() -> Path:
+    """Return the path to the hooks-failures.yaml file."""
+    return _FAILURES_FILE
+
+
+def load(path: Path | None = None) -> HookRegistry:
+    """Load the hook registry from YAML. Returns empty registry if file doesn't exist."""
+    target = path or _HOOKS_FILE
+    if not target.exists():
+        return HookRegistry()
+
+    with target.open() as f:
+        raw = yaml.safe_load(f)
+
+    if not isinstance(raw, dict):
+        return HookRegistry()
+
+    return HookRegistry.from_dict(raw)
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Atomically write content to path via a temp file in the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original_mode: int | None = None
+    if path.exists():
+        original_mode = path.stat().st_mode
+    fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        tmp.replace(path)
+        if original_mode is not None:
+            path.chmod(original_mode & 0o7777)
+    except Exception:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def save(registry: HookRegistry, path: Path | None = None) -> Path:
+    """Atomically write the hook registry to YAML. Creates file and parent dirs if needed.
+
+    Returns the path written to.
+    """
+    target = path or _HOOKS_FILE
+    data = registry.to_dict()
+    content = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    _atomic_write(target, content)
+    return target
+
+
+# ── Failure logging ──────────────────────────────────────────────────────────
+
+
+def _load_failures(path: Path | None = None) -> list[dict[str, Any]]:
+    """Load existing failure entries from YAML. Returns empty list on any error."""
+    target = path or _FAILURES_FILE
+    if not target.exists():
+        return []
+    try:
+        with target.open() as f:
+            raw = yaml.safe_load(f)
+        if isinstance(raw, list):
+            return raw  # type: ignore[return-value]
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read %s — starting fresh", target)
+    return []
+
+
+def log_failure(
+    *,
+    hook_id: str,
+    trigger_tool: str,
+    target_tool: str,
+    server: str,
+    error: str,
+    source_result: str | None = None,
+    retry_count: int = 0,
+    path: Path | None = None,
+) -> Path:
+    """Append a failure entry to ``~/.claude/hooks-failures.yaml``.
+
+    The file is a YAML list capped at ``_MAX_FAILURES`` entries (oldest dropped).
+    Returns the path written to.
+    """
+    target = path or _FAILURES_FILE
+    entries = _load_failures(target)
+
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "hook_id": hook_id,
+        "trigger_tool": trigger_tool,
+        "target_tool": target_tool,
+        "server": server,
+        "error": error,
+        "retry_count": retry_count,
+    }
+    if source_result is not None:
+        entry["source_result"] = source_result
+    entries.append(entry)
+
+    # Trim to rolling cap
+    if len(entries) > _MAX_FAILURES:
+        entries = entries[-_MAX_FAILURES:]
+
+    content = yaml.dump(entries, default_flow_style=False, sort_keys=False)
+    _atomic_write(target, content)
+    return target
+
+
+def load_failures(path: Path | None = None) -> list[dict[str, Any]]:
+    """Public accessor for failure entries."""
+    return _load_failures(path)
+
+
+def save_failures(entries: list[dict[str, Any]], path: Path | None = None) -> Path:
+    """Atomically write failure entries to ``~/.claude/hooks-failures.yaml``.
+
+    Returns the path written to.
+    """
+    target = path or _FAILURES_FILE
+    content = yaml.dump(entries, default_flow_style=False, sort_keys=False) if entries else ""
+    _atomic_write(target, content)
+    return target
+
+
+def clear_failures(path: Path | None = None) -> int:
+    """Remove all failure entries. Returns the count cleared."""
+    target = path or _FAILURES_FILE
+    entries = _load_failures(target)
+    count = len(entries)
+    if count:
+        _atomic_write(target, "")
+    return count

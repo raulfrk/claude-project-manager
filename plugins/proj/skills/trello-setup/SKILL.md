@@ -1,7 +1,7 @@
 ---
 name: trello-setup
 description: Ensure the proj label and project card exist on the Trello board. Sub-skill of trello-sync.
-allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_get_active, mcp__proj__config_load
+allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__config_load
 argument-hint: ""
 ---
 
@@ -11,12 +11,12 @@ Ensure the `proj` label and project card exist on the configured Trello board. T
 
 ### 1. Read config and active project
 
-- Call `mcp__proj__config_load` -- read `trello.*` config values. Note `default_board_id`, `default_list`.
-- Call `mcp__proj__proj_get_active` -- get active project name, per-project trello config, and `trello_card_id` from project meta.
+- Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
+  - From the result, extract `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card), and `project.name`.
 - Check prerequisites:
-  - `trello.enabled` must be `true`. If not, stop: "Trello sync not enabled. Set `trello.enabled: true` in `~/.claude/proj.yaml`."
-  - A board ID must be set (per-project `trello.board_id` or global `trello.default_board_id`). If neither is set, stop and ask the user to configure a board ID.
-- Resolve effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
+  - `integrations.trello.enabled` must be `true`. If not, stop: "Trello sync not enabled. Set `trello.enabled: true` in `~/.claude/proj.yaml`."
+  - A board ID must be set (per-project `trello.board_id` or global `integrations.trello.board_id`). If neither is set, stop and ask the user to configure a board ID.
+- Resolve effective board ID = per-project `trello.board_id` if set, else global `integrations.trello.board_id`.
 
 **Failure: Trello MCP server unavailable**
 If the Trello MCP server is not reachable -- for example, a tool call raises a

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
+from server.lib.enums import TERMINAL_STATUSES
 from server.lib.models import ProjConfig
 from server.tools.config import require_config
+from server.tools.git import _active_branches, _git_log
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -85,7 +89,7 @@ def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) ->
 
 
 def register(app: FastMCP) -> None:
-    """Register ctx_session_start, ctx_session_end, ctx_detect_project, notes_append, claudemd_write, and claudemd_read tools with the MCP app."""
+    """Register ctx_session_start, ctx_session_end, ctx_detect_project, notes_append, claudemd_write, claudemd_read, proj_session_context, and proj_status_context tools with the MCP app."""
 
     @app.tool(description="Build session context string for active project (SessionStart hook).")
     def ctx_session_start(cwd: str | None = None, compact: bool = False) -> str:
@@ -165,6 +169,148 @@ def register(app: FastMCP) -> None:
     def claudemd_read(repo_path: str) -> str:
         result = storage.read_claudemd(repo_path)
         return result if result is not None else f"No CLAUDE.md found at {repo_path}."
+
+    @app.tool(description="Return structured JSON context for the active project session (config, project metadata, integrations).")
+    def proj_session_context(include_todo_count: bool = False) -> str:
+        if not storage.config_exists():
+            return "No config found. Run config_init first."
+        cfg = require_config()
+        project_name = state.resolve_project(None)
+        if not project_name:
+            return "No active project. Use ctx_session_start or proj_set_active first."
+        try:
+            meta = storage.load_meta(cfg, project_name)
+        except FileNotFoundError:
+            return f"Project metadata not found for '{project_name}'."
+
+        result: dict[str, object] = {
+            "config": {
+                "tracking_dir": cfg.tracking_dir,
+                "projects_base_dir": cfg.projects_base_dir,
+                "default_priority": cfg.default_priority,
+            },
+            "project": {
+                "name": meta.name,
+                "status": meta.status,
+                "priority": meta.priority,
+                "description": meta.description,
+                "repos": [r.to_dict() for r in meta.repos],
+                "tags": meta.tags,
+                "todoist_project_id": meta.todoist_project_id,
+                "trello_card_id": meta.trello_card_id,
+            },
+            "integrations": {
+                "todoist": {
+                    "enabled": cfg.todoist.enabled,
+                    "mcp_server": cfg.todoist.mcp_server,
+                    "project_id": meta.todoist_project_id,
+                },
+                "trello": {
+                    "enabled": cfg.trello.enabled,
+                    "board_id": cfg.trello.default_board_id,
+                    "card_id": meta.trello_card_id,
+                },
+                "jira": {
+                    "enabled": cfg.jira.enabled,
+                },
+                "worktree": {
+                    "enabled": cfg.worktree_integration,
+                },
+                "zoxide": {
+                    "enabled": cfg.zoxide_integration,
+                },
+            },
+        }
+
+        if include_todo_count:
+            todos = storage.load_todos(cfg, project_name)
+            open_todos = [t for t in todos if t.status not in ("done", "cancelled")]
+            result["todo_count"] = {
+                "total": len(todos),
+                "open": len(open_todos),
+                "in_progress": len([t for t in open_todos if t.status == "in_progress"]),
+                "pending": len([t for t in open_todos if t.status == "pending"]),
+            }
+
+        return json.dumps(result)
+
+    @app.tool(description="Return structured JSON context for the status skill: config, project metadata, categorised todos, and git activity in one call.")
+    def proj_status_context(project_name: str | None = None) -> str:
+        cfg = require_config()
+        name = state.resolve_project(project_name)
+        if not name:
+            return "No active project. Use ctx_session_start or proj_set_active first."
+        try:
+            meta = storage.load_meta(cfg, name)
+        except FileNotFoundError:
+            return f"Project metadata not found for '{name}'."
+
+        todos = storage.load_todos(cfg, name)
+
+        # Categorise todos
+        in_progress = [t for t in todos if t.status == "in_progress"]
+        all_open = [t for t in todos if t.status not in TERMINAL_STATUSES]
+        ready = [t for t in all_open if not t.blocked_by and t.status != "in_progress"]
+        blocked = [t for t in all_open if t.blocked_by]
+        done_count = sum(1 for t in todos if t.status == "done")
+
+        def _todo_summary(t: object) -> dict[str, object]:
+            return {
+                "id": t.id,  # type: ignore[attr-defined]
+                "title": t.title,  # type: ignore[attr-defined]
+                "priority": t.priority,  # type: ignore[attr-defined]
+                "status": t.status,  # type: ignore[attr-defined]
+                "tags": t.tags,  # type: ignore[attr-defined]
+                "blocked_by": t.blocked_by,  # type: ignore[attr-defined]
+                "children_count": len(t.children),  # type: ignore[attr-defined]
+            }
+
+        # Git activity
+        git_activity: dict[str, object] = {"git_enabled": False, "commits": [], "branches": []}
+        if meta.git_enabled:
+            all_commits: list[str] = []
+            all_branches: list[str] = []
+            trackable_repos = [repo for repo in meta.repos if not repo.reference]
+            with ThreadPoolExecutor() as executor:
+                log_futures = {
+                    executor.submit(_git_log, repo.path, 7, repo.label): repo
+                    for repo in trackable_repos
+                }
+                branch_futures = {
+                    executor.submit(_active_branches, repo.path): repo
+                    for repo in trackable_repos
+                }
+                for fut, repo in log_futures.items():
+                    all_commits.extend(fut.result())
+                for fut, repo in branch_futures.items():
+                    all_branches.extend(f"{repo.label}:{b}" for b in fut.result())
+            git_activity = {"git_enabled": True, "commits": all_commits, "branches": all_branches}
+
+        result: dict[str, object] = {
+            "config": {
+                "tracking_dir": cfg.tracking_dir,
+                "projects_base_dir": cfg.projects_base_dir,
+            },
+            "project": {
+                "name": meta.name,
+                "status": meta.status,
+                "priority": meta.priority,
+                "description": meta.description,
+                "repos": [r.to_dict() for r in meta.repos],
+                "tags": meta.tags,
+                "dates": meta.dates.to_dict(),
+            },
+            "todos": {
+                "in_progress": [_todo_summary(t) for t in in_progress],
+                "ready": [_todo_summary(t) for t in ready],
+                "blocked": [_todo_summary(t) for t in blocked],
+                "all_open": [_todo_summary(t) for t in all_open],
+                "done_count": done_count,
+            },
+            "git_activity": git_activity,
+        }
+
+        return json.dumps(result)
 
 
 def ctx_detect_project_name(cwd: str) -> str | None:

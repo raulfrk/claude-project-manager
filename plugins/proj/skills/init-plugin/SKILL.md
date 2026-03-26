@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, Bash, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, Bash, mcp__proj__tracking_git_flush
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -53,6 +53,17 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
    - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"` to allow zoxide commands without prompts.
    If `perms` plugin is not installed, skip silently and note: "perms plugin not found — add MCP allow rules manually if needed."
+
+4b. **Integration verification** (if `perms` plugin is installed):
+   Call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"` to get the current rules.
+   Parse the JSON result and extract `permissions_allow` from the user scope entry.
+
+   - If `perms_integration: true`: check if any entry matching `mcp__plugin_perms_perms__*` exists in `permissions_allow`. If not, display:
+     "Warning: perms plugin MCP rules not found in settings. The perms_batch_add_mcp_allow call above may have failed — verify manually or re-run /proj:init-plugin."
+   - If `worktree_integration: true`: check if any entry matching `mcp__plugin_worktree_worktree__*` exists in `permissions_allow`. If not, display:
+     "Warning: worktree plugin MCP rules not found in settings. Install the worktree plugin and re-run /proj:init-plugin."
+
+   If the `perms_list` call fails (tool not available), skip with: "perms plugin not available — cannot verify integration rules."
 
 5. Confirm: "proj plugin configured! Configuration saved to ~/.claude/proj.yaml"
 

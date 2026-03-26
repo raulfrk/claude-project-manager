@@ -9,6 +9,7 @@ description = "MCP server for managing Claude Code settings.json permissions"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
+    "claude-hook-transport",
 ]
 
 [project.scripts]
@@ -16,6 +17,9 @@ perms-server = "server.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server"]
+
+[tool.uv.sources]
+claude-hook-transport = { path = "../../_shared" }
 
 [dependency-groups]
 dev = [

@@ -158,46 +158,6 @@ class TestConfigUpdateIntegrationFlags:
         loaded = storage.load_config()
         assert loaded.perms_integration is True
 
-    async def test_perms_integration_true_plugin_absent(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        settings_path = tmp_path / "settings_missing.json"
-        # File does not exist — treated as plugin absent
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        result = await call_tool(mcp_app, "config_update", perms_integration=True)
-
-        assert "Warning" in result
-        assert "perms plugin" in result
-        assert "settings.json" in result
-        loaded = storage.load_config()
-        assert loaded.perms_integration is True
-
-    async def test_worktree_integration_true_plugin_absent(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        import json
-
-        settings_path = tmp_path / "settings.json"
-        # Settings exists but has no worktree MCP rule
-        settings_path.write_text(json.dumps({"permissions": {"allow": ["Read(//some/path/**)"]}}))
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-
-        result = await call_tool(mcp_app, "config_update", worktree_integration=True)
-
-        assert "Warning" in result
-        assert "worktree plugin" in result
-        loaded = storage.load_config()
-        assert loaded.worktree_integration is True
-
     async def test_perms_integration_false_no_warning(
         self,
         mcp_app: Any,

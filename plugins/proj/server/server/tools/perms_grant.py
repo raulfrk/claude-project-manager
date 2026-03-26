@@ -3,49 +3,85 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-
 from server.lib import state, storage
 from server.lib.models import ProjConfig, ProjectMeta
-from server.lib.perms_helpers import (
-    _WORKTREE_CONFIG,
-    effective_settings_path,
-    is_sandbox_enabled,
-    project_dirs_from_meta,
-)
+from server.lib.perms_helpers import project_dirs_from_meta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+# ── Local settings path constants and sandbox detection ───────────────────────
+
+_USER_SETTINGS = Path.home() / ".claude" / "settings.json"
+_USER_LOCAL_SETTINGS = Path.home() / ".claude" / "settings.local.json"
+
+
+def _is_sandbox_enabled(
+    project_dir: Path | None = None,
+    project_dirs: list[Path] | None = None,
+) -> bool:
+    """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
+    paths = [_USER_LOCAL_SETTINGS]
+    if project_dirs:
+        for d in project_dirs:
+            paths.append(Path(d) / ".claude" / "settings.local.json")
+    elif project_dir:
+        paths.append(Path(project_dir) / ".claude" / "settings.local.json")
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            data: dict[str, object] = json.loads(path.read_text())
+            sandbox = data.get("sandbox", {})
+            if isinstance(sandbox, dict) and sandbox.get("enabled", False):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
+
+
+def _effective_settings_path(project_dir: Path | None = None) -> Path:
+    """Return settings.json or settings.local.json depending on sandbox mode."""
+    if _is_sandbox_enabled(project_dir):
+        return _USER_LOCAL_SETTINGS
+    return _USER_SETTINGS
+
+
 # ── Settings I/O ──────────────────────────────────────────────────────────────
 
 
 def _load_settings(project_dir: Path | None = None) -> dict[str, object]:
-    path = effective_settings_path(project_dir)
+    path = _effective_settings_path(project_dir)
     if not path.exists():
         return {}
     return json.loads(path.read_text())  # type: ignore[return-value]
 
 
 def _save_settings(data: dict[str, object], project_dir: Path | None = None) -> None:
-    path = effective_settings_path(project_dir)
+    path = _effective_settings_path(project_dir)
     storage.atomic_write_json(path, data)
 
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
 
 
-def collect_paths(meta: ProjectMeta, cfg: ProjConfig) -> list[str]:
+def collect_paths(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    worktree_base_paths: list[str] | None = None,
+) -> list[str]:
     """Collect all project-related paths.
 
     Includes all registered project repo paths, the tracking directory (if set),
-    and when worktree_integration is enabled, any base-repo paths from
-    ``~/.claude/worktree.yaml`` that are not already covered.
+    and when worktree_integration is enabled, any base-repo paths passed via
+    ``worktree_base_paths`` that are not already covered.
     """
     paths: list[str] = [repo.path for repo in meta.repos]
 
@@ -54,18 +90,10 @@ def collect_paths(meta: ProjectMeta, cfg: ProjConfig) -> list[str]:
         if abs_tracking not in paths:
             paths.append(abs_tracking)
 
-    if cfg.worktree_integration and _WORKTREE_CONFIG.exists():
-        try:
-            wt_data: dict[str, object] = yaml.safe_load(_WORKTREE_CONFIG.read_text()) or {}
-            base_repos_raw = wt_data.get("base_repos", [])
-            if isinstance(base_repos_raw, list):
-                for repo in base_repos_raw:
-                    if isinstance(repo, dict):
-                        path = repo.get("path", "")
-                        if isinstance(path, str) and path and path not in paths:
-                            paths.append(path)
-        except Exception:  # noqa: BLE001
-            pass  # Gracefully skip if worktree config is unavailable
+    if cfg.worktree_integration and worktree_base_paths:
+        for path in worktree_base_paths:
+            if path not in paths:
+                paths.append(path)
 
     return paths
 
@@ -126,72 +154,6 @@ def _remove_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
     return False
 
 
-def _add_sandbox_deny_write_path(data: dict[str, object], abs_path: str) -> bool:
-    """Add a path to sandbox.filesystem.denyWrite. Returns True if added."""
-    data = _ensure_sandbox_section(data)
-    sandbox = data["sandbox"]
-    assert isinstance(sandbox, dict)
-    fs = sandbox["filesystem"]
-    assert isinstance(fs, dict)
-    dw = fs.get("denyWrite")
-    if not isinstance(dw, list):
-        dw = []
-        fs["denyWrite"] = dw
-    clean = abs_path.rstrip("/")
-    if clean not in dw:
-        dw.append(clean)
-        return True
-    return False
-
-
-def _remove_sandbox_deny_write_path(data: dict[str, object], abs_path: str) -> bool:
-    """Remove a path from sandbox.filesystem.denyWrite. Returns True if removed."""
-    sandbox = data.get("sandbox")
-    if not isinstance(sandbox, dict):
-        return False
-    fs = sandbox.get("filesystem")
-    if not isinstance(fs, dict):
-        return False
-    dw = fs.get("denyWrite")
-    if not isinstance(dw, list):
-        return False
-    clean = abs_path.rstrip("/")
-    if clean in dw:
-        dw.remove(clean)
-        return True
-    return False
-
-
-# ── Sensitive-path deny helpers ───────────────────────────────────────────────
-
-_SENSITIVE_DENY_RULES: list[str] = [
-    "Read(~/.ssh/**)",
-    "Read(~/.gnupg/**)",
-    "Read(~/.aws/**)",
-]
-
-
-def _add_sensitive_deny_rules(data: dict[str, object]) -> int:
-    """Add permissions.deny entries for sensitive paths. Returns count added."""
-    perms = data.get("permissions", {})
-    if not isinstance(perms, dict):
-        perms = {}
-    deny = perms.get("deny", [])
-    if not isinstance(deny, list):
-        deny = []
-    deny_set: set[str] = set(deny)
-    count = 0
-    for rule in _SENSITIVE_DENY_RULES:
-        if rule not in deny_set:
-            deny.append(rule)
-            deny_set.add(rule)
-            count += 1
-    if count:
-        perms["deny"] = deny
-        data["permissions"] = perms
-    return count
-
-
 # ── Setup (one-shot atomic write) ─────────────────────────────────────────────
 
 
@@ -211,32 +173,82 @@ def _apply_mcp_rules(
     return count
 
 
+_SANDBOX_ADDED_RE = re.compile(r"Sandbox paths added:\s*(\d+)")
+_MCP_ADDED_RE = re.compile(r"MCP rules added:\s*(\d+)")
+
+
+def _parse_batch_setup_counts(result: str) -> dict[str, int]:
+    """Extract sandbox_paths and mcp_rules counts from batch_setup result string."""
+    sandbox_m = _SANDBOX_ADDED_RE.search(result)
+    mcp_m = _MCP_ADDED_RE.search(result)
+    return {
+        "sandbox_paths": int(sandbox_m.group(1)) if sandbox_m else 0,
+        "mcp_rules": int(mcp_m.group(1)) if mcp_m else 0,
+    }
+
+
+def _compute_setup_paths(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    archive_destination: str | None = None,
+) -> list[str]:
+    """Compute resolved absolute paths for sandbox allowWrite (writable repos + tracking + archive)."""
+    paths: list[str] = []
+    for repo in meta.repos:
+        if not repo.reference:
+            paths.append(str(Path(repo.path).expanduser().resolve()))
+    if cfg.tracking_dir:
+        paths.append(str(Path(cfg.tracking_dir).expanduser().resolve()))
+    if archive_destination:
+        paths.append(str(Path(archive_destination).expanduser().resolve()))
+    return paths
+
+
 def setup_permissions(
     meta: ProjectMeta,
     cfg: ProjConfig,
     *,
     mcp_servers: list[str] | None = None,
     archive_destination: str | None = None,
+    batch_setup_fn: Callable[..., str] | None = None,
 ) -> dict[str, int]:
-    """Add sandbox allowWrite paths + MCP wildcard rules in a single atomic write.
+    """Add sandbox allowWrite paths + MCP wildcard rules via the perms batch_setup function.
 
-    Targets settings.local.json (sandbox mode) or settings.json (fallback).
+    Computes the list of writable paths and MCP servers, then delegates to
+    ``batch_setup_fn`` for the actual settings file write.  When no
+    ``batch_setup_fn`` is provided, falls back to a local implementation
+    using the private helpers in this module.
 
-    Writes:
-    - sandbox.filesystem.allowWrite paths for writable repos, tracking dir,
-      and archive destination (if provided)
-    - sandbox.filesystem.denyWrite paths for reference repos (defense-in-depth)
-    - permissions.deny entries for sensitive paths (~/.ssh, ~/.gnupg, ~/.aws)
-    - MCP server wildcard rules in permissions.allow
-
-    Returns a dict with counts: {"sandbox_paths": N, "deny_write_paths": N,
-    "sensitive_deny_rules": N, "mcp_rules": N}.
+    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N}.
     All zero means the file was not written (all rules already present).
     Idempotent.
     """
+    paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination)
+    servers = mcp_servers or []
+
+    if not paths and not servers:
+        return {"sandbox_paths": 0, "mcp_rules": 0}
+
+    if batch_setup_fn is not None:
+        result = batch_setup_fn(paths=paths, mcp_servers=servers)
+        return _parse_batch_setup_counts(result)
+
+    # Fallback: local implementation using private helpers
+    return _setup_permissions_local(meta, cfg, paths=paths, mcp_servers=servers)
+
+
+def _setup_permissions_local(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    paths: list[str],
+    mcp_servers: list[str],
+) -> dict[str, int]:
+    """Local fallback when no batch_setup_fn is provided."""
     project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = is_sandbox_enabled(project_dirs=project_dirs)
+    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
@@ -247,38 +259,16 @@ def setup_permissions(
     allow_set: set[str] = set(allow)
 
     new_entries: list[str] = []
-    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "sensitive_deny_rules": 0, "mcp_rules": 0}
+    counts = {"sandbox_paths": 0, "mcp_rules": 0}
 
-    # Sandbox allowWrite paths for writable repos and tracking dir
     if sandbox_mode:
         data = _ensure_sandbox_section(data)
-        for repo in meta.repos:
-            abs_path = str(Path(repo.path).expanduser().resolve())
-            if repo.reference:
-                # Defense-in-depth: explicitly deny writes to reference repos
-                if _add_sandbox_deny_write_path(data, abs_path):
-                    counts["deny_write_paths"] += 1
-            else:
-                if _add_sandbox_write_path(data, abs_path):
-                    counts["sandbox_paths"] += 1
-        if cfg.tracking_dir:
-            abs_tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
-            if _add_sandbox_write_path(data, abs_tracking):
+        for abs_path in paths:
+            if _add_sandbox_write_path(data, abs_path):
                 counts["sandbox_paths"] += 1
 
-    # Sensitive path deny rules (always applied, not sandbox-specific)
-    counts["sensitive_deny_rules"] = _add_sensitive_deny_rules(data)
-
-    # MCP wildcard rules
     if mcp_servers:
         counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
-
-    # Archive destination: only sandbox write path
-    if archive_destination:
-        abs_dest = str(Path(archive_destination).expanduser().resolve())
-        if sandbox_mode:
-            if _add_sandbox_write_path(data, abs_dest):
-                counts["sandbox_paths"] += 1
 
     if new_entries or sum(counts.values()) > 0:
         if new_entries:
@@ -301,9 +291,8 @@ def _collect_all_allow_rules(
 ) -> set[str]:
     """Derive MCP wildcard rules for revocation.
 
-    Only MCP wildcard rules are collected here. Other rule types managed by
-    ``setup_permissions`` (sandbox paths, sensitive deny rules) are handled
-    separately and are deliberately excluded from revocation.
+    Only MCP wildcard rules are collected here. Sandbox paths are handled
+    separately.
     MCP rules are only included when ``mcp_servers`` is explicitly provided,
     because MCP wildcard rules (e.g. ``mcp__plugin_proj_proj__*``) are shared
     across all projects and should not be revoked on single-project archive
@@ -330,13 +319,18 @@ def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]
     return paths
 
 
-def _collect_sandbox_deny_write_paths(meta: ProjectMeta) -> set[str]:
-    """Derive the sandbox.filesystem.denyWrite paths for reference repos."""
-    paths: set[str] = set()
-    for repo in meta.repos:
-        if repo.reference:
-            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    return paths
+_SANDBOX_REMOVED_RE = re.compile(r"sandbox paths removed:\s*(\d+)")
+_MCP_REMOVED_RE = re.compile(r"MCP rules removed:\s*(\d+)")
+
+
+def _parse_batch_revoke_counts(result: str) -> dict[str, int]:
+    """Extract sandbox_paths and mcp_rules counts from batch_revoke result string."""
+    sandbox_m = _SANDBOX_REMOVED_RE.search(result)
+    mcp_m = _MCP_REMOVED_RE.search(result)
+    return {
+        "sandbox_paths": int(sandbox_m.group(1)) if sandbox_m else 0,
+        "mcp_rules": int(mcp_m.group(1)) if mcp_m else 0,
+    }
 
 
 def revoke_all_permissions(
@@ -344,22 +338,48 @@ def revoke_all_permissions(
     cfg: ProjConfig,
     *,
     mcp_servers: list[str] | None = None,
+    batch_revoke_fn: Callable[..., str] | None = None,
 ) -> dict[str, int]:
-    """Remove MCP wildcard rules from permissions.allow, sandbox allowWrite and denyWrite paths.
+    """Remove MCP wildcard rules from permissions.allow and sandbox allowWrite paths.
 
-    Inverse of setup_permissions. Only MCP rules + sandbox paths are managed now.
+    Computes which paths and MCP servers to remove, then delegates to
+    ``batch_revoke_fn`` for the actual settings file I/O.  When no
+    ``batch_revoke_fn`` is provided, falls back to a local implementation.
+
     MCP wildcard rules are only removed when ``mcp_servers`` is explicitly
     provided, because they are shared across projects.
 
-    Note: sensitive path deny rules (permissions.deny for ~/.ssh, ~/.gnupg,
-    ~/.aws) are NOT removed -- those are global safety rules.
-
-    Returns a dict with counts: {"sandbox_paths": N, "deny_write_paths": N, "mcp_rules": N}.
+    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N}.
     Idempotent -- removing non-existent rules is a no-op.
     """
+    # Compute sandbox paths to remove (writable repos + tracking dir)
+    paths = list(_collect_sandbox_write_paths(meta, cfg))
+
+    # MCP servers to remove (only when explicitly provided)
+    servers = mcp_servers or []
+
+    if not paths and not servers:
+        return {"sandbox_paths": 0, "mcp_rules": 0}
+
+    if batch_revoke_fn is not None:
+        result = batch_revoke_fn(paths=paths, mcp_servers=servers)
+        return _parse_batch_revoke_counts(result)
+
+    # Fallback: local implementation using private helpers
+    return _revoke_all_permissions_local(meta, cfg, paths=paths, mcp_servers=servers)
+
+
+def _revoke_all_permissions_local(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    paths: list[str],
+    mcp_servers: list[str],
+) -> dict[str, int]:
+    """Local fallback when no batch_revoke_fn is provided."""
     project_dirs = project_dirs_from_meta(meta)
     project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = is_sandbox_enabled(project_dirs=project_dirs)
+    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
     data = _load_settings(project_dir)
     perms = data.get("permissions", {})
     if not isinstance(perms, dict):
@@ -368,21 +388,18 @@ def revoke_all_permissions(
     if not isinstance(allow, list):
         allow = []
 
-    counts = {"sandbox_paths": 0, "deny_write_paths": 0, "mcp_rules": 0}
+    counts = {"sandbox_paths": 0, "mcp_rules": 0}
 
     # Remove MCP wildcard rules from permissions.allow
     to_remove = _collect_all_allow_rules(meta, cfg, mcp_servers=mcp_servers)
     new_allow = [r for r in allow if r not in to_remove]
     counts["mcp_rules"] = len(allow) - len(new_allow)
 
-    # Remove sandbox write paths and deny-write paths for reference repos
+    # Remove sandbox write paths
     if sandbox_mode:
-        for p in _collect_sandbox_write_paths(meta, cfg):
+        for p in paths:
             if _remove_sandbox_write_path(data, p):
                 counts["sandbox_paths"] += 1
-        for p in _collect_sandbox_deny_write_paths(meta):
-            if _remove_sandbox_deny_write_path(data, p):
-                counts["deny_write_paths"] += 1
 
     total = sum(counts.values())
     if total > 0:
@@ -405,7 +422,6 @@ def register(app: FastMCP) -> None:
             "in one atomic write. Idempotent. "
             "Automatically detects sandbox mode and writes to settings.local.json if enabled. "
             "Writable repo paths and the tracking dir are added to sandbox.filesystem.allowWrite. "
-            "Reference repos are added to sandbox.filesystem.denyWrite (defense-in-depth). "
             "mcp_servers is a list of server names to add wildcard allow rules for "
             "(e.g. ['plugin_proj_proj', 'plugin_perms_perms', 'trello'])."
         )
@@ -435,10 +451,6 @@ def register(app: FastMCP) -> None:
         parts = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-        if counts.get("deny_write_paths"):
-            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
-        if counts.get("sensitive_deny_rules"):
-            parts.append(f"{counts['sensitive_deny_rules']} sensitive deny rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
         return f"Added {total} rule(s) for '{name}': {', '.join(parts)}."
@@ -472,8 +484,6 @@ def register(app: FastMCP) -> None:
         parts = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-        if counts.get("deny_write_paths"):
-            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
         return f"Removed {total} rule(s) for '{name}': {', '.join(parts)}."

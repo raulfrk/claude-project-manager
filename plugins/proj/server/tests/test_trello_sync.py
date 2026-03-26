@@ -196,8 +196,13 @@ class TestBuildExpectedState:
         assert checklists[0]["todo_id"] == "1"
         items = checklists[0]["items"]
         assert isinstance(items, list)
-        assert len(items) == 1
-        assert items[0]["name"] == "1.1 \u2014 Child"
+        assert len(items) == 2
+        # Position 0: self-ref item for the root
+        assert items[0]["name"] == "Parent"
+        assert items[0]["todo_id"] == "1"
+        assert items[0]["is_self_ref"] is True
+        # Position 1: child
+        assert items[1]["name"] == "1.1 \u2014 Child"
 
     def test_done_child_is_checked(self) -> None:
         parent = Todo(id="1", title="Parent", children=["1.1"])
@@ -205,7 +210,9 @@ class TestBuildExpectedState:
         checklists, _ = build_expected_state([parent, child])
         items = checklists[0]["items"]
         assert isinstance(items, list)
-        assert items[0]["checked"] is True
+        # items[0] is self-ref (parent pending), items[1] is child (done)
+        assert items[0]["checked"] is False  # parent not done
+        assert items[1]["checked"] is True   # child done
 
     def test_done_root_leaf_is_checked(self) -> None:
         todos = [Todo(id="1", title="Done task", status="done")]
@@ -229,9 +236,11 @@ class TestBuildExpectedState:
         assert len(checklists) == 1
         items = checklists[0]["items"]
         assert isinstance(items, list)
-        assert len(items) == 2
-        assert items[0]["name"] == "1.1 \u2014 Child"
-        assert items[1]["name"] == "1.1.1 \u2014 Grand"
+        assert len(items) == 3  # self-ref + child + grandchild
+        assert items[0]["name"] == "Root"  # self-ref
+        assert items[0]["is_self_ref"] is True
+        assert items[1]["name"] == "1.1 \u2014 Child"
+        assert items[2]["name"] == "1.1.1 \u2014 Grand"
 
 
 # ── Diff tests ───────────────────────────────────────────────────────────────
@@ -293,8 +302,14 @@ class TestTrelloDiff:
         storage.save_todos(cfg, name, [parent, child])
 
         plan = compute_diff(_make_trello_card_json(), cfg, name)
-        assert len(plan.push_create_item) == 1
-        assert "Child" in plan.push_create_item[0]["name"]
+        # 2 items: self-ref for root + child
+        assert len(plan.push_create_item) == 2
+        self_ref_items = [i for i in plan.push_create_item if i.get("is_self_ref")]
+        child_items = [i for i in plan.push_create_item if not i.get("is_self_ref")]
+        assert len(self_ref_items) == 1
+        assert self_ref_items[0]["name"] == "Parent"
+        assert len(child_items) == 1
+        assert "Child" in child_items[0]["name"]
 
     def test_pull_create_from_new_trello_item(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -838,12 +853,30 @@ class TestTrelloApply:
                 "trello_checklist_item_id": "item1",
             }],
         )
-        apply_changes(data, cfg, name)
+        apply_changes(data, cfg, name, push_confirmed=True)
         todos = storage.load_todos(cfg, name)
         assert todos[0].trello_sync_state is not None
         assert todos[0].trello_sync_state.last_sync != ""
         assert todos[0].trello_sync_state.synced_name == "Linked"
         assert todos[0].trello_sync_state.synced_state == "incomplete"
+
+    def test_apply_without_push_confirmed_skips_sync_state(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Without push_confirmed, apply should NOT record trello_sync_state."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Linked", trello_checklist_item_id="item1")
+        storage.save_todos(cfg, name, [todo])
+
+        data = TrelloApplyInput(
+            link_trello_ids=[{
+                "todo_id": todo.id,
+                "trello_checklist_item_id": "item1",
+            }],
+        )
+        apply_changes(data, cfg, name)
+        todos = storage.load_todos(cfg, name)
+        assert todos[0].trello_sync_state is None
 
     def test_apply_records_sync_state_for_done(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -856,7 +889,7 @@ class TestTrelloApply:
         storage.save_todos(cfg, name, [parent, child])
 
         data = TrelloApplyInput(completed_locally=[child.id])
-        apply_changes(data, cfg, name)
+        apply_changes(data, cfg, name, push_confirmed=True)
         todos = storage.load_todos(cfg, name)
         child_reloaded = next(t for t in todos if t.id == child.id)
         assert child_reloaded.trello_sync_state is not None
@@ -1189,7 +1222,7 @@ class TestAutoLinkingPullCreate:
                 "checked": False,
             }],
         )
-        apply_changes(data, cfg, name)
+        apply_changes(data, cfg, name, push_confirmed=True)
 
         todos = storage.load_todos(cfg, name)
         todo = next(t for t in todos if t.title == "Pulled item")
@@ -1215,7 +1248,7 @@ class TestAutoLinkingPullCreate:
                 "checked": True,
             }],
         )
-        apply_changes(data, cfg, name)
+        apply_changes(data, cfg, name, push_confirmed=True)
 
         todos = storage.load_todos(cfg, name)
         child = next(t for t in todos if t.title == "Already done in Trello")
@@ -1235,7 +1268,7 @@ class TestAutoLinkingPullCreate:
                 "trello_checklist_id": "cl_new_root",
             }],
         )
-        apply_changes(data, cfg, name)
+        apply_changes(data, cfg, name, push_confirmed=True)
 
         todos = storage.load_todos(cfg, name)
         root = next(t for t in todos if t.title == "New Root Feature")
@@ -1306,7 +1339,7 @@ class TestAutoLinkingAutoApply:
     def test_auto_apply_pull_create_records_sync_state(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """auto_apply=True: pulled items get trello_sync_state recorded atomically."""
+        """auto_apply=True is pull-only; sync state is deferred until push_confirmed."""
         cfg, name = cfg_with_project
         parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
         storage.save_todos(cfg, name, [parent])
@@ -1326,14 +1359,12 @@ class TestAutoLinkingAutoApply:
         todos = storage.load_todos(cfg, name)
         child = next(t for t in todos if t.title == "Pulled task")
         assert child.trello_checklist_item_id == "item_x"
-        assert child.trello_sync_state is not None
-        assert child.trello_sync_state.last_sync != ""
-        assert child.trello_sync_state.synced_state == "incomplete"
+        assert child.trello_sync_state is None
 
     def test_auto_apply_pull_create_checked_records_complete(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """auto_apply=True: checked Trello item is created as done with complete sync state."""
+        """auto_apply=True is pull-only; sync state is deferred until push_confirmed."""
         cfg, name = cfg_with_project
         parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
         storage.save_todos(cfg, name, [parent])
@@ -1354,8 +1385,7 @@ class TestAutoLinkingAutoApply:
         child = next(t for t in todos if t.title == "Done in Trello")
         assert child.status == "done"
         assert child.trello_checklist_item_id == "item_done"
-        assert child.trello_sync_state is not None
-        assert child.trello_sync_state.synced_state == "complete"
+        assert child.trello_sync_state is None
 
     def test_auto_apply_pull_create_multiple_items_all_linked(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -1387,10 +1417,9 @@ class TestAutoLinkingAutoApply:
         item_ids = {t.trello_checklist_item_id for t in created_items}
         assert item_ids == {"item_a", "item_b", "item_c"}
 
-        # All should have sync state
+        # auto_apply is pull-only; sync state is deferred until push_confirmed
         for t in created_items:
-            assert t.trello_sync_state is not None
-            assert t.trello_sync_state.last_sync != ""
+            assert t.trello_sync_state is None
 
     def test_diff_pull_create_includes_trello_item_id(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -2123,7 +2152,11 @@ class TestIdempotency:
     ) -> None:
         """After auto_apply, re-running diff with same Trello state is a no-op."""
         cfg, name = cfg_with_project
-        parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
+        parent = _make_todo(
+            cfg, name, "Parent",
+            trello_checklist_id="cl1",
+            trello_checklist_item_id="item_self",
+        )
         storage.save_todos(cfg, name, [parent])  # save parent first for child ID
         child = _make_todo(
             cfg, name, "Child",
@@ -2135,6 +2168,7 @@ class TestIdempotency:
 
         card_json = _make_trello_card_json([
             _make_checklist("cl1", "Parent", [
+                _make_check_item("item_self", "Parent"),
                 _make_check_item("item1", f"{child.id} \u2014 Child"),
             ]),
         ])
@@ -2187,3 +2221,242 @@ class TestIdempotency:
         ])
         plan = compute_diff(card_json, cfg, name)
         assert plan.is_empty(), f"Expected empty plan, got: {plan.to_dict()}"
+
+
+# ── Self-ref item tests (251.7) ──────────────────────────────────────────────
+
+
+class TestSelfRefItem:
+    """Root todos with children get a self-referencing checklist item at pos 0."""
+
+    def test_build_expected_state_self_ref_at_position_0(self) -> None:
+        """Root with children: self-ref item at position 0, children after."""
+        parent = Todo(id="1", title="Feature", children=["1.1"])
+        child = Todo(id="1.1", title="Subtask", parent="1")
+        checklists, tasks_items = build_expected_state([parent, child])
+        assert len(checklists) == 1
+        items = checklists[0]["items"]
+        assert isinstance(items, list)
+        assert len(items) == 2
+        # Position 0: self-ref
+        assert items[0]["todo_id"] == "1"
+        assert items[0]["name"] == "Feature"
+        assert items[0]["checked"] is False
+        assert items[0]["is_self_ref"] is True
+        # Position 1: child
+        assert items[1]["todo_id"] == "1.1"
+        assert items[1]["name"] == "1.1 \u2014 Subtask"
+        assert items[1].get("is_self_ref") is not True
+
+    def test_build_expected_state_leaf_root_no_self_ref(self) -> None:
+        """Root leaf (no children): goes to Tasks, no self-ref item."""
+        leaf = Todo(id="1", title="Simple task")
+        checklists, tasks_items = build_expected_state([leaf])
+        assert len(checklists) == 0
+        assert len(tasks_items) == 1
+        assert tasks_items[0]["name"] == "Simple task"
+        assert tasks_items[0].get("is_self_ref") is not True
+
+    def test_diff_root_completed_pushes_update_for_self_ref(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Root completed locally -> push_complete_item for self-ref checklist item."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        parent = _make_todo(
+            cfg, name, "Feature",
+            status="done",
+            trello_checklist_id="cl1",
+            trello_checklist_item_id="item_self",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Feature",
+                synced_state="incomplete",
+            ),
+        )
+        child = _make_todo(
+            cfg, name, "Subtask",
+            parent=parent.id,
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="1.1 \u2014 Subtask",
+                synced_state="incomplete",
+            ),
+        )
+        parent.children.append(child.id)
+        parent.updated = t1
+        storage.save_todos(cfg, name, [parent, child])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Feature", [
+                _make_check_item("item_self", "Feature", state="incomplete"),
+                _make_check_item("item1", "1.1 \u2014 Subtask", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        # Self-ref item should be pushed complete
+        self_ref_completes = [
+            p for p in plan.push_complete_item
+            if p.get("item_id") == "item_self"
+        ]
+        assert len(self_ref_completes) == 1
+        assert self_ref_completes[0]["state"] == "complete"
+
+    def test_diff_self_ref_checked_on_trello_pulls_complete(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Self-ref item checked on Trello -> pull_complete for root todo."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        parent = _make_todo(
+            cfg, name, "Feature",
+            trello_checklist_id="cl1",
+            trello_checklist_item_id="item_self",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Feature",
+                synced_state="incomplete",
+            ),
+        )
+        child = _make_todo(
+            cfg, name, "Subtask",
+            parent=parent.id,
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="1.1 \u2014 Subtask",
+                synced_state="incomplete",
+            ),
+        )
+        parent.children.append(child.id)
+        parent.updated = "2026-03-19T09:00:00"  # not changed since sync
+        child.updated = "2026-03-19T09:00:00"
+        storage.save_todos(cfg, name, [parent, child])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Feature", [
+                _make_check_item("item_self", "Feature", state="complete"),
+                _make_check_item("item1", "1.1 \u2014 Subtask", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert parent.id in plan.pull_complete
+
+    def test_diff_root_renamed_pushes_rename_checklist_and_self_ref(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Root renamed -> push_rename_checklist AND push_update_item for self-ref."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        parent = _make_todo(
+            cfg, name, "New Name",
+            trello_checklist_id="cl1",
+            trello_checklist_item_id="item_self",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Old Name",
+                synced_state="incomplete",
+            ),
+        )
+        child = _make_todo(
+            cfg, name, "Subtask",
+            parent=parent.id,
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="1.1 \u2014 Subtask",
+                synced_state="incomplete",
+            ),
+        )
+        parent.children.append(child.id)
+        parent.updated = t1  # renamed after last sync
+        child.updated = "2026-03-19T09:00:00"
+        storage.save_todos(cfg, name, [parent, child])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Old Name", [
+                _make_check_item("item_self", "Old Name", state="incomplete"),
+                _make_check_item("item1", "1.1 \u2014 Subtask", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        # Checklist rename
+        assert len(plan.push_rename_checklist) == 1
+        assert plan.push_rename_checklist[0]["name"] == "New Name"
+        # Self-ref item rename (via linked-items loop, last-changed-wins)
+        self_ref_renames = [
+            p for p in plan.push_update_item
+            if p.get("item_id") == "item_self"
+        ]
+        assert len(self_ref_renames) == 1
+        assert self_ref_renames[0]["name"] == "New Name"
+
+    def test_diff_backward_compat_creates_self_ref_item(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Root has trello_checklist_id but no trello_checklist_item_id -> push_create_item."""
+        cfg, name = cfg_with_project
+        parent = _make_todo(
+            cfg, name, "Feature",
+            trello_checklist_id="cl1",
+            # No trello_checklist_item_id -- backward compat
+        )
+        child = _make_todo(
+            cfg, name, "Subtask",
+            parent=parent.id,
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync="2026-03-19T10:00:00",
+                synced_name="1.1 \u2014 Subtask",
+                synced_state="incomplete",
+            ),
+        )
+        parent.children.append(child.id)
+        child.updated = "2026-03-19T09:00:00"
+        storage.save_todos(cfg, name, [parent, child])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", "Feature", [
+                _make_check_item("item1", "1.1 \u2014 Subtask", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        self_ref_creates = [
+            p for p in plan.push_create_item
+            if p.get("is_self_ref") and p.get("todo_id") == parent.id
+        ]
+        assert len(self_ref_creates) == 1
+        assert self_ref_creates[0]["name"] == "Feature"
+        assert self_ref_creates[0]["checklist_id"] == "cl1"
+
+    def test_apply_stores_trello_checklist_item_id_on_root(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """apply_changes stores trello_checklist_item_id on root when self-ref item is linked."""
+        cfg, name = cfg_with_project
+        parent = _make_todo(
+            cfg, name, "Feature",
+            trello_checklist_id="cl1",
+            # No trello_checklist_item_id yet
+        )
+        child = _make_todo(cfg, name, "Subtask", parent=parent.id)
+        parent.children.append(child.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        # Simulate linking the self-ref item after push_create_item returns
+        data = TrelloApplyInput(
+            link_trello_ids=[{
+                "todo_id": parent.id,
+                "trello_checklist_item_id": "item_self_new",
+            }],
+        )
+        counts = apply_changes(data, cfg, name)
+        assert counts["linked"] == 1
+
+        todos = storage.load_todos(cfg, name)
+        root = next(t for t in todos if t.id == parent.id)
+        assert root.trello_checklist_item_id == "item_self_new"
+        assert root.trello_checklist_id == "cl1"  # unchanged

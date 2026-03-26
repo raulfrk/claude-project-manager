@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, date, timezone
 from typing import TYPE_CHECKING, Any
@@ -12,7 +14,10 @@ from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import Todo
+from server.lib.retry import retry_link
 from server.tools.config import require_project
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -318,14 +323,26 @@ def apply_changes(
     data: ApplyInput,
     cfg: Any,
     name: str,
-) -> dict[str, int]:
-    """Apply sync changes to local todos atomically. Returns counts dict."""
+    push_confirmed: bool = False,
+) -> dict[str, Any]:
+    """Apply sync changes to local todos atomically. Returns counts dict.
+
+    When *push_confirmed* is False (default, used during the pull phase),
+    ``todoist_description_synced`` values are **not** persisted on todos.
+    Instead they are collected and returned under the key
+    ``"staged_description_synced"`` so the caller can apply them after the
+    push succeeds (by calling ``apply_changes`` again with the staged values
+    and *push_confirmed=True*).
+
+    When *push_confirmed* is True the description-synced values are written
+    to todo storage normally.
+    """
     meta = storage.load_meta(cfg, name)
     todos = storage.load_todos(cfg, name)
     todo_map = {t.id: t for t in todos}
     today = _now()
 
-    counts = {
+    counts: dict[str, Any] = {
         "created": 0,
         "updated": 0,
         "completed": 0,
@@ -333,10 +350,14 @@ def apply_changes(
         "cleared": 0,
     }
 
+    # Staged description_synced values when push_confirmed is False
+    staged_description_synced: dict[str, str] = {}
+
     # 1. Create new todos
     for item in data.created_locally:
         parent_id = str(item["parent"]) if item.get("parent") else None
         parent_todo = todo_map.get(parent_id) if parent_id else None
+        desc_synced_value = str(item.get("todoist_description_synced", ""))
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
             title=str(item.get("title", "")),
@@ -345,10 +366,12 @@ def apply_changes(
             notes=str(item.get("notes", "")),
             due_date=str(item["due_date"]) if item.get("due_date") else None,
             todoist_task_id=str(item["todoist_task_id"]) if item.get("todoist_task_id") else None,
-            todoist_description_synced=str(item.get("todoist_description_synced", "")),
+            todoist_description_synced=desc_synced_value if push_confirmed else "",
             created=today,
             updated=today,
         )
+        if not push_confirmed and desc_synced_value:
+            staged_description_synced[todo.id] = desc_synced_value
         if parent_todo:
             parent_todo.children.append(todo.id)
             parent_todo.updated = today
@@ -375,19 +398,47 @@ def apply_changes(
         if "todoist_task_id" in item:
             todo.todoist_task_id = str(item["todoist_task_id"]) if item["todoist_task_id"] else None
         if "todoist_description_synced" in item:
-            todo.todoist_description_synced = str(item.get("todoist_description_synced", ""))
+            desc_synced_value = str(item.get("todoist_description_synced", ""))
+            if push_confirmed:
+                todo.todoist_description_synced = desc_synced_value
+            else:
+                staged_description_synced[todo_id] = desc_synced_value
         todo.updated = today
         counts["updated"] += 1
 
     # 3. Link todoist IDs (after push_create returns Todoist task IDs)
+    tracking_path = str(storage.tracking_dir(cfg, name))
     for item in data.link_todoist_ids:
         todo_id = str(item.get("todo_id", ""))
         todoist_task_id = str(item.get("todoist_task_id", ""))
         todo = todo_map.get(todo_id)
         if todo and todoist_task_id:
-            todo.todoist_task_id = todoist_task_id
-            todo.updated = today
-            counts["linked"] += 1
+            try:
+                def _do_link(t=todo, tid=todoist_task_id, ts=today):  # noqa: E731
+                    t.todoist_task_id = tid
+                    t.updated = ts
+
+                retry_link(
+                    _do_link,
+                    max_retries=3,
+                    orphan_context={
+                        "tracking_dir": tracking_path,
+                        "external_id": todoist_task_id,
+                        "todo_id": todo_id,
+                        "service": "todoist",
+                    },
+                )
+                counts["linked"] += 1
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to link Todoist task {todoist_task_id} to todo "
+                    f"{todo_id} after retries; orphaned resource logged: {exc}",
+                    stacklevel=2,
+                )
+                logger.warning(
+                    "Orphaned Todoist task %s (todo %s): %s",
+                    todoist_task_id, todo_id, exc,
+                )
 
     # 4. Clear todoist IDs (root_only cleanup)
     for raw_todo_id in data.cleared_todoist_ids:
@@ -427,6 +478,7 @@ def apply_changes(
     else:
         storage.save_todos(cfg, name, todos)
 
+    counts["staged_description_synced"] = staged_description_synced
     return counts
 
 
@@ -478,7 +530,7 @@ def register(app: FastMCP) -> None:
         response: dict[str, object] = {
             "plan": {"summary": plan_dict["summary"]} if summary_only else plan_dict,
             "project_info": {
-                "mcp_server": cfg.todoist.mcp_server,
+                "mcp_server": "todoist",  # Deprecated: config field ignored; local plugin uses fixed "todoist" prefix
                 "todoist_project_id": meta.todoist_project_id or "",
             },
         }
@@ -510,6 +562,7 @@ def register(app: FastMCP) -> None:
     )
     def proj_todoist_apply(
         apply_json: str,
+        push_confirmed: bool = False,
         project_name: str | None = None,
     ) -> str:
         result = require_project(project_name)
@@ -529,5 +582,5 @@ def register(app: FastMCP) -> None:
             link_todoist_ids=raw.get("link_todoist_ids", []),
             cleared_todoist_ids=raw.get("cleared_todoist_ids", []),
         )
-        counts = apply_changes(data, cfg, name)
+        counts = apply_changes(data, cfg, name, push_confirmed=push_confirmed)
         return json.dumps({"status": "ok", "counts": counts})

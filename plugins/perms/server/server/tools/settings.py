@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from datetime import datetime
@@ -117,10 +118,36 @@ def remove_allow(path: str, scope: str = "user", target: str = "auto") -> str:
     return f"No matching rules found in {settings.path} — no changes made."
 
 
-def list_allow(scope: str = "all", target: str = "auto") -> str:
-    """List current allow rules from Claude Code settings files."""
-    lines: list[str] = []
+def list_allow(scope: str = "all", target: str = "auto", format: str = "text") -> str:
+    """List current allow rules from Claude Code settings files.
+
+    When *format* is ``"json"``, returns a JSON string with structured data
+    suitable for programmatic consumption::
+
+        {"scopes": [{"scope": "user", "path": "...", "target": "sandbox",
+                      "permissions_allow": [...], "sandbox_allow_write": [...]}]}
+    """
     scopes = ["user", "project"] if scope == "all" else [scope]
+
+    if format == "json":
+        entries: list[dict[str, object]] = []
+        for s in scopes:
+            resolved = storage.resolve_target(target, s)
+            if resolved == "sandbox":
+                settings = storage.load_local(s)
+            else:
+                settings = storage.load(s)
+            entries.append({
+                "scope": s,
+                "path": str(settings.path),
+                "target": resolved,
+                "permissions_allow": list(settings.permissions.allow),
+                "sandbox_allow_write": list(settings.sandbox.filesystem.allow_write),
+            })
+        return json.dumps({"scopes": entries})
+
+    # Default text format — unchanged behaviour
+    lines: list[str] = []
     for s in scopes:
         resolved = storage.resolve_target(target, s)
 
@@ -251,6 +278,132 @@ def batch_add_mcp_allow(servers: list[str], scope: str = "user", target: str = "
     return f"All {len(skipped)} rule(s) already present in {settings.path} — no changes made."
 
 
+def batch_setup(
+    paths: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
+    scope: str = "user",
+    target: str = "auto",
+) -> str:
+    """Add sandbox paths and MCP allow rules in one atomic write.
+
+    Combines ``_add_path_sandbox`` (for sandbox mode) and MCP wildcard rule
+    addition into a single ``storage.save()`` call.  Idempotent — already-present
+    entries are skipped.
+    """
+    paths = paths or []
+    mcp_servers = mcp_servers or []
+
+    if not paths and not mcp_servers:
+        return "No paths or servers specified — nothing to do."
+
+    resolved = storage.resolve_target(target, scope)
+    settings = _load_for_target(resolved, scope)
+
+    # ── Sandbox paths ─────────────────────────────────────────────────────
+    sandbox_added: list[str] = []
+    sandbox_skipped = 0
+    if paths and resolved == "sandbox":
+        for p in paths:
+            abs_path = str(Path(p).expanduser().resolve())
+            added = _add_path_sandbox(settings, abs_path)
+            if added:
+                sandbox_added.extend(added)
+            else:
+                sandbox_skipped += 1
+
+    # ── MCP wildcard rules ────────────────────────────────────────────────
+    mcp_added: list[str] = []
+    mcp_skipped = 0
+    if mcp_servers:
+        allow_set = set(settings.permissions.allow)
+        for server in mcp_servers:
+            entry = storage.mcp_allow_entry(server)
+            if entry in allow_set:
+                mcp_skipped += 1
+            else:
+                settings.permissions.allow.append(entry)
+                allow_set.add(entry)
+                mcp_added.append(entry)
+
+    # ── Persist & report ──────────────────────────────────────────────────
+    total_added = len(sandbox_added) + len(mcp_added)
+    if not total_added:
+        total_skipped = sandbox_skipped + mcp_skipped
+        return f"Already up to date — {total_skipped} existing entry/entries skipped in {settings.path}."
+
+    storage.save(settings)
+
+    lines: list[str] = [f"Updated {settings.path}:"]
+    if sandbox_added:
+        lines.append(f"  Sandbox paths added: {len(sandbox_added)}")
+        lines.extend(f"    {e}" for e in sandbox_added)
+    if sandbox_skipped:
+        lines.append(f"  Sandbox paths skipped (already present): {sandbox_skipped}")
+    if mcp_added:
+        lines.append(f"  MCP rules added: {len(mcp_added)}")
+        lines.extend(f"    {e}" for e in mcp_added)
+    if mcp_skipped:
+        lines.append(f"  MCP rules skipped (already present): {mcp_skipped}")
+    return "\n".join(lines)
+
+
+def batch_revoke(
+    paths: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
+    scope: str = "user",
+    target: str = "auto",
+) -> str:
+    """Remove sandbox paths and MCP allow rules in one atomic write.
+
+    Inverse of batch setup. Removes matching paths from
+    ``sandbox.filesystem.allowWrite`` (sandbox mode) and matching
+    ``mcp__<server>__*`` wildcard rules from ``permissions.allow``.
+    Single atomic write. Idempotent — removing non-existent entries is a no-op.
+    """
+    paths = paths or []
+    mcp_servers = mcp_servers or []
+
+    if not paths and not mcp_servers:
+        return "Nothing to revoke — both paths and mcp_servers are empty."
+
+    resolved = storage.resolve_target(target, scope)
+    settings = _load_for_target(resolved, scope)
+
+    if not settings.path.exists():
+        return f"Settings file {settings.path} does not exist — nothing to revoke."
+
+    sandbox_removed = 0
+    mcp_removed = 0
+
+    # Remove sandbox paths
+    if paths and resolved == "sandbox":
+        for p in paths:
+            abs_path = str(Path(p).expanduser().resolve())
+            sandbox_removed += _remove_path_sandbox(settings, abs_path)
+
+    # Remove MCP wildcard rules
+    if mcp_servers:
+        entries_to_remove = {storage.mcp_allow_entry(s) for s in mcp_servers}
+        before = len(settings.permissions.allow)
+        settings.permissions.allow = [
+            e for e in settings.permissions.allow if e not in entries_to_remove
+        ]
+        mcp_removed = before - len(settings.permissions.allow)
+
+    total = sandbox_removed + mcp_removed
+    if total == 0:
+        return f"No matching entries found in {settings.path} — nothing removed."
+
+    storage.save(settings)
+
+    parts: list[str] = [f"Revoked {total} entry/entries from {settings.path}:"]
+    if sandbox_removed:
+        parts.append(f"  sandbox paths removed: {sandbox_removed}")
+    if mcp_removed:
+        parts.append(f"  MCP rules removed: {mcp_removed}")
+    return "\n".join(parts)
+
+
 _PATH_RULE_RE = re.compile(r"^(?:Read|Edit)\(//(.+?)/\*\*\)$")
 _STALE_RULE_RE = re.compile(r"^(?:Read|Edit|Bash)\(")
 
@@ -351,58 +504,6 @@ def remove_domain(domain: str) -> str:
     return f"Domain not found in {settings.path} — no changes made."
 
 
-_DENY_DISPLAY = {"deny_write": "denyWrite", "deny_read": "denyRead"}
-
-
-def _add_to_deny_list(path: str, field: str) -> str:
-    """Add a path to a sandbox deny list (denyWrite or denyRead). Idempotent."""
-    display = _DENY_DISPLAY[field]
-    abs_path = str(Path(path).expanduser().resolve())
-    settings = storage.load("user")
-    deny_list: list[str] = getattr(settings.sandbox.filesystem, field)
-    if abs_path in deny_list:
-        return f"Path already in {display} in {settings.path} — no changes made."
-    deny_list.append(abs_path)
-    storage.save(settings)
-    return f"Added to sandbox.filesystem.{display} in {settings.path}:\n  {abs_path}"
-
-
-def _remove_from_deny_list(path: str, field: str) -> str:
-    """Remove a path from a sandbox deny list (denyWrite or denyRead). Idempotent."""
-    display = _DENY_DISPLAY[field]
-    abs_path = str(Path(path).expanduser().resolve())
-    settings = storage.load("user")
-    deny_list: list[str] = getattr(settings.sandbox.filesystem, field)
-    before = len(deny_list)
-    new_list = [p for p in deny_list if p != abs_path]
-    setattr(settings.sandbox.filesystem, field, new_list)
-    removed = before - len(new_list)
-    if removed:
-        storage.save(settings)
-        return f"Removed from {display} in {settings.path}: {abs_path}"
-    return f"Path not in {display} in {settings.path} — no changes made."
-
-
-def deny_write(path: str) -> str:
-    """Add a path to sandbox.filesystem.denyWrite. Idempotent."""
-    return _add_to_deny_list(path, "deny_write")
-
-
-def remove_deny_write(path: str) -> str:
-    """Remove a path from sandbox.filesystem.denyWrite. Idempotent."""
-    return _remove_from_deny_list(path, "deny_write")
-
-
-def deny_read(path: str) -> str:
-    """Add a path to sandbox.filesystem.denyRead. Idempotent."""
-    return _add_to_deny_list(path, "deny_read")
-
-
-def remove_deny_read(path: str) -> str:
-    """Remove a path from sandbox.filesystem.denyRead. Idempotent."""
-    return _remove_from_deny_list(path, "deny_read")
-
-
 def backup() -> str:
     """Create timestamped backups of settings.json and settings.local.json."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -454,6 +555,12 @@ def cleanup_stale() -> str:
     return "\n".join(results) if results else "No settings files found."
 
 
+def is_sandbox_enabled_tool(scope: str = "user") -> str:
+    """Check if sandbox mode is enabled."""
+    enabled = storage.is_sandbox_enabled(scope)
+    return f"sandbox_enabled: {str(enabled).lower()}"
+
+
 def register(app: FastMCP) -> None:
     """Register all perms tools with the MCP application."""
 
@@ -480,11 +587,12 @@ def register(app: FastMCP) -> None:
     @app.tool(
         description=(
             "List current allow rules from Claude Code settings files. "
-            "target: 'settings', 'sandbox', or 'auto' (default)."
+            "target: 'settings', 'sandbox', or 'auto' (default). "
+            "format: 'text' (default, human-readable) or 'json' (structured data for programmatic use)."
         )
     )
-    def perms_list(scope: str = "all", target: str = "auto") -> str:
-        return list_allow(scope, target)
+    def perms_list(scope: str = "all", target: str = "auto", format: str = "text") -> str:
+        return list_allow(scope, target, format)
 
     @app.tool(
         description=(
@@ -528,6 +636,23 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Add sandbox filesystem paths and MCP server allow rules in one atomic write. "
+            "In sandbox mode: adds each path to sandbox.filesystem.allowWrite. "
+            "In all modes: adds mcp__<server>__* wildcard rules to permissions.allow. "
+            "Single file write regardless of how many paths/servers. Idempotent. "
+            "target: 'settings', 'sandbox', or 'auto' (default)."
+        )
+    )
+    def perms_batch_setup(
+        paths: list[str] | None = None,
+        mcp_servers: list[str] | None = None,
+        scope: str = "user",
+        target: str = "auto",
+    ) -> str:
+        return batch_setup(paths, mcp_servers, scope, target)
+
+    @app.tool(
+        description=(
             "Initialize sandbox mode in global settings (~/.claude/settings.json). "
             "Enables sandbox.enabled and sandbox.autoAllowBashIfSandboxed. "
             "Auto-migrates existing Read/Edit path rules from permissions.allow into "
@@ -548,30 +673,6 @@ def register(app: FastMCP) -> None:
     )
     def perms_remove_domain(domain: str) -> str:
         return remove_domain(domain)
-
-    @app.tool(
-        description="Add a path to sandbox.filesystem.denyWrite in global settings. Idempotent."
-    )
-    def perms_deny_write(path: str) -> str:
-        return deny_write(path)
-
-    @app.tool(
-        description="Remove a path from sandbox.filesystem.denyWrite in global settings. Idempotent."
-    )
-    def perms_remove_deny_write(path: str) -> str:
-        return remove_deny_write(path)
-
-    @app.tool(
-        description="Add a path to sandbox.filesystem.denyRead in global settings. Idempotent."
-    )
-    def perms_deny_read(path: str) -> str:
-        return deny_read(path)
-
-    @app.tool(
-        description="Remove a path from sandbox.filesystem.denyRead in global settings. Idempotent."
-    )
-    def perms_remove_deny_read(path: str) -> str:
-        return remove_deny_read(path)
 
     @app.tool(
         description=(
@@ -603,3 +704,30 @@ def register(app: FastMCP) -> None:
     )
     def perms_cleanup_stale() -> str:
         return cleanup_stale()
+
+    @app.tool(
+        description=(
+            "Remove sandbox paths and MCP allow rules in one atomic write. "
+            "Inverse of batch setup. Accepts lists of filesystem paths and MCP server names. "
+            "In sandbox mode removes matching paths from sandbox.filesystem.allowWrite. "
+            "Removes matching mcp__<server>__* rules from permissions.allow. "
+            "Idempotent — removing non-existent entries is a no-op. "
+            "target: 'settings', 'sandbox', or 'auto' (default)."
+        )
+    )
+    def perms_batch_revoke(
+        paths: list[str] | None = None,
+        mcp_servers: list[str] | None = None,
+        scope: str = "user",
+        target: str = "auto",
+    ) -> str:
+        return batch_revoke(paths, mcp_servers, scope, target)
+
+    @app.tool(
+        description=(
+            "Check if sandbox mode is enabled in settings.local.json. "
+            "Returns 'sandbox_enabled: true' or 'sandbox_enabled: false'. Read-only."
+        )
+    )
+    def perms_is_sandbox_enabled(scope: str = "user") -> str:
+        return is_sandbox_enabled_tool(scope)

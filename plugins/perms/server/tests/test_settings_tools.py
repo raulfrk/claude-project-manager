@@ -15,12 +15,9 @@ from server.tools.settings import (
     add_mcp_allow,
     batch_add_mcp_allow,
     check_allow,
-    deny_read,
-    deny_write,
+    is_sandbox_enabled_tool,
     list_allow,
     remove_allow,
-    remove_deny_read,
-    remove_deny_write,
     remove_domain,
     remove_mcp_allow,
     sandbox_init,
@@ -624,6 +621,99 @@ class TestListAllowSandboxMode:
         assert "no sandbox rules" in result
 
 
+# ---------------------------------------------------------------------------
+# list_allow format="json"
+# ---------------------------------------------------------------------------
+
+
+class TestListAllowJsonFormat:
+    """Tests for list_allow(format='json') structured output."""
+
+    def test_returns_valid_json(self, user_settings: Path) -> None:
+        _write_settings(user_settings, {"permissions": {"allow": ["mcp__proj__*"]}})
+        result = list_allow("user", format="json")
+        data = json.loads(result)
+        assert "scopes" in data
+
+    def test_json_contains_permissions_allow(self, user_settings: Path) -> None:
+        _write_settings(user_settings, {"permissions": {"allow": ["mcp__proj__*", "mcp__perms__*"]}})
+        result = list_allow("user", format="json")
+        data = json.loads(result)
+        scope_entry = data["scopes"][0]
+        assert scope_entry["scope"] == "user"
+        assert scope_entry["permissions_allow"] == ["mcp__proj__*", "mcp__perms__*"]
+
+    def test_json_contains_sandbox_allow_write(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj", "/home/user/other"]},
+            },
+            "permissions": {"allow": ["mcp__proj__*"]},
+        })
+        result = list_allow("user", target="sandbox", format="json")
+        data = json.loads(result)
+        scope_entry = data["scopes"][0]
+        assert scope_entry["target"] == "sandbox"
+        assert scope_entry["sandbox_allow_write"] == ["/home/user/proj", "/home/user/other"]
+        assert scope_entry["permissions_allow"] == ["mcp__proj__*"]
+
+    def test_json_empty_file_returns_empty_lists(self, user_settings: Path) -> None:
+        # File does not exist — should still return valid JSON with empty lists
+        result = list_allow("user", format="json")
+        data = json.loads(result)
+        scope_entry = data["scopes"][0]
+        assert scope_entry["permissions_allow"] == []
+        assert scope_entry["sandbox_allow_write"] == []
+        assert scope_entry["path"] == str(user_settings)
+
+    def test_json_scope_all_returns_both(
+        self, project_and_user_settings: tuple[Path, Path]
+    ) -> None:
+        project_path, user_path = project_and_user_settings
+        _write_settings(user_path, {"permissions": {"allow": ["mcp__proj__*"]}})
+        _write_settings(project_path, {"permissions": {"allow": ["mcp__perms__*"]}})
+        result = list_allow("all", format="json")
+        data = json.loads(result)
+        assert len(data["scopes"]) == 2
+        scopes_by_name = {s["scope"]: s for s in data["scopes"]}
+        assert scopes_by_name["user"]["permissions_allow"] == ["mcp__proj__*"]
+        assert scopes_by_name["project"]["permissions_allow"] == ["mcp__perms__*"]
+
+    def test_json_includes_path_field(self, user_settings: Path) -> None:
+        _write_settings(user_settings, {"permissions": {"allow": []}})
+        result = list_allow("user", format="json")
+        data = json.loads(result)
+        assert data["scopes"][0]["path"] == str(user_settings)
+
+    def test_json_includes_target_field_settings(self, user_settings: Path) -> None:
+        result = list_allow("user", target="settings", format="json")
+        data = json.loads(result)
+        assert data["scopes"][0]["target"] == "settings"
+
+    def test_json_includes_target_field_sandbox(self, sandbox_settings: Path) -> None:
+        result = list_allow("user", target="sandbox", format="json")
+        data = json.loads(result)
+        assert data["scopes"][0]["target"] == "sandbox"
+
+    def test_text_format_unchanged(self, user_settings: Path) -> None:
+        """format='text' returns the same output as the original (no JSON)."""
+        _write_settings(user_settings, {"permissions": {"allow": ["Read(//foo/**)"]}})
+        result_text = list_allow("user", format="text")
+        assert "Read(//foo/**)" in result_text
+        # Must not be JSON
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(result_text)
+
+    def test_default_format_is_text(self, user_settings: Path) -> None:
+        """Omitting format returns text (backward compatible)."""
+        _write_settings(user_settings, {"permissions": {"allow": ["Read(//foo/**)"]}})
+        result = list_allow("user")
+        assert "Read(//foo/**)" in result
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(result)
+
+
 class TestCheckAllowSandboxMode:
     def test_present(self, sandbox_settings: Path) -> None:
         _write_local_settings(sandbox_settings, {
@@ -801,69 +891,59 @@ class TestRemoveDomain:
 
 
 # ---------------------------------------------------------------------------
+# is_sandbox_enabled tool
+# ---------------------------------------------------------------------------
+
+
+class TestIsSandboxEnabled:
+    def test_returns_true_when_sandbox_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        result = is_sandbox_enabled_tool(scope="user")
+        assert result == "sandbox_enabled: true"
+
+    def test_returns_false_when_sandbox_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": False}})
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        result = is_sandbox_enabled_tool(scope="user")
+        assert result == "sandbox_enabled: false"
+
+    def test_returns_false_when_file_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        result = is_sandbox_enabled_tool(scope="user")
+        assert result == "sandbox_enabled: false"
+
+    def test_returns_false_when_no_sandbox_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"permissions": {"allow": []}})
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        result = is_sandbox_enabled_tool(scope="user")
+        assert result == "sandbox_enabled: false"
+
+    def test_project_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        local_path = project_dir / ".claude" / "settings.local.json"
+        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+        result = is_sandbox_enabled_tool(scope="project")
+        assert result == "sandbox_enabled: true"
+
+
+# ---------------------------------------------------------------------------
 # Filesystem deny tools
 # ---------------------------------------------------------------------------
 
 
-def _read_sandbox_deny_write(path: Path) -> list[str]:
-    sandbox = _read_sandbox(path)
-    fs = sandbox.get("filesystem", {})
-    assert isinstance(fs, dict)
-    return fs.get("denyWrite", [])  # type: ignore[return-value]
-
-
-def _read_sandbox_deny_read(path: Path) -> list[str]:
-    sandbox = _read_sandbox(path)
-    fs = sandbox.get("filesystem", {})
-    assert isinstance(fs, dict)
-    return fs.get("denyRead", [])  # type: ignore[return-value]
-
-
-class TestDenyWrite:
-    def test_adds_path(self, user_settings: Path) -> None:
-        result = deny_write("/etc/passwd")
-        assert "/etc/passwd" in result
-        assert "/etc/passwd" in _read_sandbox_deny_write(user_settings)
-
-    def test_idempotent(self, user_settings: Path) -> None:
-        deny_write("/etc/passwd")
-        result = deny_write("/etc/passwd")
-        assert "already" in result
-        assert _read_sandbox_deny_write(user_settings).count("/etc/passwd") == 1
-
-
-class TestRemoveDenyWrite:
-    def test_removes_path(self, user_settings: Path) -> None:
-        deny_write("/etc/passwd")
-        result = remove_deny_write("/etc/passwd")
-        assert "Removed" in result
-        assert "/etc/passwd" not in _read_sandbox_deny_write(user_settings)
-
-    def test_not_found(self, user_settings: Path) -> None:
-        result = remove_deny_write("/nonexistent")
-        assert "not in denyWrite" in result
-
-
-class TestDenyRead:
-    def test_adds_path(self, user_settings: Path) -> None:
-        result = deny_read("/etc/shadow")
-        assert "/etc/shadow" in result
-        assert "/etc/shadow" in _read_sandbox_deny_read(user_settings)
-
-    def test_idempotent(self, user_settings: Path) -> None:
-        deny_read("/etc/shadow")
-        result = deny_read("/etc/shadow")
-        assert "already" in result
-        assert _read_sandbox_deny_read(user_settings).count("/etc/shadow") == 1
-
-
-class TestRemoveDenyRead:
-    def test_removes_path(self, user_settings: Path) -> None:
-        deny_read("/etc/shadow")
-        result = remove_deny_read("/etc/shadow")
-        assert "Removed" in result
-        assert "/etc/shadow" not in _read_sandbox_deny_read(user_settings)
-
-    def test_not_found(self, user_settings: Path) -> None:
-        result = remove_deny_read("/nonexistent")
-        assert "not in denyRead" in result

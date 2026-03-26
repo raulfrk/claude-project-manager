@@ -442,41 +442,41 @@ sequenceDiagram
     note over S: Sync happens at skill level,<br/>NOT in MCP server.<br/>root_only config limits scope<br/>to root todos only.
 
     rect rgb(40, 60, 90)
-        note right of U: Todoist Sync (/proj:sync)
+        note right of U: Todoist Sync (/proj:todoist-sync)
 
         note over U,TdS: 1. Local todo created -- push to Todoist
-        U->>S: /proj:sync
+        U->>S: /proj:todoist-sync
         S->>S: Load todos (root_only filter)
-        S->>TdM: add-tasks(title, project_id)
+        S->>TdM: todoist_add_tasks(title, project_id)
         TdM->>TdS: POST /tasks
         TdS-->>TdM: task_id
         TdM-->>S: task_id
         S->>S: Store todoist_task_id on local todo
 
         note over U,TdS: 2. Todoist task completed -- pull to local
-        U->>S: /proj:sync
-        S->>TdM: fetch-object(task_id)
-        TdM->>TdS: GET /tasks/{id}
-        TdS-->>TdM: task (is_completed=true)
-        TdM-->>S: completed task
-        S->>S: Mark local todo done
+        U->>S: /proj:todoist-sync
+        S->>TdM: todoist_find_tasks(project_id)
+        TdM->>TdS: GET /tasks
+        TdS-->>TdM: tasks (includes completed)
+        TdM-->>S: task list
+        S->>S: Detect completion via diff, mark local todo done
 
         note over U,TdS: 3. Title conflict resolution
-        U->>S: /proj:sync
-        S->>TdM: fetch-object(task_id)
-        TdM-->>S: remote title + updated_at
+        U->>S: /proj:todoist-sync
+        S->>TdM: todoist_find_tasks(project_id)
+        TdM-->>S: remote tasks with titles + updated_at
         S->>S: Compare timestamps
         alt Local is newer
-            S->>TdM: update-tasks(task_id, local title)
+            S->>TdM: todoist_update_tasks(task_id, local title)
             TdM->>TdS: POST /tasks/{id}
         else Remote is newer
             S->>S: Update local todo title from remote
         end
 
         note over U,TdS: 4. Ghost detection -- archived local match
-        U->>S: /proj:sync
+        U->>S: /proj:todoist-sync
         S->>S: Detect archived todo with todoist_task_id
-        S->>TdM: complete-tasks(task_id)
+        S->>TdM: todoist_complete_tasks(task_id)
         TdM->>TdS: POST /tasks/{id}/close
         TdS-->>TdM: 204 OK
     end

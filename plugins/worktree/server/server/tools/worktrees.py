@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from server.lib import git, storage
 from server.lib.git import GitError
-from server.lib.zoxide import zoxide_boost, zoxide_remove
 from server.tools.repos import get_repo
 
 if TYPE_CHECKING:
@@ -59,9 +58,6 @@ def create_worktree(
         git.add_worktree(repo.path, worktree_path, branch, new_branch=new_branch)
     except GitError as e:
         return f"Error: {e}"
-
-    if storage.load().zoxide_integration:
-        zoxide_boost(worktree_path)
 
     return f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label})."
 
@@ -114,8 +110,6 @@ def remove_worktree(path: str, force: bool = False) -> str:
     if not result:
         return f"No managed worktree found at: {path}"
     abs_path, repo_path = result
-    if storage.load().zoxide_integration:
-        zoxide_remove(abs_path)
     try:
         git.remove_worktree(repo_path, abs_path, force=force)
         return f"Removed worktree at {abs_path}."

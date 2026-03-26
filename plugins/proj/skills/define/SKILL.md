@@ -24,44 +24,54 @@ If `no_interactive` is true, skip directly to the **Non-interactive path** below
 
 **2. Load context**
 
-Call `mcp__proj__proj_get_todo_context` with the todo ID to get the todo, existing requirements, and research in one call.
+Call `mcp__proj__proj_get_todo_context` with the todo ID.
 
 If the result indicates the todo was not found (null todo or error), stop and output:
 "Todo <id> not found."
 
-Review existing requirements and research (if any) and identify what's still unclear. If the todo has a non-empty `notes` field, treat it as additional context — incorporate it into your understanding.
+Review existing requirements, research, and notes. Store them for later reference.
 
-**3. Iterative Q&A loop** — ask questions until no meaningful gaps remain:
+**3. Free-form writing**
 
-- Focus on: Goals, Acceptance Criteria, Edge Cases, Out of Scope, Testing Strategy
-- Ask the single most important open question
-- Record the answer
-- Assess whether there are more important questions to ask
-- Repeat until you've covered all critical aspects
+If existing requirements or research are present, display them under a "Previous context" heading so the user can see what already exists.
 
-**Final question (always last):**
-> "Are you happy to proceed, or would you like to add more details first?"
+Prompt the user:
+> "Describe the goals, constraints, and anything else important for this todo. Write as much or as little as you want — I'll ask follow-up questions next."
+
+Record the user's response as the freeform input.
+
+**4. Gap analysis**
+
+Analyze the freeform input (plus any previous context) for:
+- Vague or untestable language (e.g., "should be fast", "handle errors properly")
+- Missing acceptance criteria
+- Unclear scope boundaries
+- Missing edge cases
+- Missing testing strategy
+- Implicit assumptions that need to be explicit
+
+Produce a structured gap list. Classify each gap as:
+- **CRITICAL** — blocks writing a quality requirements doc (must be resolved)
+- **MINOR** — would improve the doc but can be inferred or defaulted
+
+Present the gap list to the user before proceeding.
+
+**5. Probing Q&A**
+
+Drive questions from the gap analysis — do NOT use predefined category lists. Rules:
+- Address CRITICAL gaps first, then MINOR gaps if the user is willing
+- Ask one focused question at a time
+- When the user is uncertain about a question, offer 2-3 concrete options with tradeoffs
+- Continue until all CRITICAL gaps are addressed
+- Record every Q&A pair as a transcript
+
+When all CRITICAL gaps are resolved, ask:
+> "All critical gaps are covered. Would you like to:"
 > 1. Proceed — write requirements and research now
-> 2. Add more details — ask another question
+> 2. Address remaining minor gaps
+> 3. Add something else
 
-If the user picks "Add more details", continue the Q&A loop.
-
-Record all Q&A pairs as a transcript.
-
-**4. Plan the requirements and research**
-
-Call `EnterPlanMode`. Based on the Q&A transcript and codebase knowledge, outline:
-- Requirements document structure (goal, acceptance criteria, out of scope, testing)
-- Research approach: which areas of the codebase to explore, what patterns to look for, 2-3 implementation approaches to consider
-
-Call `ExitPlanMode` to present the outline for user review. The user will approve or request changes before you proceed to step 5.
-
-**5. Research the codebase**
-
-After plan approval, research the implementation approach:
-- Explore the codebase for existing patterns (Read, Glob, Grep)
-- Research external libraries or APIs if needed (WebSearch, WebFetch)
-- Evaluate 2-3 different approaches based on what you find
+If the user picks 2, continue with MINOR gaps. If 3, continue open-ended Q&A.
 
 **6. Write requirements and research**
 
@@ -77,16 +87,22 @@ Write `requirements.md`:
 - [ ] <criterion 1>
 - [ ] <criterion 2>
 
+## Edge Cases
+- <edge case 1>
+- <edge case 2>
+
 ## Out of Scope
 - <what NOT to do>
 
 ## Testing Strategy
 <how to verify this works>
 
-## Q&A
+## Q&A Transcript
 **Q:** <question>
 **A:** <answer>
 ```
+
+Research the codebase (Read, Glob, Grep) and external sources (WebSearch, WebFetch) as needed. Evaluate 2-3 implementation approaches.
 
 Write `research.md`:
 
@@ -115,7 +131,43 @@ Write `research.md`:
 
 Call `mcp__proj__content_set_requirements` with the requirements content.
 Call `mcp__proj__content_set_research` with the research content.
+
+**7. Quality gate loop (hard block)**
+
+Validate the written requirements against ALL of the following criteria:
+- [ ] Every acceptance criterion is testable (specific, measurable)
+- [ ] No vague language remains ("fast", "properly", "good", "clean", etc.)
+- [ ] At least 2 edge cases documented
+- [ ] Out of Scope section is present and non-empty
+- [ ] Testing strategy is present and actionable
+
+**PASS** — all criteria met. Proceed to step 8.
+
+**FAIL** — present the failing criteria to the user and offer:
+> 1. **Fix** — iterate on the failing sections and re-run the quality gate
+> 2. **Restart** — go back to step 3 with current requirements as background context
+
+If the user picks Fix: revise the relevant sections, re-write via `mcp__proj__content_set_requirements`, and re-run the gate.
+
+If the user picks Restart: return to step 3, showing current requirements as "Previous context".
+
+After 3 consecutive gate iterations without passing, suggest Restart:
+> "This is the 3rd gate iteration. Consider restarting from free-form writing to reframe the requirements from scratch."
+
+Do NOT proceed past this step until the gate passes.
+
+**8. CLAUDE.md update**
+
+Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules, style conventions, standards, or implementation hints discovered during this define session.
+
+Only write rules that apply broadly to the project. Do NOT write todo-specific details — those belong in requirements.md.
+
+**9. Git tracking flush**
+
+Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
+
+Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:execute <id> — if straightforward, execute directly
 
 ---
 
@@ -123,27 +175,46 @@ Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_re
 
 *(Reached when `--no-interactive` is present in $ARGUMENTS)*
 
-**NI-1.** Call `mcp__proj__proj_get_todo_context` with the todo ID.
+**NI-1. Load context**
+
+Call `mcp__proj__proj_get_todo_context` with the todo ID.
 
 If the result indicates the todo was not found (null todo or error), stop and output:
 "Todo <id> not found."
 
-**NI-2.** Explore the codebase for existing patterns and relevant code (Read, Glob, Grep).
+**NI-2. Explore codebase**
 
-**NI-3.** Write both `requirements.md` and `research.md` directly from context (no Q&A, no plan mode). Use the same formats as step 6.
+Use Read, Glob, and Grep to explore the codebase for existing patterns, relevant code, and implementation context. Be thorough — this replaces the interactive Q&A.
 
-Call `mcp__proj__content_set_requirements` with the content.
-Call `mcp__proj__content_set_research` with the content.
+**NI-3. Write requirements and research**
+
+Write both `requirements.md` and `research.md` directly from the todo context and codebase exploration. Use the same formats as step 6.
+
+Call `mcp__proj__content_set_requirements` with the requirements content.
+Call `mcp__proj__content_set_research` with the research content.
+
+**NI-4. Self-assessment**
+
+Rate confidence for each section on a 5-point scale:
+
+| Section             | Score | Meaning of 1 | Meaning of 5 |
+|---------------------|-------|---------------|---------------|
+| Goal                | ?/5   | speculative   | certain       |
+| Acceptance Criteria | ?/5   | speculative   | certain       |
+| Edge Cases          | ?/5   | speculative   | certain       |
+| Out of Scope        | ?/5   | speculative   | certain       |
+| Testing Strategy    | ?/5   | speculative   | certain       |
+
+Output the confidence table, then list actionable gaps with suggested fixes:
+> **Gaps:**
+> - <gap description> — suggested fix: <what to do>
+
+**NI-5. Finalize**
+
 Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
 
----
+Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules or standards discovered. Only project-wide rules, not todo-specific details.
 
-**7. Update CLAUDE.md**
-
-If the project has a CLAUDE.md, call `mcp__proj__claudemd_write` to append or update the
-requirements summary under a `## Requirements: <todo-title>` heading. Write a 1-3 sentence
-summary of the goal and the key acceptance criteria.
-
-8. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
+Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 
 Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:execute <id> — if straightforward, execute directly

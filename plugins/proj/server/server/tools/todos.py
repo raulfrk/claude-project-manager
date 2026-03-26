@@ -142,7 +142,7 @@ def _filter_todos(
 
 
 def register(app: FastMCP) -> None:
-    """Register todo_add, todo_list, todo_get, todo_update, todo_complete, todo_block, todo_unblock, todo_delete, todo_ready, todo_add_child, todo_tree, todo_set_content_flag, todo_check_executable, and proj_identify_batches tools with the MCP app."""
+    """Register todo_add, todo_list, todo_get, todo_update, todo_complete, todo_block, todo_unblock, todo_delete, todo_ready, todo_add_child, todo_batch_add_children, todo_tree, todo_set_content_flag, todo_check_executable, and proj_identify_batches tools with the MCP app."""
 
     @app.tool(description="Add a new todo to a project.")
     def todo_add(
@@ -153,6 +153,8 @@ def register(app: FastMCP) -> None:
         parent: str | None = None,
         notes: str = "",
         due_date: str | None = None,
+        todoist_task_id: str | None = None,
+        trello_checklist_item_id: str | None = None,
         project_name: str | None = None,
     ) -> str:
         result = require_project(project_name)
@@ -181,6 +183,8 @@ def register(app: FastMCP) -> None:
             parent=parent,
             notes=notes,
             due_date=due_date,
+            todoist_task_id=todoist_task_id,
+            trello_checklist_item_id=trello_checklist_item_id,
             created=today,
             updated=today,
         )
@@ -516,6 +520,149 @@ def register(app: FastMCP) -> None:
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
         return f"Added child todo {child.id} under {parent_id}: {title}"
+
+    @app.tool(
+        description=(
+            "Batch-add multiple children (with optional nesting) under a parent todo. "
+            "Accepts a JSON array of child specs and optional blocking pairs. "
+            "All children are created atomically in a single save."
+        )
+    )
+    def todo_batch_add_children(
+        parent_id: str,
+        children: str,
+        blocking_pairs: str = "[]",
+        project_name: str | None = None,
+    ) -> str:
+        """Add multiple children under a parent in one atomic operation.
+
+        Parameters
+        ----------
+        parent_id : str
+            ID of the existing parent todo.
+        children : str
+            JSON array of child specs. Each spec is an object with:
+              - title (str, required)
+              - priority (str, optional)
+              - tags (list[str], optional)
+              - notes (str, optional)
+              - children (list[spec], optional — nested sub-children)
+        blocking_pairs : str
+            JSON array of [blocker_idx, blocked_idx] pairs where each index
+            refers to the 0-based position in the depth-first flattened list
+            of created children.
+        project_name : str | None
+            Project name override.
+        """
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+
+        # --- Validate parent ---
+        meta = storage.load_meta(cfg, name)
+        todos = storage.load_todos(cfg, name)
+        parent = next((t for t in todos if t.id == parent_id), None)
+        if not parent:
+            return f"Parent todo '{parent_id}' not found."
+
+        # --- Parse JSON inputs ---
+        try:
+            child_specs: list[dict[str, object]] = json.loads(children)
+        except json.JSONDecodeError as exc:
+            return f"Invalid JSON for children: {exc}"
+        if not isinstance(child_specs, list) or not child_specs:
+            return "children must be a non-empty JSON array."
+
+        try:
+            pairs: list[list[int]] = json.loads(blocking_pairs)
+        except json.JSONDecodeError as exc:
+            return f"Invalid JSON for blocking_pairs: {exc}"
+        if not isinstance(pairs, list):
+            return "blocking_pairs must be a JSON array."
+
+        today = _now()
+        created: list[dict[str, str]] = []  # {id, title, parent}
+
+        def _flatten(
+            specs: list[dict[str, object]],
+            parent_todo: Todo,
+        ) -> None:
+            """Depth-first walk: create Todo for each spec, recurse into nested children."""
+            for spec in specs:
+                title = spec.get("title")
+                if not isinstance(title, str) or not title.strip():
+                    continue  # skip specs without a valid title
+                prio_raw = spec.get("priority")
+                priority = str(prio_raw) if isinstance(prio_raw, str) else cfg.default_priority
+                tags_raw = spec.get("tags")
+                tags = list(tags_raw) if isinstance(tags_raw, list) else []
+                notes_raw = spec.get("notes")
+                notes = str(notes_raw) if isinstance(notes_raw, str) else ""
+
+                child = Todo(
+                    id=next_todo_id(meta, parent=parent_todo),
+                    title=title,
+                    priority=priority,
+                    tags=[str(t) for t in tags],
+                    parent=parent_todo.id,
+                    notes=notes,
+                    created=today,
+                    updated=today,
+                )
+                if child.id not in parent_todo.children:
+                    parent_todo.children.append(child.id)
+                parent_todo.updated = today
+                todos.append(child)
+                created.append({"id": child.id, "title": child.title, "parent": parent_todo.id})
+
+                # Recurse into nested children
+                nested_raw = spec.get("children")
+                if isinstance(nested_raw, list) and nested_raw:
+                    _flatten(nested_raw, child)
+
+        _flatten(child_specs, parent)
+
+        # --- Resolve blocking pairs ---
+        pair_errors: list[str] = []
+        for pair in pairs:
+            if not isinstance(pair, list) or len(pair) != 2:
+                pair_errors.append(f"Invalid pair (expected [int, int]): {pair}")
+                continue
+            blocker_idx, blocked_idx = pair
+            if not isinstance(blocker_idx, int) or not isinstance(blocked_idx, int):
+                pair_errors.append(f"Indices must be integers: {pair}")
+                continue
+            if blocker_idx < 0 or blocker_idx >= len(created):
+                pair_errors.append(f"blocker_idx {blocker_idx} out of range (0..{len(created)-1})")
+                continue
+            if blocked_idx < 0 or blocked_idx >= len(created):
+                pair_errors.append(f"blocked_idx {blocked_idx} out of range (0..{len(created)-1})")
+                continue
+            if blocker_idx == blocked_idx:
+                pair_errors.append(f"Self-blocking not allowed: {pair}")
+                continue
+            blocker_id = created[blocker_idx]["id"]
+            blocked_id = created[blocked_idx]["id"]
+            todo_map = {t.id: t for t in todos}
+            blocker_todo = todo_map[blocker_id]
+            blocked_todo = todo_map[blocked_id]
+            if blocked_id not in blocker_todo.blocks:
+                blocker_todo.blocks.append(blocked_id)
+            if blocker_id not in blocked_todo.blocked_by:
+                blocked_todo.blocked_by.append(blocker_id)
+
+        # --- Single atomic save ---
+        storage.save_todos(cfg, name, todos)
+        storage.save_meta(cfg, meta)
+
+        result_data: dict[str, object] = {
+            "created": created,
+            "count": len(created),
+        }
+        if pair_errors:
+            result_data["blocking_errors"] = pair_errors
+        return json.dumps(result_data)
 
     def _has_active_descendant(todo_dict: dict[str, object]) -> bool:
         """Return True if this node or any descendant has a status other than 'done'."""

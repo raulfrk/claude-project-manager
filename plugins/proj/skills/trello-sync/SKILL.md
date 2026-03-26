@@ -1,7 +1,7 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Each project is a single Trello card; root todos with children become checklists, leaf root todos become items in a "Tasks" checklist. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
 context: fork
 agent: general-purpose
 ---
@@ -12,9 +12,9 @@ Full bidirectional Trello sync. Supports two modes:
 
 ## Mode Detection
 
-Call `mcp__proj__proj_get_active`.
-- If an active project is returned → run **single-project mode** (the existing flow below, starting at "Sub-skill chain").
-- If no active project is returned (error or empty) → run **batch mode** (see "Batch Mode" section).
+Call `mcp__proj__proj_session_context`.
+- If a project is returned → run **single-project mode** (the existing flow below, starting at "Sub-skill chain"). Use the returned config and integration data throughout.
+- If no active project (error or "No active project" message) → run **batch mode** (see "Batch Mode" section).
 
 ---
 
@@ -119,10 +119,11 @@ Before syncing, verify:
 
 ### 1. Setup
 
-- Call `mcp__proj__config_load` -- read `trello.*` config values. Note `default_board_id`, `default_list`.
-- Call `mcp__proj__proj_get_active` -- get active project name, per-project trello config, and `trello_card_id` from project meta.
+- Use the `proj_session_context` result from Mode Detection (already called above). Extract:
+  - `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card)
+  - `project.name`, `config.tracking_dir`
 - Check prerequisites (enabled, board ID set). Stop with a clear message if not met.
-- Resolve effective board ID = per-project `trello.board_id` if set, else global `trello.default_board_id`.
+- Resolve effective board ID = per-project `trello.board_id` if set, else global `integrations.trello.board_id`.
 
 **Failure: Trello MCP server unavailable**
 If the Trello MCP server is not reachable -- for example, a tool call raises a

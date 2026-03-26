@@ -156,7 +156,7 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `/proj:switch` | Switch active project context | `[project-name]` |
 | `/proj:archive` | Archive a completed project | `[project-name]` |
 | `/proj:list-proj` | List all tracked projects | — |
-| `/proj:sync` | Bidirectional Todoist sync | — |
+| `/proj:todoist-sync` | Bidirectional Todoist sync | — |
 | `/proj:trello-sync` | Bidirectional Trello sync | — |
 | `/proj:add-repo` | Add a directory/repo to the active project | `<path> [--label] [--claudemd]` |
 | `/proj:remove-repo` | Remove a directory/repo by label | `<label>` |
@@ -385,23 +385,23 @@ sequenceDiagram
     participant TrM as Trello MCP
 
     rect rgb(40, 60, 90)
-        note right of U: Todoist Sync (/proj:sync)
+        note right of U: Todoist Sync (/proj:todoist-sync)
 
         note over U,TdM: Push new local todo
-        U->>S: /proj:sync
-        S->>TdM: add-tasks(title, project_id)
+        U->>S: /proj:todoist-sync
+        S->>TdM: todoist_add_tasks(title, project_id)
         TdM-->>S: task_id
         S->>S: Store todoist_task_id
 
         note over U,TdM: Pull completed task
-        S->>TdM: fetch-object(task_id)
-        TdM-->>S: is_completed=true
+        S->>TdM: todoist_find_tasks(project_id)
+        TdM-->>S: tasks (detect completion via diff)
         S->>S: Mark local todo done
 
         note over U,TdM: Title conflict
         S->>S: Compare timestamps
         alt Local newer
-            S->>TdM: update-tasks(task_id, title)
+            S->>TdM: todoist_update_tasks(task_id, title)
         else Remote newer
             S->>S: Update local title
         end

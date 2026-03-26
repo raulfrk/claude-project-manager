@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "hooks": {
+      "command": "bash",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "hooks-server"
+      ],
+      "timeout": 120
+    }
+  }
+}

@@ -1,7 +1,7 @@
 ---
 name: load
 description: Load a specific project for this session, even if Claude was not started in that project's directory. Use when asked "load project", "switch to project", or "open project".
-allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, Bash, Read
+allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ctx_session_start, mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_get_active, Bash, Read
 argument-hint: "[project-name]"
 ---
 
@@ -25,23 +25,12 @@ Load a project context for this session only (not persisted globally).
    - Confirm: "Loaded project '<name>' for this session. This session is now working on <name>."
 
 3.5. **Display last session context** (before todos):
-   - Call `mcp__proj__config_load` to get `tracking_dir`. Call `mcp__proj__proj_get_active` to get the project `name`.
+   - Call `mcp__proj__proj_session_context` to get `config.tracking_dir` and `project.name`.
    - Use Bash: `ls <tracking_dir>/<name>/sessions/session-*.md 2>/dev/null | sort | tail -1`
    - If the result is non-empty: read that file with the Read tool and display it under the heading `### Last Session` — show this **before** the ctx_session_start context block (todos, notes).
    - If no session files exist: skip silently.
    - Then display the ctx_session_start context (project header, todos, recent notes).
 
-4. **Auto-sync with Todoist** (if configured):
-   - Call `mcp__proj__config_load` to read global config.
-   - If `todoist.enabled: true` AND `todoist.auto_sync: true`: run the full bidirectional sync.
-   - Follow the exact same algorithm as `/proj:sync` (steps 0–5 in that skill).
-   - **Todoist tool names are dynamic**: use `mcp__{todoist.mcp_server}__<tool>` as the prefix
-     for all Todoist calls (e.g. if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks`).
-   - **Use `auto_apply=True`** when calling `proj_todoist_diff` — this applies pull operations
-     server-side and eliminates the separate apply call for pulls.
-   - Display the sync summary inline after the load confirmation.
-   - If `todoist.enabled` is false or `todoist.auto_sync` is false: skip silently.
-
-5. Note: This only affects this session. Other parallel Claude sessions are unaffected.
+4. Note: This only affects this session. Other parallel Claude sessions are unaffected.
 
 Suggested next: /proj:status — see full project status  /proj:todo list — see all todos

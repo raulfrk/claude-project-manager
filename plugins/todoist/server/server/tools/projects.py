@@ -1,0 +1,33 @@
+"""Todoist project tools."""
+
+from __future__ import annotations
+
+import json
+
+from mcp.server.fastmcp import FastMCP
+
+from server.lib.client import get_client
+
+
+def register(app: FastMCP) -> None:
+    @app.tool(description="Create a Todoist project.")
+    def todoist_add_projects(
+        name: str,
+        color: str | None = None,
+        is_favorite: bool = False,
+    ) -> str:
+        body: dict = {"name": name, "is_favorite": is_favorite}
+        if color is not None:
+            body["color"] = color
+        client = get_client()
+        project = client.post("/projects", json=body)
+        return json.dumps(project)
+
+    @app.tool(description="Find Todoist projects, optionally filtering by name.")
+    def todoist_find_projects(name: str | None = None) -> str:
+        client = get_client()
+        projects = client.get("/projects")
+        if name is not None:
+            lower = name.lower()
+            projects = [p for p in projects if lower in p.get("name", "").lower()]
+        return json.dumps(projects)

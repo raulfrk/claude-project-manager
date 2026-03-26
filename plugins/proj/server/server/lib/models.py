@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 class TodoistSync:
     enabled: bool = False
     auto_sync: bool = True
-    mcp_server: str = "claude_ai_Todoist"
+    mcp_server: str = "claude_ai_Todoist"  # Deprecated: ignored, local plugin uses fixed "todoist" prefix
     root_only: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -58,16 +58,27 @@ class GitTracking:
 class ArchiveConfig:
     destination: str = "~/projects/archived"
     purge_after_days: int | None = None
+    trash_grace_days: int = 7
+    backup_retention_days: int = 30
 
     def to_dict(self) -> dict[str, object]:
-        return {"destination": self.destination, "purge_after_days": self.purge_after_days}
+        return {
+            "destination": self.destination,
+            "purge_after_days": self.purge_after_days,
+            "trash_grace_days": self.trash_grace_days,
+            "backup_retention_days": self.backup_retention_days,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> ArchiveConfig:
         raw = data.get("purge_after_days")
+        tgd_raw = data.get("trash_grace_days")
+        brd_raw = data.get("backup_retention_days")
         return cls(
             destination=str(data.get("destination", "~/projects/archived")),
             purge_after_days=int(raw) if raw is not None else None,
+            trash_grace_days=int(tgd_raw) if tgd_raw is not None else 7,
+            backup_retention_days=int(brd_raw) if brd_raw is not None else 30,
         )
 
 

@@ -25,6 +25,8 @@ Accepts the confirmed mapping produced by `/proj:jira-map` (after user review/ed
 
 ### 4. Display results
 
+If `status` is `"ok"` (no failures):
+
 ```
 Jira sync applied.
 Projects created: {created_projects}
@@ -34,6 +36,21 @@ Skipped (unmapped): {skipped}
 ```
 
 If nothing changed: "Jira sync complete. Everything up to date."
+
+If `status` is `"partial"` (some failures):
+
+```
+Jira sync applied (with errors).
+Projects created: {created_projects}  Todos created: {created_todos}  Todos updated: {updated_todos}  Failed: {count of failed issues}
+
+Failed issues:
+| Issue | Error |
+|-------|-------|
+| PROJ-123 | failed: <reason> |
+| PROJ-456 | failed: <reason> |
+```
+
+The `per_issue` field in the response maps each issue key to its status: `"created"`, `"updated"`, `"skipped"`, or `"failed: <reason>"`. Display only the failed issues in the table.
 
 ## Notes
 

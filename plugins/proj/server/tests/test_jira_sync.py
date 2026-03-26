@@ -22,10 +22,14 @@ from server.lib.models import (
 )
 from server.tools.jira_sync import (
     JiraApplyInput,
+    JiraApplyResult,
     JiraMappingPlan,
     _append_jira_comments,
+    _extract_keywords,
     _format_jira_notes,
     _fuzzy_match_project,
+    _link_standalone_key,
+    _match_standalone,
     _parse_jira_priority,
     _slugify,
     _sync_root_issue_to_notes,
@@ -174,6 +178,39 @@ class TestHelpers:
     def test_fuzzy_match_slug(self) -> None:
         assert _fuzzy_match_project("User Auth", ["user-auth", "other"]) == "user-auth"
 
+    # ── _extract_keywords tests ───────────────────────────────────────────
+
+    def test_extract_keywords_basic(self) -> None:
+        result = _extract_keywords("Implement the login page for users")
+        assert "implement" in result
+        assert "login" in result
+        assert "page" in result
+        assert "users" in result
+        # stopwords/short words removed
+        assert "the" not in result
+        assert "for" not in result
+
+    def test_extract_keywords_removes_stopwords(self) -> None:
+        result = _extract_keywords("the and a but or nor")
+        assert result == set()
+
+    def test_extract_keywords_removes_short_words(self) -> None:
+        result = _extract_keywords("go do it up ok")
+        assert result == set()  # all < 3 chars
+
+    def test_extract_keywords_lowercases(self) -> None:
+        result = _extract_keywords("Deploy Backend API")
+        assert "deploy" in result
+        assert "backend" in result
+        assert "api" in result
+
+    def test_extract_keywords_empty_string(self) -> None:
+        assert _extract_keywords("") == set()
+
+    def test_extract_keywords_stopword_only_summary(self) -> None:
+        """Edge case: summary with only stopwords produces zero keywords."""
+        assert _extract_keywords("The and a") == set()
+
 
 # ── Epic-first grouping tests ────────────────────────────────────────────────
 
@@ -232,7 +269,8 @@ class TestComputeMapping:
         for g in standalone:
             assert g.is_epic is False
             assert g.needs_user_decision is True
-            assert g.suggested_project == ""
+            # With strategy chain, recent_suggestion may suggest a project
+            assert g.matched_strategy in {"recent_suggestion", "none"}
             assert len(g.issues) == 1
 
     def test_mixed_epic_and_standalone(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
@@ -324,7 +362,7 @@ class TestComputeMapping:
         assert len(subtasks) == 2
 
     def test_no_catchall_for_standalone(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        """Standalone issues have empty suggested_project -- no catchall."""
+        """Standalone issues with no match still require user decision (no auto-assign)."""
         cfg, name = cfg_with_project
         issues = [
             _make_jira_issue("OTHER-1", "Random task"),
@@ -334,8 +372,8 @@ class TestComputeMapping:
         g = plan.groups[0]
         assert g.source == "standalone"
         assert g.needs_user_decision is True
-        assert g.suggested_project == ""
-        assert g.matched_project is None
+        # With strategy chain, recent_suggestion may suggest a project but still needs decision
+        assert g.matched_strategy in {"recent_suggestion", "none"}
 
     def test_standalone_fuzzy_match_by_summary(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """A standalone issue whose summary fuzzy-matches a project gets auto-mapped."""
@@ -369,7 +407,7 @@ class TestApplyMapping:
                 {"key": "PROJ-2", "summary": "Second task", "priority": "low", "status": "In Progress"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 2
         assert counts["todos_updated"] == 0
         assert counts["projects_created"] == 0
@@ -396,7 +434,7 @@ class TestApplyMapping:
                 {"key": "PROJ-10", "summary": "Login page", "priority": "high", "status": "To Do"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["projects_created"] == 1
         assert counts["todos_created"] == 1
 
@@ -423,11 +461,11 @@ class TestApplyMapping:
         }
 
         # Apply once
-        counts1 = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        counts1 = apply_mapping(JiraApplyInput(groups=[group]), cfg).counts
         assert counts1["todos_created"] == 1
 
         # Apply again with same data
-        counts2 = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        counts2 = apply_mapping(JiraApplyInput(groups=[group]), cfg).counts
         assert counts2["todos_created"] == 0
         assert counts2["todos_updated"] == 1
 
@@ -449,7 +487,7 @@ class TestApplyMapping:
                 {"key": "PROJ-1", "summary": "Resolved task", "priority": "medium", "status": "Done"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 1
 
         todos = storage.load_todos(cfg, name)
@@ -468,7 +506,7 @@ class TestApplyMapping:
                 {"key": "NP-10", "summary": "First in new project", "priority": "high", "status": "To Do"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["projects_created"] == 1
         assert counts["todos_created"] == 1
 
@@ -504,7 +542,7 @@ class TestApplyMapping:
                 },
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 2  # parent + child
 
         todos = storage.load_todos(cfg, name)
@@ -526,7 +564,7 @@ class TestApplyMapping:
                 {"key": "PROJ-1", "summary": "Task", "priority": "medium", "status": "To Do", "duedate": "2026-06-15"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 1
 
         todos = storage.load_todos(cfg, name)
@@ -563,7 +601,7 @@ class TestApplyMapping:
                 {"key": "PROJ-99", "summary": "Orphan", "priority": "medium", "status": "To Do"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 0
         assert counts["projects_created"] == 0
         assert counts["skipped_unmapped"] == 1
@@ -627,7 +665,7 @@ class TestApplyMapping:
         }
 
         # First run: creates project + todos
-        counts1 = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        counts1 = apply_mapping(JiraApplyInput(groups=[group]), cfg).counts
         assert counts1["projects_created"] == 1
         assert counts1["todos_created"] == 2
 
@@ -635,7 +673,7 @@ class TestApplyMapping:
         group_rerun = dict(group)
         group_rerun["project_exists"] = True
         group_rerun["create_project"] = False
-        counts2 = apply_mapping(JiraApplyInput(groups=[group_rerun]), cfg)
+        counts2 = apply_mapping(JiraApplyInput(groups=[group_rerun]), cfg).counts
         assert counts2["projects_created"] == 0
         assert counts2["todos_created"] == 0
         assert counts2["todos_updated"] == 2
@@ -658,19 +696,18 @@ class TestNoCatchallBehavior:
     4. Multiple existing projects do not cause any to act as a catchall
     """
 
-    def test_standalone_no_match_gets_empty_suggested_project(
+    def test_standalone_no_match_needs_user_decision(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Standalone issue with unrelated name gets empty suggested_project."""
+        """Standalone issue with unrelated name needs user decision (recent_suggestion)."""
         cfg, name = cfg_with_project
         issues = [_make_jira_issue("ZZZZ-999", "Completely unrelated task name xyz")]
         plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
         assert len(plan.groups) == 1
         g = plan.groups[0]
-        assert g.suggested_project == ""
         assert g.needs_user_decision is True
-        assert g.matched_project is None
-        assert g.project_exists is False
+        # Strategy chain falls through to recent_suggestion
+        assert g.matched_strategy in {"recent_suggestion", "none"}
 
     def test_multiple_projects_no_catchall(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -700,9 +737,9 @@ class TestNoCatchallBehavior:
         plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
         assert len(plan.groups) == 1
         g = plan.groups[0]
-        assert g.suggested_project == ""
         assert g.needs_user_decision is True
-        assert g.matched_project is None
+        # Strategy chain may suggest via recent_suggestion but still needs decision
+        assert g.matched_strategy in {"recent_suggestion", "none"}
 
     def test_apply_skips_unmapped_and_counts_them(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -744,7 +781,7 @@ class TestNoCatchallBehavior:
                 ],
             },
         ])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["skipped_unmapped"] == 2
         assert counts["todos_created"] == 1
         assert counts["projects_created"] == 0
@@ -754,10 +791,10 @@ class TestNoCatchallBehavior:
         assert len(todos) == 1
         assert todos[0].jira_issue_key == "MAP-1"
 
-    def test_compute_mapping_no_default_project_field(
+    def test_compute_mapping_no_auto_assign_for_unmatched(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """The mapping plan never invents a 'default' or 'misc' project for standalones."""
+        """Unmatched standalones always need user decision (no auto-assign)."""
         cfg, name = cfg_with_project
         issues = [
             _make_jira_issue("A-1", "Alpha task"),
@@ -766,12 +803,15 @@ class TestNoCatchallBehavior:
         ]
         plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
         for g in plan.groups:
-            if g.source == "standalone" and g.matched_project is None:
-                assert g.suggested_project == "", (
-                    f"Standalone group {g.jira_key} has non-empty suggested_project "
-                    f"'{g.suggested_project}' despite no match — catchall detected"
-                )
-                assert g.needs_user_decision is True
+            if g.source == "standalone":
+                # With strategy chain, recent_suggestion may suggest a project
+                # but needs_user_decision must be True for low-confidence matches
+                if g.matched_strategy in {"recent_suggestion", "none",
+                                           "tag_match_ambiguous", "keyword_match_ambiguous"}:
+                    assert g.needs_user_decision is True, (
+                        f"Standalone group {g.jira_key} with strategy "
+                        f"'{g.matched_strategy}' should need user decision"
+                    )
 
 
 # ── MCP tool registration tests ──────────────────────────────────────────────
@@ -1157,7 +1197,7 @@ class TestRootIssueToNotes:
             "PROJ-5": [{"id": "r1", "author": "PM", "created": "2026-03-19", "body": "Root comment"}],
             "PROJ-10": [{"id": "c1", "author": "Dev", "created": "2026-03-20", "body": "Child comment"}],
         }
-        counts = apply_mapping(data, cfg, comments_by_key=comments)
+        counts = apply_mapping(data, cfg, comments_by_key=comments).counts
 
         # Root issue should NOT create a todo
         todos = storage.load_todos(cfg, name)
@@ -1296,7 +1336,7 @@ class TestRootIssueToNotes:
                 {"key": "PROJ-11", "summary": "Child B", "priority": "low", "status": "Done"},
             ],
         }])
-        counts = apply_mapping(data, cfg)
+        counts = apply_mapping(data, cfg).counts
         assert counts["todos_created"] == 2
 
         todos = storage.load_todos(cfg, name)
@@ -1472,3 +1512,709 @@ class TestSummaryOnlyFlag:
         assert "total_issues" in result
         assert "summary" in result
         assert result["total_issues"] == 2
+
+
+# ── Matching strategy chain tests (todo 252.7.1) ─────────────────────────────
+
+
+class TestMatchStandalone:
+    """Tests for the _match_standalone() strategy chain."""
+
+    def test_jira_issue_key_strategy(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 1: jira_issue_key lookup matches instantly."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-10"
+        storage.save_meta(cfg, meta)
+
+        issue = _make_jira_issue("PROJ-10", "Totally unrelated name")
+        matched, strategy, suggestions = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "jira_issue_key"
+        assert suggestions == []
+
+    def test_fuzzy_name_strategy(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 2: fuzzy name match on summary."""
+        cfg, name = cfg_with_project
+        issue = _make_jira_issue("PROJ-10", "myapp")
+        matched, strategy, suggestions = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "fuzzy_name"
+
+    def test_tag_match_single(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 3: tag match with exactly one project matching."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["Backend", "API"]
+        storage.save_meta(cfg, meta)
+
+        issue = _make_jira_issue("XYZ-1", "Totally unrelated name xyz", labels=["backend"])
+        matched, strategy, suggestions = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "tag_match"
+
+    def test_tag_match_case_insensitive(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Tag matching is case-insensitive."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["FRONTEND"]
+        storage.save_meta(cfg, meta)
+
+        issue = _make_jira_issue("XYZ-1", "Unrelated xyz", labels=["frontend"])
+        matched, strategy, _ = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "tag_match"
+
+    def test_tag_match_ambiguous(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 3: ambiguous tag match (2 projects share a tag)."""
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # Set tag on myapp
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["shared-tag"]
+        storage.save_meta(cfg, meta)
+
+        # Create second project with same tag
+        proj_dir = Path(cfg.tracking_dir) / "other-proj"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+        meta2 = ProjectMeta(
+            name="other-proj",
+            tags=["shared-tag"],
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta2)
+        index = storage.load_index(cfg)
+        index.projects["other-proj"] = ProjectEntry(
+            name="other-proj", tracking_dir=str(proj_dir), created=today,
+        )
+        storage.save_index(cfg, index)
+
+        issue = _make_jira_issue("XYZ-1", "Unrelated xyz", labels=["shared-tag"])
+        matched, strategy, suggestions = _match_standalone(
+            issue, ["myapp", "other-proj"], cfg,
+        )
+        assert matched is None
+        assert strategy == "tag_match_ambiguous"
+        assert set(suggestions) == {"myapp", "other-proj"}
+
+    def test_keyword_match_by_project_name(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 4: keyword from summary matches project name."""
+        cfg, name = cfg_with_project
+        # "myapp" is 5 chars so it passes keyword extraction
+        issue = _make_jira_issue(
+            "XYZ-1", "Fix bug in myapp module",
+            labels=[],  # no labels to skip tag strategy
+        )
+        matched, strategy, _ = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "keyword_match"
+
+    def test_keyword_match_by_description(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 4: keyword from description matches project description."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.description = "Authentication service for the platform"
+        storage.save_meta(cfg, meta)
+
+        issue = _make_jira_issue(
+            "XYZ-1", "Unrelated xyz title",
+            labels=[],
+            description="Update the authentication service",
+        )
+        matched, strategy, _ = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"
+        assert strategy == "keyword_match"
+
+    def test_recent_suggestion_fallthrough(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 5: falls through to recently-active suggestion."""
+        cfg, name = cfg_with_project
+        # Issue that matches nothing by key, name, tags, or keywords
+        issue = _make_jira_issue(
+            "XYZ-999", "Zzzzz qqqq wwww",
+            labels=[],
+            description="",
+        )
+        matched, strategy, suggestions = _match_standalone(issue, ["myapp"], cfg)
+        assert matched == "myapp"  # only project, so it's the top
+        assert strategy == "recent_suggestion"
+        assert suggestions == ["myapp"]
+
+    def test_strategy_priority_tag_wins_over_keyword(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Tag match (strategy 3) takes priority over keyword match (strategy 4)."""
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # myapp has tag "deploy" and description with keyword "platform"
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["deploy"]
+        meta.description = "Platform project"
+        storage.save_meta(cfg, meta)
+
+        # Create second project with description matching keyword "deploy"
+        proj_dir = Path(cfg.tracking_dir) / "deploy-svc"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+        meta2 = ProjectMeta(
+            name="deploy-svc",
+            description="Deployment service tools",
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta2)
+        index = storage.load_index(cfg)
+        index.projects["deploy-svc"] = ProjectEntry(
+            name="deploy-svc", tracking_dir=str(proj_dir), created=today,
+        )
+        storage.save_index(cfg, index)
+
+        # Issue has label "deploy" (matches myapp tag) and keyword "deploy" (would match deploy-svc name)
+        issue = _make_jira_issue("XYZ-1", "Unrelated zzz", labels=["deploy"])
+        matched, strategy, _ = _match_standalone(
+            issue, ["myapp", "deploy-svc"], cfg,
+        )
+        assert matched == "myapp"
+        assert strategy == "tag_match"  # tag wins over keyword
+
+    def test_no_projects_returns_none(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """With no existing projects, returns (None, 'none', [])."""
+        cfg, _ = cfg_with_project
+        issue = _make_jira_issue("XYZ-1", "Something")
+        matched, strategy, suggestions = _match_standalone(issue, [], cfg)
+        assert matched is None
+        assert strategy == "none"
+        assert suggestions == []
+
+
+class TestMatchedStrategyField:
+    """Tests for the matched_strategy field on JiraGroup."""
+
+    def test_matched_strategy_in_to_dict(self) -> None:
+        from server.tools.jira_sync import JiraGroup
+        g = JiraGroup(
+            source="standalone", jira_key="X-1", name="Test",
+            suggested_project="myapp", matched_project="myapp",
+            matched_strategy="tag_match",
+            issues=[],
+        )
+        d = g.to_dict()
+        assert d["matched_strategy"] == "tag_match"
+
+    def test_matched_strategy_omitted_when_empty(self) -> None:
+        from server.tools.jira_sync import JiraGroup
+        g = JiraGroup(
+            source="standalone", jira_key="X-1", name="Test",
+            suggested_project="", matched_strategy="",
+            issues=[],
+        )
+        d = g.to_dict()
+        assert "matched_strategy" not in d
+
+
+class TestComputeMappingWithStrategies:
+    """Integration tests: compute_mapping Phase 3 uses strategy chain."""
+
+    def test_standalone_tag_match_sets_strategy(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Standalone issue matched by tag has matched_strategy set."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["infra"]
+        storage.save_meta(cfg, meta)
+
+        issues = [_make_jira_issue("XYZ-1", "Unrelated xyz", labels=["infra"])]
+        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        g = plan.groups[0]
+        assert g.matched_project == "myapp"
+        assert g.matched_strategy == "tag_match"
+        assert g.needs_user_decision is False
+
+    def test_standalone_recent_suggestion_needs_decision(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Standalone with no match falls to recent_suggestion with needs_user_decision."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("XYZ-999", "Zzzzz qqqq wwww")]
+        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        g = plan.groups[0]
+        assert g.matched_strategy == "recent_suggestion"
+        assert g.needs_user_decision is True
+
+    def test_standalone_keyword_match_sets_strategy(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Standalone matched by keyword has matched_strategy='keyword_match'."""
+        cfg, name = cfg_with_project
+        # "myapp" as keyword in summary
+        issues = [_make_jira_issue("XYZ-1", "Fix bug in myapp module", labels=[])]
+        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        g = plan.groups[0]
+        # fuzzy_name should match first since "myapp" is in the summary
+        # but the issue name as a whole doesn't fuzzy-match "myapp" at 0.6 threshold
+        # Actually _fuzzy_match_project checks the full summary, not keywords.
+        # "Fix bug in myapp module" won't fuzzy match "myapp" (too different).
+        # So it falls through to keyword_match.
+        assert g.matched_project == "myapp"
+        assert g.matched_strategy == "keyword_match"
+        assert g.needs_user_decision is False
+
+    def test_standalone_ambiguous_tag_needs_decision(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Ambiguous tag match sets needs_user_decision=True."""
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        meta = storage.load_meta(cfg, name)
+        meta.tags = ["shared"]
+        storage.save_meta(cfg, meta)
+
+        proj_dir = Path(cfg.tracking_dir) / "other"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+        meta2 = ProjectMeta(
+            name="other", tags=["shared"],
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta2)
+        index = storage.load_index(cfg)
+        index.projects["other"] = ProjectEntry(
+            name="other", tracking_dir=str(proj_dir), created=today,
+        )
+        storage.save_index(cfg, index)
+
+        issues = [_make_jira_issue("XYZ-1", "Unrelated xyz", labels=["shared"])]
+        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        g = plan.groups[0]
+        assert g.matched_strategy == "tag_match_ambiguous"
+        assert g.needs_user_decision is True
+        assert g.matched_project is None
+
+    def test_project_name_override_sets_strategy(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When project_name is provided, strategy is 'project_name_override'."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("XYZ-1", "Something")]
+        plan = compute_mapping(issues, cfg, project_name="myapp")  # type: ignore[arg-type]
+        g = plan.groups[0]
+        assert g.matched_project == "myapp"
+        assert g.matched_strategy == "project_name_override"
+        assert g.needs_user_decision is False
+
+
+# ── Per-issue resilience tests (todo 252.7.3) ────────────────────────────────
+
+
+class TestPerIssueResilience:
+    """Verify that apply_mapping processes each issue independently and
+    returns per-issue status in JiraApplyResult."""
+
+    def test_result_type_is_jira_apply_result(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """apply_mapping returns a JiraApplyResult, not a plain dict."""
+        cfg, name = cfg_with_project
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        result = apply_mapping(data, cfg)
+        assert isinstance(result, JiraApplyResult)
+        assert isinstance(result.counts, dict)
+        assert isinstance(result.per_issue, dict)
+
+    def test_per_issue_status_created(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Newly created issues get 'created' in per_issue."""
+        cfg, name = cfg_with_project
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task A", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-2", "summary": "Task B", "priority": "low", "status": "To Do"},
+            ],
+        }])
+        result = apply_mapping(data, cfg)
+        assert result.per_issue["PROJ-1"] == "created"
+        assert result.per_issue["PROJ-2"] == "created"
+
+    def test_per_issue_status_updated(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Re-run marks existing issues as 'updated' in per_issue."""
+        cfg, name = cfg_with_project
+        group = {
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task", "priority": "medium", "status": "To Do"},
+            ],
+        }
+        # First run creates
+        apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        # Second run updates
+        result = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        assert result.per_issue["PROJ-1"] == "updated"
+        assert result.counts["todos_updated"] == 1
+
+    def test_partial_failure_other_issues_succeed(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When one issue fails, other issues in the same group still succeed."""
+        cfg, name = cfg_with_project
+        from unittest.mock import patch
+        original_next_todo_id = next_todo_id
+        call_count = 0
+
+        def flaky_next_todo_id(meta, parent=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("simulated failure")
+            return original_next_todo_id(meta, parent=parent)
+
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Will fail", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-2", "summary": "Will succeed", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        with patch("server.tools.jira_sync.next_todo_id", side_effect=flaky_next_todo_id):
+            result = apply_mapping(data, cfg)
+
+        # PROJ-1 failed, PROJ-2 succeeded
+        assert result.per_issue["PROJ-1"].startswith("failed:")
+        assert result.per_issue["PROJ-2"] == "created"
+        assert result.counts["todos_created"] == 1
+
+        # Verify PROJ-2 was actually saved
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+        assert todos[0].jira_issue_key == "PROJ-2"
+
+    def test_all_issues_fail(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """When all issues fail, counts stay at zero and all are in per_issue."""
+        cfg, name = cfg_with_project
+        from unittest.mock import patch
+
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Fail A", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-2", "summary": "Fail B", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        with patch("server.tools.jira_sync.next_todo_id", side_effect=RuntimeError("boom")):
+            result = apply_mapping(data, cfg)
+
+        assert result.counts["todos_created"] == 0
+        assert result.counts["todos_updated"] == 0
+        assert result.per_issue["PROJ-1"].startswith("failed:")
+        assert result.per_issue["PROJ-2"].startswith("failed:")
+
+        # No todos saved
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 0
+
+    def test_save_called_per_issue(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """storage.save_todos is called after each successful issue."""
+        cfg, name = cfg_with_project
+        from unittest.mock import patch
+
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task A", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-2", "summary": "Task B", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-3", "summary": "Task C", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        with patch.object(storage, "save_todos", wraps=storage.save_todos) as mock_save:
+            result = apply_mapping(data, cfg)
+
+        assert result.counts["todos_created"] == 3
+        # save_todos called once per issue (3 issues = 3 calls)
+        assert mock_save.call_count == 3
+
+    def test_backward_compat_counts_keys(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """JiraApplyResult.counts has the same keys as the old return dict."""
+        cfg, name = cfg_with_project
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task", "priority": "medium", "status": "To Do"},
+            ],
+        }])
+        result = apply_mapping(data, cfg)
+        expected_keys = {"projects_created", "todos_created", "todos_updated", "skipped_unmapped"}
+        assert set(result.counts.keys()) == expected_keys
+
+    def test_project_creation_failure_marks_all_issues_failed(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """If project creation raises, all issues in that group are marked failed."""
+        cfg, name = cfg_with_project
+        from unittest.mock import patch
+
+        data = JiraApplyInput(groups=[
+            {
+                "suggested_project": "bad-project",
+                "project_exists": False,
+                "create_project": True,
+                "is_epic": True,
+                "jira_key": "BAD-1",
+                "name": "Bad Epic",
+                "issues": [
+                    {"key": "BAD-10", "summary": "Task A", "priority": "medium", "status": "To Do"},
+                    {"key": "BAD-11", "summary": "Task B", "priority": "medium", "status": "To Do"},
+                ],
+            },
+            {
+                "suggested_project": "myapp",
+                "project_exists": True,
+                "create_project": False,
+                "is_epic": True,
+                "jira_key": "PROJ-5",
+                "name": "Good Group",
+                "issues": [
+                    {"key": "PROJ-1", "summary": "Good task", "priority": "medium", "status": "To Do"},
+                ],
+            },
+        ])
+
+        original_tracking_dir = storage.tracking_dir
+
+        def bad_tracking_dir(c, pname):
+            if pname == "bad-project":
+                raise OSError("disk full")
+            return original_tracking_dir(c, pname)
+
+        with patch.object(storage, "tracking_dir", side_effect=bad_tracking_dir):
+            result = apply_mapping(data, cfg)
+
+        # Bad group: all issues failed
+        assert result.per_issue["BAD-10"].startswith("failed: project creation failed:")
+        assert result.per_issue["BAD-11"].startswith("failed: project creation failed:")
+        # Good group: processed normally
+        assert result.per_issue["PROJ-1"] == "created"
+        assert result.counts["todos_created"] == 1
+        assert result.counts["projects_created"] == 0
+
+    def test_rerun_after_partial_failure(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Re-run after partial failure: previously created todos are updated,
+        previously failed issues are retried and succeed."""
+        cfg, name = cfg_with_project
+        from unittest.mock import patch
+        original_next_todo_id = next_todo_id
+
+        group = {
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": True,
+            "jira_key": "PROJ-5",
+            "name": "Test",
+            "issues": [
+                {"key": "PROJ-1", "summary": "Task A", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-2", "summary": "Task B", "priority": "medium", "status": "To Do"},
+                {"key": "PROJ-3", "summary": "Task C", "priority": "medium", "status": "To Do"},
+            ],
+        }
+
+        # First run: PROJ-2 and PROJ-3 fail
+        call_idx = 0
+
+        def fail_some(meta, parent=None):
+            nonlocal call_idx
+            call_idx += 1
+            if call_idx in (2, 3):  # second and third issue
+                raise RuntimeError("transient error")
+            return original_next_todo_id(meta, parent=parent)
+
+        with patch("server.tools.jira_sync.next_todo_id", side_effect=fail_some):
+            result1 = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+
+        assert result1.counts["todos_created"] == 1
+        assert result1.per_issue["PROJ-1"] == "created"
+        assert result1.per_issue["PROJ-2"].startswith("failed:")
+        assert result1.per_issue["PROJ-3"].startswith("failed:")
+
+        # Second run (no failures): PROJ-1 updated, PROJ-2 and PROJ-3 created
+        result2 = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+        assert result2.counts["todos_updated"] == 1  # PROJ-1
+        assert result2.counts["todos_created"] == 2  # PROJ-2, PROJ-3
+        assert result2.per_issue["PROJ-1"] == "updated"
+        assert result2.per_issue["PROJ-2"] == "created"
+        assert result2.per_issue["PROJ-3"] == "created"
+
+        # Verify final state
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 3
+
+
+# ── Early jira_issue_key linking tests (todo 252.7.2) ────────────────────────
+
+
+class TestLinkStandaloneKey:
+    """Verify that compute_mapping with link_keys=True creates minimal todos
+    with jira_issue_key during the map phase for auto-matched standalone issues."""
+
+    def test_link_keys_creates_todo_during_map(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Standalone issue matching a project gets a todo with jira_issue_key during map."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]  # fuzzy matches "myapp"
+        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+
+        g = plan.groups[0]
+        assert g.matched_project == "myapp"
+        assert g.needs_user_decision is False
+
+        # Todo should have been created with jira_issue_key
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+        assert todos[0].jira_issue_key == "PROJ-10"
+        assert todos[0].title == "myapp"
+        assert todos[0].status == "pending"
+
+    def test_link_keys_idempotent(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Running compute_mapping twice does not create duplicate todos."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]
+
+        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+        assert todos[0].jira_issue_key == "PROJ-10"
+
+    def test_link_keys_false_skips_linking(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """link_keys=False means no storage writes for jira_issue_key (dry-run)."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]
+        plan = compute_mapping(issues, cfg, link_keys=False)  # type: ignore[arg-type]
+
+        # Match should still happen in the plan
+        assert plan.groups[0].matched_project == "myapp"
+
+        # But no todo should have been written
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 0
+
+    def test_link_keys_storage_failure_logs_warning(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Storage failure during key linking logs warning but returns the plan."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]
+
+        # Make save_todos raise to simulate storage failure
+        def _boom(*args: object, **kwargs: object) -> None:
+            msg = "disk full"
+            raise OSError(msg)
+
+        monkeypatch.setattr(storage, "save_todos", _boom)
+
+        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+
+        # Plan should still be returned
+        assert plan.total_issues == 1
+        assert plan.groups[0].matched_project == "myapp"
+
+        # No todo created (save failed)
+        monkeypatch.undo()
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 0
+
+    def test_apply_after_map_link_updates_not_duplicates(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """apply_mapping after map-phase linking updates the pre-linked todo."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]
+
+        # Map phase creates minimal todo
+        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        todos_before = storage.load_todos(cfg, name)
+        assert len(todos_before) == 1
+        assert todos_before[0].jira_issue_key == "PROJ-10"
+
+        # Apply phase should update the existing todo, not duplicate
+        data = JiraApplyInput(groups=[{
+            "suggested_project": "myapp",
+            "project_exists": True,
+            "create_project": False,
+            "is_epic": False,
+            "jira_key": "PROJ-10",
+            "name": "myapp",
+            "issues": [
+                {"key": "PROJ-10", "summary": "myapp updated", "priority": "high",
+                 "status": "To Do", "description": "Full description"},
+            ],
+        }])
+        counts = apply_mapping(data, cfg).counts
+        assert counts["todos_updated"] == 1
+        assert counts["todos_created"] == 0
+
+        todos_after = storage.load_todos(cfg, name)
+        assert len(todos_after) == 1
+        assert todos_after[0].jira_issue_key == "PROJ-10"
+        assert todos_after[0].title == "myapp updated"
+        assert todos_after[0].priority == "high"
+
+    def test_deleted_todo_recreated_on_next_map(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """If a todo linked during map is deleted, next compute_mapping re-creates it."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("PROJ-10", "myapp")]
+
+        # First map: creates todo
+        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+
+        # Delete the todo
+        storage.save_todos(cfg, name, [])
+
+        # Second map: re-creates it
+        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+        assert todos[0].jira_issue_key == "PROJ-10"
+
+    def test_needs_user_decision_not_linked(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Standalone issues that need user decision are NOT linked during map."""
+        cfg, name = cfg_with_project
+        issues = [_make_jira_issue("ZZZ-999", "Completely unrelated task name xyz")]
+        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+
+        g = plan.groups[0]
+        assert g.needs_user_decision is True
+
+        # No todo should have been created
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 0

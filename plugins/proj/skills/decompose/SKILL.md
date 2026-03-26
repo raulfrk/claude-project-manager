@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__config_load, mcp__proj__proj_get_active, mcp__proj__proj_update_meta, mcp__proj__tracking_git_flush, mcp__trello__add_checklist_item, mcp__trello__create_checklist, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_batch_add_children, mcp__proj__tracking_git_flush, Skill, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -23,103 +23,51 @@ Decompose todo $ARGUMENTS into sub-todos.
 
    **When in doubt, do not auto-skip.** If borderline, proceed to step 4 and let the user decide via the normal confirmation prompt.
 
-   If atomic: print `↩ Skipping decompose for <id> — already atomic.` and stop — do not proceed to steps 4–9.
+   If atomic: print `↩ Skipping decompose for <id> — already atomic.` and stop — do not proceed to steps 4–8.
 
 4. Analyze the todo and propose a **multi-level** breakdown:
-   - Identify 3-8 concrete root-level sub-tasks.
+   - Identify sub-tasks based on the natural problem structure — no hard cap on count.
    - For each sub-task, assess if it is **large** (warrants nested children) or a **leaf** (single focused operation):
-     - ✓ **Large** — contains 3+ distinct implementation phases (e.g. design, implement, test, deploy)
-     - ✓ **Large** — touches 2+ unrelated systems/files (e.g. server code + SKILL.md + tests)
-     - ✗ **Leaf** — single focused operation: edit one file, add one function, write one docs section
-   - For large sub-tasks, propose 2-4 nested children inline. Apply the same large/leaf assessment recursively — nest as deep as needed.
+     - **Large** — contains 3+ distinct implementation phases or touches 2+ unrelated systems/files
+     - **Leaf** — single focused operation: edit one file, add one function, write one docs section
+   - For large sub-tasks, propose nested children inline. Apply the same large/leaf assessment recursively — nest as deep as needed.
    - Consider dependencies at all levels (which must come first?). Assign priorities to all tasks.
    - Each leaf sub-task should be implementable in a focused coding session.
 
-4.5. **Analyze shared-file conflicts for safe batching:**
+4.5. **Shared-file conflict analysis**: Predict which files each subtodo will write. For any pair sharing a write target, add `blocked_by` from the dependent to the simpler/shallower subtodo. When in doubt, add the dependency — false positives are cheaper than parallel write conflicts.
 
-   **Goal**: Predict which files each subtodo will **write** and add `blocked_by` between any pair sharing a write target, so they never land in the same parallel batch.
-
-   **Step A — Predict write files** using these heuristics:
-   - **Research cross-reference**: If research.md names specific files, use those as ground truth.
-   - **Same-module heuristic**: Subtodos touching the same Python module/package likely share `__init__.py`, shared type files, and import re-exports.
-   - **Test co-location**: An implementation subtodo and its corresponding test subtodo share test files (`conftest.py`, fixtures, the test file itself).
-   - **Implicit shared files**: Always check whether subtodos will touch common project-wide files:
-     - `plugin.json`, `marketplace.json` (version bumps)
-     - `CLAUDE.md`, `README.md` (docs updates)
-     - `__init__.py` (module exports)
-     - `conftest.py`, test fixtures (shared test infra)
-     - SKILL.md files (skill instruction updates)
-   - **Title overlap**: Subtodos whose titles reference the same system, feature, or file likely share write targets even if not explicitly stated.
-
-   **Step B — Build conflict table** (internal, not shown to user):
-   ```
-   | Subtodo | Predicted write files       | Shares files with |
-   |---------|-----------------------------|--------------------|
-   | X.1     | models.py, __init__.py      | X.2                |
-   | X.2     | models.py, test_models.py   | X.1                |
-   | X.3     | tools.py                    | (none)             |
-   ```
-
-   **Step C — Add `blocked_by` relationships** for each pair sharing a write target:
-   - The subtodo that lays groundwork blocks the one that builds on it.
-   - When order is ambiguous, prefer the simpler/shallower subtodo as the blocker.
-   - Record the shared filename — it will be shown in step 5's display.
-
-   **Safety-first principle**: When in doubt whether two subtodos share a write target, **add the `blocked_by`**. False positives (unnecessary sequential execution) are far less costly than false negatives (parallel write conflicts that corrupt files).
-
-   If no shared files are found after applying all heuristics, skip silently.
+4.7. **Clarity check** — for EVERY proposed sub-todo, assess whether the title is clear and actionable:
+   - A title is **clear** if a developer can understand exactly what to do without further context.
+   - A title is **vague** if it uses ambiguous terms ("handle", "improve", "set up stuff"), lacks a specific target, or could mean multiple things.
+   - Flag each vague title with a brief explanation of why it is vague.
+   - Offer to run the full interactive define flow via the `Skill` tool (invoke skill `proj:define` with the sub-todo ID) for each vague one, after creation.
 
 5. Present the proposed multi-level breakdown as **indented bullet points**:
    - Root tasks at level 0; each nesting level adds two spaces of indentation.
-   - Format per line: `- 🔲 **ID** — title _(priority)_ [manual] [blocks X, blocked by Y]`
+   - Format per line: `- **ID** — title _(priority)_ [manual] [blocks X, blocked by Y]`
    - If a sub-todo is tagged `manual`, append `[manual]` after the priority.
    - For blocks added due to shared files (step 4.5), append the filename: `[blocks X (shared: filename.py)]`.
    - Children shown indented under their parent.
+   - Vague titles get a `[vague]` tag with the reason on the next line.
 
    Example:
    ```
    Proposed sub-todos for 1:
-   - 🔲 **1.1** — Simple leaf task _(low)_
-   - 🔲 **1.2** — Large task with phases _(high)_ [blocks 1.3 (shared: auth.py)]
-     - 🔲 **1.2.1** — Phase A _(high)_
-     - 🔲 **1.2.2** — Phase B _(medium)_
-     - 🔲 **1.2.3** — Phase C _(medium)_
-   - 🔲 **1.3** — Another leaf _(low)_ [blocked by 1.2 (shared: auth.py)]
+   - **1.1** — Add rate-limit middleware to auth router _(high)_ [blocks 1.3 (shared: auth.py)]
+   - **1.2** — Write unit tests for rate-limit logic _(medium)_
+   - **1.3** — Update OpenAPI schema with rate-limit headers _(low)_ [blocked by 1.1 (shared: auth.py)]
+   - **1.4** — Handle edge cases _(medium)_ [vague]
+     → Vague: "handle edge cases" doesn't specify which cases or where. Consider: "Add timeout handling for upstream auth failures"
    ```
 
 6. Ask: "Does this breakdown look good? Any changes?" Allow the user to add, remove, rename, or restructure sub-todos at any level.
 
-7. Create the confirmed todos — **parents before children**:
-   - For each root-level sub-todo: call `mcp__proj__todo_add_child` on the parent todo.
-   - For each nested child: call `mcp__proj__todo_add_child` on its immediate parent (using the ID returned from step 7 above).
-   - For blocking relationships at any level: call `mcp__proj__todo_block`.
-
-7.5. **Auto-sync new sub-todos to Todoist** (if enabled):
-   - Call `mcp__proj__config_load`. If `todoist.enabled` is false or `auto_sync` is false: skip silently.
-   - Call `mcp__proj__proj_get_active` to read `todoist_project_id` and `project.todoist.root_only`.
-   - **Resolve `effective_root_only`**: `project.todoist.root_only ?? global.todoist.root_only ?? false`.
-   - If `todoist_project_id` is null: call `mcp__{todoist.mcp_server}__find-projects`, present a numbered list of project names, ask "Which Todoist project should tasks for '<project name>' go to? (enter number)", then call `mcp__proj__proj_update_meta` with the chosen `todoist_project_id`. Use the chosen ID for the calls below.
-   - Collect all newly created local todo IDs (from step 7) with their local parent IDs and the returned local IDs.
-   - Push in depth order to handle parent→child linking:
-     1. **Root subtodos** (parent = the decompose target): call `mcp__{todoist.mcp_server}__add-tasks` in one bulk call.
-        - Map each: `content` = title, `priority` = (high→p2, medium→p3, low→p4), `labels` = tags, `parentId` = the decompose target's `todoist_task_id` (if it has one), `projectId` = `todoist_project_id`.
-        - For each returned task: call `mcp__proj__todo_update` to store `todoist_task_id`.
-     2. **Nested children** (parent = another new subtodo): if `effective_root_only` is true, skip this step entirely — do not push child todos to Todoist. Otherwise, repeat with one bulk `add-tasks` call per depth level.
-        - Use the `todoist_task_id` stored in the previous pass as their `parentId`.
-        - For each returned task: call `mcp__proj__todo_update` to store `todoist_task_id`.
-   - (If the decompose target itself lacks a `todoist_task_id`, omit `parentId` — the new subtodos will appear as top-level tasks in Todoist.)
-
-7.6. **Auto-sync new sub-todos to Trello** (if enabled):
-   - Call `mcp__proj__config_load`. If `trello.enabled` is false: skip silently.
-   - Call `mcp__proj__proj_get_active` to check `trello_card_id`.
-   - If no `trello_card_id`: skip silently.
-   - For each root-level subtodo (parent = decompose target):
-     - If the decompose target has `trello_checklist_id`: call `mcp__trello__add_checklist_item(checklist_id, name=title)`. Store returned ID via `mcp__proj__todo_update(todo_id, trello_checklist_item_id=<id>)`.
-     - If the decompose target does NOT have `trello_checklist_id`: call `mcp__trello__create_checklist(card_id, name=decompose_target_title)` first, store `trello_checklist_id` on the decompose target, then add items.
-   - For nested children (parent = another new subtodo): these map to checklist items with nesting prefix (e.g., "2.3.1 — title"). If the parent subtodo just had a checklist created for it, add items to that checklist with the nesting prefix in the name.
+7. Create the confirmed todos using `mcp__proj__todo_batch_add_children`:
+   - Call once per parent with `children` (list of `{title, priority, tags, notes}`) and `blocking_pairs` (list of `[blocker_index, blocked_index]` pairs).
+   - For multi-level nesting: call for root-level children first, then call again for each parent that has nested children (using the IDs returned from the first call).
 
 8. Show the final tree via `mcp__proj__todo_tree`.
 
 9. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Decompose: {todo-id}"`.
 
-💡 Suggested next: (1) /proj:execute 1.1 — start with the first sub-todo  (2) /proj:run 1 — run the full workflow
+Suggested next: (1) /proj:execute X.1 — start with the first sub-todo  (2) /proj:run X — run the full workflow

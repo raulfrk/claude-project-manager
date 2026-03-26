@@ -252,6 +252,127 @@ class TestValidateProjectName:
         assert result is None
 
 
+class TestProjArchivePreflight:
+    """Tests for the proj_archive_preflight composite tool."""
+
+    def _call_preflight(self, cfg: ProjConfig, project_name: str) -> str:
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.projects import register
+
+        app = FastMCP("test-preflight")
+        register(app)
+        tool_fn = app._tool_manager.get_tool("proj_archive_preflight")
+        assert tool_fn is not None
+
+        async def _run() -> str:
+            result = await tool_fn.run({"project_name": project_name}, {})
+            if isinstance(result, list):
+                return "".join(getattr(c, "text", str(c)) for c in result)
+            return str(result)
+
+        return asyncio.run(_run())
+
+    def test_not_found(self, cfg: ProjConfig) -> None:
+        result = self._call_preflight(cfg, "nonexistent")
+        assert "not found" in result
+
+    def test_already_archived(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        index = storage.load_index(cfg)
+        index.projects["myapp"].archived = True
+        storage.save_index(cfg, index)
+        result = self._call_preflight(cfg, "myapp")
+        assert "already archived" in result
+
+    def test_returns_json_with_all_sections(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        _run_proj_init("myapp", str(tmp_path))
+        result = self._call_preflight(cfg, "myapp")
+        data = json.loads(result)
+        assert "config" in data
+        assert "project" in data
+        assert "open_todos" in data
+        assert "worktrees" in data
+
+    def test_config_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        _run_proj_init("myapp", str(tmp_path))
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        assert data["config"]["archive_destination"] == cfg.archive.destination
+        assert data["config"]["trash_grace_days"] == cfg.archive.trash_grace_days
+
+    def test_project_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        _run_proj_init("myapp", str(tmp_path))
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        proj = data["project"]
+        assert proj["name"] == "myapp"
+        assert proj["status"] == "active"
+        assert len(proj["repos"]) == 1
+        assert proj["repos"][0]["label"] == "code"
+        assert proj["trello_card_id"] is None
+        assert proj["todoist_project_id"] is None
+
+    def test_open_todos_empty(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        _run_proj_init("myapp", str(tmp_path))
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        assert data["open_todos"]["count"] == 0
+        assert data["open_todos"]["items"] == []
+
+    def test_open_todos_counted(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        from server.lib.models import Todo
+
+        _run_proj_init("myapp", str(tmp_path))
+        todos = [
+            Todo(id="1", title="Open task", status="pending", created="2026-01-01", updated="2026-01-01"),
+            Todo(id="2", title="Done task", status="done", created="2026-01-01", updated="2026-01-01"),
+            Todo(id="3", title="In progress", status="in_progress", created="2026-01-01", updated="2026-01-01"),
+            Todo(id="4", title="Cancelled", status="cancelled", created="2026-01-01", updated="2026-01-01"),
+        ]
+        storage.save_todos(cfg, "myapp", todos)
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        assert data["open_todos"]["count"] == 2
+        ids = [t["id"] for t in data["open_todos"]["items"]]
+        assert "1" in ids
+        assert "3" in ids
+        assert "2" not in ids
+        assert "4" not in ids
+
+    def test_worktrees_empty_when_no_git_file(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        # Normal .git directory (not a worktree)
+        (repo_dir / ".git").mkdir()
+        _run_proj_init("myapp", str(repo_dir))
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        assert data["worktrees"] == []
+
+    def test_worktrees_detected_when_git_file(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
+        repo_dir = tmp_path / "worktree-repo"
+        repo_dir.mkdir()
+        # .git file (not dir) indicates worktree
+        (repo_dir / ".git").write_text("gitdir: /some/path/.git/worktrees/branch")
+        _run_proj_init("myapp", str(repo_dir))
+        data = json.loads(self._call_preflight(cfg, "myapp"))
+        assert len(data["worktrees"]) == 1
+        assert data["worktrees"][0]["path"] == str(repo_dir)
+        assert data["worktrees"][0]["label"] == "code"
+
+
 class TestProjInitValidation:
     """Integration tests: proj_init rejects bad names before touching the filesystem."""
 

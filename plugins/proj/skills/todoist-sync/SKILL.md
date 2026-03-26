@@ -1,34 +1,23 @@
 ---
-name: sync
+name: todoist-sync
 description: Manually trigger a full bidirectional Todoist sync. Always runs regardless of auto_sync setting. Use when the user says "sync with Todoist", "sync todos", or "pull from Todoist".
 argument-hint: "[all | everything]"
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__todo_list, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__todo_list, mcp__proj__proj_todoist_diff, mcp__proj__proj_todoist_apply, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose
 ---
 
 Full bidirectional Todoist sync for the active project using batched operations.
 
-## Todoist Tool Resolution
-
-The Todoist MCP server name is configurable. **Before making any Todoist tool call**, read
-`todoist.mcp_server` from the config (via `mcp__proj__config_load`) and substitute it as the
-prefix. All `mcp__claude_ai_Todoist__<tool>` references below are templates -- replace
-`claude_ai_Todoist` with the actual server name.
-
-Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
-`mcp__claude_ai_Todoist__find-tasks`.
-
 ## Steps
 
-0. **Setup** (parallel):
-   - Call `mcp__proj__config_load` -- check `todoist.enabled`, get `todoist.mcp_server`.
-   - Call `mcp__proj__proj_get_active` -- get `todoist_project_id`.
-   - If `todoist.enabled` is false: stop with "Todoist sync is not enabled. Set todoist.enabled: true in ~/.claude/proj.yaml to use /proj:sync."
+0. **Setup**: Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call.
+   - Extract `integrations.todoist.enabled` and `integrations.todoist.project_id` (= `todoist_project_id`).
+   - If `todoist.enabled` is false: stop with "Todoist sync is not enabled. Set todoist.enabled: true in ~/.claude/proj.yaml to use /proj:todoist-sync."
    - If no `todoist_project_id`: stop with "Project not linked to Todoist. Set todoist_project_id via mcp__proj__proj_update_meta first."
 
 1. **Fetch Todoist tasks**:
-   - Call `mcp__claude_ai_Todoist__find-tasks` with `projectId` and `limit: 100`. Collect all tasks (paginate with `cursor` if `hasMore: true`).
+   - Call `mcp__todoist__todoist_find_tasks` with `project_id`. Collect all returned tasks.
    - This returns **open (uncompleted) tasks only**.
 
 2. **Compute sync plan + auto-apply pulls** (single call):
@@ -36,7 +25,7 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
    - This returns a JSON object with:
      - `plan`: the sync plan with `push_create`, `push_update`, `push_complete`, `ghost_close`, `root_only_cleanup`, and summary counts.
      - `auto_applied`: counts of pull operations already applied locally (created, updated, completed).
-     - `project_info`: `mcp_server` and `todoist_project_id`.
+     - `project_info`: `todoist_project_id`.
    - **Pull operations (pull_create, pull_update, pull_complete) are already applied locally by this call.** No separate `proj_todoist_apply` is needed for pulls.
    - If all summary counts are zero: output "Todoist sync complete. Everything up to date." and stop.
    - If only pull counts are non-zero and push counts are all zero: output the pull summary and stop (pulls already applied).
@@ -44,23 +33,23 @@ Example: if `todoist.mcp_server` is `sentry`, call `mcp__sentry__find-tasks` not
 3. **Execute Todoist-side changes** (batch calls, parallel where independent):
 
    a. **Ghost close** (if `ghost_close` is non-empty):
-      - Call `mcp__claude_ai_Todoist__complete-tasks` with `ids` = the `ghost_close` array.
+      - Call `mcp__todoist__todoist_complete_tasks` with `ids` = the `ghost_close` array.
 
    b. **Push create** (if `push_create` is non-empty):
-      - Call `mcp__claude_ai_Todoist__add-tasks` with the `push_create` array as `tasks`.
+      - Call `mcp__todoist__todoist_add_tasks` with the `push_create` array as `tasks`.
         Each entry has: `content`, `priority`, `description`, `labels`, and optionally `dueString`, `parentId`.
       - The tool returns created tasks with their IDs. Build a `link_todoist_ids` array mapping each `todo_id` (from push_create) to the returned Todoist task ID.
       - If any entry had `complete_after_create: true`, collect those Todoist task IDs for completion.
 
    c. **Push update** (if `push_update` is non-empty):
-      - Call `mcp__claude_ai_Todoist__update-tasks` with the `push_update` array as `tasks`.
+      - Call `mcp__todoist__todoist_update_tasks` with the `push_update` array as `tasks`.
         Each entry has: `id`, `content`, `priority`, `description`, `labels`, and optionally `dueString`.
 
    d. **Push complete + ghost close completions** (if `push_complete` is non-empty or there are complete_after_create IDs):
-      - Call `mcp__claude_ai_Todoist__complete-tasks` with `ids` = combined array.
+      - Call `mcp__todoist__todoist_complete_tasks` with `ids` = combined array.
 
    e. **Root-only cleanup** (if `root_only_cleanup` is non-empty):
-      - For each entry: call `mcp__claude_ai_Todoist__delete-object` with `type="task"` and `id=todoist_task_id`.
+      - For each entry: call `mcp__todoist__todoist_delete` with `id=todoist_task_id`.
       - Collect the `todo_id` values as `cleared_todoist_ids`.
 
 4. **Link IDs locally** (only if step 3b or 3e produced results):

@@ -35,10 +35,10 @@ Show the proposed mapping in two sections:
 
 **Needs input (no epic)**
 
-| # | Issue | Summary | Suggested Project |
-|---|-------|---------|-------------------|
-| 3 | PROJ-789 | Fix login bug | (unmapped) |
-| 4 | PROJ-801 | Update docs | (unmapped) |
+| # | Issue | Summary | Suggested Project | Matched by |
+|---|-------|---------|-------------------|------------|
+| 3 | PROJ-789 | Fix login bug | (unmapped) | — |
+| 4 | PROJ-801 | Update docs | docs-project | keyword_match |
 
 ```
 Issues to sync: {total} ({auto_count} auto-mapped, {needs_input_count} need input)
@@ -47,6 +47,7 @@ Issues to sync: {total} ({auto_count} auto-mapped, {needs_input_count} need inpu
 - **Existing** -- maps to an already-tracked local project (matched by jira_issue_key or fuzzy name)
 - **Will create** -- a new local project will be created from the epic
 - **(unmapped)** -- standalone issue with no automatic match; user must assign
+- **Matched by** -- the `matched_strategy` from the JiraGroup (e.g., `tag_match`, `keyword_match`, `recent_suggestion`, `fuzzy_name`, `jira_issue_key`); shown as `—` when unmapped
 
 Return the mapping plan for use by downstream sub-skills (jira-apply).
 

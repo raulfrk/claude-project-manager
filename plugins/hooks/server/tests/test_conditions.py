@@ -1,0 +1,117 @@
+"""Tests for server.lib.conditions — config-driven condition evaluation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from server.lib.conditions import evaluate_condition, resolve_condition_status
+
+
+# ── evaluate_condition ────────────────────────────────────────────────────────
+
+
+class TestEvaluateCondition:
+    def test_none_condition_always_true(self):
+        assert evaluate_condition(None) is True
+
+    def test_empty_string_always_true(self):
+        assert evaluate_condition("") is True
+
+    def test_whitespace_only_is_false(self):
+        """Whitespace-only string passes the 'if not condition' check but resolves
+        to an empty key path, which evaluates to False (missing key)."""
+        assert evaluate_condition("   ") is False
+
+    def test_truthy_config_value(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
+        assert evaluate_condition("sync.todoist.enabled", config_path=proj_yaml) is True
+
+    def test_falsy_config_value(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": False}}}))
+        assert evaluate_condition("sync.todoist.enabled", config_path=proj_yaml) is False
+
+    def test_missing_key_is_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"other": "value"}))
+        assert evaluate_condition("sync.todoist.enabled", config_path=proj_yaml) is False
+
+    def test_missing_file_is_false(self, tmp_path: Path):
+        nonexistent = tmp_path / "does-not-exist.yaml"
+        assert evaluate_condition("some.flag", config_path=nonexistent) is False
+
+    def test_negation(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"feature": True}))
+        assert evaluate_condition("!feature", config_path=proj_yaml) is False
+
+    def test_negation_of_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"feature": False}))
+        assert evaluate_condition("!feature", config_path=proj_yaml) is True
+
+    def test_negation_of_missing(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"other": True}))
+        assert evaluate_condition("!missing_key", config_path=proj_yaml) is True
+
+    def test_negation_with_spaces(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"flag": True}))
+        assert evaluate_condition("  ! flag  ", config_path=proj_yaml) is False
+
+    def test_truthy_string(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"key": "non-empty"}))
+        assert evaluate_condition("key", config_path=proj_yaml) is True
+
+    def test_falsy_zero(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"key": 0}))
+        assert evaluate_condition("key", config_path=proj_yaml) is False
+
+    def test_truthy_nonzero_int(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"key": 42}))
+        assert evaluate_condition("key", config_path=proj_yaml) is True
+
+    def test_list_index_in_condition(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"items": [False, True]}))
+        assert evaluate_condition("items.0", config_path=proj_yaml) is False
+        assert evaluate_condition("items.1", config_path=proj_yaml) is True
+
+    def test_deeply_nested_condition(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"a": {"b": {"c": {"d": True}}}}))
+        assert evaluate_condition("a.b.c.d", config_path=proj_yaml) is True
+
+    def test_empty_yaml_file(self, proj_yaml: Path):
+        proj_yaml.write_text("")
+        assert evaluate_condition("any.path", config_path=proj_yaml) is False
+
+    def test_non_dict_yaml_file(self, proj_yaml: Path):
+        proj_yaml.write_text("- item1\n- item2\n")
+        assert evaluate_condition("any.path", config_path=proj_yaml) is False
+
+
+# ── resolve_condition_status ─────────────────────────────────────────────────
+
+
+class TestResolveConditionStatus:
+    def test_no_condition_returns_always(self):
+        assert resolve_condition_status(None) == "always"
+
+    def test_empty_condition_returns_always(self):
+        assert resolve_condition_status("") == "always"
+
+    def test_active_condition(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"flag": True}))
+        assert resolve_condition_status("flag", config_path=proj_yaml) == "active"
+
+    def test_inactive_condition(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"flag": False}))
+        assert resolve_condition_status("flag", config_path=proj_yaml) == "inactive"
+
+    def test_missing_key_inactive(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"other": True}))
+        assert resolve_condition_status("flag", config_path=proj_yaml) == "inactive"
+
+    def test_negated_active(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"flag": False}))
+        assert resolve_condition_status("!flag", config_path=proj_yaml) == "active"
+
+    def test_negated_inactive(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"flag": True}))
+        assert resolve_condition_status("!flag", config_path=proj_yaml) == "inactive"

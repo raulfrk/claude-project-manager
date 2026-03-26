@@ -23,7 +23,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    a. Ask: "Add a directory to this project (path):" (or for the first iteration: "What is the first content directory for this project?")
 
    b. If `worktree_integration: true` AND `projects_base_dir` is set:
-      - Call `mcp__plugin_worktree_worktree__wt_list_repos` (once, cache the result).
+      - Call `mcp__plugin_worktree_worktree__wt_list_repos` (once, cache the result). Extract base repo paths from each line (format: `[label] /path/to/repo (default: branch)`) and store as `_wt_base_paths`.
       - Present mode selection for this directory:
         ```
         How should this directory be set up?
@@ -99,8 +99,8 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Ask: "Auto-allow plugin MCP tools for this project? [yes/no/use global: yes]"
    - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
      - `mcp_servers=[<list>]` — build list when second answer is yes:
-       always include `"plugin_proj_proj"`, `"plugin_perms_perms"`;
-       add `"plugin_worktree_worktree"` if worktree_integration; add the value of `todoist.mcp_server` if todoist.enabled; add `"jira"` if jira.enabled; add `"trello"` if trello.enabled
+       always include `"plugin_proj_proj"`, `"plugin_perms_perms"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
+       add `"plugin_worktree_worktree"` if worktree_integration; add `"jira"` if jira.enabled; add `"trello"` if trello.enabled
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`
    - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Install the perms plugin when available." and continue.
@@ -148,18 +148,13 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - If any answer is not "use global" / empty, call `mcp__proj__proj_update_meta` with the corresponding `git_tracking_enabled`, `git_tracking_github_enabled`, or `git_tracking_github_repo_format` values.
    - If all answers are empty/default: skip (None values inherit global defaults).
 
-10. **Todoist** (if `todoist.enabled: true` in config):
-   - Use `mcp__{todoist.mcp_server}__add-projects` with the project name (server name from config)
-   - Store todoist_project_id via `mcp__proj__proj_update_meta`
-   - If the Todoist tool call fails (server not running or not configured), warn: "Todoist project could not be created. You can link it later via `/proj:sync`." and continue.
-
-11. Show summary of what was created. List all directories:
+10. Show summary of what was created. List all directories:
     ```
     Directories:
       - <label>: <path> (new directory | existing repo | worktree of <repo>, branch: <branch>)
       ...
     ```
 
-12. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
+11. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
 
 💡 Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview

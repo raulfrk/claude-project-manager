@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, date, timezone
@@ -17,6 +18,8 @@ from server.tools.config import require_project
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+_log = logging.getLogger(__name__)
 
 # ── Priority mapping ─────────────────────────────────────────────────────────
 
@@ -92,6 +95,29 @@ def _parse_jira_duedate(issue: dict[str, Any]) -> str | None:
     return None
 
 
+STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "may", "might", "can", "could", "of", "at", "by", "for",
+    "with", "about", "against", "between", "through", "during", "before",
+    "after", "above", "below", "to", "from", "up", "down", "in", "out",
+    "on", "off", "over", "under", "and", "but", "or", "nor", "not", "so",
+    "yet", "both", "either", "neither", "each", "every", "all", "any",
+    "few", "more", "most", "other", "some", "such", "no", "only", "own",
+    "same", "than", "too", "very", "just", "because", "as", "until",
+    "while", "into", "this", "that", "these", "those", "it", "its",
+})
+
+
+def _extract_keywords(text: str) -> set[str]:
+    """Extract significant keywords from text.
+
+    Splits on whitespace, lowercases, removes stopwords and words < 3 chars.
+    """
+    words = re.split(r"\s+", text.strip().lower())
+    return {w for w in words if len(w) >= 3 and w not in STOPWORDS}
+
+
 def _fuzzy_match_project(name: str, project_names: list[str], threshold: float = 0.6) -> str | None:
     """Find a fuzzy match for a name in existing project names."""
     lower_name = name.lower()
@@ -129,6 +155,7 @@ class JiraGroup:
     needs_user_decision: bool = False  # True when no auto-match possible
     project_exists: bool = False
     matched_project: str | None = None  # Name of matched local project
+    matched_strategy: str = ""  # Strategy that produced the match
     issues: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
@@ -144,6 +171,8 @@ class JiraGroup:
         }
         if self.matched_project:
             d["matched_project"] = self.matched_project
+        if self.matched_strategy:
+            d["matched_strategy"] = self.matched_strategy
         return d
 
 
@@ -176,6 +205,19 @@ class JiraApplyInput:
     """Input for applying Jira mapping to local projects."""
 
     groups: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class JiraApplyResult:
+    """Result of applying Jira mapping — aggregate counts plus per-issue status."""
+
+    counts: dict[str, int] = field(default_factory=lambda: {
+        "projects_created": 0,
+        "todos_created": 0,
+        "todos_updated": 0,
+        "skipped_unmapped": 0,
+    })
+    per_issue: dict[str, str] = field(default_factory=dict)
 
 
 # ── Notes formatting ──────────────────────────────────────────────────────────
@@ -388,10 +430,147 @@ def _match_by_jira_key(jira_key: str, cfg: Any, existing_names: list[str]) -> st
     return None
 
 
+def _match_standalone(
+    issue: dict[str, Any],
+    existing_names: list[str],
+    cfg: Any,
+) -> tuple[str | None, str, list[str]]:
+    """Try a chain of strategies to match a standalone Jira issue to a project.
+
+    Returns (matched_project, strategy_name, suggestions).
+    Strategies tried in order: jira_issue_key, fuzzy_name, tag_match,
+    keyword_match, recent_suggestion.
+    """
+    issue_key = str(issue.get("key", ""))
+    summary = str(issue.get("summary", ""))
+    description = str(issue.get("description", "") or "")
+    labels = _parse_jira_labels(issue)
+
+    # 1. jira_issue_key lookup
+    matched = _match_by_jira_key(issue_key, cfg, existing_names)
+    if matched is not None:
+        return matched, "jira_issue_key", []
+
+    # 2. fuzzy name match
+    matched = _fuzzy_match_project(summary, existing_names)
+    if matched is not None:
+        return matched, "fuzzy_name", []
+
+    # 3. tag-based match (Jira labels vs project tags, case-insensitive)
+    if labels:
+        label_set = {l.lower() for l in labels}
+        tag_matches: list[str] = []
+        for name in existing_names:
+            try:
+                meta = storage.load_meta(cfg, name)
+                if meta.tags and label_set & {t.lower() for t in meta.tags}:
+                    tag_matches.append(name)
+            except FileNotFoundError:
+                continue
+        if len(tag_matches) == 1:
+            return tag_matches[0], "tag_match", []
+        if len(tag_matches) > 1:
+            return None, "tag_match_ambiguous", tag_matches
+
+    # 4. keyword match (summary + description keywords vs project name/description)
+    keywords = _extract_keywords(summary + " " + description)
+    if keywords:
+        kw_matches: list[str] = []
+        for name in existing_names:
+            name_lower = name.lower()
+            if keywords & _extract_keywords(name_lower):
+                kw_matches.append(name)
+                continue
+            try:
+                meta = storage.load_meta(cfg, name)
+                if meta.description and keywords & _extract_keywords(meta.description):
+                    kw_matches.append(name)
+            except FileNotFoundError:
+                continue
+        if len(kw_matches) == 1:
+            return kw_matches[0], "keyword_match", []
+        if len(kw_matches) > 1:
+            return None, "keyword_match_ambiguous", kw_matches
+
+    # 5. recently-active suggestion (sorted by last_updated desc)
+    projects_with_dates: list[tuple[str, str]] = []
+    for name in existing_names:
+        try:
+            meta = storage.load_meta(cfg, name)
+            projects_with_dates.append((name, meta.dates.last_updated or ""))
+        except FileNotFoundError:
+            continue
+    if projects_with_dates:
+        projects_with_dates.sort(key=lambda x: x[1], reverse=True)
+        top = projects_with_dates[0][0]
+        return top, "recent_suggestion", [top]
+
+    # 6. No match at all
+    return None, "none", []
+
+
+def _link_standalone_key(group: JiraGroup, cfg: Any) -> None:
+    """Link jira_issue_key on todos for matched standalone issues.
+
+    For each issue in *group*, loads the matched project's todos, checks if a
+    todo with the issue's jira_issue_key already exists, and creates a minimal
+    todo if not.  Saves todos and meta to disk.
+
+    Logs a warning on storage failure but does not raise — the mapping plan is
+    still returned even if key linking fails.
+    """
+    project_name = group.matched_project
+    if not project_name:
+        return
+
+    try:
+        meta = storage.load_meta(cfg, project_name)
+        todos = storage.load_todos(cfg, project_name)
+    except FileNotFoundError:
+        _log.warning("Cannot link jira keys: project %s not found", project_name)
+        return
+
+    by_jira_key: dict[str, Todo] = {
+        t.jira_issue_key: t for t in todos if t.jira_issue_key
+    }
+    changed = False
+
+    for issue in group.issues:
+        issue_key = str(issue.get("key", ""))
+        if not issue_key:
+            continue
+        if issue_key in by_jira_key:
+            continue  # already linked — idempotent
+        summary = str(issue.get("summary", ""))
+        todo = Todo(
+            id=next_todo_id(meta),
+            title=summary,
+            jira_issue_key=issue_key,
+            status="pending",
+            created=_today(),
+            updated=_today(),
+        )
+        todos.append(todo)
+        by_jira_key[issue_key] = todo
+        changed = True
+
+    if changed:
+        try:
+            storage.save_todos(cfg, project_name, todos)
+            storage.save_meta(cfg, meta)
+        except Exception:
+            _log.warning(
+                "Failed to save jira key linking for project %s",
+                project_name,
+                exc_info=True,
+            )
+
+
 def compute_mapping(
     jira_issues: list[dict[str, Any]],
     cfg: Any,
     project_name: str | None = None,
+    link_keys: bool = True,
 ) -> JiraMappingPlan:
     """Group Jira issues by epic (epic-first) and map to local projects.
 
@@ -402,6 +581,13 @@ def compute_mapping(
     4. For issues with no epic: create standalone group with needs_user_decision=True
     5. Match against existing projects by jira_issue_key first, then fuzzy name
     6. No catchall/default project — unmapped issues stay as "unmapped"
+
+    Side effect: when *link_keys* is True (default), standalone issues that are
+    auto-matched to a project (i.e. ``needs_user_decision is False``) will have
+    a todo with their ``jira_issue_key`` created in the matched project's todo
+    list if one does not already exist.  This ensures the mapping persists even
+    if ``apply_mapping()`` is never called.  Pass ``link_keys=False`` for
+    dry-run mode with no storage writes.
     """
     index = storage.load_index(cfg)
     existing_names = [
@@ -476,18 +662,21 @@ def compute_mapping(
             # No epic — standalone
             standalone_issues.append((issue, issue_entry))
 
-    # Phase 3: create standalone groups (needs_user_decision=True, no catchall)
+    # Phase 3: create standalone groups using strategy chain
     standalone_groups: list[JiraGroup] = []
     for issue, issue_entry in standalone_issues:
         issue_key = str(issue.get("key", ""))
         summary = str(issue.get("summary", ""))
-        # Try jira_issue_key match on project, then fuzzy name
         if project_name:
             matched = project_name
+            strategy = "project_name_override"
+            needs_decision = False
         else:
-            matched = _match_by_jira_key(issue_key, cfg, existing_names)
-            if matched is None:
-                matched = _fuzzy_match_project(summary, existing_names)
+            matched, strategy, _suggestions = _match_standalone(issue, existing_names, cfg)
+            needs_decision = strategy in {
+                "recent_suggestion", "tag_match_ambiguous",
+                "keyword_match_ambiguous", "none",
+            }
         slug = _slugify(summary)
         standalone_groups.append(JiraGroup(
             source="standalone",
@@ -495,11 +684,19 @@ def compute_mapping(
             name=summary,
             suggested_project=matched or "",
             is_epic=False,
-            needs_user_decision=matched is None,
+            needs_user_decision=needs_decision,
             project_exists=matched is not None,
             matched_project=matched,
+            matched_strategy=strategy,
             issues=[issue_entry],
         ))
+
+    # Phase 3b: Early jira_issue_key linking (side effect: writes to storage)
+    if link_keys:
+        for group in standalone_groups:
+            if group.needs_user_decision or not group.matched_project:
+                continue
+            _link_standalone_key(group, cfg)
 
     plan = JiraMappingPlan()
     plan.groups = list(epic_groups.values()) + standalone_groups
@@ -511,8 +708,15 @@ def apply_mapping(
     data: JiraApplyInput,
     cfg: Any,
     comments_by_key: dict[str, list[dict[str, Any]]] | None = None,
-) -> dict[str, int]:
-    """Apply confirmed Jira mapping to local projects. Returns counts dict.
+) -> JiraApplyResult:
+    """Apply confirmed Jira mapping to local projects.
+
+    Returns a :class:`JiraApplyResult` with aggregate counts (backward
+    compatible) and per-issue status for transparency.
+
+    Each issue is processed independently — a failure on one issue does not
+    prevent processing of subsequent issues.  Progress is saved after each
+    successful issue so partial results survive failures.
 
     When creating a project from an epic group, sets jira_issue_key on the
     ProjectMeta so that re-runs can instantly match the epic to the project.
@@ -524,17 +728,13 @@ def apply_mapping(
     if comments_by_key is None:
         comments_by_key = {}
     today = _now()
-    counts = {
-        "projects_created": 0,
-        "todos_created": 0,
-        "todos_updated": 0,
-        "skipped_unmapped": 0,
-    }
+    result = JiraApplyResult()
 
     for group in data.groups:
         project_name = str(group.get("suggested_project", ""))
         if not project_name:
-            counts["skipped_unmapped"] += len(group.get("issues", []))
+            issues = group.get("issues", [])
+            result.counts["skipped_unmapped"] += len(issues) if isinstance(issues, list) else 0
             continue
 
         create_project = group.get("create_project", False)
@@ -542,60 +742,68 @@ def apply_mapping(
         is_epic = group.get("is_epic", False)
         jira_key = str(group.get("jira_key", ""))
 
-        # Create project if needed
+        # Create project if needed — failure marks all issues in group as failed
         if create_project and not project_exists:
-            proj_dir = storage.tracking_dir(cfg, project_name)
-            proj_dir.mkdir(parents=True, exist_ok=True)
-            from server.lib.models import ProjectDates, ProjectEntry, ProjectMeta
+            try:
+                proj_dir = storage.tracking_dir(cfg, project_name)
+                proj_dir.mkdir(parents=True, exist_ok=True)
+                from server.lib.models import ProjectDates, ProjectEntry, ProjectMeta
 
-            meta = ProjectMeta(
-                name=project_name,
-                description=str(group.get("name", "")),
-                dates=ProjectDates(created=today, last_updated=today),
-                # Link project to epic for instant re-run matching
-                jira_issue_key=jira_key if is_epic else None,
-            )
-            storage.save_meta(cfg, meta)
-            (proj_dir / "todos.yaml").write_text("todos: []\n")
-            (proj_dir / "archive.yaml").write_text("todos: []\n")
+                meta = ProjectMeta(
+                    name=project_name,
+                    description=str(group.get("name", "")),
+                    dates=ProjectDates(created=today, last_updated=today),
+                    jira_issue_key=jira_key if is_epic else None,
+                )
+                storage.save_meta(cfg, meta)
+                (proj_dir / "todos.yaml").write_text("todos: []\n")
+                (proj_dir / "archive.yaml").write_text("todos: []\n")
 
-            # Add to index
-            index = storage.load_index(cfg)
-            index.projects[project_name] = ProjectEntry(
-                name=project_name,
-                tracking_dir=str(proj_dir),
-                created=today,
-            )
-            storage.save_index(cfg, index)
-            counts["projects_created"] += 1
+                index = storage.load_index(cfg)
+                index.projects[project_name] = ProjectEntry(
+                    name=project_name,
+                    tracking_dir=str(proj_dir),
+                    created=today,
+                )
+                storage.save_index(cfg, index)
+                result.counts["projects_created"] += 1
 
-            # Append epic description/comments to project NOTES.md
-            if is_epic:
-                epic_desc = str(group.get("description", "") or "")
-                note_parts: list[str] = []
-                if epic_desc:
-                    note_parts.append(f"## Jira: {jira_key}\n### Description\n{epic_desc.strip()}")
-                epic_comments = comments_by_key.get(jira_key, [])
-                if epic_comments:
-                    comment_lines: list[str] = []
-                    for ec in epic_comments:
-                        ec_author_raw = ec.get("author")
-                        if isinstance(ec_author_raw, dict):
-                            ec_author = str(ec_author_raw.get("displayName", "") or ec_author_raw.get("name", ""))
-                        elif isinstance(ec_author_raw, str):
-                            ec_author = ec_author_raw
-                        else:
-                            ec_author = "Unknown"
-                        ec_created = str(ec.get("created", ""))[:10]
-                        ec_body = str(ec.get("body", "")).strip()
-                        comment_lines.append(f"**{ec_author}** ({ec_created}): {ec_body}")
-                    note_parts.append("### Comments\n" + "\n".join(comment_lines))
-                if note_parts:
-                    storage.append_note(cfg, project_name, "\n".join(note_parts))
-                # Track epic comment IDs on meta to avoid duplicates on re-sync
-                if epic_comments:
-                    meta.jira_synced_comment_ids = [str(ec.get("id", "")) for ec in epic_comments if ec.get("id")]
-                    storage.save_meta(cfg, meta)
+                # Append epic description/comments to project NOTES.md
+                if is_epic:
+                    epic_desc = str(group.get("description", "") or "")
+                    note_parts: list[str] = []
+                    if epic_desc:
+                        note_parts.append(f"## Jira: {jira_key}\n### Description\n{epic_desc.strip()}")
+                    epic_comments = comments_by_key.get(jira_key, [])
+                    if epic_comments:
+                        comment_lines: list[str] = []
+                        for ec in epic_comments:
+                            ec_author_raw = ec.get("author")
+                            if isinstance(ec_author_raw, dict):
+                                ec_author = str(ec_author_raw.get("displayName", "") or ec_author_raw.get("name", ""))
+                            elif isinstance(ec_author_raw, str):
+                                ec_author = ec_author_raw
+                            else:
+                                ec_author = "Unknown"
+                            ec_created = str(ec.get("created", ""))[:10]
+                            ec_body = str(ec.get("body", "")).strip()
+                            comment_lines.append(f"**{ec_author}** ({ec_created}): {ec_body}")
+                        note_parts.append("### Comments\n" + "\n".join(comment_lines))
+                    if note_parts:
+                        storage.append_note(cfg, project_name, "\n".join(note_parts))
+                    if epic_comments:
+                        meta.jira_synced_comment_ids = [str(ec.get("id", "")) for ec in epic_comments if ec.get("id")]
+                        storage.save_meta(cfg, meta)
+            except Exception as exc:
+                # Project creation failed — mark all issues in group as failed
+                group_issues = group.get("issues", [])
+                if isinstance(group_issues, list):
+                    for gi in group_issues:
+                        if isinstance(gi, dict):
+                            gi_key = str(gi.get("key", ""))
+                            if gi_key:
+                                result.per_issue[gi_key] = f"failed: project creation failed: {exc}"
+                continue
 
         # Process issues
         issues = group.get("issues", [])
@@ -605,6 +813,11 @@ def apply_mapping(
         try:
             meta = storage.load_meta(cfg, project_name)
         except FileNotFoundError:
+            for gi in issues:
+                if isinstance(gi, dict):
+                    gi_key = str(gi.get("key", ""))
+                    if gi_key:
+                        result.per_issue[gi_key] = "failed: project not found"
             continue
 
         # On re-run with existing epic project: ensure jira_issue_key is set
@@ -627,112 +840,120 @@ def apply_mapping(
             if not issue_key:
                 continue
 
-            if issue_key == meta.jira_issue_key:
-                # Root issue -> NOTES.md, not a todo
-                _sync_root_issue_to_notes(cfg, project_name, meta, issue, comments_by_key.get(issue_key, []))
+            try:
+                if issue_key == meta.jira_issue_key:
+                    # Root issue -> NOTES.md, not a todo
+                    _sync_root_issue_to_notes(cfg, project_name, meta, issue, comments_by_key.get(issue_key, []))
+                    result.per_issue[issue_key] = "skipped"
+                    storage.save_meta(cfg, meta)
+                    continue
+
+                summary = str(issue.get("summary", ""))
+                priority = str(issue.get("priority", "medium"))
+                status = str(issue.get("status", ""))
+                labels = issue.get("labels", [])
+                labels = [str(x) for x in labels] if isinstance(labels, list) else []
+                description = str(issue.get("description", "") or "")
+                duedate = str(issue.get("duedate", "")) if issue.get("duedate") else None
+                resolved = status.lower() in {"done", "resolved", "closed", "cancelled", "canceled"}
+
+                # Format description into structured notes
+                formatted_notes = _format_jira_notes(issue_key, description) if description else ""
+
+                if issue_key in by_jira_key:
+                    # Update existing todo
+                    todo = by_jira_key[issue_key]
+                    todo.title = summary
+                    todo.priority = priority
+                    todo.tags = labels
+                    if formatted_notes and formatted_notes != todo.notes:
+                        comments_marker = "### Comments"
+                        if comments_marker in todo.notes:
+                            idx = todo.notes.index(comments_marker)
+                            todo.notes = formatted_notes.rstrip() + "\n" + todo.notes[idx:]
+                        else:
+                            todo.notes = formatted_notes
+                    if duedate:
+                        todo.due_date = duedate
+                    if resolved and todo.status not in TERMINAL_STATUSES:
+                        todo.status = TodoStatus.DONE
+                    todo.updated = today
+                    result.counts["todos_updated"] += 1
+                    issue_status = "updated"
+                else:
+                    # Create new todo
+                    todo = Todo(
+                        id=next_todo_id(meta),
+                        title=summary,
+                        priority=priority,
+                        tags=labels,
+                        notes=formatted_notes,
+                        due_date=duedate,
+                        jira_issue_key=issue_key,
+                        status=TodoStatus.DONE if resolved else "pending",
+                        created=today,
+                        updated=today,
+                    )
+                    todos.append(todo)
+                    todo_map[todo.id] = todo
+                    by_jira_key[issue_key] = todo
+                    result.counts["todos_created"] += 1
+                    issue_status = "created"
+
+                # Append Jira comments (deduped by comment ID)
+                issue_comments = comments_by_key.get(issue_key, [])
+                if issue_comments:
+                    _append_jira_comments(todo, issue_comments)
+
+                # Handle subtasks
+                subtasks = issue.get("subtasks", [])
+                if isinstance(subtasks, list):
+                    for st in subtasks:
+                        if not isinstance(st, dict):
+                            continue
+                        st_key = str(st.get("key", ""))
+                        st_summary = str(st.get("summary", ""))
+                        st_status = str(st.get("status", ""))
+                        st_resolved = st_status.lower() in {"done", "resolved", "closed", "cancelled", "canceled"}
+                        if not st_key:
+                            continue
+
+                        if st_key in by_jira_key:
+                            st_todo = by_jira_key[st_key]
+                            st_todo.title = st_summary
+                            if st_resolved and st_todo.status not in TERMINAL_STATUSES:
+                                st_todo.status = TodoStatus.DONE
+                            st_todo.updated = today
+                            result.counts["todos_updated"] += 1
+                        else:
+                            parent_todo = by_jira_key.get(issue_key)
+                            st_todo = Todo(
+                                id=next_todo_id(meta, parent=parent_todo),
+                                title=st_summary,
+                                parent=parent_todo.id if parent_todo else None,
+                                jira_issue_key=st_key,
+                                status=TodoStatus.DONE if st_resolved else "pending",
+                                created=today,
+                                updated=today,
+                            )
+                            if parent_todo:
+                                parent_todo.children.append(st_todo.id)
+                                parent_todo.updated = today
+                            todos.append(st_todo)
+                            todo_map[st_todo.id] = st_todo
+                            by_jira_key[st_key] = st_todo
+                            result.counts["todos_created"] += 1
+
+                # Save after each successful issue
+                storage.save_todos(cfg, project_name, todos)
+                storage.save_meta(cfg, meta)
+                result.per_issue[issue_key] = issue_status
+
+            except Exception as exc:
+                result.per_issue[issue_key] = f"failed: {exc}"
                 continue
 
-            summary = str(issue.get("summary", ""))
-            priority = str(issue.get("priority", "medium"))
-            status = str(issue.get("status", ""))
-            labels = issue.get("labels", [])
-            labels = [str(x) for x in labels] if isinstance(labels, list) else []
-            description = str(issue.get("description", "") or "")
-            duedate = str(issue.get("duedate", "")) if issue.get("duedate") else None
-            resolved = status.lower() in {"done", "resolved", "closed", "cancelled", "canceled"}
-
-            # Format description into structured notes
-            formatted_notes = _format_jira_notes(issue_key, description) if description else ""
-
-            if issue_key in by_jira_key:
-                # Update existing todo
-                todo = by_jira_key[issue_key]
-                todo.title = summary
-                todo.priority = priority
-                todo.tags = labels
-                if formatted_notes and formatted_notes != todo.notes:
-                    # Preserve any ### Comments section already appended
-                    comments_marker = "### Comments"
-                    if comments_marker in todo.notes:
-                        idx = todo.notes.index(comments_marker)
-                        todo.notes = formatted_notes.rstrip() + "\n" + todo.notes[idx:]
-                    else:
-                        todo.notes = formatted_notes
-                if duedate:
-                    todo.due_date = duedate
-                if resolved and todo.status not in TERMINAL_STATUSES:
-                    todo.status = TodoStatus.DONE
-                todo.updated = today
-                counts["todos_updated"] += 1
-            else:
-                # Create new todo
-                todo = Todo(
-                    id=next_todo_id(meta),
-                    title=summary,
-                    priority=priority,
-                    tags=labels,
-                    notes=formatted_notes,
-                    due_date=duedate,
-                    jira_issue_key=issue_key,
-                    status=TodoStatus.DONE if resolved else "pending",
-                    created=today,
-                    updated=today,
-                )
-                todos.append(todo)
-                todo_map[todo.id] = todo
-                by_jira_key[issue_key] = todo
-                counts["todos_created"] += 1
-
-            # Append Jira comments (deduped by comment ID)
-            issue_comments = comments_by_key.get(issue_key, [])
-            if issue_comments:
-                _append_jira_comments(todo, issue_comments)
-
-            # Handle subtasks
-            subtasks = issue.get("subtasks", [])
-            if isinstance(subtasks, list):
-                for st in subtasks:
-                    if not isinstance(st, dict):
-                        continue
-                    st_key = str(st.get("key", ""))
-                    st_summary = str(st.get("summary", ""))
-                    st_status = str(st.get("status", ""))
-                    st_resolved = st_status.lower() in {"done", "resolved", "closed", "cancelled", "canceled"}
-                    if not st_key:
-                        continue
-
-                    if st_key in by_jira_key:
-                        # Update existing subtask todo
-                        st_todo = by_jira_key[st_key]
-                        st_todo.title = st_summary
-                        if st_resolved and st_todo.status not in TERMINAL_STATUSES:
-                            st_todo.status = TodoStatus.DONE
-                        st_todo.updated = today
-                        counts["todos_updated"] += 1
-                    else:
-                        # Create new child todo
-                        parent_todo = by_jira_key.get(issue_key)
-                        st_todo = Todo(
-                            id=next_todo_id(meta, parent=parent_todo),
-                            title=st_summary,
-                            parent=parent_todo.id if parent_todo else None,
-                            jira_issue_key=st_key,
-                            status=TodoStatus.DONE if st_resolved else "pending",
-                            created=today,
-                            updated=today,
-                        )
-                        if parent_todo:
-                            parent_todo.children.append(st_todo.id)
-                            parent_todo.updated = today
-                        todos.append(st_todo)
-                        todo_map[st_todo.id] = st_todo
-                        by_jira_key[st_key] = st_todo
-                        counts["todos_created"] += 1
-
-        storage.save_meta(cfg, meta)
-        storage.save_todos(cfg, project_name, todos)
-
-    return counts
+    return result
 
 
 # ── MCP tool registration ────────────────────────────────────────────────────
@@ -786,7 +1007,8 @@ def register(app: FastMCP) -> None:
             "Creates projects where needed, creates or updates todos with "
             "jira_issue_key set for idempotent re-runs. Optionally accepts "
             "comments_by_key_json mapping issue keys to comment lists. "
-            "Returns counts of projects created, todos created, and todos updated."
+            "Returns counts of projects created, todos created, todos updated, "
+            "and per-issue status (created/updated/skipped/failed)."
         )
     )
     def proj_jira_apply(
@@ -815,5 +1037,14 @@ def register(app: FastMCP) -> None:
             return f"Config error: {e}"
 
         data = JiraApplyInput(groups=raw.get("groups", []))
-        counts = apply_mapping(data, cfg_obj, comments_by_key=cbk)
-        return json.dumps({"status": "ok", "counts": counts})
+        apply_result = apply_mapping(data, cfg_obj, comments_by_key=cbk)
+        response: dict[str, Any] = {
+            "status": "ok",
+            "counts": apply_result.counts,
+        }
+        # Include per_issue details when there are failures
+        failed = {k: v for k, v in apply_result.per_issue.items() if v.startswith("failed:")}
+        if failed:
+            response["status"] = "partial"
+            response["per_issue"] = apply_result.per_issue
+        return json.dumps(response)

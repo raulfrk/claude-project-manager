@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,12 +14,6 @@ from server.lib.models import (
     ProjectPermissions,
     RepoEntry,
     validate_project_name,
-)
-from server.lib.zoxide import (
-    list_worktree_paths,
-    resolve_enabled as _zoxide_enabled,
-    zoxide_boost,
-    zoxide_remove,
 )
 from server.lib.models import TrelloListMappings
 from server.tools.config import require_config, require_project
@@ -51,7 +45,7 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_init, proj_list, proj_get, proj_get_active, proj_update_meta, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
+    """Register proj_init, proj_list, proj_list_full, proj_get, proj_get_active, proj_update_meta, proj_archive_preflight, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
 
     @app.tool(description="Initialize tracking for a new project. Accepts multiple directories via the dirs parameter (list of {path, label} dicts). The legacy path parameter is kept for backward compatibility and creates a single directory with label 'code'.")
     def proj_init(
@@ -125,12 +119,6 @@ def register(app: FastMCP) -> None:
             meta.zoxide_integration = zoxide_integration
         storage.save_meta(cfg, meta)
 
-        # Boost paths in zoxide frecency database if enabled
-        if _zoxide_enabled(cfg, meta):
-            for repo_entry in repo_entries:
-                if Path(repo_entry.path).is_dir():
-                    zoxide_boost(repo_entry.path)
-
         entry = ProjectEntry(
             name=name,
             tracking_dir=str(tracking),
@@ -172,6 +160,71 @@ def register(app: FastMCP) -> None:
                 desc = ""
             lines.append(f"  {p.name}{marker} [{status}]{desc} — created {p.created}")
         return "\n".join(lines)
+
+    @app.tool(
+        description="List all projects with full metadata (status, tags, repos, integrations). "
+        "Optionally filter by integration (todoist, trello, jira)."
+    )
+    def proj_list_full(
+        include_archived: bool = False,
+        integration_filter: str | None = None,
+    ) -> str:
+        cfg = require_config()
+        index = storage.load_index(cfg)
+
+        valid_integrations = {"todoist", "trello", "jira"}
+        if integration_filter and integration_filter not in valid_integrations:
+            return json.dumps({
+                "error": f"Unknown integration '{integration_filter}'. "
+                f"Valid values: {', '.join(sorted(valid_integrations))}",
+            })
+
+        entries = [
+            p for p in index.projects.values()
+            if include_archived or not p.archived
+        ]
+
+        projects: list[dict[str, object]] = []
+        warnings: list[str] = []
+        for entry in sorted(entries, key=lambda x: x.name):
+            try:
+                meta = storage.load_meta(cfg, entry.name)
+            except FileNotFoundError:
+                warnings.append(f"meta.yaml missing for project '{entry.name}'")
+                continue
+
+            # Apply integration filter
+            if integration_filter:
+                has_integration = False
+                if integration_filter == "todoist" and meta.todoist_project_id:
+                    has_integration = True
+                elif integration_filter == "trello" and meta.trello_card_id:
+                    has_integration = True
+                elif integration_filter == "jira" and meta.jira_issue_key:
+                    has_integration = True
+                if not has_integration:
+                    continue
+
+            # Build integration summary
+            integrations: dict[str, str | None] = {
+                "todoist": meta.todoist_project_id,
+                "trello": meta.trello_card_id,
+                "jira": meta.jira_issue_key,
+            }
+
+            projects.append({
+                "name": meta.name,
+                "description": meta.description,
+                "status": meta.status,
+                "priority": meta.priority,
+                "tags": meta.tags,
+                "repos": [r.to_dict() for r in meta.repos],
+                "dates": meta.dates.to_dict(),
+                "archived": entry.archived,
+                "integrations": {k: v for k, v in integrations.items() if v},
+            })
+
+        return json.dumps({"projects": projects, "count": len(projects), "warnings": warnings}, indent=2)
 
     @app.tool(description="Get full details of a project (defaults to active project).")
     def proj_get(name: str | None = None) -> str:
@@ -264,8 +317,68 @@ def register(app: FastMCP) -> None:
 
         return f"Updated project '{project_name}'.{trello_move_hint}"
 
+    @app.tool(
+        description="Pre-flight check for archiving a project. Returns config, project metadata, "
+        "open todos, and detected worktrees in a single call so the skill can present a "
+        "consolidated prompt without sequential guard calls."
+    )
+    def proj_archive_preflight(project_name: str) -> str:
+        from server.lib.enums import TERMINAL_STATUSES
+
+        cfg = require_config()
+        index = storage.load_index(cfg)
+
+        if project_name not in index.projects:
+            return f"Project '{project_name}' not found."
+
+        entry = index.projects[project_name]
+        if entry.archived:
+            return f"Project '{project_name}' is already archived."
+
+        try:
+            meta = storage.load_meta(cfg, project_name)
+        except FileNotFoundError:
+            return f"meta.yaml missing for project '{project_name}'."
+
+        try:
+            todos = storage.load_todos(cfg, project_name)
+        except FileNotFoundError:
+            todos = []
+
+        open_todos = [t for t in todos if t.status not in TERMINAL_STATUSES]
+
+        # Detect worktrees: a .git *file* (not directory) indicates a worktree checkout
+        worktrees: list[dict[str, str]] = []
+        for repo in meta.repos:
+            git_path = Path(repo.path) / ".git"
+            if git_path.is_file():
+                worktrees.append({"path": repo.path, "label": repo.label})
+
+        result = {
+            "config": {
+                "archive_destination": cfg.archive.destination,
+                "trash_grace_days": cfg.archive.trash_grace_days,
+            },
+            "project": {
+                "name": meta.name,
+                "status": meta.status,
+                "repos": [r.to_dict() for r in meta.repos],
+                "trello_card_id": meta.trello_card_id,
+                "todoist_project_id": meta.todoist_project_id,
+            },
+            "open_todos": {
+                "count": len(open_todos),
+                "items": [{"id": t.id, "title": t.title} for t in open_todos],
+            },
+            "worktrees": worktrees,
+        }
+        return json.dumps(result, indent=2)
+
     @app.tool(description="Archive a project (marks as archived, unsets active if needed).")
-    def proj_archive(name: str | None = None, purgeable: bool = True) -> str:
+    def proj_archive(
+        name: str | None = None,
+        purgeable: bool = True,
+    ) -> str:
         result = require_project(name)
         if isinstance(result, str):
             return result
@@ -273,37 +386,6 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
         if project_name not in index.projects:
             return f"Project '{project_name}' not found."
-
-        # Remove repo paths from zoxide before archiving
-        try:
-            meta = storage.load_meta(cfg, project_name)
-            if _zoxide_enabled(cfg, meta):
-                # Collect worktree base repo paths to skip
-                skip_paths: set[str] = set()
-                if cfg.worktree_integration:
-                    from server.tools.perms_grant import _WORKTREE_CONFIG
-                    import yaml
-                    if _WORKTREE_CONFIG.exists():
-                        try:
-                            wt_data = yaml.safe_load(_WORKTREE_CONFIG.read_text()) or {}
-                            base_repos_raw = wt_data.get("base_repos", [])
-                            if isinstance(base_repos_raw, list):
-                                for repo in base_repos_raw:
-                                    if isinstance(repo, dict):
-                                        p = repo.get("path", "")
-                                        if isinstance(p, str) and p:
-                                            skip_paths.add(p)
-                        except Exception:  # noqa: BLE001
-                            pass
-                for repo in meta.repos:
-                    if repo.path not in skip_paths:
-                        zoxide_remove(repo.path)
-                # Also remove worktree paths for base repos
-                for base_path in skip_paths:
-                    for wt_path in list_worktree_paths(base_path):
-                        zoxide_remove(wt_path)
-        except FileNotFoundError:
-            pass  # No meta file — skip zoxide removal
 
         index.projects[project_name].archived = True
         index.projects[project_name].archive_date = date.today().isoformat()
@@ -324,8 +406,6 @@ def register(app: FastMCP) -> None:
                 parts = []
                 if counts["sandbox_paths"]:
                     parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-                if counts.get("deny_write_paths"):
-                    parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
                 if counts["mcp_rules"]:
                     parts.append(f"{counts['mcp_rules']} MCP")
                 revoke_summary = f" Revoked {total} permission rule(s) ({', '.join(parts)})."
@@ -347,7 +427,21 @@ def register(app: FastMCP) -> None:
         except Exception:  # noqa: BLE001
             pass  # Archive succeeds even if hint generation fails
 
-        return f"Archived project '{project_name}'.{revoke_summary}{trello_move_hint}"
+        # Build trash info hint
+        trash_hint = ""
+        try:
+            archive_dest = Path(cfg.archive.destination).expanduser()
+            trash_loc = archive_dest / ".trash"
+            grace = cfg.archive.trash_grace_days
+            expiry = (date.today() + timedelta(days=grace)).isoformat()
+            trash_hint = (
+                f"\nTracking data moved to {trash_loc}/ "
+                f"(permanent deletion after {expiry}, {grace}-day grace period)."
+            )
+        except Exception:  # noqa: BLE001
+            pass  # Archive succeeds even if hint generation fails
+
+        return f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}"
 
     @app.tool(description="List or execute purge of archived projects older than purge_after_days.")
     def proj_purge_archive(confirm: bool = False) -> str:
@@ -374,17 +468,84 @@ def register(app: FastMCP) -> None:
         if not confirm:
             return json.dumps({"candidates": candidates, "count": len(candidates)})
 
-        # Actually purge
+        # Actually purge — move to .trash/ instead of immediate deletion
+        import tarfile
+        from datetime import datetime, timedelta
+
+        archive_dest = Path(cfg.archive.destination).expanduser()
+        trash_dir = archive_dest / ".trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+
+        # Prepare backup directory for pre-purge tarball snapshots
+        backup_dir = Path(cfg.tracking_dir).expanduser() / ".archive-backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
         purged = []
+        backup_paths: list[str] = []
         for c in candidates:
             name = c["name"]
             tracking_path = Path(cfg.tracking_dir).expanduser() / name
             if tracking_path.exists():
-                shutil.rmtree(tracking_path, ignore_errors=True)
+                # Create a tarball backup before purging
+                backup_path = backup_dir / f"{name}-{datetime.now().strftime('%Y%m%dT%H%M%S')}.tar.gz"
+                try:
+                    with tarfile.open(backup_path, "w:gz") as tar:
+                        tar.add(str(tracking_path), arcname=name)
+                    backup_paths.append(str(backup_path))
+                except Exception:  # noqa: BLE001
+                    # Backup failed — skip purge for this project to avoid data loss
+                    continue
+
+                timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+                trash_dest = trash_dir / f"{name}-{timestamp}"
+                try:
+                    shutil.move(str(tracking_path), str(trash_dest))
+                except (OSError, shutil.Error):
+                    # Move to trash failed — skip purge for this project
+                    continue
             del index.projects[name]
             purged.append(name)
         storage.save_index(cfg, index)
-        return f"Purged {len(purged)} projects: {', '.join(purged)}"
+
+        # Clean up backups older than backup_retention_days
+        expired_backups = 0
+        if backup_dir.exists():
+            cutoff = datetime.now() - timedelta(days=cfg.archive.backup_retention_days)
+            for bf in backup_dir.iterdir():
+                if not bf.is_file() or not bf.name.endswith(".tar.gz"):
+                    continue
+                try:
+                    mtime = datetime.fromtimestamp(bf.stat().st_mtime)
+                    if mtime < cutoff:
+                        bf.unlink()
+                        expired_backups += 1
+                except Exception:  # noqa: BLE001
+                    continue
+
+        # Sweep .trash/ for entries older than trash_grace_days
+        swept = 0
+        if trash_dir.exists():
+            grace = cfg.archive.trash_grace_days
+            now = datetime.now()
+            for entry in trash_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                # Parse timestamp from directory name: <name>-<YYYYMMDDTHHmmss>
+                parts = entry.name.rsplit("-", 1)
+                if len(parts) != 2:
+                    continue
+                try:
+                    entry_time = datetime.strptime(parts[1], "%Y%m%dT%H%M%S")
+                except ValueError:
+                    continue
+                if (now - entry_time).days >= grace:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    swept += 1
+
+        sweep_note = f" Swept {swept} expired trash entries." if swept else ""
+        backup_note = f" Backups: {', '.join(backup_paths)}." if backup_paths else ""
+        expired_note = f" Removed {expired_backups} expired backup(s)." if expired_backups else ""
+        return f"Purged {len(purged)} projects: {', '.join(purged)}{backup_note}{expired_note}{sweep_note}"
 
     @app.tool(description="Add a repository path to a project.")
     def proj_add_repo(
@@ -408,10 +569,6 @@ def register(app: FastMCP) -> None:
             return f"Path '{abs_path}' does not exist or is not a directory."
         meta.repos.append(RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference))
         storage.save_meta(cfg, meta)
-
-        # Boost path in zoxide frecency database if enabled
-        if _zoxide_enabled(cfg, meta):
-            zoxide_boost(abs_path)
 
         if reference:
             return f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."

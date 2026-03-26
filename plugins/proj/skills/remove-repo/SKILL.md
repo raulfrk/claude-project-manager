@@ -1,7 +1,7 @@
 ---
 name: remove-repo
 description: Remove a directory or repository from the active project by label. Validates the label exists, guards against removing the last repo, confirms with user, revokes permissions. Use when the user says "remove repo", "unregister repo", or "remove directory from project".
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__proj_get, mcp__proj__config_load, mcp__proj__proj_remove_repo, mcp__proj__proj_setup_permissions, mcp__perms__perms_remove_allow, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_remove_repo, mcp__proj__proj_setup_permissions, mcp__perms__perms_remove_allow, mcp__proj__tracking_git_flush
 argument-hint: "<label>"
 ---
 
@@ -12,17 +12,14 @@ Remove a directory or repository from the active project by label.
 
 **Steps:**
 
-1. Call `mcp__proj__proj_get_active`. If no active project is returned, stop with: "No active project. Run /proj:load first."
+1. Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call. If no active project, stop with: "No active project. Run /proj:load first."
+   - Extract `project.name` and `project.repos` from the session context.
 
-2. Call `mcp__proj__config_load` to load plugin configuration.
+2. Find the repo entry matching the provided label. If no repo with that label exists, stop with: "No repo with label '<label>' found in project '<name>'."
 
-3. Call `mcp__proj__proj_get` to retrieve the active project's metadata including its `repos` list.
+3. If there is only 1 repo in the project, stop with: "Cannot remove the last repo -- a project must have at least one repo. Use /proj:archive to remove the entire project instead."
 
-4. Find the repo entry matching the provided label. If no repo with that label exists, stop with: "No repo with label '<label>' found in project '<name>'."
-
-5. If there is only 1 repo in the project, stop with: "Cannot remove the last repo -- a project must have at least one repo. Use /proj:archive to remove the entire project instead."
-
-6. Display the repo details and ask the user for confirmation:
+4. Display the repo details and ask the user for confirmation:
    ```
    Remove repo from project '<project_name>'?
      Label: <label>
@@ -32,13 +29,13 @@ Remove a directory or repository from the active project by label.
    ```
    If the user declines, stop with: "Cancelled."
 
-7. Call `mcp__proj__proj_remove_repo` with `label=<label>`. If the tool returns an error, display it and stop.
+5. Call `mcp__proj__proj_remove_repo` with `label=<label>`. If the tool returns an error, display it and stop.
 
-8. Revoke permissions for the removed repo path:
+6. Revoke permissions for the removed repo path:
    - Call `mcp__perms__perms_remove_allow` with `path=<repo_path>` to remove Read and Edit allow rules for that directory.
    - If the config has `perms_integration: true`, call `mcp__proj__proj_setup_permissions` to refresh sandbox write paths from the remaining repos.
 
-9. Display confirmation summary:
+7. Display confirmation summary:
    ```
    Repo removed from <project_name>:
    - Label: <label>
@@ -48,4 +45,4 @@ Remove a directory or repository from the active project by label.
    - Remaining repos: <count>
    ```
 
-10. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Remove repo: {label}"`.
+8. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Remove repo: {label}"`.

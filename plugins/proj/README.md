@@ -191,8 +191,14 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `sync` | `/proj:sync` | Manually trigger bidirectional Todoist sync. |
+| `todoist-sync` | `/proj:todoist-sync` | Manually trigger bidirectional Todoist sync. |
 | `trello-sync` | `/proj:trello-sync` | Sync root-level todos with a Trello board. |
+
+### Permissions
+
+| Skill | Usage | Description |
+|-------|-------|-------------|
+| `perms-sync` | `/proj:perms-sync [--apply]` | Check if settings match expected permission rules. Reports missing MCP and sandbox rules. |
 
 ### Repository management
 
@@ -363,7 +369,7 @@ When `todoist.enabled: true`, bidirectional sync with a Todoist project.
 | `notes` | `description` |
 | `tags` | `labels` |
 
-Sync runs automatically during `/proj:status` and `/proj:load` when `auto_sync: true`. Manual trigger: `/proj:sync`.
+Sync runs automatically during `/proj:status` and `/proj:load` when `auto_sync: true`. Manual trigger: `/proj:todoist-sync`.
 
 ---
 

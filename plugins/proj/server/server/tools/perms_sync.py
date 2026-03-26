@@ -1,18 +1,14 @@
-"""Perms sync tool — compare expected vs actual allow rules (settings.json or settings.local.json)."""
+"""Perms sync tool — compare expected vs actual allow rules."""
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig, ProjectMeta
-from server.lib import perms_helpers
-from server.lib.perms_helpers import (
-    is_sandbox_enabled,
-    project_dirs_from_meta,
-)
+from server.lib.perms_helpers import project_dirs_from_meta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -29,18 +25,18 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
 
     if cfg.permissions.auto_allow_mcps:
         # proj is always present — it's the running plugin itself
-        rules.add("mcp__proj__*")
+        rules.add("mcp__plugin_proj_proj__*")
         # perms and worktree are only expected when their integrations are enabled
         if cfg.perms_integration:
-            rules.add("mcp__perms__*")
+            rules.add("mcp__plugin_perms_perms__*")
         if cfg.worktree_integration:
-            rules.add("mcp__worktree__*")
+            rules.add("mcp__plugin_worktree_worktree__*")
         if cfg.todoist.enabled:
-            rules.add(f"mcp__{cfg.todoist.mcp_server}__*")
+            rules.add("mcp__todoist__*")  # Fixed prefix — local plugin
         if cfg.jira.enabled:
-            rules.add("mcp__jira__*")
+            rules.add("mcp__plugin_jira_jira__*")
         if cfg.trello.enabled:
-            rules.add("mcp__trello__*")
+            rules.add("mcp__plugin_trello_trello__*")
     # Global Claude.ai MCP servers — always expected, unconditionally
     rules.add("mcp__claude_ai_Excalidraw__*")
     rules.add("mcp__claude_ai_Mermaid_Chart__*")
@@ -58,40 +54,6 @@ def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[st
     return paths
 
 
-def _load_actual_rules(project_dir: Path | None = None) -> set[str]:
-    """Load permissions.allow rules from the effective settings file."""
-    sandbox_mode = is_sandbox_enabled(project_dir)
-    path = perms_helpers._USER_LOCAL_SETTINGS if sandbox_mode else perms_helpers._USER_SETTINGS
-    if not path.exists():
-        return set()
-    data: dict[str, object] = json.loads(path.read_text())
-    perms = data.get("permissions", {})
-    if not isinstance(perms, dict):
-        return set()
-    allow = perms.get("allow", [])
-    if not isinstance(allow, list):
-        return set()
-    return set(str(r) for r in allow)
-
-
-def _load_actual_sandbox_paths() -> set[str]:
-    """Load sandbox.filesystem.allowWrite paths from settings.local.json."""
-    path = perms_helpers._USER_LOCAL_SETTINGS
-    if not path.exists():
-        return set()
-    data: dict[str, object] = json.loads(path.read_text())
-    sandbox = data.get("sandbox", {})
-    if not isinstance(sandbox, dict):
-        return set()
-    fs = sandbox.get("filesystem", {})
-    if not isinstance(fs, dict):
-        return set()
-    aw = fs.get("allowWrite", [])
-    if not isinstance(aw, list):
-        return set()
-    return set(str(p) for p in aw)
-
-
 def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
     """Extract server names from MCP wildcard rules like ``mcp__server__*``."""
     servers: list[str] = []
@@ -103,20 +65,24 @@ def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
     return servers
 
 
-def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
-    project_dirs = project_dirs_from_meta(meta)
-    project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = is_sandbox_enabled(project_dirs=project_dirs)
+def run_sync(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    *,
+    actual_rules: set[str],
+    actual_sandbox_paths: set[str],
+    sandbox_mode: bool,
+    apply: bool = False,
+    batch_setup_fn: Callable[..., str] | None = None,
+) -> str:
     expected = _derive_expected_rules(meta, cfg)
-    actual = _load_actual_rules(project_dir)
-    missing = expected - actual
+    missing = expected - actual_rules
 
     # In sandbox mode, also check sandbox.filesystem.allowWrite
     missing_sandbox_paths: set[str] = set()
     if sandbox_mode:
         expected_paths = _derive_expected_sandbox_paths(meta, cfg)
-        actual_paths = _load_actual_sandbox_paths()
-        missing_sandbox_paths = expected_paths - actual_paths
+        missing_sandbox_paths = expected_paths - actual_sandbox_paths
 
     target_name = "settings.local.json" if sandbox_mode else "settings.json"
 
@@ -134,6 +100,7 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
             meta,
             cfg,
             mcp_servers=mcp_servers,
+            batch_setup_fn=batch_setup_fn,
         )
         total = sum(counts.values())
         if total == 0 and not missing_sandbox_paths:
@@ -141,10 +108,6 @@ def run_sync(meta: ProjectMeta, cfg: ProjConfig, *, apply: bool = False) -> str:
         parts: list[str] = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-        if counts.get("deny_write_paths"):
-            parts.append(f"{counts['deny_write_paths']} deny-write path(s)")
-        if counts.get("sensitive_deny_rules"):
-            parts.append(f"{counts['sensitive_deny_rules']} sensitive deny rule(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
         applied_total = total
@@ -175,12 +138,21 @@ def register(app: FastMCP) -> None:
             "Check if settings allow rules match the active project config. "
             "Reports missing rules (one-way check — extras in actual are fine). "
             "Does not auto-fix. Idempotent. "
-            "Automatically detects sandbox mode and checks settings.local.json if enabled. "
+            "Caller must pass actual_rules, actual_sandbox_paths, and sandbox_mode "
+            "(obtained from perms MCP tools). "
             "In sandbox mode, also checks sandbox.filesystem.allowWrite paths. "
             "Pass apply=true to automatically add all missing rules in one atomic write."
         )
     )
-    def proj_perms_sync(project_name: str | None = None, apply: bool = False) -> str:
+    def proj_perms_sync(
+        project_name: str | None = None,
+        apply: bool = False,
+        actual_rules: list[str] | None = None,
+        actual_sandbox_paths: list[str] | None = None,
+        sandbox_mode: bool = False,
+    ) -> str:
+        if actual_rules is None:
+            return "Error: actual_rules is a required parameter."
         cfg = require_config()
         index = storage.load_index(cfg)
         name = state.resolve_project(project_name)
@@ -189,4 +161,11 @@ def register(app: FastMCP) -> None:
         if name not in index.projects:
             return f"Project '{name}' not found."
         meta = storage.load_meta(cfg, name)
-        return run_sync(meta, cfg, apply=apply)
+        return run_sync(
+            meta,
+            cfg,
+            actual_rules=set(actual_rules),
+            actual_sandbox_paths=set(actual_sandbox_paths or []),
+            sandbox_mode=sandbox_mode,
+            apply=apply,
+        )

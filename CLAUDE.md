@@ -5,10 +5,34 @@
 
 ## Overview
 
-Claude Code plugin marketplace for project management workflows. Three plugins:
+Claude Code plugin marketplace for project management workflows. Five plugins:
 - `perms` — auto-manage `settings.json` permissions (file paths + MCP tool wildcards)
 - `worktree` — git worktree management
-- `proj` — full project lifecycle (todos, notes, git, Todoist sync)
+- `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync)
+- `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
+- `jira` — Jira MCP server (issues, projects, epics, bulk operations)
+
+## Overhaul Plan
+
+A comprehensive overhaul requirements document exists at:
+`~/projects/tracking/claude-project-manager/overhaul-requirements.md` (7,565 lines)
+
+It contains the full workflow map, user vision, quality assessment, gap analysis, 31 change proposals, and 35 implementation todos across 6 phases. **Read this file before starting any overhaul work.** Key architectural decisions:
+- **Hooks plugin** (`plugins/hooks/`) — central MCP→MCP registry with schema-based param mapping, auto-registration, and recovery
+- **3 new plugins planned**: `plugins/todoist/` (local, replacing external MCP), `plugins/zoxide/`, `plugins/hooks/`
+- **Perms is single source of truth** for settings.json — proj must never write settings files directly
+- **Proj must not read worktree.yaml directly** — use worktree MCP tools
+- **Remove deny functionality** from perms (denyWrite/denyRead)
+- **Define skill rewrite** — free-form writing → probing Q&A → iterative rerun → quality gate
+- **Default --iter 5** for `/proj:run`
+
+## Task Planning
+
+Before starting any non-trivial task, evaluate whether it should be broken down into a todo list of smaller steps. Use task tracking to manage progress on multi-step work.
+
+## Implementation Validation
+
+After completing any implementation, always validate the result against the specs (requirements, research, or overhaul document) that were provided for that work. Check for gaps, deviations, and missing test coverage before marking a todo as done.
 
 ## Key Conventions
 

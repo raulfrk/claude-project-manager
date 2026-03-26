@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,7 +24,10 @@ from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import Todo, TrelloSyncState
+from server.lib.retry import retry_link
 from server.tools.config import require_project
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -175,6 +179,14 @@ def build_expected_state(
         if root.children:
             # Root with children -> checklist
             items: list[dict[str, object]] = []
+            # Self-referencing item at position 0: makes the root todo
+            # itself visible as a checkable item in the Trello checklist.
+            items.append({
+                "todo_id": root.id,
+                "name": root.title,
+                "checked": root.status in TERMINAL_STATUSES,
+                "is_self_ref": True,
+            })
             for display_name, desc_todo in _flatten_descendants(root, todo_map):
                 items.append({
                     "todo_id": desc_todo.id,
@@ -438,14 +450,55 @@ def compute_diff(
                         "checklist_id": root_todo.trello_checklist_id,
                         "name": local_name,
                     })
+                    # Also rename the self-ref item if it exists but was
+                    # NOT processed by the linked-items loop (item not on
+                    # Trello card — edge case).  When the self-ref item IS
+                    # on the Trello card, the linked-items loop already
+                    # handles the name push via last-changed-wins.
+                    if (
+                        root_todo.trello_checklist_item_id
+                        and root_todo.trello_checklist_item_id not in trello_items_by_id
+                    ):
+                        plan.push_update_item.append({
+                            "item_id": root_todo.trello_checklist_item_id,
+                            "name": local_name,
+                            "checklist_id": root_todo.trello_checklist_id,
+                        })
 
         # Push items within this checklist (only unlinked ones)
         items_spec = cl_spec.get("items", [])
         if isinstance(items_spec, list):
             for item_spec in items_spec:
                 item_todo_id = str(item_spec.get("todo_id", ""))  # type: ignore[union-attr]
+                is_self_ref = bool(item_spec.get("is_self_ref", False))  # type: ignore[union-attr]
                 item_todo = todo_map.get(item_todo_id)
                 if item_todo is None:
+                    continue
+                # Self-ref items: the root todo IS the checklist owner.
+                # Use trello_checklist_item_id (not trello_checklist_id) to
+                # decide whether the self-ref item is already linked.
+                if is_self_ref:
+                    if not root_todo.trello_checklist_item_id and root_todo.trello_checklist_id:
+                        # Backward compat: checklist exists but self-ref item
+                        # was never created — emit push_create_item.
+                        plan.push_create_item.append({
+                            "todo_id": root_todo.id,
+                            "name": str(item_spec.get("name", "")),  # type: ignore[union-attr]
+                            "checklist_id": root_todo.trello_checklist_id,
+                            "checked": bool(item_spec.get("checked", False)),  # type: ignore[union-attr]
+                            "is_self_ref": True,
+                        })
+                    elif not root_todo.trello_checklist_id:
+                        # New checklist being created — self-ref item will be
+                        # created along with the checklist (no checklist_id yet).
+                        plan.push_create_item.append({
+                            "todo_id": root_todo.id,
+                            "name": str(item_spec.get("name", "")),  # type: ignore[union-attr]
+                            "checklist_id": None,
+                            "checked": bool(item_spec.get("checked", False)),  # type: ignore[union-attr]
+                            "is_self_ref": True,
+                        })
+                    # If already linked: handled by last-changed-wins loop above.
                     continue
                 # Only push-create for items not yet linked; linked items
                 # are handled by the last-changed-wins loop above.
@@ -682,6 +735,8 @@ def apply_changes(
     data: TrelloApplyInput,
     cfg: Any,
     name: str,
+    *,
+    push_confirmed: bool = False,
 ) -> dict[str, int]:
     """Apply Trello sync changes to local todos atomically. Returns counts dict."""
     meta = storage.load_meta(cfg, name)
@@ -752,20 +807,81 @@ def apply_changes(
         counts["updated"] += 1
 
     # 4. Link Trello IDs (after push operations return Trello IDs)
+    trk_dir = str(storage.tracking_dir(cfg, name))
     for item in data.link_trello_ids:
         todo_id = str(item.get("todo_id", ""))
         # Handle _tasks sentinel: store checklist ID on meta instead of a todo
         if todo_id == "_tasks" and "trello_checklist_id" in item:
-            meta.trello.trello_tasks_checklist_id = str(item["trello_checklist_id"]) if item.get("trello_checklist_id") else None
-            counts["linked"] += 1
+            def _link_tasks_checklist(itm: dict = item) -> None:  # noqa: E501
+                meta.trello.trello_tasks_checklist_id = (
+                    str(itm["trello_checklist_id"]) if itm.get("trello_checklist_id") else None
+                )
+            try:
+                retry_link(
+                    _link_tasks_checklist,
+                    orphan_context={
+                        "tracking_dir": trk_dir,
+                        "external_id": str(item.get("trello_checklist_id", "")),
+                        "todo_id": "_tasks",
+                        "service": "trello",
+                    },
+                )
+                counts["linked"] += 1
+            except Exception:
+                logger.warning(
+                    "Failed to link Trello checklist %s to _tasks; logged as orphaned resource",
+                    item.get("trello_checklist_id", ""),
+                )
             continue
         todo = todo_map.get(todo_id)
         if not todo:
             continue
+        # -- Checklist-level link --
         if "trello_checklist_id" in item:
-            todo.trello_checklist_id = str(item["trello_checklist_id"]) if item.get("trello_checklist_id") else None
+            def _link_checklist(t: Todo = todo, itm: dict = item) -> None:  # noqa: E501
+                t.trello_checklist_id = (
+                    str(itm["trello_checklist_id"]) if itm.get("trello_checklist_id") else None
+                )
+            try:
+                retry_link(
+                    _link_checklist,
+                    orphan_context={
+                        "tracking_dir": trk_dir,
+                        "external_id": str(item.get("trello_checklist_id", "")),
+                        "todo_id": todo_id,
+                        "service": "trello",
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to link Trello checklist %s to todo %s; logged as orphaned resource",
+                    item.get("trello_checklist_id", ""),
+                    todo_id,
+                )
+                continue
+        # -- Item-level link --
         if "trello_checklist_item_id" in item:
-            todo.trello_checklist_item_id = str(item["trello_checklist_item_id"]) if item.get("trello_checklist_item_id") else None
+            def _link_item(t: Todo = todo, itm: dict = item) -> None:  # noqa: E501
+                t.trello_checklist_item_id = (
+                    str(itm["trello_checklist_item_id"]) if itm.get("trello_checklist_item_id") else None
+                )
+            try:
+                retry_link(
+                    _link_item,
+                    orphan_context={
+                        "tracking_dir": trk_dir,
+                        "external_id": str(item.get("trello_checklist_item_id", "")),
+                        "todo_id": todo_id,
+                        "service": "trello",
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to link Trello checklist item %s to todo %s; logged as orphaned resource",
+                    item.get("trello_checklist_item_id", ""),
+                    todo_id,
+                )
+                continue
         todo.updated = now
         counts["linked"] += 1
 
@@ -803,20 +919,23 @@ def apply_changes(
         counts["reopened"] += 1
 
     # 8. Record trello_sync_state on all synced todos (232.7)
-    sync_now = _now()
-    expected_checklists, expected_tasks_items = build_expected_state(todos)
-    for todo in todos:
-        if todo.trello_checklist_item_id or todo.trello_checklist_id:
-            expected_name = _find_expected_name(
-                todo.id, expected_checklists, expected_tasks_items,
-            )
-            display_name = expected_name or todo.title
-            state_str = "complete" if todo.status in TERMINAL_STATUSES else "incomplete"
-            todo.trello_sync_state = TrelloSyncState(
-                last_sync=sync_now,
-                synced_name=display_name,
-                synced_state=state_str,
-            )
+    # Only update sync state when push operations have been confirmed complete,
+    # so the snapshot reflects what Trello actually has.
+    if push_confirmed:
+        sync_now = _now()
+        expected_checklists, expected_tasks_items = build_expected_state(todos)
+        for todo in todos:
+            if todo.trello_checklist_item_id or todo.trello_checklist_id:
+                expected_name = _find_expected_name(
+                    todo.id, expected_checklists, expected_tasks_items,
+                )
+                display_name = expected_name or todo.title
+                state_str = "complete" if todo.status in TERMINAL_STATUSES else "incomplete"
+                todo.trello_sync_state = TrelloSyncState(
+                    last_sync=sync_now,
+                    synced_name=display_name,
+                    synced_state=state_str,
+                )
 
     # Save atomically
     storage.save_meta(cfg, meta)
@@ -913,6 +1032,7 @@ def register(app: FastMCP) -> None:
     )
     def proj_trello_apply(
         apply_json: str,
+        push_confirmed: bool = False,
         project_name: str | None = None,
     ) -> str:
         result = require_project(project_name)
@@ -934,5 +1054,5 @@ def register(app: FastMCP) -> None:
             link_trello_ids=raw.get("link_trello_ids", []),
             link_trello_card_id=raw.get("link_trello_card_id"),
         )
-        counts = apply_changes(data, cfg, proj_name)
+        counts = apply_changes(data, cfg, proj_name, push_confirmed=push_confirmed)
         return json.dumps({"status": "ok", "counts": counts})

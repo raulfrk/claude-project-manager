@@ -1,12 +1,12 @@
 ---
 name: purge
 description: Purge archived projects older than the configured purge_after_days threshold. Use when asked "purge old projects", "clean up archives", or "purge archives".
-allowed-tools: mcp__proj__proj_purge_archive, mcp__proj__config_load, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_purge_archive, mcp__proj__proj_session_context, mcp__proj__tracking_git_flush
 ---
 
 Purge archived projects that have exceeded the retention period.
 
-1. Call `mcp__proj__config_load` to verify purge is configured (check `archive.purge_after_days`).
+1. Call `mcp__proj__proj_session_context` to get config and integration settings. Check if `archive.purge_after_days` is configured.
    If not configured: display "Purge not configured. Set archive.purge_after_days via /proj:init-plugin or config_update." and stop.
 
 2. Call `mcp__proj__proj_purge_archive` (without confirm) to get candidates.

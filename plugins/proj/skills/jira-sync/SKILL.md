@@ -1,7 +1,7 @@
 ---
 name: jira-sync
 description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
-allowed-tools: mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_get_epic_issues, mcp__jira__jira_get_user_issues, mcp__jira__jira_init
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_get_epic_issues, mcp__jira__jira_get_user_issues, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 context: fork
 agent: general-purpose
@@ -26,8 +26,10 @@ This skill operates across all projects -- it does NOT require loading a project
 
 ### 1. Setup
 
-- Call `mcp__proj__config_load` -- read `jira.*` config values. Note `jira.enabled`, `jira.default_user`.
-- If `jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
+- Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
+  - From the result, extract `integrations.jira.enabled` and other config values.
+  - Note: jira-sync works across all projects, so the active project from context is informational only.
+- If `integrations.jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
 - Parse optional `--user` and `--projects` from skill arguments:
   - `--user <username>` overrides `jira.default_user`
   - `--projects <key1,key2>` filters to specific Jira project keys

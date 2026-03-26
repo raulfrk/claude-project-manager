@@ -13,7 +13,7 @@ Extract from $ARGUMENTS:
 - **Input mode**: single ID (`1`), range (`2-5`), or comma list (`1,3,5`)
 - **`--steps <csv>`**: explicit step list (reordered to workflow order)
 - **`--from <step>`**: slice from that step onward (`--steps` takes precedence)
-- **`--iter N`**: prep iteration count (default 1, positive integer)
+- **`--iter N`**: prep iteration count (default 5, positive integer)
 - **`--no-interactive`**: run autonomously with no user prompts
 
 If no todo ID: stop with `Todo ID required. Usage: /proj:run <id> [--steps define,execute] [--from <step>]`
@@ -53,6 +53,27 @@ Read the sibling `<step>/SKILL.md` file. Extract instructions after the second `
 - For each todo in descendant list (in dependency order via `mcp__proj__proj_identify_batches`):
   - Announce: `Define: <id> — <title>`
   - Execute the define skill interactively (Q&A + research in main conversation)
+
+**Quality gate check** (after define phase):
+For each todo defined non-interactively (agent-driven):
+- Read the self-assessment from define output
+- If any section has confidence ≤ 2 (speculative or inferred), add to flagged_todos
+
+If flagged_todos is non-empty, display:
+
+```
+### Low-confidence definitions detected
+
+| Todo | Low-confidence sections |
+|------|------------------------|
+| <id> | <section> (<score>/5) |
+
+1. **Continue anyway** — proceed to decompose
+2. **Re-define** — run interactive define on flagged todos
+3. **Stop** — exit workflow
+```
+
+If Re-define: run interactive define on each flagged todo, then resume from decompose.
 
 **If `decompose`** — parallel Task agents:
 - For each batch in dependency order:
@@ -102,11 +123,12 @@ Recommend "Ready to execute" when ALL dimensions are Stable or Minor changes wit
 
 1. **Continue** — Start iteration <i+1>
 2. **Skip to execute** — Prep has converged, proceed to execute
-3. **Edit** — Modify this iteration's output
+3. **Redefine** — Re-run interactive define on specific todos (enter IDs)
 4. **Stop** — Exit workflow now (completed steps are saved)
 ```
 
 When the user picks option 2, skip all remaining iterations and jump directly to step 5 (Execute).
+When the user picks option 3: prompt for todo IDs, run interactive define on each, then resume from decompose step.
 
 **5. Execute** (only if `has_execute`)
 
@@ -118,7 +140,7 @@ If NOT `--no-interactive`, prompt:
 ### Prep complete — Execute?
 
 1. **Proceed** — Run execute
-2. **Edit** — Modify prep output
+2. **Redefine** — Re-run interactive define on specific todos (enter IDs)
 3. **Stop** — Exit (prep saved)
 ```
 
@@ -157,10 +179,11 @@ For each batch in dependency order (excluding `manual_skipped_ids`):
 3. Wait for batch completion. Report failures: `Agent for todo <id> failed: <error>`.
 4. **Satisfaction check** (sequential, main conversation): For each completed todo in the batch, run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
-      1. **Satisfied** — call `mcp__proj__todo_complete` (+ Todoist if applicable; + if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`)
-      2. **Not satisfied** — ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
+      1. **Satisfied** — mark done: call `mcp__proj__todo_complete` (+ if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`)
+      2. **Not satisfied** — fix in scope: ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
+      3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
-Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop for the parent todo before calling `mcp__proj__todo_complete` on parent + Todoist complete if applicable + if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`. Otherwise display warning.
+Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent + if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`. Otherwise display warning.
 
 **6. Complete**
 
@@ -183,7 +206,7 @@ Suggested next: /proj:status — see updated project overview
 
 **a. Setup**
 - Load step list, apply `--steps`/`--from` flags.
-- `run_define_interactive` = `define` in steps AND NOT `--no-interactive`
+- `run_define_interactive` = `define` in steps (always interactive — define requires user input even in batch mode)
 - `has_execute` = `execute` in steps
 - `agent_steps` = steps excluding `define` (if interactive) and `execute`
 - Read SKILL.md for each step in `agent_steps`. Store as `step_instructions[step]`.
@@ -192,7 +215,7 @@ Suggested next: /proj:status — see updated project overview
 **b. Dependency order**
 Call `mcp__proj__proj_identify_batches` with all todo IDs. Error on cycles.
 
-**Iteration loop** (repeat up to `--iter N` times, default 1):
+**Iteration loop** (repeat up to `--iter N` times, default 5):
 
 If N > 1: announce `Iteration <i>/<N>`
 
@@ -200,6 +223,27 @@ If N > 1: announce `Iteration <i>/<N>`
 For each todo in dependency order:
 - Announce: `Define: <id> — <title>`
 - Execute define interactively in main conversation
+
+**Quality gate check** (after define phase):
+For each todo defined non-interactively (agent-driven):
+- Read the self-assessment from define output
+- If any section has confidence ≤ 2 (speculative or inferred), add to flagged_todos
+
+If flagged_todos is non-empty, display:
+
+```
+### Low-confidence definitions detected
+
+| Todo | Low-confidence sections |
+|------|------------------------|
+| <id> | <section> (<score>/5) |
+
+1. **Continue anyway** — proceed to decompose
+2. **Re-define** — run interactive define on flagged todos
+3. **Stop** — exit workflow
+```
+
+If Re-define: run interactive define on each flagged todo, then resume from decompose.
 
 **Phase B — Remaining steps (parallel agents):**
 For each batch in dependency order:

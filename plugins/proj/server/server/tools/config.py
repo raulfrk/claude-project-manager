@@ -84,6 +84,7 @@ def register(app: FastMCP) -> None:
             f"  claudemd_management: {cfg.claudemd_management}\n"
             f"  archive.destination: {cfg.archive.destination}\n"
             f"  archive.purge_after_days: {cfg.archive.purge_after_days or '(not set)'}\n"
+            f"  archive.trash_grace_days: {cfg.archive.trash_grace_days}\n"
             f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
             f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
             f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
@@ -121,6 +122,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_repo_format: str = "tracking",
         archive_destination: str = "~/projects/archived",
         archive_purge_after_days: int | None = None,
+        archive_trash_grace_days: int = 7,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -151,42 +153,13 @@ def register(app: FastMCP) -> None:
         cfg.git_tracking.github_repo_format = git_tracking_github_repo_format
         cfg.archive.destination = archive_destination
         cfg.archive.purge_after_days = archive_purge_after_days
+        cfg.archive.trash_grace_days = archive_trash_grace_days
         storage.save_config(cfg)
 
         # Set file permissions to 600
         storage.config_path().chmod(0o600)
 
         return f"Configuration saved to {storage.config_path()}."
-
-    def _check_integration_plugin(flag: bool, prefixes: list[str], plugin_label: str) -> str | None:
-        """Return a warning string if flag=True but no matching MCP rule is in settings.json.
-
-        Checks that at least one entry in permissions.allow starts with one of the given
-        prefixes (or exactly equals the wildcard literal). Returns None when flag is False
-        or the plugin is found. Never raises — a missing or unreadable settings.json is
-        treated the same as plugin absent.
-        """
-        if not flag:
-            return None
-        from server.tools.perms_grant import _load_settings  # lazy import to avoid circular dep
-
-        data = _load_settings()
-        perms = data.get("permissions", {})
-        allow_list: list[object] = []
-        if isinstance(perms, dict):
-            raw = perms.get("allow", [])
-            if isinstance(raw, list):
-                allow_list = raw
-        found = any(
-            isinstance(r, str) and any(r.startswith(p) or r == p + "*" for p in prefixes)
-            for r in allow_list
-        )
-        if not found:
-            return (
-                f"Warning: {plugin_label} MCP server not found in settings.json. "
-                f"Install it and re-run /proj:init-plugin."
-            )
-        return None
 
     @app.tool(description="Update individual proj config settings.")
     def config_update(
@@ -216,6 +189,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_repo_format: str | None = None,
         archive_destination: str | None = None,
         archive_purge_after_days: int | None = None,
+        archive_trash_grace_days: int | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -255,6 +229,10 @@ def register(app: FastMCP) -> None:
         if archive_purge_after_days is not None:
             if not isinstance(archive_purge_after_days, int) or archive_purge_after_days <= 0:
                 return "Invalid archive_purge_after_days: must be a positive integer."
+
+        if archive_trash_grace_days is not None:
+            if not isinstance(archive_trash_grace_days, int) or archive_trash_grace_days <= 0:
+                return "Invalid archive_trash_grace_days: must be a positive integer."
 
         cfg = require_config()
         if tracking_dir is not None:
@@ -309,24 +287,7 @@ def register(app: FastMCP) -> None:
             cfg.archive.destination = archive_destination
         if archive_purge_after_days is not None:
             cfg.archive.purge_after_days = archive_purge_after_days
+        if archive_trash_grace_days is not None:
+            cfg.archive.trash_grace_days = archive_trash_grace_days
         storage.save_config(cfg)
-        warnings: list[str] = []
-        if perms_integration is True:
-            w = _check_integration_plugin(
-                True,
-                ["mcp__plugin_perms_perms__", "mcp__perms__"],
-                "perms plugin",
-            )
-            if w:
-                warnings.append(w)
-        if worktree_integration is True:
-            w = _check_integration_plugin(
-                True,
-                ["mcp__plugin_worktree_worktree__", "mcp__worktree__"],
-                "worktree plugin",
-            )
-            if w:
-                warnings.append(w)
-        if warnings:
-            return "Configuration updated.\n" + "\n".join(warnings)
         return "Configuration updated."

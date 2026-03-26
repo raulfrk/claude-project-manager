@@ -1,7 +1,7 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, Task, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, Task, Skill, EnterPlanMode, ExitPlanMode
 argument-hint: "[todo-id | range] e.g. 1 or 2-4"
 ---
 
@@ -28,26 +28,26 @@ Execute todo(s): $ARGUMENTS
    - Testing approach
 
    Call `ExitPlanMode` to present the plan for user review. The user will approve or request changes before you proceed.
-4. Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions pulled from Todoist) — it should inform your implementation approach.
+4. Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions) — it should inform your implementation approach.
 5. On completion — **Satisfaction loop**:
-   a. Ask: "Are you satisfied with the outcome, or is there anything else that needs to be done?"
-      1. **Satisfied** — proceed to step 5c
-      2. **Not satisfied** — describe what's missing
+   a. Ask: "Are you satisfied with the outcome of todo <id>?"
+      1. **Satisfied** — proceed to step 5d
+      2. **Not satisfied** — describe what needs fixing
+      3. **Redefine** — refine requirements and re-run workflow
    b. If not satisfied:
-      - Create a new todo from the user's description (`mcp__proj__todo_add`)
-      - If Trello auto-sync (trello.enabled=true via config_load, project has trello_card_id):
-        - Determine checklist: if parent todo has `trello_checklist_id`, use that. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find existing "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on the root todo.
-        - Call `mcp__trello__add_checklist_item(checklist_id, name=title)`
-        - Store returned item ID: call `mcp__proj__todo_update` with `trello_checklist_item_id=<returned id>`
-      - Run the full workflow on the new todo: read `run/SKILL.md` and execute with `$ARGUMENTS = <new_id> --iter 5`
-      - After the run completes, re-ask satisfaction on the original todo (go back to step 5a)
-      - Loop until satisfied
-   c. Call `mcp__proj__todo_complete`
-   - If Todoist enabled: call `mcp__{todoist.mcp_server}__complete-tasks`
-   - If Trello auto-sync AND todo has `trello_checklist_item_id`:
-     - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
-   - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
-   - Append a brief progress note: `mcp__proj__notes_append`
+      - Ask what's missing, fix issues in current scope
+      - Re-ask satisfaction (go back to step 5a)
+   c. If redefine:
+      - Invoke `/proj:define <id>` via Skill tool (existing requirements/research kept as context — non-destructive)
+      - After define completes, check if todo has/needs children:
+        - If decomposable: invoke `/proj:decompose <id>` via Skill tool
+      - Invoke `/proj:execute <id>` via Skill tool
+      - Re-ask satisfaction on original todo (go back to step 5a)
+   d. Call `mcp__proj__todo_complete`
+      - If Trello auto-sync AND todo has `trello_checklist_item_id`:
+        - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
+      - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
+      - Append a brief progress note: `mcp__proj__notes_append`
 
 **For a range with independent todos (no blocked_by between them):**
 
@@ -66,7 +66,7 @@ Each agent implements according to its approved plan. Agents do NOT call `todo_c
 Phase 3 — Satisfaction check (sequential, main conversation):
 For each completed agent todo (excluding manual-skipped):
 1. Review the agent's output
-2. Run the satisfaction loop (same as step 5a-5c above)
+2. Run the satisfaction loop (same as step 5a-5d above)
 Main conversation reports summary, including any skipped manual todos.
 
 **For a range with dependencies:**
@@ -79,7 +79,7 @@ Execute in topological order (respect blocked_by chains). For each todo:
 4. Call `ExitPlanMode` for user review.
 
 Phase 2 — Execute (sequential, in dependency order):
-Execute each todo according to its approved plan, one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan. After implementation, run the satisfaction loop (step 5a-5c) before calling `todo_complete`.
+Execute each todo according to its approved plan, one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan. After implementation, run the satisfaction loop (step 5a-5d) before calling `todo_complete`.
 
 **Note:** Root todo execution does NOT auto-recurse into children. To execute children, specify their IDs explicitly.
 

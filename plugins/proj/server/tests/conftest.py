@@ -35,6 +35,7 @@ def _isolate_sandbox_detection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """
     nonexistent = tmp_path / "nonexistent-local-settings.json"
     monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", nonexistent)
+    monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", nonexistent)
 
 
 @pytest.fixture()

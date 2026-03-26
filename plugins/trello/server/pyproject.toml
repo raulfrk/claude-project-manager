@@ -11,6 +11,7 @@ dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.28",
     "pyyaml>=6.0",
+    "claude-hook-transport",
 ]
 
 [project.scripts]
@@ -18,6 +19,9 @@ trello-server = "server.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server"]
+
+[tool.uv.sources]
+claude-hook-transport = { path = "../../_shared" }
 
 [dependency-groups]
 dev = [

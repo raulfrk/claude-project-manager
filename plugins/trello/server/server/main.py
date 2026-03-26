@@ -2,6 +2,7 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_transport import run_dual
 from server.tools import (
     attachments,
     boards,
@@ -27,7 +28,7 @@ attachments.register(mcp)
 
 
 def main() -> None:
-    mcp.run()
+    run_dual(mcp, 19104)
 
 
 if __name__ == "__main__":

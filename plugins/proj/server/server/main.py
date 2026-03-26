@@ -4,6 +4,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_transport import run_dual
 from server.lib import state
 from server.tools import config, content, context, explore, git, jira_sync, migrate, perms_grant, perms_sync, projects, todoist_sync, trello_sync, todos, tracking_git
 from server.tools.context import ctx_detect_project_name
@@ -36,7 +37,7 @@ def main() -> None:
                 state.set_session_active(detected)
         except Exception:
             pass  # graceful no-op: missing config, untracked dir, etc.
-    mcp.run()
+    run_dual(mcp, 19102)
 
 
 if __name__ == "__main__":

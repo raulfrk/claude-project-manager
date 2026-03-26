@@ -369,7 +369,7 @@ class TestTodoistApply:
             "link_todoist_ids": [],
             "cleared_todoist_ids": [],
         }
-        result = json.loads(apply_fn(apply_json=json.dumps(data), project_name=name))  # type: ignore[operator]
+        result = json.loads(apply_fn(apply_json=json.dumps(data), project_name=name, push_confirmed=True))  # type: ignore[operator]
         assert result["counts"]["created"] == 1
 
         todos = storage.load_todos(cfg, name)
@@ -520,6 +520,36 @@ class TestTodoistApply:
         assert len(todos) == 2
         child_todo = next(t for t in todos if t.id == child.id)
         assert child_todo.status == "done"
+
+    def test_apply_without_push_confirmed_skips_description_synced(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Without push_confirmed, apply should NOT record todoist_description_synced."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Linked", todoist_task_id="t1")
+        storage.save_todos(cfg, name, [todo])
+
+        apply_fn = self._get_apply_fn()
+        data = {
+            "created_locally": [],
+            "updated_locally": [{
+                "todo_id": todo.id,
+                "title": "Linked",
+                "todoist_description_synced": "synced desc",
+            }],
+            "completed_locally": [],
+            "link_todoist_ids": [],
+            "cleared_todoist_ids": [],
+        }
+        result = json.loads(apply_fn(apply_json=json.dumps(data), project_name=name))  # type: ignore[operator]
+        assert result["counts"]["updated"] == 1
+
+        # todoist_description_synced should NOT be persisted on the todo
+        todos = storage.load_todos(cfg, name)
+        assert todos[0].todoist_description_synced == ""
+
+        # Value should be staged in the result instead
+        assert result["counts"]["staged_description_synced"] == {todo.id: "synced desc"}
 
 
 # ── Standalone function tests ────────────────────────────────────────────────

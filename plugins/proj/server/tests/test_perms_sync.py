@@ -7,7 +7,6 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-import yaml
 
 from server.lib import storage
 from server.lib.models import (
@@ -21,7 +20,7 @@ from server.lib.models import (
     TodoistSync,
     TrelloSync,
 )
-from server.tools.perms_sync import _derive_expected_rules, _load_actual_rules, run_sync
+from server.tools.perms_sync import _derive_expected_rules, run_sync
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,10 +102,10 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__proj__*" in rules
-        assert "mcp__perms__*" in rules
-        assert "mcp__worktree__*" in rules
-        assert "mcp__claude_ai_Todoist__*" not in rules
+        assert "mcp__plugin_proj_proj__*" in rules
+        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_worktree_worktree__*" in rules
+        assert "mcp__todoist__*" not in rules
 
     def test_todoist_enabled_adds_todoist_mcp_rule(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -114,7 +113,7 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__claude_ai_Todoist__*" in rules
+        assert "mcp__todoist__*" in rules
 
     def test_jira_enabled_adds_jira_mcp_rule(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -122,7 +121,7 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__jira__*" in rules
+        assert "mcp__plugin_jira_jira__*" in rules
 
     def test_jira_disabled_no_jira_mcp_rule(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -130,7 +129,7 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__jira__*" not in rules
+        assert "mcp__plugin_jira_jira__*" not in rules
 
     def test_trello_enabled_adds_trello_mcp_rule(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -138,7 +137,7 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__trello__*" in rules
+        assert "mcp__plugin_trello_trello__*" in rules
 
     def test_trello_disabled_no_trello_mcp_rule(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -146,7 +145,7 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__trello__*" not in rules
+        assert "mcp__plugin_trello_trello__*" not in rules
 
     def test_auto_allow_mcps_false_no_plugin_mcp_rules(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -162,12 +161,12 @@ class TestDeriveExpectedRules:
         rules = _derive_expected_rules(meta, cfg)
 
         # All plugin MCP servers are excluded when auto_allow_mcps=False
-        assert "mcp__proj__*" not in rules
-        assert "mcp__perms__*" not in rules
-        assert "mcp__worktree__*" not in rules
-        assert "mcp__claude_ai_Todoist__*" not in rules
-        assert "mcp__jira__*" not in rules
-        assert "mcp__trello__*" not in rules
+        assert "mcp__plugin_proj_proj__*" not in rules
+        assert "mcp__plugin_perms_perms__*" not in rules
+        assert "mcp__plugin_worktree_worktree__*" not in rules
+        assert "mcp__todoist__*" not in rules
+        assert "mcp__plugin_jira_jira__*" not in rules
+        assert "mcp__plugin_trello_trello__*" not in rules
         # Global Claude.ai servers are always present regardless
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
@@ -190,7 +189,7 @@ class TestDeriveExpectedRules:
         rules = _derive_expected_rules(meta, cfg)
 
         # MCP rules always present
-        assert "mcp__proj__*" in rules
+        assert "mcp__plugin_proj_proj__*" in rules
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
         # No Bash rules — only MCP rules now
@@ -204,9 +203,9 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__proj__*" in rules
-        assert "mcp__perms__*" in rules
-        assert "mcp__worktree__*" in rules
+        assert "mcp__plugin_proj_proj__*" in rules
+        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
@@ -216,8 +215,8 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__perms__*" in rules
-        assert "mcp__worktree__*" not in rules
+        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_worktree_worktree__*" not in rules
 
     def test_worktree_integration_only_adds_worktree_mcp_rule(self) -> None:
         meta = _make_meta(repos=[])
@@ -225,8 +224,8 @@ class TestDeriveExpectedRules:
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__worktree__*" in rules
-        assert "mcp__perms__*" not in rules
+        assert "mcp__plugin_worktree_worktree__*" in rules
+        assert "mcp__plugin_perms_perms__*" not in rules
 
     def test_no_repos_no_mcps_only_global_mcp_rules(self) -> None:
         meta = _make_meta(repos=[])
@@ -239,51 +238,25 @@ class TestDeriveExpectedRules:
         # No Read/Edit/Bash rules
         assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
 
-    def test_worktree_integration_false_no_path_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_worktree_integration_false_no_path_rules(self) -> None:
         """_derive_expected_rules returns only MCP rules, not path rules."""
-        wt_config = tmp_path / "worktree.yaml"
-        wt_config.write_text(
-            yaml.dump({
-                "base_repos": [
-                    {"label": "wt", "path": "/extra/worktree/path", "default_branch": "main"},
-                ],
-            })
-        )
-        monkeypatch.setattr("server.tools.perms_grant._WORKTREE_CONFIG", wt_config)
-
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=False)
 
         rules = _derive_expected_rules(meta, cfg)
 
         # Only global MCP rules — no path rules of any kind
-        assert not any("/extra/worktree/path" in r for r in rules)
         assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
         assert "mcp__claude_ai_Excalidraw__*" in rules
 
-    def test_worktree_integration_true_no_path_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_worktree_integration_true_no_path_rules(self) -> None:
         """_derive_expected_rules returns only MCP rules, even with worktree_integration=True."""
-        wt_config = tmp_path / "worktree.yaml"
-        wt_config.write_text(
-            yaml.dump({
-                "base_repos": [
-                    {"label": "wt", "path": "/extra/worktree/path", "default_branch": "main"},
-                ],
-            })
-        )
-        monkeypatch.setattr("server.tools.perms_grant._WORKTREE_CONFIG", wt_config)
-
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=True)
 
         rules = _derive_expected_rules(meta, cfg)
 
         # Only MCP rules — no path or Bash rules
-        assert not any("/extra/worktree/path" in r for r in rules)
         assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
         # worktree MCP rule present (auto_allow_mcps=False, so no plugin MCPs)
         assert "mcp__claude_ai_Excalidraw__*" in rules
@@ -293,129 +266,74 @@ class TestDeriveExpectedRules:
 
 
 class TestDeriveExpectedRulesCustomServer:
-    def test_todoist_custom_mcp_server_emits_custom_rule(self) -> None:
+    def test_todoist_enabled_always_emits_fixed_rule(self) -> None:
+        """Todoist always uses fixed mcp__todoist__* rule regardless of config mcp_server."""
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-        cfg.todoist.mcp_server = "sentry"
+        cfg.todoist.mcp_server = "sentry"  # config value ignored
         meta = _make_meta(repos=[])
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__sentry__*" in rules
-        assert "mcp__claude_ai_Todoist__*" not in rules
+        assert "mcp__todoist__*" in rules
+        assert "mcp__sentry__*" not in rules
 
-    def test_todoist_default_mcp_server_still_emits_standard_rule(self) -> None:
+    def test_todoist_default_mcp_server_emits_fixed_rule(self) -> None:
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
         meta = _make_meta(repos=[])
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__claude_ai_Todoist__*" in rules
+        assert "mcp__todoist__*" in rules
 
-    def test_todoist_disabled_custom_mcp_server_emits_no_rule(self) -> None:
+    def test_todoist_disabled_emits_no_rule(self) -> None:
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
         cfg.todoist.mcp_server = "sentry"
         meta = _make_meta(repos=[])
 
         rules = _derive_expected_rules(meta, cfg)
 
+        assert "mcp__todoist__*" not in rules
         assert "mcp__sentry__*" not in rules
-        assert "mcp__claude_ai_Todoist__*" not in rules
-
-
-# ── _load_actual_rules ────────────────────────────────────────────────────────
-
-
-class TestLoadActualRules:
-    def test_missing_settings_returns_empty_set(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-tmp_path / ".claude" / "settings.json",
-        )
-
-        result = _load_actual_rules()
-
-        assert result == set()
-
-    def test_reads_allow_rules_from_settings(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = _write_settings(
-            tmp_path,
-            allow=["Read(//home/user/proj/**)", "mcp__proj__*"],
-        )
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
-
-        result = _load_actual_rules()
-
-        assert "Read(//home/user/proj/**)" in result
-        assert "mcp__proj__*" in result
-        assert len(result) == 2
-
-    def test_empty_allow_list_returns_empty_set(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
-
-        result = _load_actual_rules()
-
-        assert result == set()
 
 
 # ── run_sync ──────────────────────────────────────────────────────────────────
 
 
 class TestRunSync:
-    def test_all_rules_present_returns_in_sync(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_all_rules_present_returns_in_sync(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
         expected = _derive_expected_rules(meta, cfg)
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
 
-        result = run_sync(meta, cfg)
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
 
         assert "✅" in result
         assert "in sync" in result
 
-    def test_missing_mcp_rules_only_reported(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_mcp_rules_only_reported(self) -> None:
         """With auto_allow_mcps=False, only global MCP rules are expected and reported missing."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
-        # settings.json has no rules at all
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
         assert "❌" in result
-        # Only MCP rules reported missing — no Read/Edit/Bash rules
         assert "MCP rules" in result
         assert "mcp__claude_ai_Excalidraw__*" in result
         assert "Read(" not in result
         assert "Edit(" not in result
 
-    def test_missing_mcp_rules_reported(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_mcp_rules_reported(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(
             auto_allow_mcps=True,
@@ -423,255 +341,246 @@ settings_path,
             perms_integration=True,
             worktree_integration=True,
         )
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
         assert "❌" in result
-        assert "mcp__proj__*" in result
+        assert "mcp__plugin_proj_proj__*" in result
         assert "MCP rules" in result
 
-    def test_extras_in_actual_are_ignored(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_extras_in_actual_are_ignored(self) -> None:
         """Extra rules in settings.json beyond what's expected are fine."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
         expected = _derive_expected_rules(meta, cfg)
-        # Add extra rules in actual
-        actual_rules = sorted(expected) + ["Read(//some/other/path/**)", "mcp__custom__*"]
-        settings_path = _write_settings(tmp_path, allow=actual_rules)
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
+        actual = expected | {"Read(//some/other/path/**)", "mcp__custom__*"}
 
-        result = run_sync(meta, cfg)
+        result = run_sync(
+            meta, cfg,
+            actual_rules=actual,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
 
         assert "✅" in result
 
-    def test_missing_rules_suggest_perms_add(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_rules_suggest_perms_add(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
 
-        result = run_sync(meta, cfg)
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
 
         assert "perms_add_mcp_allow" in result
 
-    def test_todoist_rule_appears_when_enabled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_todoist_rule_appears_when_enabled(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
+        assert "mcp__todoist__*" in result
 
-        assert "mcp__claude_ai_Todoist__*" in result
-
-    def test_perms_integration_false_mcp_perms_not_reported_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_perms_integration_false_mcp_perms_not_reported_missing(self) -> None:
         """When perms_integration=False, mcp__perms__* is not expected so it is not reported missing."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, perms_integration=False, worktree_integration=False)
-        # Provide all expected rules but deliberately omit mcp__perms__*
         expected = _derive_expected_rules(meta, cfg)
-        # Verify perms rule is not even expected
-        assert "mcp__perms__*" not in expected
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+        assert "mcp__plugin_perms_perms__*" not in expected
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
-        # In sync even though mcp__perms__* is absent from settings.json
         assert "✅" in result
         assert "in sync" in result
 
-    def test_worktree_integration_false_in_sync_without_worktree_bash_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_worktree_integration_false_in_sync_without_worktree_bash_rules(self) -> None:
         """When worktree_integration=False, Bash rules for worktree-only paths are not expected."""
-        # Create a worktree.yaml with an extra path
-        wt_config = tmp_path / "worktree.yaml"
-        wt_config.write_text(
-            yaml.dump({
-                "base_repos": [
-                    {"label": "wt", "path": "/extra/worktree/path", "default_branch": "main"},
-                ],
-            })
-        )
-        monkeypatch.setattr("server.tools.perms_grant._WORKTREE_CONFIG", wt_config)
-
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=False)
-        # Only provide rules for the repo path — no rules for the extra worktree path
         expected = _derive_expected_rules(meta, cfg)
-        assert not any("/extra/worktree/path" in r for r in expected)
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
-        # No missing rules even though worktree path has no Bash rules in settings.json
         assert "✅" in result
         assert "in sync" in result
 
-    def test_partial_mcp_rules_present_reports_only_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_partial_mcp_rules_present_reports_only_missing(self) -> None:
         """When some MCP rules are present but others missing, only missing ones are reported."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
-        expected = _derive_expected_rules(meta, cfg)
-        # Provide one global MCP rule but not the other
-        partial_rules = ["mcp__claude_ai_Excalidraw__*"]
-        settings_path = _write_settings(tmp_path, allow=partial_rules)
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
 
-        result = run_sync(meta, cfg)
+        result = run_sync(
+            meta, cfg,
+            actual_rules={"mcp__claude_ai_Excalidraw__*"},
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
 
         assert "❌" in result
-        # Mermaid Chart is missing
         assert "mcp__claude_ai_Mermaid_Chart__*" in result
-        # Excalidraw is NOT missing
         assert "mcp__claude_ai_Excalidraw__*" not in result
 
-    def test_worktree_integration_true_no_bash_rules_expected(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_worktree_integration_true_no_bash_rules_expected(self) -> None:
         """Bash rules are no longer expected in permissions.allow, even with worktree_integration=True."""
-        wt_config = tmp_path / "worktree.yaml"
-        wt_config.write_text(
-            yaml.dump({
-                "base_repos": [
-                    {"label": "wt", "path": "/extra/worktree/path", "default_branch": "main"},
-                ],
-            })
-        )
-        monkeypatch.setattr("server.tools.perms_grant._WORKTREE_CONFIG", wt_config)
-
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=True)
-        # Provide all expected rules (only global MCP rules)
         expected = _derive_expected_rules(meta, cfg)
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
-        # All in sync — no Bash rules expected
         assert "✅" in result
         assert "in sync" in result
 
-    def test_run_sync_reports_missing_custom_todoist_rule(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_run_sync_reports_fixed_todoist_rule_regardless_of_config(self) -> None:
+        """Custom mcp_server config is ignored — always uses fixed mcp__todoist__* rule."""
         meta = _make_meta(repos=[])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-        cfg.todoist.mcp_server = "sentry"
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+        cfg.todoist.mcp_server = "sentry"  # ignored
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
         )
 
-        result = run_sync(meta, cfg)
-
-        assert "mcp__sentry__*" in result
-        assert "mcp__claude_ai_Todoist__*" not in result
+        assert "mcp__todoist__*" in result
+        assert "mcp__sentry__*" not in result
 
     def test_apply_true_writes_missing_mcp_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply=True writes missing MCP rules into settings.json and returns a success message."""
+        """apply=True writes missing MCP rules and returns a success message."""
         repo_path = str(tmp_path / "myrepo")
         meta = _make_meta(repos=[RepoEntry(label="code", path=repo_path)])
         cfg = _make_cfg(auto_allow_mcps=False)
-        # settings.json starts with no rules
         settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
 
-        result = run_sync(meta, cfg, apply=True)
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+            apply=True,
+        )
 
-        # Return value must be a success string, not a "❌ Missing" report
         assert "✅" in result
         assert "❌" not in result
 
-    def test_apply_true_already_in_sync_is_noop(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """apply=True with all rules already present returns in-sync message and leaves settings.json unchanged."""
+    def test_apply_true_forwards_batch_setup_fn(self) -> None:
+        """apply=True forwards batch_setup_fn to setup_permissions."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=False)
+
+        def fake_batch_setup(paths: list[str], mcp_servers: list[str]) -> str:
+            return "Sandbox paths added: 1. MCP rules added: 2."
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+            apply=True,
+            batch_setup_fn=fake_batch_setup,
+        )
+
+        assert "✅" in result
+        assert "Applied" in result
+
+    def test_apply_true_already_in_sync_is_noop(self) -> None:
+        """apply=True with all rules already present returns in-sync message."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
         expected = _derive_expected_rules(meta, cfg)
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+            apply=True,
         )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
-        original_mtime = settings_path.stat().st_mtime
-        result = run_sync(meta, cfg, apply=True)
-
-        # Must return in-sync message
         assert "✅" in result
         assert "in sync" in result
-        # File must not have been rewritten (mtime unchanged)
-        assert settings_path.stat().st_mtime == original_mtime
 
-    def test_apply_false_does_not_write(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """apply=False (default) reports missing rules but does NOT modify settings.json."""
+    def test_apply_false_does_not_write(self) -> None:
+        """apply=False (default) reports missing rules but does NOT modify anything."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
-        settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+            apply=False,
         )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
 
-        original_content = settings_path.read_text()
-        result = run_sync(meta, cfg, apply=False)
-
-        # Must report missing rules
         assert "❌" in result
-        # settings.json content must be unchanged
-        assert settings_path.read_text() == original_content
+
+    def test_empty_actual_rules_reports_all_missing(self) -> None:
+        """Empty actual_rules means all expected rules are reported missing."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
+
+        assert "❌" in result
+        assert "mcp__plugin_proj_proj__*" in result
+
+    def test_sandbox_mode_false_ignores_sandbox_paths(self) -> None:
+        """When sandbox_mode=False, actual_sandbox_paths are ignored."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected = _derive_expected_rules(meta, cfg)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=False,
+        )
+
+        assert "✅" in result
+        assert "Sandbox" not in result
 
 
 # ── MCP tool integration ──────────────────────────────────────────────────────
@@ -682,16 +591,23 @@ class TestProjPermsSyncTool:
     async def test_tool_registered(self, mcp_app) -> None:  # type: ignore[no-untyped-def]
         from tests.conftest import call_tool
 
-        # With no active project the tool should return a helpful message
+        # Without actual_rules the tool should return an error
         result = await call_tool(mcp_app, "proj_perms_sync")
         assert isinstance(result, str)
         assert len(result) > 0
 
     @pytest.mark.anyio
-    async def test_tool_no_active_project(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_missing_actual_rules_returns_error(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app, "proj_perms_sync")
+        assert "actual_rules" in result.lower() or "required" in result.lower()
+
+    @pytest.mark.anyio
+    async def test_tool_no_active_project(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+        from tests.conftest import call_tool
+
+        result = await call_tool(mcp_app, "proj_perms_sync", actual_rules=[])
         assert "No active project" in result
 
     @pytest.mark.anyio
@@ -709,23 +625,26 @@ class TestProjPermsSyncTool:
         setup_project(cfg, "myproject", repo_path)
         state.set_session_active("myproject")
 
-        # Point settings to a file that has all expected rules
         meta = storage.load_meta(cfg, "myproject")
         expected = _derive_expected_rules(meta, cfg)
-        settings_path = _write_settings(tmp_path, allow=sorted(expected))
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
 
-        result = await call_tool(mcp_app, "proj_perms_sync")
+        result = await call_tool(
+            mcp_app, "proj_perms_sync",
+            actual_rules=sorted(expected),
+            actual_sandbox_paths=[],
+            sandbox_mode=False,
+        )
         assert "✅" in result
 
     @pytest.mark.anyio
     async def test_tool_unknown_project_name(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
         from tests.conftest import call_tool
 
-        result = await call_tool(mcp_app, "proj_perms_sync", project_name="ghost")
+        result = await call_tool(
+            mcp_app, "proj_perms_sync",
+            project_name="ghost",
+            actual_rules=[],
+        )
         assert "not found" in result
 
     @pytest.mark.anyio
@@ -736,7 +655,7 @@ settings_path,
         mcp_app,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
-        """apply=True via the MCP tool writes missing rules into settings.json."""
+        """apply=True via the MCP tool writes missing rules."""
         from server.lib import state
         from tests.conftest import call_tool, setup_project
 
@@ -744,132 +663,24 @@ settings_path,
         setup_project(cfg, "myproject", repo_path)
         state.set_session_active("myproject")
 
-        # Start with an empty settings.json
         settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-settings_path,
-        )
         monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
 
-        result = await call_tool(mcp_app, "proj_perms_sync", apply=True)
+        result = await call_tool(
+            mcp_app, "proj_perms_sync",
+            apply=True,
+            actual_rules=[],
+            actual_sandbox_paths=[],
+            sandbox_mode=False,
+        )
 
-        # Tool must report success, not a "❌ Missing" report
         assert "✅" in result
         assert "❌ Missing" not in result
 
 
 # ── Sandbox mode tests ────────────────────────────────────────────────────────
-
-
-def _write_local_settings(path: Path, data: dict[str, object]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
-    return path
-
-
-class TestSandboxDetection:
-    def test_is_sandbox_enabled_true(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
-
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-local_path,
-        )
-        assert _is_sandbox_enabled() is True
-
-    def test_is_sandbox_enabled_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
-
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-tmp_path / "nonexistent.json",
-        )
-        assert _is_sandbox_enabled() is False
-
-    def test_is_sandbox_enabled_project_level_only(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Sandbox enabled at project level but not user level is detected."""
-        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
-
-        # User-level settings.local.json does not exist
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-tmp_path / "nonexistent.json",
-        )
-        # Project-level has sandbox enabled
-        project_dir = tmp_path / "myproject"
-        proj_local = project_dir / ".claude" / "settings.local.json"
-        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
-
-        assert _is_sandbox_enabled(project_dir) is True
-
-    def test_is_sandbox_enabled_user_false_project_true(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When user-level sandbox is disabled but project-level is enabled, returns True."""
-        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
-
-        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
-        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-user_local,
-        )
-
-        project_dir = tmp_path / "myproject"
-        proj_local = project_dir / ".claude" / "settings.local.json"
-        _write_local_settings(proj_local, {"sandbox": {"enabled": True}})
-
-        assert _is_sandbox_enabled(project_dir) is True
-
-    def test_is_sandbox_enabled_both_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When both user-level and project-level sandbox are disabled, returns False."""
-        from server.lib.perms_helpers import is_sandbox_enabled as _is_sandbox_enabled
-
-        user_local = tmp_path / "user" / ".claude" / "settings.local.json"
-        _write_local_settings(user_local, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-user_local,
-        )
-
-        project_dir = tmp_path / "myproject"
-        proj_local = project_dir / ".claude" / "settings.local.json"
-        _write_local_settings(proj_local, {"sandbox": {"enabled": False}})
-
-        assert _is_sandbox_enabled(project_dir) is False
-
-
-class TestLoadActualRulesSandbox:
-    def test_reads_from_local_when_sandbox_enabled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": ["mcp__proj__*"]},
-        })
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-local_path,
-        )
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-tmp_path / "settings.json",
-        )
-
-        result = _load_actual_rules()
-        assert "mcp__proj__*" in result
 
 
 class TestDeriveExpectedSandboxPaths:
@@ -890,87 +701,49 @@ class TestDeriveExpectedSandboxPaths:
 
 
 class TestRunSyncSandbox:
-    def test_in_sync_sandbox_mode(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_in_sync_sandbox_mode(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False, tracking_dir="/tmp/tracking")
         expected = _derive_expected_rules(meta, cfg)
 
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {
-                "enabled": True,
-                "filesystem": {"allowWrite": ["/home/user/proj", "/tmp/tracking"]},
-            },
-            "permissions": {"allow": sorted(expected)},
-        })
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-local_path,
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths={"/home/user/proj", "/tmp/tracking"},
+            sandbox_mode=True,
         )
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-tmp_path / "settings.json",
-        )
-
-        result = run_sync(meta, cfg)
 
         assert "settings.local.json" in result
         assert "in sync" in result
 
-    def test_missing_sandbox_paths_reported(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_sandbox_paths_reported(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
         expected = _derive_expected_rules(meta, cfg)
 
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        # All permission rules present but sandbox.filesystem.allowWrite is empty
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": sorted(expected)},
-        })
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-local_path,
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths=set(),
+            sandbox_mode=True,
         )
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-tmp_path / "settings.json",
-        )
-
-        result = run_sync(meta, cfg)
 
         assert "❌" in result
         assert "sandbox allowWrite" in result.lower() or "Sandbox allowWrite" in result
         assert "/home/user/proj" in result
 
-    def test_missing_rules_in_sandbox_mode_reported(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_rules_in_sandbox_mode_reported(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
 
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_LOCAL_SETTINGS",
-local_path,
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=True,
         )
-        monkeypatch.setattr(
-            "server.lib.perms_helpers._USER_SETTINGS",
-tmp_path / "settings.json",
-        )
-
-        result = run_sync(meta, cfg)
 
         assert "❌" in result
         assert "settings.local.json" in result
-        # Only MCP and sandbox path rules reported — no Read/Edit rules
         assert "MCP rules" in result or "Sandbox allowWrite" in result
         assert "Read(" not in result
