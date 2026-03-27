@@ -626,12 +626,22 @@ def register(app: FastMCP) -> None:
             else:
                 return f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"
         state.set_session_active(name)
+        meta = storage.load_meta(cfg, name)
         msg = f"Loaded project '{name}' for this session."
         # Detect old single-path format
         raw = storage._load_yaml(storage.meta_path(cfg, name))
         if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
             msg += "\n\n⚠️ Project uses legacy single-path format. Run `/proj:migrate-dirs` to upgrade to multi-dir format."
-        return msg
+        # Include paths/mcp_servers for hooks (auto-repair on load)
+        paths = [r.path for r in meta.repos if not r.reference]
+        if cfg.tracking_dir:
+            paths.append(str(Path(cfg.tracking_dir).expanduser().resolve()))
+        return json.dumps({
+            "message": msg,
+            "project_name": name,
+            "paths": paths,
+            "mcp_servers": [],
+        })
 
     @app.tool(description="Migrate a project from legacy single-path format to multi-dir repos format.")
     def proj_migrate_dirs(

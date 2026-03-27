@@ -54,6 +54,17 @@ def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[st
     return paths
 
 
+def _derive_expected_additional_dirs(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
+    """Derive the paths expected in permissions.additionalDirectories."""
+    paths: set[str] = set()
+    for repo in meta.repos:
+        if not repo.reference:
+            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    if cfg.tracking_dir:
+        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
+    return paths
+
+
 def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
     """Extract server names from MCP wildcard rules like ``mcp__server__*``."""
     servers: list[str] = []
@@ -71,6 +82,7 @@ def run_sync(
     *,
     actual_rules: set[str],
     actual_sandbox_paths: set[str],
+    actual_additional_dirs: set[str] | None = None,
     sandbox_mode: bool,
     apply: bool = False,
     batch_setup_fn: Callable[..., str] | None = None,
@@ -84,9 +96,15 @@ def run_sync(
         expected_paths = _derive_expected_sandbox_paths(meta, cfg)
         missing_sandbox_paths = expected_paths - actual_sandbox_paths
 
+    # Check permissions.additionalDirectories
+    missing_additional_dirs: set[str] = set()
+    expected_additional = _derive_expected_additional_dirs(meta, cfg)
+    if actual_additional_dirs is not None:
+        missing_additional_dirs = expected_additional - actual_additional_dirs
+
     target_name = "settings.local.json" if sandbox_mode else "settings.json"
 
-    if not missing and not missing_sandbox_paths:
+    if not missing and not missing_sandbox_paths and not missing_additional_dirs:
         return f"✅ {target_name} is in sync — all expected rules are present."
 
     # Group by type (only MCP rules expected in permissions.allow now)
@@ -103,13 +121,15 @@ def run_sync(
             batch_setup_fn=batch_setup_fn,
         )
         total = sum(counts.values())
-        if total == 0 and not missing_sandbox_paths:
+        if total == 0 and not missing_sandbox_paths and not missing_additional_dirs:
             return f"✅ {target_name} is in sync — all expected rules are present."
         parts: list[str] = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
+        if counts.get("additional_directories"):
+            parts.append(f"{counts['additional_directories']} additional dir(s)")
         applied_total = total
         return f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
 
@@ -120,6 +140,9 @@ def run_sync(
     if missing_sandbox_paths:
         lines.append("\n**Sandbox allowWrite paths:**")
         lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))
+    if missing_additional_dirs:
+        lines.append("\n**Additional directories:**")
+        lines.extend(f"  - `{p}`" for p in sorted(missing_additional_dirs))
     hint = "\nRun `proj_setup_permissions` to add all missing rules at once."
     if missing_mcp:
         hint += (
@@ -149,6 +172,7 @@ def register(app: FastMCP) -> None:
         apply: bool = False,
         actual_rules: list[str] | None = None,
         actual_sandbox_paths: list[str] | None = None,
+        actual_additional_dirs: list[str] | None = None,
         sandbox_mode: bool = False,
     ) -> str:
         if actual_rules is None:
@@ -166,6 +190,7 @@ def register(app: FastMCP) -> None:
             cfg,
             actual_rules=set(actual_rules),
             actual_sandbox_paths=set(actual_sandbox_paths or []),
+            actual_additional_dirs=set(actual_additional_dirs) if actual_additional_dirs is not None else None,
             sandbox_mode=sandbox_mode,
             apply=apply,
         )

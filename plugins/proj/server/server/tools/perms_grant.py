@@ -104,15 +104,18 @@ def _apply_mcp_rules(
 
 _SANDBOX_ADDED_RE = re.compile(r"Sandbox paths added:\s*(\d+)")
 _MCP_ADDED_RE = re.compile(r"MCP rules added:\s*(\d+)")
+_ADDL_DIRS_ADDED_RE = re.compile(r"Additional directories added:\s*(\d+)")
 
 
 def _parse_batch_setup_counts(result: str) -> dict[str, int]:
-    """Extract sandbox_paths and mcp_rules counts from batch_setup result string."""
+    """Extract sandbox_paths, mcp_rules, and additional_directories counts from batch_setup result string."""
     sandbox_m = _SANDBOX_ADDED_RE.search(result)
     mcp_m = _MCP_ADDED_RE.search(result)
+    addl_m = _ADDL_DIRS_ADDED_RE.search(result)
     return {
         "sandbox_paths": int(sandbox_m.group(1)) if sandbox_m else 0,
         "mcp_rules": int(mcp_m.group(1)) if mcp_m else 0,
+        "additional_directories": int(addl_m.group(1)) if addl_m else 0,
     }
 
 
@@ -149,21 +152,31 @@ def setup_permissions(
     ``batch_setup_fn`` is provided, returns computed counts without applying
     (hooks dispatch to perms plugin).
 
-    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N}.
+    Computed paths are also passed as ``additional_directories`` so the perms
+    plugin can write them to ``permissions.additionalDirectories`` for permanent
+    project directory access.
+
+    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N, "additional_directories": N}.
     Idempotent.
     """
     paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination)
     servers = mcp_servers or []
 
     if not paths and not servers:
-        return {"sandbox_paths": 0, "mcp_rules": 0}
+        return {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
 
     if batch_setup_fn is not None:
-        result = batch_setup_fn(paths=paths, mcp_servers=servers)
+        result = batch_setup_fn(
+            paths=paths, mcp_servers=servers, additional_directories=paths,
+        )
         return _parse_batch_setup_counts(result)
 
     # No batch_fn — return computed data; hooks dispatch to perms plugin
-    return {"sandbox_paths": len(paths), "mcp_rules": len(servers)}
+    return {
+        "sandbox_paths": len(paths),
+        "mcp_rules": len(servers),
+        "additional_directories": len(paths),
+    }
 
 
 # ── Revoke all (inverse of setup_permissions) ─────────────────────────────────
@@ -207,15 +220,18 @@ def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]
 
 _SANDBOX_REMOVED_RE = re.compile(r"sandbox paths removed:\s*(\d+)")
 _MCP_REMOVED_RE = re.compile(r"MCP rules removed:\s*(\d+)")
+_ADDL_DIRS_REMOVED_RE = re.compile(r"additional directories removed:\s*(\d+)")
 
 
 def _parse_batch_revoke_counts(result: str) -> dict[str, int]:
-    """Extract sandbox_paths and mcp_rules counts from batch_revoke result string."""
+    """Extract sandbox_paths, mcp_rules, and additional_directories counts from batch_revoke result string."""
     sandbox_m = _SANDBOX_REMOVED_RE.search(result)
     mcp_m = _MCP_REMOVED_RE.search(result)
+    addl_m = _ADDL_DIRS_REMOVED_RE.search(result)
     return {
         "sandbox_paths": int(sandbox_m.group(1)) if sandbox_m else 0,
         "mcp_rules": int(mcp_m.group(1)) if mcp_m else 0,
+        "additional_directories": int(addl_m.group(1)) if addl_m else 0,
     }
 
 
@@ -233,10 +249,12 @@ def revoke_all_permissions(
     ``batch_revoke_fn`` is provided, returns computed counts without applying
     (hooks dispatch to perms plugin).
 
+    Also removes matching ``additional_directories`` entries.
+
     MCP wildcard rules are only removed when ``mcp_servers`` is explicitly
     provided, because they are shared across projects.
 
-    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N}.
+    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N, "additional_directories": N}.
     Idempotent -- removing non-existent rules is a no-op.
     """
     # Compute sandbox paths to remove (writable repos + tracking dir)
@@ -246,14 +264,20 @@ def revoke_all_permissions(
     servers = mcp_servers or []
 
     if not paths and not servers:
-        return {"sandbox_paths": 0, "mcp_rules": 0}
+        return {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
 
     if batch_revoke_fn is not None:
-        result = batch_revoke_fn(paths=paths, mcp_servers=servers)
+        result = batch_revoke_fn(
+            paths=paths, mcp_servers=servers, additional_directories=paths,
+        )
         return _parse_batch_revoke_counts(result)
 
     # No batch_fn — return computed data; hooks dispatch to perms plugin
-    return {"sandbox_paths": len(paths), "mcp_rules": len(servers)}
+    return {
+        "sandbox_paths": len(paths),
+        "mcp_rules": len(servers),
+        "additional_directories": len(paths),
+    }
 
 
 # ── MCP tool registration ──────────────────────────────────────────────────────
@@ -299,6 +323,8 @@ def register(app: FastMCP) -> None:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
+        if counts.get("additional_directories"):
+            parts.append(f"{counts['additional_directories']} additional dir(s)")
         return f"Added {total} rule(s) for '{name}': {', '.join(parts)}."
 
     @app.tool(
@@ -332,4 +358,6 @@ def register(app: FastMCP) -> None:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
+        if counts.get("additional_directories"):
+            parts.append(f"{counts['additional_directories']} additional dir(s)")
         return f"Removed {total} rule(s) for '{name}': {', '.join(parts)}."

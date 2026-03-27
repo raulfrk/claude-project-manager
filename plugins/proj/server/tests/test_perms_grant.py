@@ -191,7 +191,7 @@ class TestSetupPermissions:
         counts = setup_permissions(meta, cfg, batch_setup_fn=mock_fn)
 
         mock_fn.assert_not_called()
-        assert counts == {"sandbox_paths": 0, "mcp_rules": 0}
+        assert counts == {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
 
     def test_batch_setup_fn_parses_counts_from_result(self) -> None:
         mock_fn = Mock(return_value="Sandbox paths added: 5, MCP rules added: 3")
@@ -420,10 +420,10 @@ class TestSetupPermissionsSandbox:
             mcp_servers=["plugin_proj_proj"],
         )
 
-        # repo + tracking_dir = 2 paths, 1 MCP server
+        # repo + tracking_dir = 2 paths, 1 MCP server, 2 additional_directories
         assert counts["sandbox_paths"] == 2
         assert counts["mcp_rules"] == 1
-        assert sum(counts.values()) == 3
+        assert counts["additional_directories"] == 2
 
     def test_idempotent_sandbox(self) -> None:
         """Without batch_setup_fn, repeated calls return the same computed counts.
@@ -611,7 +611,7 @@ class TestRevokeAllPermissions:
         counts = revoke_all_permissions(meta, cfg, batch_revoke_fn=mock_fn)
 
         mock_fn.assert_not_called()
-        assert counts == {"sandbox_paths": 0, "mcp_rules": 0}
+        assert counts == {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
 
     def test_batch_revoke_fn_parses_counts_from_result(self) -> None:
         mock_fn = Mock(return_value="sandbox paths removed: 4, MCP rules removed: 2")

@@ -36,3 +36,13 @@ hooks:
       paths: "${paths}"
     blocking: true
     condition: "perms_integration"
+
+  - id: perms-on-proj-load-session
+    trigger_tool: proj_load_session
+    target_tool: perms_batch_setup
+    server: perms
+    param_mapping:
+      paths: "${paths}"
+      mcp_servers: "${mcp_servers}"
+    blocking: true
+    condition: "perms_integration"

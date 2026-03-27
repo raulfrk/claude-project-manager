@@ -283,17 +283,19 @@ def batch_setup(
     mcp_servers: list[str] | None = None,
     scope: str = "user",
     target: str = "auto",
+    additional_directories: list[str] | None = None,
 ) -> str:
-    """Add sandbox paths and MCP allow rules in one atomic write.
+    """Add sandbox paths, MCP allow rules, and additional directories in one atomic write.
 
-    Combines ``_add_path_sandbox`` (for sandbox mode) and MCP wildcard rule
-    addition into a single ``storage.save()`` call.  Idempotent — already-present
-    entries are skipped.
+    Combines ``_add_path_sandbox`` (for sandbox mode), MCP wildcard rule
+    addition, and ``permissions.additionalDirectories`` updates into a single
+    ``storage.save()`` call.  Idempotent — already-present entries are skipped.
     """
     paths = paths or []
     mcp_servers = mcp_servers or []
+    additional_directories = additional_directories or []
 
-    if not paths and not mcp_servers:
+    if not paths and not mcp_servers and not additional_directories:
         return "No paths or servers specified — nothing to do."
 
     resolved = storage.resolve_target(target, scope)
@@ -325,8 +327,22 @@ def batch_setup(
                 allow_set.add(entry)
                 mcp_added.append(entry)
 
+    # ── Additional directories ───────────────────────────────────────────
+    addl_added: list[str] = []
+    addl_skipped = 0
+    if additional_directories:
+        existing = set(settings.permissions.additional_directories)
+        for d in additional_directories:
+            abs_d = str(Path(d).expanduser().resolve())
+            if abs_d not in existing:
+                settings.permissions.additional_directories.append(abs_d)
+                existing.add(abs_d)
+                addl_added.append(abs_d)
+            else:
+                addl_skipped += 1
+
     # ── Persist & report ──────────────────────────────────────────────────
-    total_added = len(sandbox_added) + len(mcp_added)
+    total_added = len(sandbox_added) + len(mcp_added) + len(addl_added)
     if not total_added:
         total_skipped = sandbox_skipped + mcp_skipped
         return f"Already up to date — {total_skipped} existing entry/entries skipped in {settings.path}."
@@ -344,6 +360,11 @@ def batch_setup(
         lines.extend(f"    {e}" for e in mcp_added)
     if mcp_skipped:
         lines.append(f"  MCP rules skipped (already present): {mcp_skipped}")
+    if addl_added:
+        lines.append(f"  Additional directories added: {len(addl_added)}")
+        lines.extend(f"    {e}" for e in addl_added)
+    if addl_skipped:
+        lines.append(f"  Additional directories skipped (already present): {addl_skipped}")
     return "\n".join(lines)
 
 
@@ -648,8 +669,9 @@ def register(app: FastMCP) -> None:
         mcp_servers: list[str] | None = None,
         scope: str = "user",
         target: str = "auto",
+        additional_directories: list[str] | None = None,
     ) -> str:
-        return batch_setup(paths, mcp_servers, scope, target)
+        return batch_setup(paths, mcp_servers, scope, target, additional_directories)
 
     @app.tool(
         description=(

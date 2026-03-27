@@ -504,8 +504,12 @@ class TestRunSync:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(auto_allow_mcps=False)
 
-        def fake_batch_setup(paths: list[str], mcp_servers: list[str]) -> str:
-            return "Sandbox paths added: 1. MCP rules added: 2."
+        def fake_batch_setup(
+            paths: list[str],
+            mcp_servers: list[str],
+            additional_directories: list[str] | None = None,
+        ) -> str:
+            return "Sandbox paths added: 1. MCP rules added: 2. Additional directories added: 1."
 
         result = run_sync(
             meta, cfg,
