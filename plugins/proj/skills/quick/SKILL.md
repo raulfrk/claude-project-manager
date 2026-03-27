@@ -26,43 +26,20 @@ Known flags: `--steps`, `--from`, `--iter`, `--no-interactive`.
 Everything else is the **description**.
 If description is empty, ask: `What would you like to work on?`
 
-### T2. Create external resources and local todo
+### T2. Create local todo
 
 Use the `proj_session_context` result from step 1 for config values (e.g., `config.default_priority`).
 
-**Trello** (skip unless `integrations.trello.enabled` in session context AND `integrations.trello.card_id` is set):
-
-1. Determine checklist: if parent todo has `trello_checklist_id`, use it. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on root todo.
-   > If any Trello call returned an error, go to **Error Recovery**.
-2. Call `mcp__trello__add_checklist_item(checklist_id, name=title)`.
-   > If add_checklist_item returned an error, go to **Error Recovery**.
-3. Capture the returned item ID as `trello_checklist_item_id`.
-
-### T3. Create local todo
-
-Call `mcp__proj__todo_add` with `title` = description, `priority` = config `default_priority`. Include `trello_checklist_item_id` if captured above.
+Call `mcp__proj__todo_add` with `title` = description, `priority` = config `default_priority`.
 > If todo_add returned an error, go to **Error Recovery**.
 
 Store returned ID as `new_id`.
 
-### T4. Trello title sync
-
-If `mcp__proj__todo_update` is called with a `title` change AND the todo has `trello_checklist_item_id`:
-- Call `mcp__trello__rename_checklist_item(card_id, checklist_id, item_id, name=new_title)` using project's `trello_card_id` and parent's `trello_checklist_id`.
-  > If rename_checklist_item returned an error, go to **Error Recovery**.
-
-### T5. Launch workflow
+### T3. Launch workflow
 
 Display: `Created todo <new_id>: <title>. Running workflow...`
 
 Call the Skill tool: `skill: "proj:run", args: "<new_id> <forwarded-flags>"`
-
-### T6. Post-completion Trello sync
-
-After the run skill completes and todo is marked done:
-- If Trello auto-sync AND todo has `trello_checklist_item_id`:
-  - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")`.
-    > If update_checklist_item returned an error, go to **Error Recovery**.
 
 ---
 
@@ -102,8 +79,6 @@ Call `mcp__proj__proj_load_session`.
 
 Skip unless `perms_integration: true` in config.
 
-Build MCP server list: `["plugin_proj_proj", "plugin_perms_perms", "claude_ai_Excalidraw", "claude_ai_Mermaid_Chart"]` + worktree if enabled + `"jira"` if jira.enabled + `"trello"` if trello.enabled.
-
 Call `mcp__proj__proj_setup_permissions` silently.
 > If proj_setup_permissions returned an error, go to **Error Recovery**.
 
@@ -116,9 +91,6 @@ Call `mcp__proj__claudemd_write` with project overview template.
 
 Call `mcp__proj__todo_add` with `title=todo_title`, `priority=default_priority`.
 > If todo_add returned an error, go to **Error Recovery**.
-
-If Trello enabled: sync as in Todo Mode T2 (Trello section).
-Pass captured `trello_checklist_item_id` to the `todo_add` call above.
 
 ### P8. Launch workflow
 
@@ -144,15 +116,13 @@ stop and when to continue.
 When any MCP tool call fails, do the following:
 
 1. Log which step failed and the error message.
-2. List completed steps so far (e.g., "config loaded, todo created, Trello sync failed").
+2. List completed steps so far.
 3. Display to user:
    ```
    Quick-start failed at step <step>: <error summary>
    Completed: <list of completed steps>
    Failed: <step that errored>
    ```
-4. If the failure is in an optional sync step (Trello parts of T2, T4, T6, or Trello parts of P7):
-   - Warn the user but continue to the next step. The core todo/project was already created.
-5. If the failure is in a required step (T3, P3, P4, P5, P6, or the todo_add in P7):
+4. If the failure is in a required step (T2, P3, P4, P5, P6, or the todo_add in P7):
    - Stop and display the error. Do not proceed to the workflow launch.
 6. Never silently swallow errors. Always surface what failed and what succeeded.

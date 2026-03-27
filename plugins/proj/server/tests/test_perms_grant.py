@@ -107,13 +107,8 @@ class TestCollectPaths:
 
 
 class TestSetupPermissions:
-    def test_adds_mcp_rules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
-
+    def test_returns_computed_counts_without_batch_fn(self) -> None:
+        """Without batch_setup_fn, returns computed counts (hooks handle dispatch)."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         counts = setup_permissions(
@@ -121,24 +116,17 @@ class TestSetupPermissions:
             mcp_servers=["plugin_proj_proj", "plugin_perms_perms"],
         )
 
-        allow = _read_allow(settings_path)
-        assert "mcp__plugin_proj_proj__*" in allow
-        assert "mcp__plugin_perms_perms__*" in allow
+        # writable repo + tracking_dir = 2 paths, 2 MCP servers
+        assert counts["sandbox_paths"] == 2
         assert counts["mcp_rules"] == 2
 
-    def test_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+    def test_returns_zero_when_nothing_to_do(self) -> None:
+        """No paths and no servers returns zero counts."""
+        meta = _make_meta(repos=[])
+        cfg = ProjConfig(tracking_dir=None, worktree_integration=False)
+        counts = setup_permissions(meta, cfg, mcp_servers=[])
 
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        setup_permissions(meta, cfg, mcp_servers=["proj"])
-        counts2 = setup_permissions(meta, cfg, mcp_servers=["proj"])
-
-        assert sum(counts2.values()) == 0
+        assert sum(counts.values()) == 0
 
     # ── batch_setup_fn delegation tests ──
 
@@ -256,9 +244,8 @@ class TestProjSetupPermissionsTool:
             "proj_setup_permissions",
             mcp_servers=["plugin_proj_proj"],
         )
+        # Without batch_fn, returns computed counts (hooks handle dispatch)
         assert "rule(s)" in result or "up to date" in result
-        allow = _read_allow(settings_path)
-        assert "mcp__plugin_proj_proj__*" in allow
 
 
 # ── Sandbox mode tests ─────────────────────────────────────────────────────────
@@ -375,29 +362,16 @@ class TestSandboxModeDetection:
 
 
 class TestSetupPermissionsSandbox:
-    def test_adds_sandbox_write_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
-
+    def test_adds_sandbox_write_paths(self) -> None:
+        """Without batch_setup_fn, returns computed counts for sandbox paths."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
         counts = setup_permissions(meta, cfg)
 
-        aw = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" in aw
-        assert counts["sandbox_paths"] > 0
+        # writable repo + tracking_dir = 2 paths
+        assert counts["sandbox_paths"] == 2
+        assert counts["mcp_rules"] == 0
 
     def test_reference_repo_not_in_allow_write(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -423,21 +397,8 @@ class TestSetupPermissionsSandbox:
         assert "/home/user/docs" not in aw
         assert counts["sandbox_paths"] == 0
 
-    def test_mixed_repos_writable_and_reference(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
-
+    def test_mixed_repos_writable_and_reference(self) -> None:
+        """Without batch_setup_fn, reference repos are excluded from computed path count."""
         meta = _make_meta(repos=[
             RepoEntry(label="code", path="/home/user/proj"),
             RepoEntry(label="docs", path="/home/user/docs", reference=True),
@@ -446,26 +407,12 @@ class TestSetupPermissionsSandbox:
         cfg.tracking_dir = "/tmp/tracking"
         counts = setup_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
 
-        aw = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" in aw
-        assert "/home/user/docs" not in aw
-        assert counts["sandbox_paths"] >= 1  # proj + tracking
+        # Only writable repo + tracking_dir = 2 paths (reference repo excluded)
+        assert counts["sandbox_paths"] == 2
+        assert counts["mcp_rules"] == 1
 
-    def test_mcp_rules_and_sandbox_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
-
+    def test_mcp_rules_and_sandbox_paths(self) -> None:
+        """Without batch_setup_fn, returns computed counts for both paths and MCP servers."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         counts = setup_permissions(
@@ -473,64 +420,48 @@ class TestSetupPermissionsSandbox:
             mcp_servers=["plugin_proj_proj"],
         )
 
-        allow = _read_local_allow(local_path)
-        assert "mcp__plugin_proj_proj__*" in allow
-        aw = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" in aw
-        assert sum(counts.values()) > 0
+        # repo + tracking_dir = 2 paths, 1 MCP server
+        assert counts["sandbox_paths"] == 2
+        assert counts["mcp_rules"] == 1
+        assert sum(counts.values()) == 3
 
-    def test_idempotent_sandbox(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
+    def test_idempotent_sandbox(self) -> None:
+        """Without batch_setup_fn, repeated calls return the same computed counts.
 
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
-
+        Idempotency is guaranteed by the batch_setup_fn (perms plugin) deduplicating;
+        without it, computed counts are always the same since no local state changes.
+        """
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
-        setup_permissions(meta, cfg, mcp_servers=["proj"])
+        counts1 = setup_permissions(meta, cfg, mcp_servers=["proj"])
         counts2 = setup_permissions(meta, cfg, mcp_servers=["proj"])
 
-        assert sum(counts2.values()) == 0
+        assert counts1 == counts2
 
 
 # ── revoke_all_permissions ─────────────────────────────────────────────────────
 
 
 class TestRevokeAllPermissions:
-    def test_setup_then_revoke_removes_mcp_rules(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-
+    def test_setup_then_revoke_removes_mcp_rules(self) -> None:
+        """Without batch fns, setup returns computed counts; revoke without mcp_servers
+        returns sandbox_paths count but mcp_rules=0 (MCP rules shared across projects)."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
-        # Setup permissions first
-        setup_permissions(
+        # Setup returns computed counts (no local writes)
+        setup_counts = setup_permissions(
             meta, cfg,
             mcp_servers=["plugin_proj_proj"],
         )
-        allow_after_setup = _read_allow(settings_path)
-        assert len(allow_after_setup) > 0
+        assert setup_counts["sandbox_paths"] == 2
+        assert setup_counts["mcp_rules"] == 1
 
-        # Revoke all (without mcp_servers -- MCP rules are shared across projects)
-        counts = revoke_all_permissions(meta, cfg)
-        # MCP rules are NOT removed by default (shared across projects)
-        allow_after = _read_allow(settings_path)
-        assert "mcp__plugin_proj_proj__*" in allow_after
+        # Revoke without mcp_servers -- MCP rules are shared across projects
+        revoke_counts = revoke_all_permissions(meta, cfg)
+        assert revoke_counts["sandbox_paths"] == 2  # repo + tracking
+        assert revoke_counts["mcp_rules"] == 0  # not explicitly provided
 
     def test_revoke_with_mcp_servers_removes_mcp_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -554,20 +485,14 @@ class TestRevokeAllPermissions:
         assert counts["mcp_rules"] == 1
         assert _read_allow(settings_path) == []
 
-    def test_revoke_no_permissions_returns_zero(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+    def test_revoke_no_permissions_returns_zero(self) -> None:
+        """Without batch_revoke_fn and no paths/servers, returns zero counts."""
+        meta = _make_meta(repos=[])
         cfg = _make_cfg()
+        cfg.tracking_dir = ""
 
         counts = revoke_all_permissions(meta, cfg)
         assert sum(counts.values()) == 0
-        assert _read_allow(settings_path) == []
 
     def test_revoke_preserves_unrelated_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -588,66 +513,33 @@ class TestRevokeAllPermissions:
         for rule in unrelated:
             assert rule in allow
 
-    def test_revoke_idempotent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        settings_path = tmp_path / ".claude" / "settings.json"
-        _write_settings(settings_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
+    def test_revoke_idempotent(self) -> None:
+        """Without batch_revoke_fn, repeated calls return the same computed counts.
 
+        Idempotency is guaranteed by the batch_revoke_fn (perms plugin) deduplicating;
+        without it, computed counts are always the same since no local state changes.
+        """
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
-        setup_permissions(meta, cfg)
-        revoke_all_permissions(meta, cfg)
+        counts1 = revoke_all_permissions(meta, cfg)
         counts2 = revoke_all_permissions(meta, cfg)
-        assert sum(counts2.values()) == 0
+        assert counts1 == counts2
 
-    def test_revoke_removes_sandbox_write_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
+    def test_revoke_removes_sandbox_write_paths(self) -> None:
+        """Without batch_revoke_fn, returns computed counts for sandbox paths to remove."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
-        # Setup permissions in sandbox mode
-        setup_permissions(meta, cfg)
-        aw_before = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" in aw_before
-
-        # Revoke all
         counts = revoke_all_permissions(meta, cfg)
-        assert counts["sandbox_paths"] > 0
-        aw_after = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" not in aw_after
-        allow = _read_local_allow(local_path)
-        assert len(allow) == 0
+        # writable repo + tracking_dir = 2 paths
+        assert counts["sandbox_paths"] == 2
+        assert counts["mcp_rules"] == 0
 
-    def test_revoke_mixed_repos(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {
-            "sandbox": {"enabled": True},
-            "permissions": {"allow": []},
-        })
-        monkeypatch.setattr("server.lib.perms_helpers._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", local_path)
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", tmp_path / "settings.json")
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", tmp_path / "settings.json")
-
+    def test_revoke_mixed_repos(self) -> None:
+        """Without batch_revoke_fn, reference repos are excluded from computed path count."""
         meta = _make_meta(repos=[
             RepoEntry(label="code", path="/home/user/proj"),
             RepoEntry(label="docs", path="/home/user/docs", reference=True),
@@ -655,19 +547,10 @@ class TestRevokeAllPermissions:
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
-        setup_permissions(meta, cfg, mcp_servers=["proj"])
-
-        # Verify setup state
-        aw = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" in aw
-        assert "/home/user/docs" not in aw  # reference repo excluded from allowWrite
-
         counts = revoke_all_permissions(meta, cfg, mcp_servers=["proj"])
-        assert counts["sandbox_paths"] > 0
+        # Only writable repo + tracking_dir = 2 paths (reference repo excluded)
+        assert counts["sandbox_paths"] == 2
         assert counts["mcp_rules"] == 1
-
-        aw_after = _read_sandbox_allow_write(local_path)
-        assert "/home/user/proj" not in aw_after
 
     # ── batch_revoke_fn delegation tests ──
 
@@ -770,22 +653,17 @@ class TestArchiveRevokesPermissions:
         monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
 
 
-        # Setup permissions
-        await call_tool(
+        # Setup permissions (returns computed counts, hooks handle dispatch)
+        setup_result = await call_tool(
             mcp_app_with_grant,
             "proj_setup_permissions",
             mcp_servers=["plugin_proj_proj"],
         )
-        allow_before = _read_allow(settings_path)
-        assert len(allow_before) > 0
+        assert "rule(s)" in setup_result
 
         # Archive the project
         result = await call_tool(mcp_app_with_grant, "proj_archive", name="myproject")
         assert "Archived" in result
-
-        # MCP rules stay because they are shared across projects
-        allow_after = _read_allow(settings_path)
-        assert "mcp__plugin_proj_proj__*" in allow_after
 
     @pytest.mark.anyio
     async def test_archive_succeeds_without_permissions(

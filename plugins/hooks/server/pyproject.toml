@@ -59,6 +59,7 @@ pythonVersion = "3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto"]
+markers = ["e2e: end-to-end tests requiring subprocess servers"]
 
 [tool.coverage.run]
 branch = true

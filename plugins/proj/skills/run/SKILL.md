@@ -179,11 +179,11 @@ For each batch in dependency order (excluding `manual_skipped_ids`):
 3. Wait for batch completion. Report failures: `Agent for todo <id> failed: <error>`.
 4. **Satisfaction check** (sequential, main conversation): For each completed todo in the batch, run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
-      1. **Satisfied** — mark done: call `mcp__proj__todo_complete` (+ if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`)
+      1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
       2. **Not satisfied** — fix in scope: ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
       3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
-Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent + if Trello auto-sync AND todo has `trello_checklist_item_id`: call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`. Otherwise display warning.
+Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent. Otherwise display warning.
 
 **6. Complete**
 

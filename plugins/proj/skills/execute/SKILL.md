@@ -44,8 +44,6 @@ Execute todo(s): $ARGUMENTS
       - Invoke `/proj:execute <id>` via Skill tool
       - Re-ask satisfaction on original todo (go back to step 5a)
    d. Call `mcp__proj__todo_complete`
-      - If Trello auto-sync AND todo has `trello_checklist_item_id`:
-        - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
       - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
       - Append a brief progress note: `mcp__proj__notes_append`
 

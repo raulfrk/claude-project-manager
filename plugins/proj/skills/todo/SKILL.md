@@ -9,7 +9,7 @@ agent: general-purpose
 
 Manage project todos. Parse $ARGUMENTS to determine the operation:
 
-**First**: Call `mcp__proj__proj_session_context` to get the active project name, config, and integration settings. Extract `project.name` and pass it to all subsequent `mcp__proj__todo_*` tool calls. Use `config.default_priority` for default priority and `integrations.trello` for sync checks.
+**First**: Call `mcp__proj__proj_session_context` to get the active project name, config, and integration settings. Extract `project.name` and pass it to all subsequent `mcp__proj__todo_*` tool calls. Use `config.default_priority` for default priority.
 
 **add** `<title>` — add a new todo
   - **Smart parent inference**: if the title starts with a number (e.g. `3 Fix bug` or `4.2 Improve error handling`), check whether that ID is an existing todo:
@@ -20,23 +20,15 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
   - Parse optional inline params from the remaining arguments after the title:
     `priority=<high|medium|low>`, `tags=<tag1,tag2>`, `blocked_by=<id1,id2>`, `due=<date>`
   - Defaults: priority from config (`config.default_priority` from session context), no tags, no blocks, no due date
-  - If Trello auto-sync (`integrations.trello.enabled` and project has `trello_card_id` from session context):
-    - Determine checklist: if parent todo has `trello_checklist_id`, use that. Otherwise call `mcp__trello__get_card_checklists(card_id)` to find existing "Tasks" checklist; if none, call `mcp__trello__create_checklist(card_id, name="Tasks")` and store `trello_checklist_id` on the root todo.
-    - Call `mcp__trello__add_checklist_item(checklist_id, name=title)`
-    - Capture the returned item ID as `trello_checklist_item_id`.
-  - Call `mcp__proj__todo_add` with parsed values. Include `due_date=<value>` if `due` param was provided. Include `trello_checklist_item_id` if captured above.
+  - Call `mcp__proj__todo_add` with parsed values. Include `due_date=<value>` if `due` param was provided.
 
 **update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update a todo's fields
   - Parse the key=value pairs from the arguments
   - Call `mcp__proj__todo_update` with the provided fields
-  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
-    - If `title` was changed: call `mcp__trello__rename_checklist_item(card_id, checklist_id, item_id, name=new_title)` where card_id comes from project's `trello_card_id`, checklist_id from todo's parent's `trello_checklist_id`
   - Show the updated todo
 
 **done** `<id>` — mark a todo complete (e.g. "done 2")
   - Call `mcp__proj__todo_complete`
-  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
-    - Call `mcp__trello__update_checklist_item(card_id, checklist_id, item_id, state="complete")` where card_id from project's `trello_card_id`
 
 **list** [all|pending|ready|blocked] — list todos with optional filter
   - Default (no filter): call `mcp__proj__todo_tree` — shows open tasks as a hierarchy, filtering out done todos
@@ -71,10 +63,7 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
   - Call `mcp__proj__todo_unblock`
 
 **delete** `<id>` -- delete a todo
-  - Before deleting, call `mcp__proj__todo_get` to read the todo's `trello_checklist_item_id` for the Trello delete call.
   - Call `mcp__proj__todo_delete`
-  - If Trello auto-sync AND todo has `trello_checklist_item_id`:
-    - Call `mcp__trello__delete_checklist_item(card_id, checklist_id, item_id)` where card_id from project's `trello_card_id`
 
 If $ARGUMENTS is empty or ambiguous, output usage: "Usage: /proj:todo [add|update|done|list|tree|block|unblock|delete] [args]"
 Always confirm the action taken and show the resulting todo.

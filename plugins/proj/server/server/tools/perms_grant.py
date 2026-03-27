@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig, ProjectMeta
-from server.lib.perms_helpers import project_dirs_from_meta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -47,26 +46,6 @@ def _is_sandbox_enabled(
     return False
 
 
-def _effective_settings_path(project_dir: Path | None = None) -> Path:
-    """Return settings.json or settings.local.json depending on sandbox mode."""
-    if _is_sandbox_enabled(project_dir):
-        return _USER_LOCAL_SETTINGS
-    return _USER_SETTINGS
-
-
-# ── Settings I/O ──────────────────────────────────────────────────────────────
-
-
-def _load_settings(project_dir: Path | None = None) -> dict[str, object]:
-    path = _effective_settings_path(project_dir)
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())  # type: ignore[return-value]
-
-
-def _save_settings(data: dict[str, object], project_dir: Path | None = None) -> None:
-    path = _effective_settings_path(project_dir)
-    storage.atomic_write_json(path, data)
 
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
@@ -102,56 +81,6 @@ def _mcp_allow_entry(server_name: str) -> str:
     return f"mcp__{server_name}__*"
 
 
-# ── Sandbox-aware helpers ──────────────────────────────────────────────────────
-
-
-def _ensure_sandbox_section(data: dict[str, object]) -> dict[str, object]:
-    """Ensure ``sandbox.filesystem.allowWrite`` path exists in the data dict."""
-    sandbox = data.get("sandbox", {})
-    if not isinstance(sandbox, dict):
-        sandbox = {}
-    fs = sandbox.get("filesystem", {})
-    if not isinstance(fs, dict):
-        fs = {}
-    if "allowWrite" not in fs:
-        fs["allowWrite"] = []
-    sandbox["filesystem"] = fs
-    data["sandbox"] = sandbox
-    return data
-
-
-def _add_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
-    """Add a path to sandbox.filesystem.allowWrite. Returns True if added."""
-    data = _ensure_sandbox_section(data)
-    sandbox = data["sandbox"]
-    assert isinstance(sandbox, dict)
-    fs = sandbox["filesystem"]
-    assert isinstance(fs, dict)
-    aw = fs["allowWrite"]
-    assert isinstance(aw, list)
-    clean = abs_path.rstrip("/")
-    if clean not in aw:
-        aw.append(clean)
-        return True
-    return False
-
-
-def _remove_sandbox_write_path(data: dict[str, object], abs_path: str) -> bool:
-    """Remove a path from sandbox.filesystem.allowWrite. Returns True if removed."""
-    sandbox = data.get("sandbox")
-    if not isinstance(sandbox, dict):
-        return False
-    fs = sandbox.get("filesystem")
-    if not isinstance(fs, dict):
-        return False
-    aw = fs.get("allowWrite")
-    if not isinstance(aw, list):
-        return False
-    clean = abs_path.rstrip("/")
-    if clean in aw:
-        aw.remove(clean)
-        return True
-    return False
 
 
 # ── Setup (one-shot atomic write) ─────────────────────────────────────────────
@@ -217,11 +146,10 @@ def setup_permissions(
 
     Computes the list of writable paths and MCP servers, then delegates to
     ``batch_setup_fn`` for the actual settings file write.  When no
-    ``batch_setup_fn`` is provided, falls back to a local implementation
-    using the private helpers in this module.
+    ``batch_setup_fn`` is provided, returns computed counts without applying
+    (hooks dispatch to perms plugin).
 
     Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N}.
-    All zero means the file was not written (all rules already present).
     Idempotent.
     """
     paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination)
@@ -234,50 +162,8 @@ def setup_permissions(
         result = batch_setup_fn(paths=paths, mcp_servers=servers)
         return _parse_batch_setup_counts(result)
 
-    # Fallback: local implementation using private helpers
-    return _setup_permissions_local(meta, cfg, paths=paths, mcp_servers=servers)
-
-
-def _setup_permissions_local(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    *,
-    paths: list[str],
-    mcp_servers: list[str],
-) -> dict[str, int]:
-    """Local fallback when no batch_setup_fn is provided."""
-    project_dirs = project_dirs_from_meta(meta)
-    project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
-    data = _load_settings(project_dir)
-    perms = data.get("permissions", {})
-    if not isinstance(perms, dict):
-        perms = {}
-    allow = perms.get("allow", [])
-    if not isinstance(allow, list):
-        allow = []
-    allow_set: set[str] = set(allow)
-
-    new_entries: list[str] = []
-    counts = {"sandbox_paths": 0, "mcp_rules": 0}
-
-    if sandbox_mode:
-        data = _ensure_sandbox_section(data)
-        for abs_path in paths:
-            if _add_sandbox_write_path(data, abs_path):
-                counts["sandbox_paths"] += 1
-
-    if mcp_servers:
-        counts["mcp_rules"] = _apply_mcp_rules(mcp_servers, allow_set, new_entries)
-
-    if new_entries or sum(counts.values()) > 0:
-        if new_entries:
-            allow.extend(new_entries)
-            perms["allow"] = allow
-            data["permissions"] = perms
-        _save_settings(data, project_dir)
-
-    return counts
+    # No batch_fn — return computed data; hooks dispatch to perms plugin
+    return {"sandbox_paths": len(paths), "mcp_rules": len(servers)}
 
 
 # ── Revoke all (inverse of setup_permissions) ─────────────────────────────────
@@ -344,7 +230,8 @@ def revoke_all_permissions(
 
     Computes which paths and MCP servers to remove, then delegates to
     ``batch_revoke_fn`` for the actual settings file I/O.  When no
-    ``batch_revoke_fn`` is provided, falls back to a local implementation.
+    ``batch_revoke_fn`` is provided, returns computed counts without applying
+    (hooks dispatch to perms plugin).
 
     MCP wildcard rules are only removed when ``mcp_servers`` is explicitly
     provided, because they are shared across projects.
@@ -365,49 +252,8 @@ def revoke_all_permissions(
         result = batch_revoke_fn(paths=paths, mcp_servers=servers)
         return _parse_batch_revoke_counts(result)
 
-    # Fallback: local implementation using private helpers
-    return _revoke_all_permissions_local(meta, cfg, paths=paths, mcp_servers=servers)
-
-
-def _revoke_all_permissions_local(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    *,
-    paths: list[str],
-    mcp_servers: list[str],
-) -> dict[str, int]:
-    """Local fallback when no batch_revoke_fn is provided."""
-    project_dirs = project_dirs_from_meta(meta)
-    project_dir = project_dirs[0] if project_dirs else None
-    sandbox_mode = _is_sandbox_enabled(project_dirs=project_dirs)
-    data = _load_settings(project_dir)
-    perms = data.get("permissions", {})
-    if not isinstance(perms, dict):
-        perms = {}
-    allow = perms.get("allow", [])
-    if not isinstance(allow, list):
-        allow = []
-
-    counts = {"sandbox_paths": 0, "mcp_rules": 0}
-
-    # Remove MCP wildcard rules from permissions.allow
-    to_remove = _collect_all_allow_rules(meta, cfg, mcp_servers=mcp_servers)
-    new_allow = [r for r in allow if r not in to_remove]
-    counts["mcp_rules"] = len(allow) - len(new_allow)
-
-    # Remove sandbox write paths
-    if sandbox_mode:
-        for p in paths:
-            if _remove_sandbox_write_path(data, p):
-                counts["sandbox_paths"] += 1
-
-    total = sum(counts.values())
-    if total > 0:
-        perms["allow"] = new_allow
-        data["permissions"] = perms
-        _save_settings(data, project_dir)
-
-    return counts
+    # No batch_fn — return computed data; hooks dispatch to perms plugin
+    return {"sandbox_paths": len(paths), "mcp_rules": len(servers)}
 
 
 # ── MCP tool registration ──────────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+hooks:
+  - id: worktree-on-wt-create-perms
+    trigger_tool: wt_create
+    target_tool: perms_add_allow
+    server: perms
+    param_mapping:
+      path: "${worktree_path}"
+    blocking: false
+    condition: "perms_integration"
+
+  - id: worktree-on-wt-remove-perms
+    trigger_tool: wt_remove
+    target_tool: perms_remove_allow
+    server: perms
+    param_mapping:
+      path: "${worktree_path}"
+    blocking: false
+    condition: "perms_integration"

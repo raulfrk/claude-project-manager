@@ -1,0 +1,45 @@
+hooks:
+  - id: trello-on-todo-add
+    trigger_tool: todo_add
+    target_tool: add_checklist_item
+    server: trello
+    param_mapping:
+      checklist_id: "${trello_checklist_id}"
+      name: "${title}"
+    blocking: true
+    condition: "trello.enabled and trello.auto_sync and project.trello_card_id"
+
+  - id: trello-on-todo-complete
+    trigger_tool: todo_complete
+    target_tool: update_checklist_item
+    server: trello
+    param_mapping:
+      card_id: "${trello_card_id}"
+      checklist_id: "${trello_checklist_id}"
+      item_id: "${trello_checklist_item_id}"
+      state: "complete"
+    blocking: false
+    condition: "trello.enabled and trello.auto_sync"
+
+  - id: trello-on-todo-update
+    trigger_tool: todo_update
+    target_tool: rename_checklist_item
+    server: trello
+    param_mapping:
+      card_id: "${trello_card_id}"
+      checklist_id: "${trello_checklist_id}"
+      item_id: "${trello_checklist_item_id}"
+      name: "${title}"
+    blocking: false
+    condition: "trello.enabled and trello.auto_sync"
+
+  - id: trello-on-todo-delete
+    trigger_tool: todo_delete
+    target_tool: delete_checklist_item
+    server: trello
+    param_mapping:
+      card_id: "${trello_card_id}"
+      checklist_id: "${trello_checklist_id}"
+      item_id: "${trello_checklist_item_id}"
+    blocking: false
+    condition: "trello.enabled and trello.auto_sync"
