@@ -61,6 +61,126 @@ def _format_notes_section(cfg: ProjConfig, project_name: str, lines: list[str]) 
         lines.append(f"\n### Recent Notes\n{notes}")
 
 
+def _read_session_history(
+    cfg: ProjConfig, project_name: str
+) -> dict[str, object]:
+    """Return session history data from recent session files.
+
+    Returns a dict with:
+      - summary: first 300 chars of the latest session file (after ``# Session:`` header)
+      - decisions: last 5 Key Decisions across recent sessions (deduplicated)
+      - questions: unresolved questions from last 3 sessions
+    """
+    sessions_dir = storage.tracking_dir(cfg, project_name) / "sessions"
+    if not sessions_dir.is_dir():
+        return {}
+
+    files = sorted(sessions_dir.glob("session-*.md"))
+    if not files:
+        return {}
+
+    # --- summary from latest session ---
+    latest_content = files[-1].read_text()
+    # Strip the ``# Session: ...`` header line
+    header_match = re.match(r"^# Session:[^\n]*\n?", latest_content)
+    body = latest_content[header_match.end():] if header_match else latest_content
+    summary = body.strip()[:300]
+
+    # --- decisions from recent sessions (last 5 decisions, deduplicated) ---
+    decisions: list[str] = []
+    seen_decisions: set[str] = set()
+    for f in reversed(files):
+        content = f.read_text()
+        sections = re.split(r"(?=^## )", content, flags=re.MULTILINE)
+        for section in sections:
+            if section.startswith("## Key Decisions"):
+                for line in section.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- "):
+                        item = stripped[2:].strip()
+                        if item not in seen_decisions:
+                            seen_decisions.add(item)
+                            decisions.append(item)
+        if len(decisions) >= 5:
+            break
+    decisions = decisions[:5]
+
+    # --- open questions from last 3 sessions ---
+    questions: list[str] = []
+    recent_files = files[-3:]
+    for f in recent_files:
+        content = f.read_text()
+        sections = re.split(r"(?=^## )", content, flags=re.MULTILINE)
+        for section in sections:
+            if section.startswith("## Open Questions"):
+                for line in section.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- "):
+                        item = stripped[2:].strip()
+                        if item not in questions:
+                            questions.append(item)
+
+    return {"summary": summary, "decisions": decisions, "questions": questions}
+
+
+def _format_session_history(
+    cfg: ProjConfig, project_name: str, lines: list[str]
+) -> None:
+    """Append session history sections to *lines* if session data exists."""
+    data = _read_session_history(cfg, project_name)
+    if not data:
+        return
+
+    summary = data.get("summary", "")
+    decisions: list[str] = data.get("decisions", [])  # type: ignore[assignment]
+    questions: list[str] = data.get("questions", [])  # type: ignore[assignment]
+
+    if summary:
+        lines.append(f"\n### Last Session\n{summary}")
+
+    if decisions:
+        lines.append(f"\n### Key Decisions (last {len(decisions)})")
+        for d in decisions:
+            lines.append(f"- {d}")
+
+    if questions:
+        lines.append("\n### Open Questions")
+        for q in questions:
+            lines.append(f"- [ ] {q}")
+
+
+def _read_project_knowledge(cfg: ProjConfig, project_name: str, max_bullets: int = 5) -> list[str]:
+    """Return up to *max_bullets* bullet entries from the most recent section of knowledge.md."""
+    knowledge_path = storage.tracking_dir(cfg, project_name) / "knowledge.md"
+    if not knowledge_path.exists():
+        return []
+    content = knowledge_path.read_text()
+    # Split into dated sections (## YYYY-MM-DD)
+    sections = re.split(r"(?=^## \d{4}-\d{2}-\d{2})", content, flags=re.MULTILINE)
+    sections = [s.strip() for s in sections if s.strip()]
+    if not sections:
+        return []
+    # Take the last (most recent) section
+    latest = sections[-1]
+    bullets: list[str] = []
+    for line in latest.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+            if len(bullets) >= max_bullets:
+                break
+    return bullets
+
+
+def _format_knowledge_section(cfg: ProjConfig, project_name: str, lines: list[str]) -> None:
+    """Append project knowledge section to *lines* if knowledge.md exists."""
+    bullets = _read_project_knowledge(cfg, project_name)
+    if bullets:
+        lines.append("\n### Project Knowledge")
+        for b in bullets:
+            lines.append(f"- {b}")
+
+
 def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) -> str:
     """Build a markdown context string for the active project."""
     meta = storage.load_meta(cfg, project_name)
@@ -84,6 +204,8 @@ def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) ->
 
     if not compact:
         _format_notes_section(cfg, project_name, lines)
+        _format_session_history(cfg, project_name, lines)
+        _format_knowledge_section(cfg, project_name, lines)
 
     return "\n".join(lines)
 

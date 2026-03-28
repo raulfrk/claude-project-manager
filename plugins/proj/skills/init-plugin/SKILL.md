@@ -35,13 +35,20 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
           - Store as `git_tracking_github_repo_format`; default to `"tracking-{project-name}"` if the user presses Enter
    g. **Zoxide integration** — "Enable zoxide integration? [no]"
       - Explain: if enabled, project directories are boosted in zoxide's frecency database on init/load for faster `cd` navigation
-   h. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
-   h2. **Archive purge** — "How many days after archiving should purgeable projects be eligible for purge? Leave empty to never purge. [none]"
+   h. **Team mode** — "Enable parallel agent execution for batch todos? [no]"
+      - Explain: if enabled, batch operations can use multiple agents in parallel for faster execution
+      - If yes: "Max agents? [4]"
+        - Store as `team_mode_max_agents`; default to `4` if the user presses Enter
+      - If yes: "Trust level? (0=supervised, 1=guided, 2=autonomous, 3=full-auto) [1]"
+        - Explain: controls how much autonomy agents have — 0 requires approval for each action, 3 runs fully unattended
+        - Store as `team_mode_trust_level`; default to `1` if the user presses Enter
+   h2. **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
+   h3. **Archive purge** — "How many days after archiving should purgeable projects be eligible for purge? Leave empty to never purge. [none]"
       - Store as `archive_purge_after_days` (None if left blank, integer if provided)
    i. **Plugins** — "Do you have the `perms` plugin installed? [no]"
    j. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
 
-**3.** Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, `archive_purge_after_days`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
+**3.** Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, `archive_purge_after_days`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`. If team mode is enabled, also include `team_mode_enabled`, `team_mode_max_agents`, and `team_mode_trust_level`.
 
 **4.** If `perms` plugin is installed: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
    - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
@@ -52,21 +59,36 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    - If `auto_allow_mcps: true` and `trello.enabled: true`, also include: `"trello"`
    - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
    - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"` to allow zoxide commands without prompts.
-   If `perms` plugin is not installed, skip silently and note: "Perms MCP server not available. Check your MCP server configuration and restart it."
+   If `perms` plugin is not installed, skip silently and note: "Perms MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 **4a.** Integration verification (if `perms` plugin is installed):
    Call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"` to get the current rules.
    Parse the JSON result and extract `permissions_allow` from the user scope entry.
 
    - If `perms_integration: true`: check if any entry matching `mcp__plugin_perms_perms__*` exists in `permissions_allow`. If not, display:
-     "Warning: perms plugin MCP rules not found in settings. The `perms_batch_add_mcp_allow` call may have failed — verify manually or re-run `/proj:init-plugin`."
+     "Warning: `perms` plugin MCP rules not found in settings. The `perms_batch_add_mcp_allow` call may have failed. Re-run `/proj:init-plugin` to fix."
    - If `worktree_integration: true`: check if any entry matching `mcp__plugin_worktree_worktree__*` exists in `permissions_allow`. If not, display:
-     "Warning: worktree plugin MCP rules not found in settings. Install the worktree plugin and re-run `/proj:init-plugin`."
+     "Warning: `worktree` plugin MCP rules not found in settings. Install the `worktree` plugin and re-run `/proj:init-plugin`."
 
-   If the `perms_list` call fails (tool not available), skip with: "Perms MCP server not available. Check your MCP server configuration and restart it."
+   If the `perms_list` call fails (tool not available), skip with: "Perms MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 **5.** Confirm: "proj plugin configured! Configuration saved to `~/.claude/proj.yaml`"
 
 **6.** Show the user their next step: "Run `/proj:init` to start tracking your first project."
 
-Suggested next: (1) /proj:init — create your first project  (2) /proj:load — load an existing project
+## Prerequisites
+
+- None (this is the first-time setup wizard).
+
+## Error Handling
+
+- **Already configured**: asks the user if they want to reconfigure. If declined, stops with `Existing configuration kept — no changes made.`
+- **Config init failure**: displays error from `config_init` and stops.
+- **Perms plugin not available**: skips permission setup silently with a note.
+- **MCP rule verification failure**: displays warning about missing rules and suggests re-running.
+
+## Output
+
+Confirmation: `proj plugin configured! Configuration saved to ~/.claude/proj.yaml`. Next step guidance to run `/proj:init`.
+
+Suggested next: `1. /proj:init` -- create your first project | `2. /proj:load` -- load an existing project

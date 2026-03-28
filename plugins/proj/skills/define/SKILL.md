@@ -1,8 +1,8 @@
 ---
 name: define
 description: Gather requirements and research implementation approach for a todo. Runs interactive Q&A, then researches the codebase. Use when asked "define 1", "clarify requirements for 1", or "research 1".
-allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task
-argument-hint: "<todo-id> [--no-interactive]"
+allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task
+argument-hint: "<todo-id> [--no-interactive] [--skip-bg-prep]"
 ---
 
 Define and research todo: $ARGUMENTS
@@ -12,6 +12,7 @@ Define and research todo: $ARGUMENTS
 Extract from $ARGUMENTS:
 - `todo_id` = the first non-flag token (the todo ID)
 - `no_interactive` = `true` if `--no-interactive` is present in $ARGUMENTS
+- `skip_bg_prep` = `true` if `--skip-bg-prep` is present in $ARGUMENTS
 
 If `todo_id` is empty or not present, stop and output:
 "Todo ID required. Usage: `/proj:define <todo-id>`"
@@ -30,6 +31,30 @@ If the result indicates the todo was not found (null todo or error), stop and ou
 "Todo <id> not found. Run `/proj:todo list` to see available todos."
 
 Review existing requirements, research, and notes. Store them for later reference.
+
+**2b.** Search prior decisions
+
+Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results found, review them before asking questions.
+
+**2c.** Background codebase exploration (skip if `skip_bg_prep` is true)
+
+Extract keywords from the todo title and description/notes.
+
+Spawn two background Task agents (general-purpose, read-only tools only: `Read, Glob, Grep`):
+
+  **Agent A — File discovery:**
+    - Glob for files matching title keywords (*.py, *.ts, *.md, etc.)
+    - Grep for function/class/variable names related to the todo
+    - Return: list of relevant file paths with 1-line descriptions
+
+  **Agent B — Test/pattern exploration:**
+    - Identify test directories related to the todo's domain
+    - Read up to 5 test files to understand existing patterns
+    - Read up to 3 source files that appear most relevant
+    - Return: summary of patterns found, key function signatures, test conventions
+
+Store agent handles as `bg_explore_agents`.
+Do NOT wait for them — proceed to step 3 immediately.
 
 **3.** Free-form writing
 
@@ -73,6 +98,12 @@ When all CRITICAL gaps are resolved, ask:
 
 If the user picks 2, continue with MINOR gaps. If 3, continue open-ended Q&A.
 
+**5.5.** Collect background exploration (if `bg_explore_agents` exist)
+
+Wait for `bg_explore_agents` to complete.
+Merge results into `bg_file_discovery` (list of relevant files) and `bg_pattern_summary` (patterns and conventions observed).
+If agents failed, log warning and continue — results are advisory only.
+
 **6.** Write requirements and research
 
 Write `requirements.md`:
@@ -102,7 +133,7 @@ Write `requirements.md`:
 **A:** <answer>
 ```
 
-Research the codebase (Read, Glob, Grep) and external sources (WebSearch, WebFetch) as needed. Evaluate 2-3 implementation approaches.
+Research the codebase (Read, Glob, Grep) and external sources (WebSearch, WebFetch) as needed. Include `bg_file_discovery` and `bg_pattern_summary` as additional input when researching — skip re-exploring files already covered by background agents. Evaluate 2-3 implementation approaches.
 
 Write `research.md`:
 
@@ -167,7 +198,7 @@ Only write rules that apply broadly to the project. Do NOT write todo-specific d
 Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
 
-Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:execute <id> — if straightforward, execute directly
+Suggested next: `1. /proj:decompose <id>` -- break into subtasks | `2. /proj:execute <id>` -- if straightforward, execute directly
 
 ---
 
@@ -182,13 +213,25 @@ Call `mcp__proj__proj_get_todo_context` with the todo ID.
 If the result indicates the todo was not found (null todo or error), stop and output:
 "Todo <id> not found. Run `/proj:todo list` to see available todos."
 
+**NI-1b. Search prior decisions**
+
+Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results found, review them before exploring the codebase.
+
+**NI-1c.** Background codebase exploration (skip if `skip_bg_prep` is true)
+
+Same as step 2c: extract keywords, spawn two read-only background Task agents (Agent A for file discovery, Agent B for test/pattern exploration). Store handles as `bg_explore_agents`. Do NOT wait — proceed to NI-2 immediately.
+
 **NI-2. Explore codebase**
 
 Use Read, Glob, and Grep to explore the codebase for existing patterns, relevant code, and implementation context. Be thorough — this replaces the interactive Q&A.
 
+**NI-2.5.** Collect background exploration (if `bg_explore_agents` exist)
+
+Wait for `bg_explore_agents` to complete. Merge results into `bg_file_discovery` and `bg_pattern_summary`. If agents failed, log warning and continue.
+
 **NI-3. Write requirements and research**
 
-Write both `requirements.md` and `research.md` directly from the todo context and codebase exploration. Use the same formats as step 6.
+Write both `requirements.md` and `research.md` directly from the todo context and codebase exploration. Use the same formats as step 6. Include `bg_file_discovery` and `bg_pattern_summary` as additional input — skip re-exploring files already covered by background agents.
 
 Call `mcp__proj__content_set_requirements` with the requirements content.
 Call `mcp__proj__content_set_research` with the research content.
@@ -217,4 +260,21 @@ Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules
 
 Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 
-Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:execute <id> — if straightforward, execute directly
+## Prerequisites
+
+- An active project must be loaded.
+- A valid todo ID must be provided.
+
+## Error Handling
+
+- **No todo ID**: displays "Todo ID required. Usage: `/proj:define <todo-id>`" and stops.
+- **Todo not found**: displays "Todo `<id>` not found. Run `/proj:todo list` to see available todos." and stops.
+- **Quality gate failure**: presents failing criteria and offers Fix or Restart options. Blocks progress until gate passes.
+- **Read failure on sibling SKILL.md**: treated as a hard stop.
+
+## Output
+
+- **Interactive**: requirements.md and research.md written to the todo's content directory. Quality gate pass confirmation. CLAUDE.md updated with project-wide rules.
+- **Non-interactive**: requirements.md and research.md written, plus a confidence self-assessment table and actionable gaps list.
+
+Suggested next: `1. /proj:decompose <id>` -- break into subtasks | `2. /proj:execute <id>` -- if straightforward, execute directly

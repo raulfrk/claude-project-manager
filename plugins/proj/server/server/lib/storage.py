@@ -6,7 +6,7 @@ import contextlib
 import json
 import os
 import tempfile
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
@@ -187,6 +187,71 @@ def archive_and_remove_todos(
         raise
 
 
+# ── Sessions / Decisions ──────────────────────────────────────────────────
+
+
+def sessions_dir(cfg: ProjConfig, project_name: str) -> Path:
+    return tracking_dir(cfg, project_name) / "sessions"
+
+
+def decisions_path(cfg: ProjConfig, project_name: str) -> Path:
+    return tracking_dir(cfg, project_name) / "decisions.yaml"
+
+
+def _load_yaml_list(path: Path) -> list[dict[str, object]]:
+    """Load a YAML file that contains a top-level list, returning [] if missing or corrupt."""
+    try:
+        with path.open() as f:
+            data = yaml.safe_load(f)
+            if not isinstance(data, list):
+                return []
+            return data  # type: ignore[return-value]
+    except (FileNotFoundError, yaml.YAMLError):
+        return []
+
+
+def _write_yaml_list(path: Path, data: list[dict[str, object]]) -> None:
+    """Atomically write a YAML file containing a top-level list."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, object]]:
+    """Read decisions.yaml, returning a list of decision dicts or empty list."""
+    return _load_yaml_list(decisions_path(cfg, project_name))
+
+
+def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, object]) -> None:
+    """Atomic read + append + write for a single decision entry."""
+    existing = load_decisions(cfg, project_name)
+    existing.append(entry)
+    _write_yaml_list(decisions_path(cfg, project_name), existing)
+
+
+def build_decision_entry(
+    decision: str,
+    context: str = "",
+    todo_id: str = "",
+    tags: list[str] | None = None,
+) -> dict[str, object]:
+    """Build a decision entry dict with a UTC timestamp."""
+    return {
+        "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
+        "decision": decision,
+        "context": context,
+        "todo_id": todo_id,
+        "tags": tags or [],
+    }
+
+
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
 
@@ -222,10 +287,12 @@ def rename_todo_dir(cfg: ProjConfig, project_name: str, old_id: str, new_id: str
     """Rename a todo's content directory from old_id to new_id. Returns True if renamed, False if not found."""
     old_path = todo_content_dir(cfg, project_name, old_id)
     new_path = todo_content_dir(cfg, project_name, new_id)
-    if old_path.exists():
-        old_path.rename(new_path)
-        return True
-    return False
+    if not old_path.exists():
+        return False
+    if new_path.exists():
+        raise FileExistsError(f"Cannot rename todo dir: target '{new_path}' already exists")
+    old_path.rename(new_path)
+    return True
 
 
 def requirements_path(cfg: ProjConfig, project_name: str, todo_id: str) -> Path:

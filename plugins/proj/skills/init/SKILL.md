@@ -43,7 +43,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
       - Ask for path (show default). Ask for label (default: "code" for first dir, require explicit for subsequent).
 
    d. Validate:
-      - Label must be unique within `_dirs`. If duplicate: "Label '<label>' already used. Choose a different label or run `/proj:remove-repo` to free it."
+      - Label must be unique within `_dirs`. If duplicate, stop with: "Label `<label>` already used. Run `/proj:remove-repo` to free it."
       - Path must not be empty.
 
    e. Add `{path: <resolved_path>, label: <label>}` to `_dirs`.
@@ -157,4 +157,21 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
 **11.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
 
-Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview
+## Prerequisites
+
+- Proj plugin must be configured (run `/proj:init-plugin` first if `~/.claude/proj.yaml` does not exist).
+
+## Error Handling
+
+- **Config not found**: displays error from `config_load` and stops.
+- **Duplicate project name**: displays error from `proj_init` and stops.
+- **Invalid directory path**: displays error and stops.
+- **Duplicate label**: displays error and asks user to choose a different label.
+- **Worktree creation failure**: offers fallback to plain directory creation.
+- **Permissions setup failure**: warns and continues (non-fatal).
+
+## Output
+
+Summary of created project: project name, all directories (label, path, type), permissions status. Git tracking flush confirmation.
+
+Suggested next: `1. /proj:todo add` -- add your first task | `2. /proj:status` -- see the project overview

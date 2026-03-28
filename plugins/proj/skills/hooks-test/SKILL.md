@@ -13,9 +13,9 @@ Test a registered hook by firing its trigger.
 - First arg: `hook_id` (required) — the hook to test.
 - Second arg (optional): `source_result_json` — a JSON string to use as the source result for template resolution. Defaults to `{}`.
 
-If $ARGUMENTS is empty, output usage: "Usage: `/proj:hooks-test <hook_id> [source_result_json]`"
+If $ARGUMENTS is empty, output: "Hook ID required. Usage: `/proj:hooks-test <hook_id> [source_result_json]`"
 
-**1.** Call `mcp__hooks__hooks_list_tool` to look up the hook by ID. Find the hook entry whose `id` matches. If not found, output "Hook '<hook_id>' not found. Run `/proj:hooks-list` to see available hooks." and stop.
+**1.** Call `mcp__hooks__hooks_list_tool` to look up the hook by ID. Find the hook entry whose `id` matches. If not found, stop with: "Hook `<hook_id>` not found. Run `/proj:hooks-list` to see available hooks."
 
 **2.** Extract the `trigger_tool` from the matched hook.
 
@@ -46,4 +46,17 @@ If there are blocking results, show them:
 
 If `hooks_fired` is 0 and `skipped` > 0, note: "Hook was skipped — check its condition."
 
-Suggested next: (1) /proj:hooks-debug — inspect failures (if errors occurred)
+## Prerequisites
+
+- Hooks plugin MCP server is running and reachable.
+- A hook ID must be provided.
+
+## Error Handling
+
+- **No arguments**: displays "Hook ID required. Usage: `/proj:hooks-test <hook_id>`" and stops.
+- **Hook not found**: displays "Hook `<hook_id>` not found. Run `/proj:hooks-list` to see available hooks." and stops.
+- **Hooks MCP unavailable**: displays error from tool call and stops.
+
+## Output
+
+Test fire summary: hooks fired count, skipped count, errors count. If errors, lists each with hook_id and error. If blocking results, shows them. If skipped, notes the condition.

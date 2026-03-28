@@ -22,4 +22,18 @@ Set up the worktree plugin configuration.
 
 **4.** Confirm setup is complete and show the registered repos.
 
-Suggested next: (1) /worktree:create — create your first worktree  (2) /worktree:add-repo — register another base repository
+## Prerequisites
+
+- Worktree plugin MCP server must be running and reachable.
+
+## Error Handling
+
+- **Already configured**: asks user to reconfigure or add repos. If declined, keeps existing config.
+- **Worktree MCP unavailable**: displays error from tool call and stops.
+- **Invalid repo path**: displays error from `wt_add_repo` and asks for a different path.
+
+## Output
+
+Setup confirmation and list of registered repos.
+
+Suggested next: `1. /worktree:create` -- create your first worktree | `2. /worktree:add-repo` -- register another base repository

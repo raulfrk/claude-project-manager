@@ -39,6 +39,20 @@ Also show what was auto-applied locally (pull operations).
 
 Return the diff plan for use by downstream sub-skills (trello-push).
 
+## Prerequisites
+
+- Active project must have a `trello_card_id` set.
+- Card data JSON from `/proj:trello-fetch` must be provided as input.
+
+## Error Handling
+
+- **Diff tool error**: displays error from `proj_trello_diff` and stops.
+- **No active project**: displays error and stops.
+
+## Output
+
+Diff plan summarizing push operations (create checklist, create item, update item, complete item, delete item, rename checklist) and auto-applied pull operations with counts. Returns the diff plan for downstream sub-skills.
+
 ## Notes
 
 - All Trello MCP tool names use the static pattern `mcp__trello__<tool_name>`.

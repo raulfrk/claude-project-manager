@@ -27,18 +27,18 @@ This skill operates across all projects -- it does NOT require loading a project
 - Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
   - From the result, extract `integrations.jira.enabled` and other config values.
   - Note: jira-sync works across all projects, so the active project from context is informational only.
-- If `integrations.jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
+- If `integrations.jira.enabled` is false or not set, stop with: "Jira sync not enabled. Run `/proj:init-plugin` to enable it."
 - Parse optional `--user` and `--projects` from skill arguments:
   - `--user <username>` overrides `jira.default_user`
   - `--projects <key1,key2>` filters to specific Jira project keys
-- If no user is resolved (neither argument nor config default): stop with "No Jira user configured. Pass `--user <username>` or set `jira.default_user` in `~/.claude/proj.yaml`."
+- If no user is resolved (neither argument nor config default), stop with: "No Jira user configured. Pass `--user <username>` or set `jira.default_user` in `~/.claude/proj.yaml`."
 
 **Failure: Jira MCP server unavailable**
 If the Jira MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
-and say:
+with:
 
-> "Jira MCP server not available. Check your MCP server configuration and restart it."
+> "Jira MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 Do not proceed with any further sync steps.
 
@@ -119,10 +119,29 @@ Repeat editing until the user confirms with **Apply** or aborts with **Cancel**.
 Display a final summary with counts. If nothing changed: "Jira sync complete. Everything up to date."
 
 Display suggested next steps:
-- `/proj:status` — review project status after sync
-- `/proj:trello-sync` — if Trello is also enabled, sync there too
+- `1. /proj:status` -- review project status after sync
+- `2. /proj:trello-sync` -- if Trello is also enabled, sync there too
 
 ---
+
+## Prerequisites
+
+- Jira sync must be enabled (`jira.enabled: true` in config).
+- A Jira username must be configured (via `--user` argument or `jira.default_user` in config).
+- Jira MCP server must be running and reachable.
+
+## Error Handling
+
+- **Jira not enabled**: displays `Jira sync not enabled.` and stops.
+- **No user configured**: displays `No Jira user configured.` with instructions and stops.
+- **Jira MCP unavailable**: displays `Jira MCP server not available.` and stops.
+- **No issues found**: displays `No open issues found.` and stops.
+- **User cancels**: displays `Sync cancelled.` and stops.
+- **Partial apply failures**: displays failed issues in a table with issue key and error reason.
+
+## Output
+
+Dry-run mapping table (auto-mapped and needs-input sections), then after apply: summary with projects created, todos created, todos updated, skipped counts. If nothing changed: `Jira sync complete. Everything up to date.`
 
 ## Notes
 
@@ -135,4 +154,4 @@ Display suggested next steps:
 - Epics themselves are NOT synced as todos -- they define the project boundary.
 - Bulk tools: `jira_bulk_create_issues` (POST /rest/api/2/issue/bulk) and `jira_bulk_update_issues` (loops PUT per issue with rate limiting). Both return `{successes, failures}` for partial-failure handling.
 
-Suggested next: (1) /proj:status — review project status after sync  (2) /proj:todo list — review todos after sync
+Suggested next: `1. /proj:status` -- review project status after sync | `2. /proj:todo list` -- review todos after sync

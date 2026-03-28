@@ -17,10 +17,11 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
 
    If the result is an error string (not JSON), display it and stop.
 
-**3.** Open todos warning: If `open_todos.count > 0`, display them as bullet points with status icons, then warn the user:
+**3.** Open todos warning: If `open_todos.count > 0`, display them as bullet points with status icons and dependency badges (`[manual]`, `[blocked by X]`, `[blocks Y]`), then warn the user:
    ```
    This project has N open todos:
-   - 🔲 **1** — Write skills _(medium)_
+   - 🔲 **1** — Write skills _(medium)_ [manual]
+   - 🔲 **2** — Build API _(high)_ [blocks 3]
    - 🔲 **3** — Integration tests _(medium)_ [blocked by 2]
    Are you sure you want to archive it?
    ```
@@ -71,13 +72,15 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
 
 **9.** Repo cleanup (for each repo based on user's choice):
    - **move**: `mkdir -p <archive_dest>/<name> && mv <repo_path> <archive_dest>/<name>/<label>/`
-   - **delete**: `rm -rf <repo_path>`
+   - **delete**: `mkdir -p <tracking_dir>/.trash/<name>/ && mv <repo_path> <tracking_dir>/.trash/<name>/<label>/`
    - **skip**: do nothing
 
 **10.** Tracking directory cleanup (based on user's choice):
     - **move**: `mkdir -p <archive_dest>/<name> && mv <tracking_dir> <archive_dest>/<name>/tracking/`
-    - **delete**: `rm -rf <tracking_dir>`
+    - **delete**: `mkdir -p <tracking_dir>/.trash/<name>/ && mv <tracking_dir>/<name> <tracking_dir>/.trash/<name>/tracking/`
     - **skip**: do nothing
+
+   > Trash entries expire after `trash_grace_days` (default 7). Run `/proj:purge` to sweep expired entries.
 
 **11.** If this was the active project: "No active project now. Run `/proj:switch` to set a new one."
 
@@ -93,4 +96,21 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
     - Tracking: <action>
     ```
 
-Suggested next: (1) /proj:switch — switch to another project
+## Prerequisites
+
+- A project must exist (either active project or specified by name).
+- Archive destination must be configured in config.
+
+## Error Handling
+
+- **No project found**: displays error from `proj_archive_preflight` and stops.
+- **Preflight returns error**: displays the error and stops.
+- **Open todos**: warns user and asks for confirmation before proceeding.
+- **Worktree removal failure (uncommitted changes)**: asks user to force-remove or skip.
+- **Move/delete failure**: displays error from Bash command.
+
+## Output
+
+Archive summary: metadata status, per-repo actions (moved/deleted/skipped with paths), worktrees removed/skipped count, tracking directory action.
+
+Suggested next: `1. /proj:switch` -- switch to another project

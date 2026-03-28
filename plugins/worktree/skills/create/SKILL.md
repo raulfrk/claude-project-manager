@@ -8,7 +8,7 @@ argument-hint: "[repo-label] [branch-name]"
 Create a git worktree. Arguments: $ARGUMENTS (optional — repo label and/or branch name)
 
 **1.** Call `mcp__plugin_worktree_worktree__wt_list_repos` to show available base repos.
-   If the repo list is empty, stop: "No repos configured. Run `/worktree:add-repo` to register one."
+   If the repo list is empty, stop with: "No repos configured. Run `/worktree:add-repo` to register one."
 **2.** If $ARGUMENTS provides repo label and branch, use those. Otherwise ask:
    - "Which repo? (label from the list above)"
    - "Branch name for the new worktree?"
@@ -20,4 +20,20 @@ Create a git worktree. Arguments: $ARGUMENTS (optional — repo label and/or bra
    (If the perms server is unavailable, skip and continue.)
 **5.** Show the created worktree path and confirm success.
 
-Suggested next: (1) /worktree:list — see all worktrees  (2) /worktree:remove — remove a worktree when done
+## Prerequisites
+
+- Worktree plugin must be configured (at least one base repo registered).
+- Worktree MCP server must be running and reachable.
+
+## Error Handling
+
+- **No repos configured**: displays "No repos configured. Run `/worktree:add-repo` to register one." and stops.
+- **Create error**: displays error from `wt_create` and stops.
+- **Perms server unavailable**: skips permission grant and continues.
+- **Missing arguments**: asks interactively for repo, branch, new branch flag, and path.
+
+## Output
+
+Created worktree path and success confirmation. Permissions grant status (if applicable).
+
+Suggested next: `1. /worktree:list` -- see all worktrees | `2. /worktree:remove` -- remove a worktree when done

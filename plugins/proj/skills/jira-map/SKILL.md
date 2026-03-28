@@ -49,6 +49,21 @@ Issues to sync: {total} ({auto_count} auto-mapped, {needs_input_count} need inpu
 
 Return the mapping plan for use by downstream sub-skills (jira-apply).
 
+## Prerequisites
+
+- Jira MCP server is running and reachable.
+- Issues data from `/proj:jira-fetch` must be provided as input.
+
+## Error Handling
+
+- **Jira MCP unavailable**: displays error from tool call and stops.
+- **No issues provided**: displays error and stops.
+- **Mapping tool error**: displays error from `proj_jira_map` and stops.
+
+## Output
+
+Two-section mapping table: Auto-mapped (epic-based) showing Epic, Local Project, Issues count, Status; and Needs input (no epic) showing Issue, Summary, Suggested Project, Matched by. Summary line with total/auto/needs-input counts.
+
 ## Notes
 
 - All Jira MCP tool names use the static pattern `mcp__jira__<tool_name>`.

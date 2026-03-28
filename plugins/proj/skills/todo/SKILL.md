@@ -35,23 +35,23 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
   - `all`: call `mcp__proj__todo_tree` — shows all todos including done as a hierarchy
   - `ready`: call `mcp__proj__todo_ready` — shows todos with no blockers as a flat list
   - `blocked`: call `mcp__proj__todo_list` with `status: "pending"` then filter to those with non-empty `blocked_by`
-  - Display as nested bullet points with 2-space indent per level. Use status icons (✅ = done, 🔄 = in_progress, 🔲 = pending), bold ID, title, priority in italics. Always use the full, exact title from the todo — never abbreviate or summarize. If `"manual" in tags`, append `[manual]` after the priority. Blocked todos include `[blocked by X]` inline. Order: `_(priority)_ [manual] [blocked by X]`.
+  - Display as nested bullet points with 2-space indent per level. Use status icons (✅ = done, 🔄 = in_progress, 🔲 = pending), bold ID, title, priority in italics. Always use the full, exact title from the todo — never abbreviate or summarize. If `"manual" in tags`, append `[manual]` after the priority. Blocked todos include `[blocked by X]` inline. Todos that block others include `[blocks Y]` inline. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
   - Example:
     ```
     - 🔲 **2** — Build API _(high)_
-      - 🔄 **2.1** — Design endpoints _(high)_ [manual]
+      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2]
       - 🔲 **2.2** — Add auth _(medium)_ [blocked by 2.1]
     - 🔲 **3** — Write skills _(medium)_
     ```
 
 **tree** — show todos as a hierarchy
   - Call `mcp__proj__todo_tree`
-  - Render as nested bullet points with 2-space indent per level. Apply the same status icons, bold ID, and inline metadata as `list` (including `[manual]` badge for manual-tagged todos).
+  - Render as nested bullet points with 2-space indent per level. Apply the same status icons, bold ID, and inline metadata as `list` (including `[manual]` badge and `[blocked by X]`/`[blocks Y]` for dependency display).
   - Example:
     ```
     - ✅ **1** — Implement storage layer _(medium)_
     - 🔲 **2** — Build API _(high)_
-      - 🔄 **2.1** — Design endpoints _(high)_ [manual]
+      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2]
       - 🔲 **2.2** — Add auth _(medium)_ [blocked by 2.1]
     - 🔲 **3** — Write tests _(low)_
     ```
@@ -65,9 +65,24 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
 **delete** `<id>` -- delete a todo
   - Call `mcp__proj__todo_delete`
 
-If $ARGUMENTS is empty or ambiguous, output usage: "Usage: `/proj:todo [add|update|done|list|tree|block|unblock|delete] [args]`"
+If $ARGUMENTS is empty or ambiguous, output: "Operation required. Usage: `/proj:todo [add|update|done|list|tree|block|unblock|delete] [args]`"
 Always confirm the action taken and show the resulting todo.
 
 **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Todo: update"`.
 
-Suggested next: After adding a todo → (1) /proj:define <id> — define requirements  After completing a todo → (1) /proj:status — see project overview
+## Prerequisites
+
+- An active project must be loaded (call `proj_session_context` first).
+
+## Error Handling
+
+- **No active project**: displays error from `proj_session_context` and stops.
+- **Empty or ambiguous arguments**: displays usage message.
+- **Todo not found**: displays error from the relevant `todo_*` tool call.
+- **Blocked todo completion**: displays error if trying to complete a blocked todo.
+
+## Output
+
+Confirmation of the action taken plus the resulting todo state. For list/tree operations: nested bullet points with status icons, bold IDs, titles, priority, manual/blocked badges.
+
+Suggested next: After adding a todo: `1. /proj:define <id>` -- define requirements | After completing a todo: `1. /proj:status` -- see project overview

@@ -8,6 +8,12 @@ Covers:
 - include_todo_count=True includes correct count
 - Todoist enabled populates integrations correctly
 - Trello fields populated from project meta
+- _read_session_history with mock session files
+- _read_session_history with no sessions directory
+- _read_session_history with malformed session files
+- _build_context includes session history section
+- _build_context compact mode excludes session history
+- Backward compatibility: project without sessions/ dir
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from server.lib.models import (
     RepoEntry,
     Todo,
 )
+from server.tools.context import _build_context, _read_project_knowledge, _read_session_history
 from tests.conftest import call_tool, setup_project
 
 
@@ -429,3 +436,326 @@ class TestProjStatusContext:
         assert data["todos"]["blocked"] == []
         assert data["todos"]["all_open"] == []
         assert data["todos"]["done_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Session history tests
+# ---------------------------------------------------------------------------
+
+SESSION_A = """\
+# Session: 2026-03-20
+
+## Key Decisions
+- Adopted new caching strategy for API calls
+- Switched from REST to GraphQL for data layer
+
+## Todos Worked On
+- T100 caching work
+
+## Open Questions
+- Should we add rate limiting to the cache layer?
+- Is GraphQL overkill for simple CRUD?
+"""
+
+SESSION_B = """\
+# Session: 2026-03-21
+
+## Key Decisions
+- Added rate limiting middleware
+- Adopted new caching strategy for API calls
+
+## Insights Discovered
+- GraphQL reduces payload size by 40%
+
+## Open Questions
+- How to handle cache invalidation on deploy?
+"""
+
+SESSION_C = """\
+# Session: 2026-03-22
+
+## Key Decisions
+- Finalized deploy pipeline with blue-green strategy
+
+## Open Questions
+- Need to benchmark cold-start times
+"""
+
+
+def _create_sessions(cfg: ProjConfig, project_name: str, files: dict[str, str]) -> None:
+    """Write session files into the project's sessions dir."""
+    sessions_dir = Path(cfg.tracking_dir) / project_name / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    for filename, content in files.items():
+        (sessions_dir / filename).write_text(content)
+
+
+class TestReadSessionHistory:
+    """Tests for _read_session_history helper."""
+
+    def test_with_session_files(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns summary, decisions, and questions from session files."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-20.md": SESSION_A,
+            "session-2026-03-21.md": SESSION_B,
+            "session-2026-03-22.md": SESSION_C,
+        })
+
+        result = _read_session_history(cfg, "myapp")
+
+        # Summary from latest session (SESSION_C), after header
+        assert "summary" in result
+        summary = result["summary"]
+        assert isinstance(summary, str)
+        assert "Finalized deploy pipeline" in summary
+        assert len(summary) <= 300
+
+        # Decisions: last 5 across sessions (most recent first), deduplicated
+        decisions = result["decisions"]
+        assert isinstance(decisions, list)
+        assert len(decisions) <= 5
+        # Most recent session's decision first
+        assert decisions[0] == "Finalized deploy pipeline with blue-green strategy"
+        # Duplicate "Adopted new caching strategy" should appear only once
+        caching_count = sum(1 for d in decisions if "caching strategy" in d)
+        assert caching_count == 1
+
+    def test_no_sessions_directory(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns empty dict when sessions/ directory does not exist."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        # No sessions dir created
+        result = _read_session_history(cfg, "myapp")
+        assert result == {}
+
+    def test_empty_sessions_directory(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns empty dict when sessions/ exists but has no session files."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        sessions_dir = Path(cfg.tracking_dir) / "myapp" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        result = _read_session_history(cfg, "myapp")
+        assert result == {}
+
+    def test_malformed_session_files(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Gracefully handles session files without expected sections."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-20.md": "Just some random text\nNo sections here.",
+            "session-2026-03-21.md": "# Session: 2026-03-21\n\nSome notes but no ## sections.",
+        })
+
+        result = _read_session_history(cfg, "myapp")
+
+        # Should still return a result with summary
+        assert "summary" in result
+        summary = result["summary"]
+        assert isinstance(summary, str)
+        # Decisions and questions should be empty lists
+        assert result["decisions"] == []
+        assert result["questions"] == []
+
+    def test_questions_from_last_3_sessions(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Questions are collected from the last 3 sessions only."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        old_session = """\
+# Session: 2026-03-10
+
+## Open Questions
+- This old question should NOT appear
+"""
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-10.md": old_session,
+            "session-2026-03-20.md": SESSION_A,
+            "session-2026-03-21.md": SESSION_B,
+            "session-2026-03-22.md": SESSION_C,
+        })
+
+        result = _read_session_history(cfg, "myapp")
+        questions = result["questions"]
+
+        # Old question from session-2026-03-10 should NOT be included
+        assert not any("old question" in q.lower() for q in questions)
+        # Questions from A, B, C should be present
+        assert any("rate limiting" in q for q in questions)
+        assert any("cache invalidation" in q for q in questions)
+        assert any("cold-start" in q for q in questions)
+
+    def test_decisions_deduplicated(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Duplicate decisions across sessions are deduplicated."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-20.md": SESSION_A,
+            "session-2026-03-21.md": SESSION_B,
+        })
+
+        result = _read_session_history(cfg, "myapp")
+        decisions = result["decisions"]
+
+        # "Adopted new caching strategy for API calls" appears in both A and B
+        caching_decisions = [d for d in decisions if "caching strategy" in d]
+        assert len(caching_decisions) == 1
+
+
+class TestBuildContextSessionHistory:
+    """Tests for session history integration in _build_context."""
+
+    def test_includes_session_history(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context includes session history sections when not compact."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-22.md": SESSION_C,
+        })
+
+        result = _build_context(cfg, "myapp", compact=False)
+
+        assert "### Last Session" in result
+        assert "### Key Decisions" in result
+        assert "Finalized deploy pipeline" in result
+        assert "### Open Questions" in result
+        assert "- [ ] Need to benchmark cold-start times" in result
+
+    def test_compact_excludes_session_history(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context in compact mode does NOT include session history."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _create_sessions(cfg, "myapp", {
+            "session-2026-03-22.md": SESSION_C,
+        })
+
+        result = _build_context(cfg, "myapp", compact=True)
+
+        assert "### Last Session" not in result
+        assert "### Key Decisions" not in result
+        assert "### Open Questions" not in result
+
+    def test_backward_compatible_no_sessions(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context works normally for projects without sessions/ dir."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        # No sessions dir created
+
+        result = _build_context(cfg, "myapp", compact=False)
+
+        # Should produce valid context without session sections
+        assert "## Active Project: myapp" in result
+        assert "### Last Session" not in result
+        assert "### Key Decisions" not in result
+
+
+# ---------------------------------------------------------------------------
+# Project knowledge tests
+# ---------------------------------------------------------------------------
+
+KNOWLEDGE_SINGLE_SECTION = """\
+## 2026-03-25
+- Adopted caching strategy for API calls
+- Switched from REST to GraphQL
+- Added rate limiting middleware
+"""
+
+KNOWLEDGE_MULTI_SECTION = """\
+## 2026-03-20
+- Old decision that should not appear
+- Another old decision
+
+## 2026-03-25
+- Recent decision one
+- Recent decision two
+- Recent decision three
+- Recent decision four
+- Recent decision five
+- Recent decision six (should be truncated)
+"""
+
+
+def _write_knowledge(cfg: ProjConfig, project_name: str, content: str) -> None:
+    """Write knowledge.md into the project's tracking dir."""
+    knowledge_path = Path(cfg.tracking_dir) / project_name / "knowledge.md"
+    knowledge_path.parent.mkdir(parents=True, exist_ok=True)
+    knowledge_path.write_text(content)
+
+
+class TestReadProjectKnowledge:
+    """Tests for _read_project_knowledge helper."""
+
+    def test_returns_bullets_from_single_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns bullet entries from a single-section knowledge.md."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", KNOWLEDGE_SINGLE_SECTION)
+
+        result = _read_project_knowledge(cfg, "myapp")
+
+        assert len(result) == 3
+        assert result[0] == "Adopted caching strategy for API calls"
+        assert result[1] == "Switched from REST to GraphQL"
+        assert result[2] == "Added rate limiting middleware"
+
+    def test_returns_only_most_recent_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Only returns bullets from the most recent (last) section."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", KNOWLEDGE_MULTI_SECTION)
+
+        result = _read_project_knowledge(cfg, "myapp")
+
+        # Should not include old section bullets
+        assert not any("Old decision" in b for b in result)
+        assert result[0] == "Recent decision one"
+
+    def test_max_5_bullets(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns at most 5 bullet entries even if more exist."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", KNOWLEDGE_MULTI_SECTION)
+
+        result = _read_project_knowledge(cfg, "myapp")
+
+        assert len(result) == 5
+        assert not any("truncated" in b for b in result)
+
+    def test_no_knowledge_file(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns empty list when knowledge.md does not exist."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+
+        result = _read_project_knowledge(cfg, "myapp")
+
+        assert result == []
+
+    def test_empty_knowledge_file(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Returns empty list when knowledge.md exists but has no sections."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", "# Knowledge\nSome preamble text.\n")
+
+        result = _read_project_knowledge(cfg, "myapp")
+
+        assert result == []
+
+
+class TestBuildContextKnowledge:
+    """Tests for project knowledge integration in _build_context."""
+
+    def test_includes_knowledge_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context includes Project Knowledge section when knowledge.md exists."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", KNOWLEDGE_SINGLE_SECTION)
+
+        result = _build_context(cfg, "myapp", compact=False)
+
+        assert "### Project Knowledge" in result
+        assert "- Adopted caching strategy for API calls" in result
+        assert "- Switched from REST to GraphQL" in result
+
+    def test_compact_excludes_knowledge(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context in compact mode does NOT include Project Knowledge."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        _write_knowledge(cfg, "myapp", KNOWLEDGE_SINGLE_SECTION)
+
+        result = _build_context(cfg, "myapp", compact=True)
+
+        assert "### Project Knowledge" not in result
+
+    def test_no_knowledge_file_no_section(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """_build_context works normally without knowledge.md."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+
+        result = _build_context(cfg, "myapp", compact=False)
+
+        assert "## Active Project: myapp" in result
+        assert "### Project Knowledge" not in result

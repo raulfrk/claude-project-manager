@@ -3,6 +3,8 @@ name: perms-debug
 description: Debug permission issues for a specific path or tool
 allowed-tools: mcp__plugin_perms_perms__perms_check, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_is_sandbox_enabled
 argument-hint: "<path_or_tool_name>"
+context: fork
+agent: general-purpose
 ---
 
 # perms-debug
@@ -36,3 +38,17 @@ Show a clear summary:
 **4.** Suggestion
 
 If the path or tool is denied, suggest: "Run `perms:grant <path_or_tool> [scope]` to add the permission."
+
+## Prerequisites
+
+- Perms plugin MCP server is running and reachable.
+- A path or tool name must be provided as argument.
+
+## Error Handling
+
+- **No arguments**: asks the user what to diagnose.
+- **Perms MCP unavailable**: displays error from tool call and stops.
+
+## Output
+
+Diagnostic summary with: Status (allowed/denied), Reason (matching rule or what's missing), Fix (specific `perms:grant` invocation).

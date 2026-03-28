@@ -40,3 +40,19 @@ If `still_failed` > 0, suggest: "Failures persist — use `/proj:hooks-debug` fo
    - **clear**: call `mcp__hooks__hooks_recover_tool` with `clear=true` and stop
 
 Display final summary of all recovery actions taken.
+
+## Prerequisites
+
+- Hooks plugin MCP server is running and reachable.
+
+## Error Handling
+
+- **Hooks MCP unavailable**: displays error from tool call and stops.
+- **Hook ID not found**: displays error from `hooks_recover_tool` and stops.
+
+## Output
+
+- **clear mode**: `Cleared <cleared> failure entries.`
+- **retry mode**: Recovery summary with retried/succeeded/still_failed counts.
+- **interactive mode**: Failures grouped by hook_id, with recovery actions taken.
+- **No failures**: `No hook failures recorded. All hooks are healthy.`

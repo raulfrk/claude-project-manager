@@ -19,14 +19,14 @@ Call `mcp__proj__proj_session_context`.
 
 ## Todo Mode
 
-### T1. Parse arguments
+**T1.** Parse arguments
 
 Split $ARGUMENTS into description + flags.
 Known flags: `--steps`, `--from`, `--iter`, `--no-interactive`.
 Everything else is the **description**.
 If description is empty, ask: `What would you like to work on?`
 
-### T2. Create local todo
+**T2.** Create local todo
 
 Use the `proj_session_context` result from step 1 for config values (e.g., `config.default_priority`).
 
@@ -35,7 +35,7 @@ Call `mcp__proj__todo_add` with `title` = description, `priority` = config `defa
 
 Store returned ID as `new_id`.
 
-### T3. Launch workflow
+**T3.** Launch workflow
 
 Display: `Created todo <new_id>: <title>. Running workflow...`
 
@@ -45,17 +45,17 @@ Call the Skill tool: `skill: "proj:run", args: "<new_id> <forwarded-flags>"`
 
 ## Project Mode
 
-### P1. Project name
+**P1.** Project name
 
 If $ARGUMENTS is non-empty, use as project name. Otherwise ask.
 Confirm: `Project name: <name> -- correct?`
 
-### P2. Todo title
+**P2.** Todo title
 
 Ask: `What would you like to work on? (This becomes the first todo.)`
 Store as `todo_title`.
 
-### P3. Project location
+**P3.** Project location
 
 Call `mcp__proj__config_load`.
 > If config_load returned an error, go to **Error Recovery**.
@@ -67,7 +67,7 @@ Present options:
 Handle selection: validate path, mkdir, or wt_create. Store as `content_path`.
 > If wt_create returned an error, go to **Error Recovery**.
 
-### P4. Initialize
+**P4.** Initialize
 
 Call `mcp__proj__proj_init` with `name`, `path=content_path`, `description=todo_title`.
 > If proj_init returned an error, go to **Error Recovery**.
@@ -75,34 +75,42 @@ Call `mcp__proj__proj_init` with `name`, `path=content_path`, `description=todo_
 Call `mcp__proj__proj_load_session`.
 > If proj_load_session returned an error, go to **Error Recovery**.
 
-### P5. Permissions
+**P5.** Permissions
 
 Skip unless `perms_integration: true` in config.
 
-Call `mcp__proj__proj_setup_permissions` silently.
+Call `mcp__proj__proj_setup_permissions` with `mcp_servers=[<list>]` — build list:
+  always include `"plugin_proj_proj"`, `"plugin_perms_perms"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
+  add `"plugin_worktree_worktree"` if worktree_integration; add `"todoist"` if todoist.enabled; add `"trello"` if trello.enabled; add `"jira"` if jira.enabled.
 > If proj_setup_permissions returned an error, go to **Error Recovery**.
 
-### P6. CLAUDE.md
+**P6.** CLAUDE.md
 
 Call `mcp__proj__claudemd_write` with project overview template.
 > If claudemd_write returned an error, go to **Error Recovery**.
 
-### P7. Create todo and sync
+**P7.** Create todo and sync
 
 Call `mcp__proj__todo_add` with `title=todo_title`, `priority=default_priority`.
 > If todo_add returned an error, go to **Error Recovery**.
 
-### P8. Launch workflow
+**P8.** Launch workflow
 
 Display: `Project '<name>' created. Todo <new_id>: <todo_title>. Running workflow...`
 
 Call the Skill tool: `skill: "proj:run", args: "<new_id> --iter 3"`
 
-Suggested next: (1) /proj:todo list — review all todos  (2) /proj:status — see project overview
+Suggested next: `1. /proj:todo list` -- review all todos | `2. /proj:status` -- see project overview
 
 ---
 
-## Error Recovery
+## Prerequisites
+
+- Proj plugin must be configured (`~/.claude/proj.yaml` exists).
+- **Todo mode**: an active project must be loaded.
+- **Project mode**: no active project required (creates one).
+
+## Error Handling
 
 **Root cause of prior step-skipping**: The original SKILL.md had no explicit failure
 paths after MCP tool calls. When a call failed, the model had no instructions for how to
@@ -124,3 +132,9 @@ When any MCP tool call fails, do the following:
 4. If the failure is in a required step (T2, P3, P4, P5, P6, or the todo_add in P7):
    - Stop and display the error. Do not proceed to the workflow launch.
 6. Never silently swallow errors. Always surface what failed and what succeeded.
+
+## Output
+
+- **Todo mode**: `Created todo <id>: <title>. Running workflow...` followed by the full `/proj:run` output.
+- **Project mode**: `Project '<name>' created. Todo <id>: <title>. Running workflow...` followed by the full `/proj:run` output.
+- **On failure**: `Quick-start failed at step <step>: <error summary>` with list of completed and failed steps.

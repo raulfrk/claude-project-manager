@@ -41,6 +41,19 @@ Trello sync complete.
 
 If all counts are zero: "Trello sync complete. Everything up to date."
 
+## Prerequisites
+
+- Creation results JSON from `/proj:trello-push` must be provided as input.
+
+## Error Handling
+
+- **Link tool error**: displays error from `proj_trello_apply` and stops.
+- **Git flush error**: displays error but does not roll back linked IDs.
+
+## Output
+
+Sync summary: pulled from Trello (created, updated, completed, reopened counts) and pushed to Trello (checklists created, items created, updated, completed counts). If all counts are zero: `Trello sync complete. Everything up to date.`
+
 ## Notes
 
 - All Trello MCP tool names use the static pattern `mcp__trello__<tool_name>`.

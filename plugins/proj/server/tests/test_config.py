@@ -270,3 +270,106 @@ class TestGitTrackingConfig:
         assert "git_tracking.enabled" in result
         assert "git_tracking.github_enabled" in result
         assert "git_tracking.github_repo_format" in result
+
+
+@pytest.mark.anyio
+class TestTeamModeConfig:
+    async def test_config_init_with_team_mode_params(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        new_cfg_path = tmp_path / "proj.yaml"
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", new_cfg_path)
+
+        result = await call_tool(
+            mcp_app,
+            "config_init",
+            tracking_dir=str(tmp_path / "tracking"),
+            team_mode_enabled=True,
+            team_mode_max_agents=6,
+            team_mode_trust_level=2,
+        )
+
+        assert "saved" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.team_mode.enabled is True
+        assert loaded.team_mode.max_agents == 6
+        assert loaded.team_mode.trust_level == 2
+
+    async def test_config_load_displays_team_mode(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_load")
+
+        assert "team_mode.enabled" in result
+        assert "team_mode.max_agents" in result
+        assert "team_mode.trust_level" in result
+
+    async def test_config_update_modifies_team_mode_fields(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(
+            mcp_app,
+            "config_update",
+            team_mode_enabled=True,
+            team_mode_max_agents=8,
+            team_mode_trust_level=3,
+        )
+
+        assert "updated" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.team_mode.enabled is True
+        assert loaded.team_mode.max_agents == 8
+        assert loaded.team_mode.trust_level == 3
+
+    async def test_config_update_rejects_invalid_trust_level(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_update", team_mode_trust_level=5)
+
+        assert "Invalid team_mode_trust_level" in result
+        loaded = storage.load_config()
+        assert loaded.team_mode.trust_level == 1  # unchanged default
+
+    async def test_config_update_rejects_invalid_max_agents(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_update", team_mode_max_agents=0)
+
+        assert "Invalid team_mode_max_agents" in result
+        loaded = storage.load_config()
+        assert loaded.team_mode.max_agents == 4  # unchanged default
+
+    async def test_config_update_partial_team_mode_leaves_others_unchanged(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        # First set team_mode to non-default values
+        await call_tool(
+            mcp_app,
+            "config_update",
+            team_mode_enabled=True,
+            team_mode_max_agents=6,
+            team_mode_trust_level=2,
+        )
+
+        # Update only max_agents
+        result = await call_tool(mcp_app, "config_update", team_mode_max_agents=10)
+
+        assert "updated" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.team_mode.enabled is True  # unchanged
+        assert loaded.team_mode.max_agents == 10  # updated
+        assert loaded.team_mode.trust_level == 2  # unchanged

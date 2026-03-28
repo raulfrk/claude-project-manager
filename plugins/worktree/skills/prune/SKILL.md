@@ -3,6 +3,8 @@ name: prune
 description: Prune stale git worktree admin files. Use when the user says "prune worktrees", "clean up stale worktrees".
 allowed-tools: mcp__plugin_worktree_worktree__wt_prune
 argument-hint: "[repo-label]"
+context: fork
+agent: general-purpose
 ---
 
 Prune stale worktree metadata.
@@ -11,13 +13,17 @@ Prune stale worktree metadata.
 **2.** On success, display the pruned worktrees as a list: branch name and path for each entry.
 **3.** If no worktrees were pruned, print: "No stale worktrees found."
 
-## Failure Paths
+## Prerequisites
 
-- **Invalid repo label**: print `"Repo label '<label>' not found. Run /worktree:list to see available repos."` and stop.
-- **Empty prune result**: print `"No stale worktrees found."` and stop.
-- **MCP tool error**: display the error message and suggest: `"Run \`git worktree prune\` manually to clean up stale entries."`
+- Worktree plugin must be configured (at least one base repo registered).
 
-## Output Format
+## Error Handling
+
+- **Invalid repo label**: displays "Repo label `<label>` not found. Run `/worktree:add-repo` to register one." and stops.
+- **Empty prune result**: displays `No stale worktrees found.` and stops.
+- **MCP tool error**: displays the error message and suggests running `git worktree prune` manually.
+
+## Output
 
 ```
 Pruned worktrees:
@@ -25,4 +31,4 @@ Pruned worktrees:
 - <branch-name> — <path>
 ```
 
-Suggested next: (1) /worktree:list — verify remaining worktrees
+Suggested next: `1. /worktree:list` -- verify remaining worktrees

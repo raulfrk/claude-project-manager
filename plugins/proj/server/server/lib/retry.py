@@ -8,7 +8,18 @@ from typing import Any, Callable, TypeVar
 
 import yaml
 
+from server.lib.backoff import exponential_backoff
+from server.lib.resilience import CircuitBreakerManager
+
 T = TypeVar("T")
+
+
+class CircuitOpenError(Exception):
+    """Raised when a circuit breaker is open and the call is skipped."""
+
+    def __init__(self, service: str) -> None:
+        self.service = service
+        super().__init__(f"Circuit breaker OPEN for {service} — call skipped (graceful degradation)")
 
 
 def retry_link(
@@ -17,15 +28,31 @@ def retry_link(
     max_retries: int = 3,
     backoff: float = 0.5,
     orphan_context: dict[str, Any] | None = None,
+    circuit_breaker_manager: CircuitBreakerManager | None = None,
+    service: str | None = None,
 ) -> T:
+    # If circuit breaker is active and circuit is open, skip the call
+    if circuit_breaker_manager is not None and service is not None:
+        if not circuit_breaker_manager.check(service):
+            raise CircuitOpenError(service)
+
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            return fn()
+            result = fn()
+            # Record success if circuit breaker is active
+            if circuit_breaker_manager is not None and service is not None:
+                circuit_breaker_manager.record_success(service)
+            return result
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries:
-                time.sleep(backoff * attempt)
+                delay = exponential_backoff(attempt - 1, base=backoff)
+                time.sleep(delay)
+
+    # Record failure if circuit breaker is active
+    if circuit_breaker_manager is not None and service is not None and last_exc is not None:
+        circuit_breaker_manager.record_failure(service, str(last_exc))
 
     if orphan_context is not None and last_exc is not None:
         log_orphaned_resource(

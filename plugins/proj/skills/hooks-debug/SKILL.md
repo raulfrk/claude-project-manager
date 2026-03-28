@@ -33,4 +33,15 @@ List recent hook failures to help debug execution issues.
 
 **5.** Display suggested next actions.
 
-Suggested next: (1) /proj:hooks-recover <hook_id> — retry a specific hook's failures  (2) /proj:hooks-recover clear — clear all failure entries
+## Prerequisites
+
+- Hooks plugin MCP server is running and reachable.
+
+## Error Handling
+
+- **Hooks MCP unavailable**: displays error from tool call and stops.
+- **No failures**: displays `No hook failures recorded. All hooks are healthy.` and stops.
+
+## Output
+
+Failures table (Hook ID, Trigger, Target, Server, Error, Retries, Timestamp) with summary count. Verification failures marked with `[verification]` badge.

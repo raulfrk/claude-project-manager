@@ -8,6 +8,7 @@ from datetime import date
 
 from server.lib import storage
 from server.tools.context import _build_context, ctx_detect_project_name
+from server.tools.digest import _deduplicate, _parse_session
 
 
 def cmd_session_start(cwd: str | None, compact: bool) -> None:
@@ -28,7 +29,30 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
     try:
         context = _build_context(cfg, detected, compact=compact)
         print(context)
-        if not compact:
+        if compact:
+            # Include session digest in compact mode (PreCompact hook)
+            sess_dir = storage.sessions_dir(cfg, detected)
+            if sess_dir.is_dir():
+                files = sorted(sess_dir.glob("session-*.md"))
+                selected = files[-3:] if len(files) > 3 else files
+                if selected:
+                    aggregated: dict[str, list[str]] = {"decisions": [], "questions": [], "insights": []}
+                    for f in selected:
+                        try:
+                            parsed = _parse_session(f.read_text())
+                            for key in aggregated:
+                                aggregated[key].extend(parsed[key])
+                        except OSError:
+                            continue
+                    for key in aggregated:
+                        aggregated[key] = _deduplicate(aggregated[key])
+                    if aggregated["decisions"] or aggregated["questions"]:
+                        print("\n### Session Digest (last 3)")
+                        if aggregated["decisions"]:
+                            print("**Decisions**: " + "; ".join(aggregated["decisions"][:5]))
+                        if aggregated["questions"]:
+                            print("**Open Questions**: " + "; ".join(aggregated["questions"][:3]))
+        else:
             print(f'\n⚡ **Activate**: Call `proj_load_session("{detected}")` to register this project for MCP tools this session.')
     except FileNotFoundError:
         print("Warning: project config not found, skipping session context", file=sys.stderr)

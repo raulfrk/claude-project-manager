@@ -2,6 +2,8 @@
 name: perms-sandbox-setup
 description: Initialize and verify sandbox mode for permissions
 allowed-tools: mcp__plugin_perms_perms__perms_sandbox_init, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_perms_perms__perms_list
+context: fork
+agent: general-purpose
 ---
 
 # perms-sandbox-setup
@@ -28,4 +30,19 @@ Display the initialization result to the user.
 **3.** Verify and suggest
 
 - Confirm sandbox mode is now active.
-Suggested next: (1) /proj:perms-audit — review your current permission rules under sandbox mode
+
+## Prerequisites
+
+- Perms plugin MCP server must be running and reachable.
+
+## Error Handling
+
+- **Perms MCP unavailable**: displays error from tool call and stops.
+- **Sandbox init failure**: displays error from `perms_sandbox_init` and stops.
+
+## Output
+
+- If already enabled: `Sandbox mode is already enabled.` with current status.
+- If newly initialized: initialization result and confirmation that sandbox mode is active.
+
+Suggested next: `1. /proj:perms-audit` -- review your current permission rules under sandbox mode

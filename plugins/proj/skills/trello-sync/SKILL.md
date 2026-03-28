@@ -22,16 +22,16 @@ Call `mcp__proj__proj_session_context`.
 
 When no active project is set, sync all Trello-enabled projects in a single run.
 
-### Batch 1. Load global config and project list
+**Batch 1.** Load global config and project list
 
 - Call `mcp__proj__config_load` to get global trello config (`trello.enabled`, `trello.default_board_id`, `trello.default_list`).
 - Call `mcp__proj__proj_list` to get all non-archived projects.
 
-### Batch 2. Gather project metadata
+**Batch 2.** Gather project metadata
 
 For each project returned by `proj_list`, call `mcp__proj__proj_get` with `project_name=<name>` to get full metadata including per-project trello config and `trello_card_id`.
 
-### Batch 3. Categorize projects
+**Batch 3.** Categorize projects
 
 Sort each project into one of three buckets:
 
@@ -48,7 +48,7 @@ Trello batch sync — project scan:
   Skipped (not enabled):     project-e
 ```
 
-### Batch 4. Sync linked projects
+**Batch 4.** Sync linked projects
 
 For each **linked** project, run the full single-project sync flow (steps 1–8 below) with `project_name=<name>` passed explicitly to each MCP tool call instead of relying on the active project. Specifically:
 - In step 1 (Setup), use the project's metadata from Batch 2 instead of calling `proj_get_active`.
@@ -58,7 +58,7 @@ For each **linked** project, run the full single-project sync flow (steps 1–8 
 
 Collect per-project results (success/failure, counts).
 
-### Batch 5. Offer to link unlinked projects
+**Batch 5.** Offer to link unlinked projects
 
 If there are **unlinked but Trello-enabled** projects, present them to the user:
 
@@ -82,7 +82,7 @@ For each confirmed project, create a Trello card using the same pattern as steps
 5. Store the card ID: call `mcp__proj__proj_trello_apply` with `project_name=<name>` and `link_trello_card_id=<new_card_id>`.
 6. Run the full sync flow (steps 4–8) for the newly linked project.
 
-### Batch 6. Final summary
+**Batch 6.** Final summary
 
 Display a summary of the entire batch run:
 
@@ -112,7 +112,7 @@ If there were failures, list the project name and a brief error description for 
 ## Prerequisites
 
 Before syncing, verify:
-1. `trello.enabled` is `true` in config. If not, stop and tell the user to enable it with `mcp__proj__config_update(trello_enabled=True)`.
+1. `trello.enabled` is `true` in config. If not, stop with: "Trello sync not enabled. Run `/proj:init-plugin` to enable it."
 2. The active project has a `trello.board_id` set (from per-project config) or `trello.default_board_id` set globally. If neither is set, stop and ask the user to configure a board ID.
 
 **1.** Setup
@@ -128,7 +128,7 @@ If the Trello MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Trello MCP server not available. Check your MCP server configuration and restart it."
+> "Trello MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 Do not proceed with any further sync steps.
 
@@ -232,6 +232,19 @@ If all counts are zero: "Trello sync complete. Everything up to date."
 
 ---
 
+## Error Handling
+
+- **Trello not enabled**: displays `Trello sync not enabled.` and stops.
+- **No board ID configured**: stops and asks the user to configure a board ID.
+- **Trello MCP unavailable**: displays `Trello MCP server not available.` and stops.
+- **Partial push failures**: batch tools return `{successes, failures}` — individual failures are reported.
+- **Git flush error**: displays error but does not roll back synced changes.
+
+## Output
+
+- **Single-project mode**: Sync summary showing pulled (created, updated, completed, reopened) and pushed (checklists created, items created, updated, completed) counts. If all zero: `Trello sync complete. Everything up to date.`
+- **Batch mode**: Per-project results, then overall summary (synced, newly linked, skipped, failures counts).
+
 ## Notes
 
 - All Trello MCP tool names use the pattern `mcp__trello__<tool_name>`.
@@ -244,4 +257,4 @@ If all counts are zero: "Trello sync complete. Everything up to date."
 - Checklist item names for non-root descendants use ID prefixes (e.g., `1.1: Child title`) for disambiguation.
 - The "Tasks" checklist is a catch-all for root leaf todos (those with no children).
 
-Suggested next: (1) /proj:todo list — review todos after sync  (2) /proj:todo add — add a new todo (will be pushed to Trello on next sync)
+Suggested next: `1. /proj:todo list` -- review todos after sync | `2. /proj:todo add` -- add a new todo (will be pushed to Trello on next sync)

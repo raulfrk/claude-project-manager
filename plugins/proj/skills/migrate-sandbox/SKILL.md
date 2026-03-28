@@ -68,3 +68,20 @@ To rollback: /proj:migrate-sandbox --restore <timestamp>
 
 Call `mcp__perms__perms_restore` with the provided timestamp.
 Display: "Restored settings from backup."
+
+## Prerequisites
+
+- Perms plugin MCP server must be running and reachable.
+
+## Error Handling
+
+- **Perms MCP unavailable**: displays error from tool call and stops.
+- **Backup failure**: displays error from `perms_backup` and stops.
+- **Sandbox init failure**: displays error from `perms_sandbox_init` and stops.
+- **Invalid restore timestamp**: displays error from `perms_restore` and stops.
+
+## Output
+
+- **Dry-run**: current state summary and what would change.
+- **Full migration**: pre-flight state, backup timestamp, sandbox config result, cleanup before/after counts, final verification with rule counts and rollback instructions.
+- **Rollback**: `Restored settings from backup.`

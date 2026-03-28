@@ -40,6 +40,20 @@ Registered hook <id>:
   condition: <condition or none>
 ```
 
-Suggested next: (1) /proj:hooks-test <id> — verify the hook fires correctly
-
 **On error** (duplicate, cycle, invalid JSON), display the error message from the tool response.
+
+## Prerequisites
+
+- Hooks plugin MCP server is running and reachable.
+
+## Error Handling
+
+- **No arguments and not interactive**: starts interactive Q&A to collect required fields.
+- **Duplicate hook**: displays error from `hooks_register_tool`.
+- **Cycle detected**: displays error from `hooks_register_tool`.
+- **Invalid param_mapping JSON**: displays error from `hooks_register_tool`.
+- **Hooks MCP unavailable**: displays error from tool call and stops.
+
+## Output
+
+On success: registered hook details (ID, trigger, target, server, mapping, blocking, verification, condition). On error: error message from tool.

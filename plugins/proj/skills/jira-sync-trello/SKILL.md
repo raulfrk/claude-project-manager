@@ -14,8 +14,8 @@ Convenience wrapper that chains `/proj:jira-sync` and `/proj:trello-sync` in seq
 **1.** Check prerequisites
 
 - Call `mcp__proj__config_load` -- read `jira.enabled` and `trello.enabled`.
-- If `jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
-- If `trello.enabled` is false or not set: stop with "Trello sync not enabled. Set `trello.enabled: true` in `~/.claude/proj.yaml`."
+- If `jira.enabled` is false or not set, stop with: "Jira sync not enabled. Run `/proj:init-plugin` to enable it."
+- If `trello.enabled` is false or not set, stop with: "Trello sync not enabled. Run `/proj:init-plugin` to enable it."
 
 **2.** Run Jira sync
 
@@ -36,4 +36,19 @@ Jira -> Local -> Trello sync complete.
 
 If either step reported "everything up to date", note that in the summary.
 
-Suggested next: (1) /proj:status — review project status after sync  (2) /proj:todo list — review todos after sync
+## Prerequisites
+
+- Jira sync must be enabled (`jira.enabled: true` in config).
+- Trello sync must be enabled (`trello.enabled: true` in config).
+- Both Jira and Trello MCP servers must be running and reachable.
+
+## Error Handling
+
+- **Jira not enabled**: displays "Jira sync not enabled. Run `/proj:init-plugin` to enable it." and stops.
+- **Trello not enabled**: displays "Trello sync not enabled. Run `/proj:init-plugin` to enable it." and stops.
+- **Jira sync fails**: stops without proceeding to Trello sync.
+- **Trello sync fails**: reports the Trello failure in the combined summary.
+
+## Output
+
+Combined summary: `Jira -> Local -> Trello sync complete.` If either step reported everything up to date, notes that in the summary.

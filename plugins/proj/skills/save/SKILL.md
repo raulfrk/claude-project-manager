@@ -1,7 +1,7 @@
 ---
 name: save
 description: Save session notes, reconcile git activity with todos, and update project context. Use when asked "save session", "proj:save", or at the end of a work session.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, Bash, Write
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, Bash, Write
 ---
 
 Save session context and reconcile git activity for the active project.
@@ -53,11 +53,37 @@ Save session context and reconcile git activity for the active project.
    - <bullet>
    ```
 
-**8.** Update CLAUDE.md (if project has repos with claudemd=true):
+**8.** Knowledge bridge — extract Key Decisions from the session content written in step 7:
+   - If there are no Key Decisions, skip this step silently.
+   - For each Key Decision, call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<decision text>`, `context="Extracted from session <filename>"`, `tags="session-extracted"`.
+   - Append the decisions to `<tracking_dir>/<name>/knowledge.md` using the Write tool (create or append):
+     ```
+     ## <YYYY-MM-DD>
+     - decision 1
+     - decision 2
+     ```
+     If the file already exists, read it first and append the new section at the end.
+
+**9.** Update CLAUDE.md (if project has repos with claudemd=true):
    - Call `mcp__proj__claudemd_write` to update the active todos section based on current state.
 
-**9.** Call `mcp__proj__notes_append` with a one-line summary.
+**10.** Call `mcp__proj__notes_append` with a one-line summary.
 
-**10.** Display: "Session saved to sessions/<filename>"
+**11.** Display: "Session saved to sessions/<filename>"
 
-**11.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Save: session"`.
+**12.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Save: session"`.
+
+## Prerequisites
+
+- An active project must be loaded.
+
+## Error Handling
+
+- **No active project**: displays error from `proj_session_context` and stops.
+- **Git reconciliation error**: skips silently and continues.
+- **Session file write error**: displays error and stops.
+- **CLAUDE.md write error**: logs warning and continues.
+
+## Output
+
+`Session saved to sessions/<filename>`. Git reconciliation suggestions (if any). Session file with key decisions, todos worked on, insights, and open questions.

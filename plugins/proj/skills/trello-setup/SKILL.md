@@ -11,7 +11,7 @@ Ensure the `proj` label and project card exist on the configured Trello board. T
 - Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
   - From the result, extract `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card), and `project.name`.
 - Check prerequisites:
-  - `integrations.trello.enabled` must be `true`. If not, stop: "Trello sync not enabled. Set `trello.enabled: true` in `~/.claude/proj.yaml`."
+  - `integrations.trello.enabled` must be `true`. If not, stop with: "Trello sync not enabled. Run `/proj:init-plugin` to enable it."
   - A board ID must be set (per-project `trello.board_id` or global `integrations.trello.board_id`). If neither is set, stop and ask the user to configure a board ID.
 - Resolve effective board ID = per-project `trello.board_id` if set, else global `integrations.trello.board_id`.
 
@@ -20,7 +20,7 @@ If the Trello MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Trello MCP server not available. Check your MCP server configuration and restart it."
+> "Trello MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 Do not proceed with any further steps.
 
@@ -40,6 +40,24 @@ Do not proceed with any further steps.
   - Record the returned card ID for linking by downstream sub-skills.
 
 Return the board ID, card ID, and label ID for use by downstream sub-skills (trello-fetch).
+
+## Prerequisites
+
+- Trello sync must be enabled (`trello.enabled: true` in config).
+- A board ID must be set (per-project or global `trello.default_board_id`).
+- Active project must be loaded.
+- Trello MCP server must be running and reachable.
+
+## Error Handling
+
+- **Trello not enabled**: displays "Trello sync not enabled. Run `/proj:init-plugin` to enable it." and stops.
+- **No board ID configured**: stops and asks the user to configure a board ID.
+- **Trello MCP unavailable**: displays "Trello MCP server not available. Check your MCP server configuration and restart Claude Code." and stops.
+- **Card missing or archived**: creates a new card and links it.
+
+## Output
+
+Returns board ID, card ID, and label ID for use by downstream sub-skills (trello-fetch).
 
 ## Notes
 

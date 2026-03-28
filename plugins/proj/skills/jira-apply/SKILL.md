@@ -50,6 +50,20 @@ Failed issues:
 
 The `per_issue` field in the response maps each issue key to its status: `"created"`, `"updated"`, `"skipped"`, or `"failed: <reason>"`. Display only the failed issues in the table.
 
+## Prerequisites
+
+- Confirmed mapping JSON from `/proj:jira-map` must be provided as input.
+
+## Error Handling
+
+- **Apply tool error**: displays error from `proj_jira_apply` and stops.
+- **Partial failures**: displays failed issues in a table with issue key and error reason.
+- **Git flush error**: displays error but does not roll back applied changes.
+
+## Output
+
+On success: summary with projects created, todos created, todos updated, skipped counts. On partial failure: same summary plus a table of failed issues with error reasons. If nothing changed: `Jira sync complete. Everything up to date.`
+
 ## Notes
 
 - All Jira MCP tool names use the static pattern `mcp__jira__<tool_name>`.

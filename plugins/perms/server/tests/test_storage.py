@@ -163,28 +163,23 @@ class TestSandboxFilesystem:
     def test_to_dict_with_values(self) -> None:
         sf = SandboxFilesystem(
             allow_write=["/home/user/proj"],
-            deny_write=["/etc"],
-            deny_read=["/secret"],
         )
         d = sf.to_dict()
         assert d == {
             "allowWrite": ["/home/user/proj"],
-            "denyWrite": ["/etc"],
-            "denyRead": ["/secret"],
         }
 
     def test_from_dict(self) -> None:
         data = {"allowWrite": ["/a"], "denyWrite": ["/b"], "denyRead": ["/c"]}
         sf = SandboxFilesystem.from_dict(data)
         assert sf.allow_write == ["/a"]
-        assert sf.deny_write == ["/b"]
-        assert sf.deny_read == ["/c"]
+        # deny fields silently ignored for backward compat
+        assert not hasattr(sf, "deny_write")
+        assert not hasattr(sf, "deny_read")
 
     def test_from_dict_empty(self) -> None:
         sf = SandboxFilesystem.from_dict({})
         assert sf.allow_write == []
-        assert sf.deny_write == []
-        assert sf.deny_read == []
 
 
 class TestSandboxConfig:
@@ -203,7 +198,6 @@ class TestSandboxConfig:
             "allowUnsandboxedCommands": False,
             "filesystem": {
                 "allowWrite": ["/tmp"],
-                "denyWrite": ["/etc"],
             },
             "network": {
                 "allowedDomains": ["example.com"],
@@ -215,7 +209,6 @@ class TestSandboxConfig:
         assert sc.enabled is True
         assert sc.auto_allow_bash_if_sandboxed is True
         assert sc.filesystem.allow_write == ["/tmp"]
-        assert sc.filesystem.deny_write == ["/etc"]
         assert sc.network.allowed_domains == ["example.com"]
         assert sc.network.allow_unix_sockets == ["/var/run/docker.sock"]
         assert sc.raw.get("customKey") == "preserved"

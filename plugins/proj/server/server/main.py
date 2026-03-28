@@ -6,7 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from hook_transport import run_dual
 from server.lib import state
-from server.tools import config, content, context, explore, git, jira_sync, migrate, perms_grant, perms_sync, projects, todoist_sync, trello_sync, todos, tracking_git
+from server.tools import config, content, context, decisions, digest, explore, git, jira_sync, knowledge, migrate, perms_grant, perms_sync, projects, todoist_sync, trello_sync, todos, tracking_git
 from server.tools.context import ctx_detect_project_name
 
 mcp = FastMCP("proj")
@@ -23,6 +23,9 @@ migrate.register(mcp)
 perms_sync.register(mcp)
 perms_grant.register(mcp)
 explore.register(mcp)
+knowledge.register(mcp)
+decisions.register(mcp)
+digest.register(mcp)
 tracking_git.register(mcp)
 
 

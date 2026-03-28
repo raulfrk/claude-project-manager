@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 class Permissions:
     allow: list[str] = field(default_factory=list)
     ask: list[str] = field(default_factory=list)
-    deny: list[str] = field(default_factory=list)
     additional_directories: list[str] = field(default_factory=list)  # round-trip preservation for Claude Code
 
     def to_dict(self) -> dict[str, list[str]]:
@@ -22,18 +21,16 @@ class Permissions:
             result["allow"] = self.allow
         if self.ask:
             result["ask"] = self.ask
-        if self.deny:
-            result["deny"] = self.deny
         if self.additional_directories:
             result["additionalDirectories"] = self.additional_directories
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, list[str]]) -> Permissions:
+        data.get("deny")  # silently ignore legacy deny field
         return cls(
             allow=data.get("allow", []),
             ask=data.get("ask", []),
-            deny=data.get("deny", []),
             additional_directories=data.get("additionalDirectories", []),
         )
 
@@ -43,25 +40,19 @@ class SandboxFilesystem:
     """Represents the ``sandbox.filesystem`` section of settings.local.json."""
 
     allow_write: list[str] = field(default_factory=list)
-    deny_write: list[str] = field(default_factory=list)
-    deny_read: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {}
         if self.allow_write:
             result["allowWrite"] = self.allow_write
-        if self.deny_write:
-            result["denyWrite"] = self.deny_write
-        if self.deny_read:
-            result["denyRead"] = self.deny_read
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> SandboxFilesystem:
+        data.get("denyWrite")  # silently ignore legacy field
+        data.get("denyRead")  # silently ignore legacy field
         return cls(
             allow_write=list(data.get("allowWrite", [])),  # type: ignore[arg-type]
-            deny_write=list(data.get("denyWrite", [])),  # type: ignore[arg-type]
-            deny_read=list(data.get("denyRead", [])),  # type: ignore[arg-type]
         )
 
 

@@ -11,8 +11,8 @@ Full bidirectional Todoist sync for the active project using batched operations.
 
 **1.** Setup: Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call.
    - Extract `integrations.todoist.enabled` and `integrations.todoist.project_id` (= `todoist_project_id`).
-   - If `todoist.enabled` is false: stop with "Todoist sync not enabled. Set `todoist.enabled: true` in `~/.claude/proj.yaml`."
-   - If no `todoist_project_id`: stop with "Project not linked to Todoist. Set todoist_project_id via mcp__proj__proj_update_meta first."
+   - If `todoist.enabled` is false, stop with: "Todoist sync not enabled. Run `/proj:init-plugin` to enable it."
+   - If no `todoist_project_id`, stop with: "Project not linked to Todoist. Set `todoist_project_id` via `mcp__proj__proj_update_meta` first."
 
 **2.** Fetch Todoist tasks:
    - Call `mcp__todoist__todoist_find_tasks` with `project_id`. Collect all returned tasks.
@@ -72,7 +72,7 @@ Full bidirectional Todoist sync for the active project using batched operations.
 
 **7.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Todoist"`.
 
-Suggested next: (1) /proj:status — see updated project overview
+Suggested next: `1. /proj:status` -- see updated project overview
 
 ---
 
@@ -83,3 +83,21 @@ If `trello.enabled` is true in the config, after completing the Todoist sync abo
 
 If the user invoked this skill with "sync all" or "sync everything", also output:
 "To sync Trello too, run `/proj:trello-sync` separately."
+
+## Prerequisites
+
+- An active project must be loaded.
+- Todoist sync must be enabled (`todoist.enabled: true` in config).
+- Project must have a `todoist_project_id` set.
+
+## Error Handling
+
+- **No active project**: displays error from `proj_session_context` and stops.
+- **Todoist not enabled**: displays "Todoist sync not enabled. Run `/proj:init-plugin` to enable it." and stops.
+- **No todoist_project_id**: displays "Project not linked to Todoist. Set `todoist_project_id` via `mcp__proj__proj_update_meta` first." and stops.
+- **Todoist API errors**: displays error from the specific Todoist tool call.
+- **Partial push failures**: individual failures reported in the summary.
+
+## Output
+
+Sync summary: pulled from Todoist (created, updated, closed counts), pushed to Todoist (created, updated, completed counts). If ghost close or root-only cleanup occurred, those counts shown separately. If everything up to date: `Todoist sync complete. Everything up to date.`

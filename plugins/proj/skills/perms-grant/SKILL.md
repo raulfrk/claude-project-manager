@@ -33,4 +33,19 @@ The user may provide: `<path_or_mcp_server> [scope]`
 **3.** After granting
 
 - Show the confirmation result.
-Suggested next: (1) /proj:perms-audit — verify the updated permissions
+
+## Prerequisites
+
+- Perms plugin MCP server must be running and reachable.
+
+## Error Handling
+
+- **No arguments**: starts interactive Q&A to collect path/server and scope.
+- **Perms MCP unavailable**: displays error from tool call and stops.
+- **Invalid path or server name**: displays error from the perms tool and stops.
+
+## Output
+
+Confirmation of the granted permission (path or MCP server, scope).
+
+Suggested next: `1. /proj:perms-audit` -- verify the updated permissions

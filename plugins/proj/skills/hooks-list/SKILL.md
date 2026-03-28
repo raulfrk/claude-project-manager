@@ -49,3 +49,16 @@ List all registered hooks from the hooks registry.
 
 **5.** After all sections, show a summary line:
 `N hook(s) registered across M trigger(s). V verification hook(s).`
+
+## Prerequisites
+
+- Hooks plugin MCP server is running and reachable.
+
+## Error Handling
+
+- **Hooks MCP unavailable**: displays error from tool call and stops.
+- **No hooks registered**: displays "No hooks registered. Run `/proj:hooks-add` to create one." and stops.
+
+## Output
+
+Hooks grouped by trigger tool in tables (ID, Target, Server, Blocking, Condition, Status). Separate section for verification hooks. Summary line with total counts.

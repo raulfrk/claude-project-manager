@@ -52,4 +52,21 @@ Add a new directory or repository to the active project.
 
 **6.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Add repo: {label}"`.
 
-Suggested next: (1) /proj:status — see updated project overview
+## Prerequisites
+
+- An active project must be loaded.
+- A path must be provided.
+
+## Error Handling
+
+- **No active project**: displays "No active project. Run `/proj:load` to load one." and stops.
+- **No path provided**: displays usage message and stops.
+- **Path does not exist**: displays "Path `<path>` does not exist." and stops.
+- **Duplicate repo**: displays error from `proj_add_repo` and stops.
+- **Permissions refresh failure**: logs warning and continues.
+
+## Output
+
+Confirmation summary: label, path, git repo detection, mode (reference/writable), permissions refreshed status. Git tracking flush confirmation.
+
+Suggested next: `1. /proj:status` -- see updated project overview

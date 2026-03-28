@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+import shutil
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -643,33 +644,72 @@ def register(app: FastMCP) -> None:
             "mcp_servers": [],
         })
 
-    @app.tool(description="Migrate a project from legacy single-path format to multi-dir repos format.")
+    def _migrate_single_dir(cfg: object, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict:
+        """Migrate one project from single-path to multi-repo format. Returns result dict."""
+        meta_p = storage.meta_path(cfg, project_name)
+        if not meta_p.exists():
+            return {"project": project_name, "migrated": False, "reason": "meta.yaml missing"}
+
+        raw = storage._load_yaml(meta_p)
+        path_val = raw.get("path")
+        repos_val = raw.get("repos", [])
+
+        if not isinstance(path_val, str) or not path_val or (isinstance(repos_val, list) and repos_val):
+            return {"project": project_name, "migrated": False, "reason": "already multi-dir"}
+
+        if dry_run:
+            return {"project": project_name, "migrated": False, "dry_run": True, "old_path": path_val, "new_label": label}
+
+        # Backup
+        backup_path = meta_p.with_name(f"meta.yaml.bak-{timestamp}")
+        shutil.copy2(meta_p, backup_path)
+
+        try:
+            new_repo = {"label": label, "path": path_val, "claudemd": False, "reference": False}
+            raw["repos"] = [new_repo]
+            del raw["path"]
+            storage._write_yaml(meta_p, raw)
+        except Exception:
+            # Rollback
+            shutil.copy2(backup_path, meta_p)
+            raise
+
+        return {"project": project_name, "migrated": True, "label": label, "old_path": path_val}
+
+    @app.tool(description="Migrate projects from legacy single-path format to multi-dir repos format. Defaults to all non-archived projects.")
     def proj_migrate_dirs(
         label: str = "code",
         project_name: str | None = None,
+        all_projects: bool = True,
         dry_run: bool = False,
     ) -> str:
         cfg = require_config()
-        project_name = state.resolve_project(project_name)
-        if not project_name:
-            return "No active project."
-        raw = storage._load_yaml(storage.meta_path(cfg, project_name))
-        path_val = raw.get("path")
-        repos_val = raw.get("repos", [])
-        if not isinstance(path_val, str) or not path_val or (isinstance(repos_val, list) and repos_val):
-            return f"Project '{project_name}' already uses multi-dir format. No migration needed."
-        if dry_run:
-            return (
-                f"Dry run — migration preview for '{project_name}':\n"
-                f"  Old format: path: {path_val}\n"
-                f"  New format: repos:\n"
-                f"    - label: {label}\n"
-                f"      path: {path_val}\n"
-                f"      claudemd: false\n"
-                f"      reference: false"
-            )
-        new_repo = {"label": label, "path": path_val, "claudemd": False, "reference": False}
-        raw["repos"] = [new_repo]
-        del raw["path"]
-        storage._write_yaml(storage.meta_path(cfg, project_name), raw)
-        return json.dumps({"migrated": True, "project": project_name, "label": label, "path": path_val})
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        if project_name:
+            # Single project mode
+            names = [project_name]
+        elif all_projects:
+            # All non-archived projects
+            index = storage.load_index(cfg)
+            names = [name for name, entry in index.projects.items() if not entry.archived]
+        else:
+            # Resolve active project
+            resolved = state.resolve_project(None)
+            if not resolved:
+                return json.dumps({"error": "No active project."})
+            names = [resolved]
+
+        results = []
+        for name in names:
+            try:
+                result = _migrate_single_dir(cfg, name, label, dry_run, timestamp)
+                results.append(result)
+            except Exception as e:
+                results.append({"project": name, "migrated": False, "error": str(e)})
+
+        migrated = [r for r in results if r.get("migrated")]
+        skipped = [r for r in results if not r.get("migrated") and not r.get("error")]
+        errors = [r for r in results if r.get("error")]
+
+        return json.dumps({"migrated": migrated, "skipped": skipped, "errors": errors, "dry_run": dry_run})

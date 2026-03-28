@@ -1,6 +1,6 @@
 # perms
 
-Manage Claude Code permissions from within Claude sessions. Provides MCP tools to add and remove allow rules for project directories, MCP server tool access, sandbox paths, and deny rules — no manual JSON editing required.
+Manage Claude Code permissions from within Claude sessions. Provides MCP tools to add and remove allow rules for project directories, MCP server tool access, and sandbox paths — no manual JSON editing required.
 
 ## What it does
 

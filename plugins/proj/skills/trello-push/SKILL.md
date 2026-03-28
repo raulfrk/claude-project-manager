@@ -50,6 +50,21 @@ For each entry:
 
 Return the creation results (new checklist IDs and item IDs) for use by downstream sub-skills (trello-link).
 
+## Prerequisites
+
+- Diff plan JSON from `/proj:trello-diff` must be provided as input.
+- Trello MCP server must be running and reachable.
+
+## Error Handling
+
+- **Trello MCP unavailable**: displays error from tool call and stops.
+- **Partial batch failures**: `batch_add_checklist_items` and `batch_update_checklist_items` return `{successes, failures}` — failures are reported individually.
+- **Single item errors**: displays error from the specific Trello tool call.
+
+## Output
+
+Returns creation results (new checklist IDs and item IDs) for use by downstream sub-skills (trello-link).
+
 ## Notes
 
 - All Trello MCP tool names use the static pattern `mcp__trello__<tool_name>`.
