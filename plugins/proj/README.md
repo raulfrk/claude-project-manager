@@ -181,10 +181,11 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `define` | `/proj:define <id>` | Gather requirements through Q&A and research implementation approaches. Writes `requirements.md` and `research.md`. Uses plan mode to outline before writing. |
-| `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos with dependency analysis. Detects shared-file conflicts for safe parallel execution. |
-| `execute` | `/proj:execute [id\|range]` | Implement todos. Uses plan mode for review. For ranges, plans sequentially then executes in parallel. |
-| `run` | `/proj:run <id> [--steps ...] [--from ...]` | Full workflow: define → decompose → execute. Interactive prompts between steps. Supports `--steps`, `--from`, `--iter N`. Ranges run autonomously in batches. |
+| `define` | `/proj:define <id>` | Gather requirements through Q&A and research implementation approaches. Writes `requirements.md` and `research.md`. Background codebase exploration runs in parallel with Q&A. |
+| `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos with dependency analysis. Detects shared-file conflicts for safe parallel execution. Supports `worktree_candidate` annotations for worktree-aware conflict resolution. |
+| `refine` | `/proj:refine <id>` | Stress-test requirements with 3 review agents (Skeptic, Edge-Case Finder, Architecture Reviewer). Sub-skill invoked by `run` with `--refine` flag. Produces a Refinement Report with Apply/Edit/Skip/Stop options. |
+| `execute` | `/proj:execute [id\|range]` | Implement todos with smart-gate scoring, quality levels, and pipeline execution. Supports team mode, trust levels, verification, worktree isolation, and batch plan approval. |
+| `run` | `/proj:run <id> [--steps ...] [--from ...] [--iter N]` | Full workflow: define → preflight → decompose → refine → execute. Supports `--fast/--balanced/--careful/--paranoid` quality levels, `--worktree` isolation, `--refine` stress-testing, `--batch-approve` speculative planning, and `--no-pipeline` sequential mode. |
 | `quick` | `/proj:quick [description]` | Quick-start: creates a new project (if none active) or a new todo (if active project exists), then launches `/proj:run`. |
 
 ### Sync
