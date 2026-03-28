@@ -99,6 +99,7 @@ def register(app: FastMCP) -> None:
             f"    light_review_threshold: {cfg.smart_gate.light_review_threshold}\n"
             f"    critical_path_patterns: {cfg.smart_gate.critical_path_patterns}\n"
             f"  quality_level: {cfg.quality_level}\n"
+            f"  worktree_isolation: {cfg.worktree_isolation}\n"
             f"  config_path: {storage.config_path()}"
         )
 
@@ -141,6 +142,7 @@ def register(app: FastMCP) -> None:
         resilience_recovery_timeout: int = 300,
         quality_level: str = "balanced",
         smart_gate_enabled: bool = True,
+        worktree_isolation: bool = False,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -189,6 +191,7 @@ def register(app: FastMCP) -> None:
             )
         cfg.quality_level = quality_level
         cfg.smart_gate = SmartGateConfig(enabled=smart_gate_enabled)
+        cfg.worktree_isolation = worktree_isolation
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -235,6 +238,7 @@ def register(app: FastMCP) -> None:
         smart_gate_auto_execute_threshold: int | None = None,
         smart_gate_light_review_threshold: int | None = None,
         smart_gate_critical_path_patterns: list[str] | None = None,
+        worktree_isolation: bool | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -385,5 +389,7 @@ def register(app: FastMCP) -> None:
             cfg.smart_gate.light_review_threshold = smart_gate_light_review_threshold
         if smart_gate_critical_path_patterns is not None:
             cfg.smart_gate.critical_path_patterns = smart_gate_critical_path_patterns
+        if worktree_isolation is not None:
+            cfg.worktree_isolation = worktree_isolation
         storage.save_config(cfg)
         return "Configuration updated."

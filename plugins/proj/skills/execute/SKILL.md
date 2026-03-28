@@ -26,7 +26,7 @@ Execute todo(s): $ARGUMENTS
 - Parse `--worktree` flag: enable worktree isolation for parallel execution.
 - Parse `--no-worktree` flag: disable worktree isolation.
 
-Derive: `worktree_enabled` from flags and config default.
+Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 
 **Note**: Worktree lifecycle (Phase 1.5 setup, Phase 2.5 merge, Phase 5 cleanup) is orchestrated by `run/SKILL.md`. When execute is called directly with `--worktree`, worktree context is passed to agents but the full lifecycle (create/merge/cleanup) must be managed by the caller. For standalone execution, use `/proj:run` instead.
