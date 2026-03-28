@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class Permissions:
     allow: list[str] = field(default_factory=list)
+    deny: list[str] = field(default_factory=list)
     ask: list[str] = field(default_factory=list)
     additional_directories: list[str] = field(default_factory=list)  # round-trip preservation for Claude Code
 
@@ -19,6 +20,8 @@ class Permissions:
         result: dict[str, list[str]] = {}
         if self.allow:
             result["allow"] = self.allow
+        if self.deny:
+            result["deny"] = list(self.deny)
         if self.ask:
             result["ask"] = self.ask
         if self.additional_directories:
@@ -27,9 +30,9 @@ class Permissions:
 
     @classmethod
     def from_dict(cls, data: dict[str, list[str]]) -> Permissions:
-        data.get("deny")  # silently ignore legacy deny field
         return cls(
             allow=data.get("allow", []),
+            deny=list(data.get("deny", [])),
             ask=data.get("ask", []),
             additional_directories=data.get("additionalDirectories", []),
         )
@@ -40,19 +43,21 @@ class SandboxFilesystem:
     """Represents the ``sandbox.filesystem`` section of settings.local.json."""
 
     allow_write: list[str] = field(default_factory=list)
+    raw: dict[str, object] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, list[str]]:
-        result: dict[str, list[str]] = {}
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = dict(self.raw)
         if self.allow_write:
             result["allowWrite"] = self.allow_write
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> SandboxFilesystem:
-        data.get("denyWrite")  # silently ignore legacy field
-        data.get("denyRead")  # silently ignore legacy field
+        known_keys = {"allowWrite"}
+        raw = {k: v for k, v in data.items() if k not in known_keys}
         return cls(
             allow_write=list(data.get("allowWrite", [])),  # type: ignore[arg-type]
+            raw=raw,
         )
 
 

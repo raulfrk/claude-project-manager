@@ -66,6 +66,8 @@ def register(app: FastMCP) -> None:
             f"  default_priority: {cfg.default_priority}\n"
             f"  permissions.auto_grant: {cfg.permissions.auto_grant}\n"
             f"  permissions.auto_allow_mcps: {cfg.permissions.auto_allow_mcps}\n"
+            f"  permissions.projects_root: {cfg.permissions.projects_root or '(not set)'}\n"
+            f"  permissions.tracking_root: {cfg.permissions.tracking_root or '(not set)'}\n"
             f"  todoist.enabled: {cfg.todoist.enabled}\n"
             f"  todoist.auto_sync: {cfg.todoist.auto_sync}\n"
             f"  todoist.mcp_server: {cfg.todoist.mcp_server}\n"
@@ -143,6 +145,8 @@ def register(app: FastMCP) -> None:
         quality_level: str = "balanced",
         smart_gate_enabled: bool = True,
         worktree_isolation: bool = False,
+        permissions_projects_root: str | None = None,
+        permissions_tracking_root: str | None = None,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -156,6 +160,14 @@ def register(app: FastMCP) -> None:
         )
         cfg.permissions.auto_grant = auto_grant_permissions
         cfg.permissions.auto_allow_mcps = auto_allow_mcps
+        if permissions_projects_root is not None:
+            cfg.permissions.projects_root = permissions_projects_root
+        elif projects_base_dir:
+            cfg.permissions.projects_root = projects_base_dir
+        if permissions_tracking_root is not None:
+            cfg.permissions.tracking_root = permissions_tracking_root
+        elif tracking_dir:
+            cfg.permissions.tracking_root = tracking_dir
         cfg.todoist.enabled = todoist_enabled
         cfg.todoist.auto_sync = todoist_auto_sync
         cfg.todoist.mcp_server = todoist_mcp_server
@@ -239,6 +251,8 @@ def register(app: FastMCP) -> None:
         smart_gate_light_review_threshold: int | None = None,
         smart_gate_critical_path_patterns: list[str] | None = None,
         worktree_isolation: bool | None = None,
+        permissions_projects_root: str | None = None,
+        permissions_tracking_root: str | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -323,6 +337,10 @@ def register(app: FastMCP) -> None:
             cfg.permissions.auto_grant = auto_grant_permissions
         if auto_allow_mcps is not None:
             cfg.permissions.auto_allow_mcps = auto_allow_mcps
+        if permissions_projects_root is not None:
+            cfg.permissions.projects_root = permissions_projects_root
+        if permissions_tracking_root is not None:
+            cfg.permissions.tracking_root = permissions_tracking_root
         if todoist_enabled is not None:
             cfg.todoist.enabled = todoist_enabled
         if todoist_mcp_server is not None:

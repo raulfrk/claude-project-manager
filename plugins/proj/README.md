@@ -388,6 +388,6 @@ When `perms_integration: true` (requires the `perms` plugin), automatic manageme
 
 ## Version
 
-Current version: **2.0.0**
+Current version: **2.1.0**
 
 See `CHANGELOG.md` for full release history.

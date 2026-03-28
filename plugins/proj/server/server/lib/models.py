@@ -208,12 +208,19 @@ class JiraSync:
 class PermissionsConfig:
     auto_grant: bool = True
     auto_allow_mcps: bool = True  # add mcp__<server>__* allow rules at init time
+    projects_root: str | None = None
+    tracking_root: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        d: dict[str, object] = {
             "auto_grant": self.auto_grant,
             "auto_allow_mcps": self.auto_allow_mcps,
         }
+        if self.projects_root is not None:
+            d["projects_root"] = self.projects_root
+        if self.tracking_root is not None:
+            d["tracking_root"] = self.tracking_root
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> PermissionsConfig:
@@ -222,6 +229,8 @@ class PermissionsConfig:
         return cls(
             auto_grant=bool(data.get("auto_grant", True)),
             auto_allow_mcps=bool(data.get("auto_allow_mcps", True)),
+            projects_root=data.get("projects_root") or None,
+            tracking_root=data.get("tracking_root") or None,
         )
 
 

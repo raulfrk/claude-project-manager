@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, Bash, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, Bash, mcp__proj__tracking_git_flush
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -71,6 +71,18 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
      "Warning: `worktree` plugin MCP rules not found in settings. Install the `worktree` plugin and re-run `/proj:init-plugin`."
 
    If the `perms_list` call fails (tool not available), skip with: "Perms MCP server not available. Check your MCP server configuration and restart Claude Code."
+
+**4b.** **Sandbox root paths** (if `perms` plugin installed):
+   - Compute `projects_root` from `projects_base_dir` value
+   - Compute `tracking_root` from `tracking_dir` value
+   - Compute `archive_destination` from `archive.destination` config value
+   - Call `perms_set_sandbox_paths` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`
+
+**4c.** **Default deny rules** (if `perms` plugin installed):
+   - Call `perms_set_deny` with the default deny rules list (from `DEFAULT_DENY_RULES` constant)
+
+**4d.** **Persist root paths:**
+   - Call `config_update` with `permissions_projects_root=<projects_root>` and `permissions_tracking_root=<tracking_root>`
 
 **5.** Confirm: "proj plugin configured! Configuration saved to `~/.claude/proj.yaml`"
 

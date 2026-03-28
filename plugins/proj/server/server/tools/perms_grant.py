@@ -126,14 +126,28 @@ def _compute_setup_paths(
     archive_destination: str | None = None,
 ) -> list[str]:
     """Compute resolved absolute paths for sandbox allowWrite (writable repos + tracking + archive)."""
-    paths: list[str] = []
-    for repo in meta.repos:
-        if not repo.reference:
-            paths.append(str(Path(repo.path).expanduser().resolve()))
-    if cfg.tracking_dir:
+    paths = []
+    if cfg.permissions.projects_root:
+        root = str(Path(cfg.permissions.projects_root).expanduser().resolve())
+        paths.append(root)
+    else:
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.append(str(Path(repo.path).expanduser().resolve()))
+
+    if cfg.permissions.tracking_root:
+        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve())
+        # Containment check: skip if already under projects_root
+        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
+            paths.append(tracking)
+    elif cfg.tracking_dir:
         paths.append(str(Path(cfg.tracking_dir).expanduser().resolve()))
+
     if archive_destination:
-        paths.append(str(Path(archive_destination).expanduser().resolve()))
+        archive = str(Path(archive_destination).expanduser().resolve())
+        # Containment check: skip if already under projects_root
+        if not any(archive.startswith(p + "/") or archive == p for p in paths):
+            paths.append(archive)
     return paths
 
 
@@ -210,10 +224,17 @@ def _collect_all_allow_rules(
 def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     """Derive the sandbox.filesystem.allowWrite paths that setup_permissions would create."""
     paths: set[str] = set()
-    for repo in meta.repos:
-        if not repo.reference:
-            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    if cfg.tracking_dir:
+    if cfg.permissions.projects_root:
+        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
+    else:
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    if cfg.permissions.tracking_root:
+        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
+        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
+            paths.add(tracking)
+    elif cfg.tracking_dir:
         paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
     return paths
 

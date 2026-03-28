@@ -17,10 +17,13 @@ from server.tools.settings import (
     check_allow,
     is_sandbox_enabled_tool,
     list_allow,
+    reconcile_mcp,
     remove_allow,
     remove_domain,
     remove_mcp_allow,
     sandbox_init,
+    set_deny,
+    set_sandbox_paths,
 )
 
 
@@ -940,5 +943,199 @@ class TestIsSandboxEnabled:
         _write_local_settings(local_path, {"sandbox": {"enabled": True}})
         result = is_sandbox_enabled_tool(scope="project")
         assert result == "sandbox_enabled: true"
+
+
+# ---------------------------------------------------------------------------
+# T16 — set_sandbox_paths
+# ---------------------------------------------------------------------------
+
+
+class TestSetSandboxPaths:
+    def test_set_sandbox_paths_replace(self, sandbox_settings: Path) -> None:
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/old/path1", "/old/path2"]},
+            },
+        })
+        result = set_sandbox_paths(["/new/a", "/new/b"])
+        assert "2 root(s)" in result
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/new/a" in aw
+        assert "/new/b" in aw
+        # Old paths not under new roots are preserved by default
+        assert "/old/path1" in aw
+        assert "/old/path2" in aw
+
+    def test_set_sandbox_paths_preserve_extra(self, sandbox_settings: Path) -> None:
+        """User-added paths not under given roots are preserved."""
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/user/custom", "/home/user/proj/sub"]},
+            },
+        })
+        result = set_sandbox_paths(["/home/user/proj"])
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        # /user/custom is not under /home/user/proj so it is preserved
+        assert "/user/custom" in aw
+        assert "/home/user/proj" in aw
+        assert "1 preserved" in result
+
+    def test_set_sandbox_paths_containment(self, sandbox_settings: Path) -> None:
+        """Paths under roots are NOT preserved (deduplication)."""
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/home/user/proj/subdir", "/home/user/proj"]},
+            },
+        })
+        result = set_sandbox_paths(["/home/user/proj"])
+        aw = _read_sandbox_allow_write(sandbox_settings)
+        assert "/home/user/proj" in aw
+        # /home/user/proj/subdir starts with /home/user/proj/ so it's dropped
+        assert "/home/user/proj/subdir" not in aw
+        assert "0 preserved" in result
+
+
+# ---------------------------------------------------------------------------
+# T17 — set_deny
+# ---------------------------------------------------------------------------
+
+
+class TestSetDeny:
+    def test_set_deny_replaces_rules(self, sandbox_settings: Path) -> None:
+        rules = ["Bash(git push *)", "Bash(rm -rf *)"]
+        result = set_deny(rules)
+        assert "2 rules" in result
+        data: dict[str, object] = json.loads(sandbox_settings.read_text())
+        perms = data.get("permissions", {})
+        assert isinstance(perms, dict)
+        assert perms.get("deny") == rules
+
+    def test_set_deny_clear_settings_json(self, sandbox_settings: Path) -> None:
+        """When clear_settings_json_deny is True, deny is cleared from settings.json."""
+        main_path = sandbox_settings.parent / "settings.json"
+        _write_settings(main_path, {"permissions": {"deny": ["Bash(sudo *)"]}})
+        set_deny(["Bash(git push *)"], clear_settings_json_deny=True)
+        main_data: dict[str, object] = json.loads(main_path.read_text())
+        main_perms = main_data.get("permissions", {})
+        assert isinstance(main_perms, dict)
+        # deny should be cleared from settings.json
+        assert main_perms.get("deny", []) == []
+
+
+# ---------------------------------------------------------------------------
+# T18 — reconcile_mcp
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileMcp:
+    def test_reconcile_mcp_removes_stale_from_both(self, sandbox_settings: Path) -> None:
+        main_path = sandbox_settings.parent / "settings.json"
+        _write_settings(main_path, {
+            "permissions": {"allow": ["mcp__stale_srv__*", "mcp__keep__*"]},
+        })
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": ["mcp__stale_srv__*", "mcp__local_keep__*"]},
+        })
+        result = reconcile_mcp(
+            expected_servers=["keep", "local_keep"],
+            stale_servers=["stale_srv"],
+        )
+        assert "stale removed" in result
+        main_allow = _read_allow(main_path)
+        assert "mcp__stale_srv__*" not in main_allow
+        assert "mcp__keep__*" in main_allow
+        local_allow = _read_local_allow(sandbox_settings)
+        assert "mcp__stale_srv__*" not in local_allow
+        assert "mcp__local_keep__*" in local_allow
+
+    def test_reconcile_mcp_adds_missing_to_local_only(self, sandbox_settings: Path) -> None:
+        main_path = sandbox_settings.parent / "settings.json"
+        _write_settings(main_path, {"permissions": {"allow": []}})
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": []},
+        })
+        result = reconcile_mcp(expected_servers=["proj", "perms"])
+        assert "2 missing added" in result
+        local_allow = _read_local_allow(sandbox_settings)
+        assert "mcp__proj__*" in local_allow
+        assert "mcp__perms__*" in local_allow
+        # Must NOT be added to main settings.json
+        main_allow = _read_allow(main_path)
+        assert "mcp__proj__*" not in main_allow
+        assert "mcp__perms__*" not in main_allow
+
+    def test_reconcile_mcp_preserves_user_rules(self, sandbox_settings: Path) -> None:
+        main_path = sandbox_settings.parent / "settings.json"
+        _write_settings(main_path, {
+            "permissions": {"allow": ["mcp__user_custom__*"]},
+        })
+        _write_local_settings(sandbox_settings, {
+            "sandbox": {"enabled": True},
+            "permissions": {"allow": ["mcp__another_custom__*"]},
+        })
+        reconcile_mcp(
+            expected_servers=["proj"],
+            stale_servers=["old_srv"],
+        )
+        main_allow = _read_allow(main_path)
+        assert "mcp__user_custom__*" in main_allow
+        local_allow = _read_local_allow(sandbox_settings)
+        assert "mcp__another_custom__*" in local_allow
+
+
+# ---------------------------------------------------------------------------
+# T23 — set_deny cross-file (no clear by default)
+# ---------------------------------------------------------------------------
+
+
+class TestSetDenyCrossFile:
+    def test_set_deny_no_clear_by_default(self, sandbox_settings: Path) -> None:
+        """settings.json deny is untouched when clear_settings_json_deny is False."""
+        main_path = sandbox_settings.parent / "settings.json"
+        _write_settings(main_path, {"permissions": {"deny": ["Bash(sudo *)"]}})
+        set_deny(["Bash(git push *)"], clear_settings_json_deny=False)
+        main_data: dict[str, object] = json.loads(main_path.read_text())
+        main_perms = main_data.get("permissions", {})
+        assert isinstance(main_perms, dict)
+        assert main_perms.get("deny") == ["Bash(sudo *)"]
+
+
+# ---------------------------------------------------------------------------
+# T25 — fresh state (no existing files)
+# ---------------------------------------------------------------------------
+
+
+class TestFreshState:
+    def test_set_sandbox_paths_fresh_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        # No file exists yet
+        assert not local_path.exists()
+        result = set_sandbox_paths(["/home/user/proj"])
+        assert "1 root(s)" in result
+        assert local_path.exists()
+        aw = _read_sandbox_allow_write(local_path)
+        assert "/home/user/proj" in aw
+
+    def test_set_deny_fresh_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        assert not local_path.exists()
+        result = set_deny(["Bash(git push *)"])
+        assert "1 rules" in result
+        assert local_path.exists()
+        data: dict[str, object] = json.loads(local_path.read_text())
+        perms = data.get("permissions", {})
+        assert isinstance(perms, dict)
+        assert perms.get("deny") == ["Bash(git push *)"]
 
 

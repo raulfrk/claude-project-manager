@@ -20,7 +20,12 @@ from server.lib.models import (
     TodoistSync,
     TrelloSync,
 )
-from server.tools.perms_sync import _derive_expected_rules, run_sync
+from server.tools.perms_sync import (
+    _derive_expected_additional_dirs,
+    _derive_expected_rules,
+    _derive_expected_sandbox_paths,
+    run_sync,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -34,13 +39,20 @@ def _make_cfg(
     tracking_dir: str = "/tmp/tracking",
     perms_integration: bool = False,
     worktree_integration: bool = False,
+    projects_root: str | None = None,
+    tracking_root: str | None = None,
 ) -> ProjConfig:
     cfg = ProjConfig(
         tracking_dir=tracking_dir,
         perms_integration=perms_integration,
         worktree_integration=worktree_integration,
     )
-    cfg.permissions = PermissionsConfig(auto_grant=True, auto_allow_mcps=auto_allow_mcps)
+    cfg.permissions = PermissionsConfig(
+        auto_grant=True,
+        auto_allow_mcps=auto_allow_mcps,
+        projects_root=projects_root,
+        tracking_root=tracking_root,
+    )
     cfg.todoist = TodoistSync(enabled=todoist_enabled)
     cfg.jira = JiraSync(enabled=jira_enabled)
     cfg.trello = TrelloSync(enabled=trello_enabled)
@@ -689,8 +701,6 @@ class TestProjPermsSyncTool:
 
 class TestDeriveExpectedSandboxPaths:
     def test_writable_repo_paths_included(self) -> None:
-        from server.tools.perms_sync import _derive_expected_sandbox_paths
-
         meta = _make_meta(repos=[
             RepoEntry(label="code", path="/home/user/proj"),
             RepoEntry(label="docs", path="/home/user/docs", reference=True),
@@ -702,6 +712,83 @@ class TestDeriveExpectedSandboxPaths:
         assert "/home/user/proj" in paths
         assert "/home/user/docs" not in paths  # reference repo excluded
         assert "/tmp/tracking" in paths
+
+    def test_derive_sandbox_paths_uses_projects_root(self) -> None:
+        """When projects_root is set, returns root instead of per-repo paths."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            RepoEntry(label="docs", path="/home/user/projects/repo-b"),
+        ])
+        cfg = _make_cfg(
+            tracking_dir="/tmp/tracking",
+            projects_root="/home/user/projects",
+        )
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        assert "/home/user/projects" in paths
+        # Individual repo paths should NOT be present — root replaces them
+        assert "/home/user/projects/repo-a" not in paths
+        assert "/home/user/projects/repo-b" not in paths
+        assert "/tmp/tracking" in paths
+
+    def test_derive_sandbox_paths_tracking_root_containment(self) -> None:
+        """tracking_root under projects_root is skipped (already covered)."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+        ])
+        cfg = _make_cfg(
+            tracking_dir="/tmp/tracking",
+            projects_root="/home/user/projects",
+            tracking_root="/home/user/projects/tracking",
+        )
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        assert "/home/user/projects" in paths
+        # tracking_root is under projects_root, so it should be skipped
+        assert "/home/user/projects/tracking" not in paths
+
+    def test_derive_sandbox_paths_resolves_tilde(self) -> None:
+        """Paths with ~ are properly resolved."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="~/myproject"),
+        ])
+        cfg = _make_cfg(tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        # No path should contain a tilde
+        assert not any("~" in p for p in paths)
+        # The expanded home path should be present
+        expanded = str(Path("~/myproject").expanduser().resolve())
+        assert expanded in paths
+
+    def test_derive_sandbox_paths_resolves_relative(self) -> None:
+        """Paths with .. are resolved to absolute form."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/../projects/repo-a"),
+        ])
+        cfg = _make_cfg(tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        # The resolved path without ".." should be present
+        assert "/home/user/projects/repo-a" in paths
+        # No path should contain ".."
+        assert not any(".." in p for p in paths)
+
+    def test_derive_sandbox_paths_strips_trailing_slash(self) -> None:
+        """Trailing slashes are stripped from all paths."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj/"),
+        ])
+        cfg = _make_cfg(tracking_dir="/tmp/tracking/")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg)
+
+        assert not any(p.endswith("/") for p in paths)
+        assert "/home/user/proj" in paths
 
 
 class TestRunSyncSandbox:
@@ -751,3 +838,101 @@ class TestRunSyncSandbox:
         assert "settings.local.json" in result
         assert "MCP rules" in result or "Sandbox allowWrite" in result
         assert "Read(" not in result
+
+
+# ── T21: Migration workflow (derive functions in root mode) ──────────────────
+
+
+class TestDeriveAdditionalDirsUsesRoots:
+    def test_derive_additional_dirs_uses_roots(self) -> None:
+        """When projects_root is set, additional dirs use root instead of per-repo."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            RepoEntry(label="docs", path="/home/user/projects/repo-b"),
+        ])
+        cfg = _make_cfg(
+            tracking_dir="/tmp/tracking",
+            projects_root="/home/user/projects",
+        )
+
+        dirs = _derive_expected_additional_dirs(meta, cfg)
+
+        assert "/home/user/projects" in dirs
+        assert "/home/user/projects/repo-a" not in dirs
+        assert "/home/user/projects/repo-b" not in dirs
+        assert "/tmp/tracking" in dirs
+
+    def test_derive_additional_dirs_tracking_root_containment(self) -> None:
+        """tracking_root under projects_root is skipped in additional dirs too."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+        ])
+        cfg = _make_cfg(
+            tracking_dir="/tmp/tracking",
+            projects_root="/home/user/projects",
+            tracking_root="/home/user/projects/tracking",
+        )
+
+        dirs = _derive_expected_additional_dirs(meta, cfg)
+
+        assert "/home/user/projects" in dirs
+        assert "/home/user/projects/tracking" not in dirs
+
+
+class TestRunSyncDenyWarning:
+    def test_run_sync_deny_warning_when_roots_set(self) -> None:
+        """When projects_root is set and no deny rules, a warning is generated."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(
+            auto_allow_mcps=True,
+            todoist_enabled=False,
+            projects_root="/home/user/projects",
+        )
+        expected = _derive_expected_rules(meta, cfg)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths={"/home/user/projects"},
+            actual_deny_rules=None,
+            sandbox_mode=True,
+        )
+
+        assert "⚠️" in result
+        assert "deny" in result.lower()
+
+    def test_run_sync_no_deny_warning_without_roots(self) -> None:
+        """When projects_root is NOT set, no deny warning even without deny rules."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected = _derive_expected_rules(meta, cfg)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths={"/home/user/proj"},
+            actual_deny_rules=None,
+            sandbox_mode=True,
+        )
+
+        assert "⚠️" not in result
+
+    def test_run_sync_no_deny_warning_when_deny_rules_present(self) -> None:
+        """When projects_root is set but deny rules exist, no warning."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(
+            auto_allow_mcps=True,
+            todoist_enabled=False,
+            projects_root="/home/user/projects",
+        )
+        expected = _derive_expected_rules(meta, cfg)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected,
+            actual_sandbox_paths={"/home/user/projects"},
+            actual_deny_rules=["some_deny_rule"],
+            sandbox_mode=True,
+        )
+
+        assert "⚠️" not in result

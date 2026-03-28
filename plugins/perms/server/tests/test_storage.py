@@ -342,3 +342,56 @@ class TestResolveTarget:
     ) -> None:
         monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
         assert storage.resolve_target("auto", "user") == "settings"
+
+
+# ── T24 — Sandbox settings preservation (round-trip) ────────────────────────
+
+
+class TestSandboxFilesystemRoundtripRaw:
+    """Verify that unknown/extra filesystem keys survive from_dict -> to_dict."""
+
+    def test_sandbox_filesystem_roundtrip_preserves_deny_read(self) -> None:
+        data = {"allowWrite": ["/a"], "denyRead": ["/secret"]}
+        sf = SandboxFilesystem.from_dict(data)
+        out = sf.to_dict()
+        assert out.get("denyRead") == ["/secret"]
+
+    def test_sandbox_filesystem_roundtrip_preserves_deny_write(self) -> None:
+        data = {"allowWrite": ["/a"], "denyWrite": ["/protected"]}
+        sf = SandboxFilesystem.from_dict(data)
+        out = sf.to_dict()
+        assert out.get("denyWrite") == ["/protected"]
+
+    def test_sandbox_filesystem_roundtrip_preserves_allow_read(self) -> None:
+        data = {"allowWrite": ["/a"], "allowRead": ["/readable"]}
+        sf = SandboxFilesystem.from_dict(data)
+        out = sf.to_dict()
+        assert out.get("allowRead") == ["/readable"]
+
+    def test_sandbox_network_preserved_during_set_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Network settings survive a sandbox path update (load -> modify -> save)."""
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        local_path.parent.mkdir(parents=True)
+        local_path.write_text(json.dumps({
+            "sandbox": {
+                "enabled": True,
+                "filesystem": {"allowWrite": ["/old"]},
+                "network": {
+                    "allowedDomains": ["example.com"],
+                    "allowUnixSockets": ["/var/run/docker.sock"],
+                },
+            },
+        }))
+        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+
+        settings = storage.load_local("user")
+        settings.sandbox.filesystem.allow_write = ["/new"]
+        storage.save(settings)
+
+        data = json.loads(local_path.read_text())
+        net = data["sandbox"]["network"]
+        assert net["allowedDomains"] == ["example.com"]
+        assert net["allowUnixSockets"] == ["/var/run/docker.sock"]
+        assert data["sandbox"]["filesystem"]["allowWrite"] == ["/new"]

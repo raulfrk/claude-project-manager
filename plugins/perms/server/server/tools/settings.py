@@ -15,6 +15,53 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+DEFAULT_DENY_RULES: list[str] = [
+    "Bash(git push *)",
+    "Bash(git push)",
+    "Bash(git push --force*)",
+    "Bash(git reset --hard*)",
+    "Bash(git clean -f*)",
+    "Bash(git checkout .)",
+    "Bash(git restore .)",
+    "Bash(git branch -D *)",
+    "Bash(git rebase *)",
+    "Bash(git stash drop *)",
+    "Bash(git stash clear)",
+    "Bash(rm -rf *)",
+    "Bash(rm -r *)",
+    "Bash(rm -f *)",
+    "Bash(chmod 777 *)",
+    "Bash(chown *)",
+    "Bash(sudo *)",
+    "Bash(curl *)",
+    "Bash(wget *)",
+    "Bash(ssh *)",
+    "Bash(npm publish*)",
+    "Bash(cargo publish*)",
+    "Bash(twine upload*)",
+    "Bash(docker rm *)",
+    "Bash(docker rmi *)",
+    "Bash(kill *)",
+    "Bash(killall *)",
+    "Bash(shutdown *)",
+    "Bash(reboot *)",
+    "Edit(~/.claude/settings.json)",
+    "Edit(~/.claude/settings.local.json)",
+]
+
+KNOWN_STALE_MCP_SERVERS: list[str] = [
+    "perms",
+    "proj",
+    "worktree",
+    "sentry",
+    "Todoist",
+    "claude_ai_Todoist",
+    "remotion-documentation",
+    "claude_ai_WebSearch",
+    "claude_ai_WebFetch",
+]
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
@@ -137,13 +184,16 @@ def list_allow(scope: str = "all", target: str = "auto", format: str = "text") -
                 settings = storage.load_local(s)
             else:
                 settings = storage.load(s)
-            entries.append({
+            entry: dict[str, object] = {
                 "scope": s,
                 "path": str(settings.path),
                 "target": resolved,
                 "permissions_allow": list(settings.permissions.allow),
                 "sandbox_allow_write": list(settings.sandbox.filesystem.allow_write),
-            })
+            }
+            if settings.permissions.deny:
+                entry["permissions_deny"] = list(settings.permissions.deny)
+            entries.append(entry)
         return json.dumps({"scopes": entries})
 
     # Default text format — unchanged behaviour
@@ -373,19 +423,22 @@ def batch_revoke(
     mcp_servers: list[str] | None = None,
     scope: str = "user",
     target: str = "auto",
+    additional_directories: list[str] | None = None,
 ) -> str:
-    """Remove sandbox paths and MCP allow rules in one atomic write.
+    """Remove sandbox paths, MCP allow rules, and additional directories in one atomic write.
 
     Inverse of batch setup. Removes matching paths from
-    ``sandbox.filesystem.allowWrite`` (sandbox mode) and matching
-    ``mcp__<server>__*`` wildcard rules from ``permissions.allow``.
+    ``sandbox.filesystem.allowWrite`` (sandbox mode), matching
+    ``mcp__<server>__*`` wildcard rules from ``permissions.allow``,
+    and matching entries from ``permissions.additionalDirectories``.
     Single atomic write. Idempotent — removing non-existent entries is a no-op.
     """
     paths = paths or []
     mcp_servers = mcp_servers or []
+    additional_directories = additional_directories or []
 
-    if not paths and not mcp_servers:
-        return "Nothing to revoke — both paths and mcp_servers are empty."
+    if not paths and not mcp_servers and not additional_directories:
+        return "Nothing to revoke — paths, mcp_servers, and additional_directories are all empty."
 
     resolved = storage.resolve_target(target, scope)
     settings = _load_for_target(resolved, scope)
@@ -395,6 +448,7 @@ def batch_revoke(
 
     sandbox_removed = 0
     mcp_removed = 0
+    addl_removed = 0
 
     # Remove sandbox paths
     if paths and resolved == "sandbox":
@@ -411,7 +465,16 @@ def batch_revoke(
         ]
         mcp_removed = before - len(settings.permissions.allow)
 
-    total = sandbox_removed + mcp_removed
+    # Remove additional directories
+    if additional_directories:
+        dirs_to_remove = {str(Path(d).expanduser().resolve()) for d in additional_directories}
+        before = len(settings.permissions.additional_directories)
+        settings.permissions.additional_directories = [
+            d for d in settings.permissions.additional_directories if d not in dirs_to_remove
+        ]
+        addl_removed = before - len(settings.permissions.additional_directories)
+
+    total = sandbox_removed + mcp_removed + addl_removed
     if total == 0:
         return f"No matching entries found in {settings.path} — nothing removed."
 
@@ -422,6 +485,8 @@ def batch_revoke(
         parts.append(f"  sandbox paths removed: {sandbox_removed}")
     if mcp_removed:
         parts.append(f"  MCP rules removed: {mcp_removed}")
+    if addl_removed:
+        parts.append(f"  additional directories removed: {addl_removed}")
     return "\n".join(parts)
 
 
@@ -582,6 +647,77 @@ def is_sandbox_enabled_tool(scope: str = "user") -> str:
     return f"sandbox_enabled: {str(enabled).lower()}"
 
 
+def set_sandbox_paths(paths: list[str], preserve_extra: bool = True) -> str:
+    """Replace sandbox.filesystem.allowWrite paths atomically.
+
+    Default preserves user-added paths not under the given roots.
+    """
+    settings = storage.load_local()
+    resolved = [str(Path(p).expanduser().resolve()) for p in paths]
+
+    preserved: list[str] = []
+    if preserve_extra:
+        for existing in settings.sandbox.filesystem.allow_write:
+            if not any(existing.startswith(r + "/") or existing == r for r in resolved):
+                preserved.append(existing)
+        new_paths = resolved + preserved
+    else:
+        new_paths = resolved
+
+    settings.sandbox.filesystem.allow_write = new_paths
+    storage.save(settings)
+    return f"Sandbox paths set: {len(resolved)} root(s), {len(preserved)} preserved"
+
+
+def set_deny(rules: list[str], clear_settings_json_deny: bool = False) -> str:
+    """Replace permissions.deny rules atomically in settings.local.json."""
+    settings = storage.load_local()
+    settings.permissions.deny = list(rules)
+    storage.save(settings)
+
+    if clear_settings_json_deny:
+        main = storage.load()
+        if main.permissions.deny:
+            main.permissions.deny = []
+            storage.save(main)
+
+    return f"Deny rules set: {len(rules)} rules in settings.local.json"
+
+
+def reconcile_mcp(expected_servers: list[str], stale_servers: list[str] | None = None) -> str:
+    """Reconcile MCP wildcard rules: remove known-stale servers, add missing expected servers."""
+    expected = {f"mcp__{s}__*" for s in expected_servers}
+    stale = {f"mcp__{s}__*" for s in (stale_servers or [])}
+
+    main = storage.load()
+    local = storage.load_local()
+
+    # Remove stale from both
+    main_before = len(main.permissions.allow)
+    main.permissions.allow = [r for r in main.permissions.allow if r not in stale]
+    main_removed = main_before - len(main.permissions.allow)
+
+    local_before = len(local.permissions.allow)
+    local.permissions.allow = [r for r in local.permissions.allow if r not in stale]
+    local_removed = local_before - len(local.permissions.allow)
+
+    # Find missing: expected - (set of main.allow) - (set of local.allow)
+    merged = set(main.permissions.allow) | set(local.permissions.allow)
+    missing = expected - merged
+
+    # Add missing to local only
+    local.permissions.allow.extend(sorted(missing))
+
+    storage.save(main)
+    storage.save(local)
+
+    total_removed = main_removed + local_removed
+    return (
+        f"MCP reconciled: {total_removed} stale removed, "
+        f"{len(missing)} missing added to settings.local.json"
+    )
+
+
 def register(app: FastMCP) -> None:
     """Register all perms tools with the MCP application."""
 
@@ -729,10 +865,12 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Remove sandbox paths and MCP allow rules in one atomic write. "
-            "Inverse of batch setup. Accepts lists of filesystem paths and MCP server names. "
+            "Remove sandbox paths, MCP allow rules, and additional directories in one atomic write. "
+            "Inverse of batch setup. Accepts lists of filesystem paths, MCP server names, "
+            "and additional directories. "
             "In sandbox mode removes matching paths from sandbox.filesystem.allowWrite. "
             "Removes matching mcp__<server>__* rules from permissions.allow. "
+            "Removes matching entries from permissions.additionalDirectories. "
             "Idempotent — removing non-existent entries is a no-op. "
             "target: 'settings', 'sandbox', or 'auto' (default)."
         )
@@ -742,8 +880,9 @@ def register(app: FastMCP) -> None:
         mcp_servers: list[str] | None = None,
         scope: str = "user",
         target: str = "auto",
+        additional_directories: list[str] | None = None,
     ) -> str:
-        return batch_revoke(paths, mcp_servers, scope, target)
+        return batch_revoke(paths, mcp_servers, scope, target, additional_directories)
 
     @app.tool(
         description=(
@@ -753,3 +892,29 @@ def register(app: FastMCP) -> None:
     )
     def perms_is_sandbox_enabled(scope: str = "user") -> str:
         return is_sandbox_enabled_tool(scope)
+
+    @app.tool(
+        description=(
+            "Replace sandbox.filesystem.allowWrite paths atomically. "
+            "Default preserves user-added paths not under the given roots."
+        )
+    )
+    def perms_set_sandbox_paths(paths: list[str], preserve_extra: bool = True) -> str:
+        return set_sandbox_paths(paths, preserve_extra)
+
+    @app.tool(
+        description="Replace permissions.deny rules atomically in settings.local.json."
+    )
+    def perms_set_deny(rules: list[str], clear_settings_json_deny: bool = False) -> str:
+        return set_deny(rules, clear_settings_json_deny)
+
+    @app.tool(
+        description=(
+            "Reconcile MCP wildcard rules: remove known-stale servers from both settings files, "
+            "add missing expected servers to settings.local.json only."
+        )
+    )
+    def perms_reconcile_mcp(
+        expected_servers: list[str], stale_servers: list[str] | None = None
+    ) -> str:
+        return reconcile_mcp(expected_servers, stale_servers)

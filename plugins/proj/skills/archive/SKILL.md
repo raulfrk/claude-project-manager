@@ -27,6 +27,7 @@ Archive a project. $ARGUMENTS is the project name (optional — defaults to acti
    ```
 
 **4.** Setup permissions: Call `mcp__proj__proj_setup_permissions` with `archive_destination` set to the archive destination path from preflight. This auto-grants Bash `mv`/`rm`/`mkdir` rules for project paths and the archive destination, plus sandbox write access.
+   - **Note**: When `permissions.projects_root` is set, no per-project path revocation is needed (root covers all projects). `proj_revoke_all_permissions` only removes MCP wildcards when explicitly requested.
 
 **5.** Worktree discovery (if worktrees were returned by preflight):
    If preflight returned worktrees, also call `mcp__plugin_worktree_worktree__wt_list` to get full worktree details (branch info) for the matched paths.

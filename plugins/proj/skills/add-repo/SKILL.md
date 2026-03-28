@@ -39,6 +39,7 @@ Add a new directory or repository to the active project.
    If the tool returns an error (e.g., duplicate repo), display the error and stop.
 
 **4.** Call `mcp__proj__proj_setup_permissions` to refresh sandbox write paths for the project including the new repo path.
+   - **Note**: When `permissions.projects_root` is set, the `proj_setup_permissions` call is a no-op for sandbox paths. If the new repo is outside `projects_root`, display a warning: "Repo path `<path>` is outside projects_root `<root>`. Move it under the root for sandbox coverage, or add its path to sandbox.filesystem.allowWrite manually."
 
 **5.** Display confirmation summary:
    ```

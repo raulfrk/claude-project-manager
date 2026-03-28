@@ -24,15 +24,17 @@ Check if Claude Code settings match the active project's expected permission rul
    - Parse the JSON result. Extract from the user scope entry:
      - `actual_rules` = the `permissions_allow` list
      - `actual_sandbox_paths` = the `sandbox_allow_write` list (if `sandbox_mode` is true; otherwise empty list)
+     - `actual_deny_rules` = the `permissions_deny` list (if present in the JSON; otherwise omit)
    - If the tool call fails, display: "Perms MCP server not available. Check your MCP server configuration and restart Claude Code." and stop.
 
 **4.** Run sync check: Call `mcp__proj__proj_perms_sync` with:
    - `actual_rules` = the `permissions_allow` list from step 3
    - `actual_sandbox_paths` = the `sandbox_allow_write` list from step 3 (empty list if sandbox_mode is false)
+   - `actual_deny_rules` = the `permissions_deny` list from step 3 (omit if not present)
    - `sandbox_mode` = the boolean from step 2
    - `apply` = true if `--apply` flag was present, false otherwise
 
-**5.** Display the result from `proj_perms_sync`.
+**5.** Display the result from `proj_perms_sync`. If the result contains a deny rules warning (lines starting with "⚠️"), display it prominently at the end of the output.
 
 ## Prerequisites
 

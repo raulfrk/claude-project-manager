@@ -20,6 +20,8 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.perms_grant import (
+    _collect_sandbox_write_paths,
+    _compute_setup_paths,
     collect_paths,
     revoke_all_permissions,
     setup_permissions,
@@ -691,6 +693,144 @@ class TestArchiveRevokesPermissions:
         assert "Archived" in result
         # No "Revoked" since there were no permissions to revoke
         assert _read_allow(settings_path) == []
+
+
+# ── T19: Root-aware _compute_setup_paths ─────────────────────────────────────
+
+
+class TestComputeSetupPathsRootAware:
+    def test_compute_setup_paths_uses_projects_root(self) -> None:
+        """When projects_root is set, returns root instead of per-repo paths."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            RepoEntry(label="lib", path="/home/user/projects/repo-b"),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = "/home/user/projects"
+        cfg.tracking_dir = ""
+
+        paths = _compute_setup_paths(meta, cfg)
+
+        assert "/home/user/projects" in paths
+        # Per-repo paths should NOT appear when root is set
+        assert "/home/user/projects/repo-a" not in paths
+        assert "/home/user/projects/repo-b" not in paths
+
+    def test_compute_setup_paths_tracking_root_containment(self) -> None:
+        """tracking_root under projects_root is skipped (containment check)."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = "/home/user/projects"
+        cfg.permissions.tracking_root = "/home/user/projects/tracking"
+
+        paths = _compute_setup_paths(meta, cfg)
+
+        assert "/home/user/projects" in paths
+        # tracking_root is under projects_root, should be skipped
+        assert "/home/user/projects/tracking" not in paths
+
+    def test_compute_setup_paths_archive_containment(self) -> None:
+        """archive_dest under projects_root is skipped (containment check)."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = "/home/user/projects"
+        cfg.tracking_dir = ""
+
+        paths = _compute_setup_paths(
+            meta, cfg, archive_destination="/home/user/projects/archived",
+        )
+
+        assert "/home/user/projects" in paths
+        # archive_dest is under projects_root, should be skipped
+        assert "/home/user/projects/archived" not in paths
+
+    def test_compute_setup_paths_tracking_root_separate(self) -> None:
+        """tracking_root outside projects_root is included."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = "/home/user/projects"
+        cfg.permissions.tracking_root = "/home/user/tracking"
+
+        paths = _compute_setup_paths(meta, cfg)
+
+        assert "/home/user/projects" in paths
+        assert "/home/user/tracking" in paths
+
+
+# ── T20: Backward compatibility (no roots fallback) ─────────────────────────
+
+
+class TestComputeSetupPathsBackwardCompat:
+    def test_compute_setup_paths_no_roots_fallback(self) -> None:
+        """When projects_root=None, uses per-repo paths (legacy behavior)."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = None
+        cfg.permissions.tracking_root = None
+        cfg.tracking_dir = "/tmp/tracking"
+
+        paths = _compute_setup_paths(meta, cfg)
+
+        # Writable repo included, reference repo excluded
+        assert "/home/user/proj" in paths
+        assert "/home/user/docs" not in paths
+        # tracking_dir used as fallback
+        assert "/tmp/tracking" in paths
+
+    def test_collect_sandbox_write_paths_no_roots_fallback(self) -> None:
+        """When projects_root=None, _collect_sandbox_write_paths uses per-repo paths (legacy)."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/proj"),
+            RepoEntry(label="docs", path="/home/user/docs", reference=True),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = None
+        cfg.permissions.tracking_root = None
+        cfg.tracking_dir = "/tmp/tracking"
+
+        paths = _collect_sandbox_write_paths(meta, cfg)
+
+        # Writable repo included, reference repo excluded
+        assert "/home/user/proj" in paths
+        assert "/home/user/docs" not in paths
+        # tracking_dir used as fallback
+        assert "/tmp/tracking" in paths
+
+
+# ── T22: User custom sandbox paths (root mode exclusion) ────────────────────
+
+
+class TestComputeSetupPathsUserPaths:
+    def test_compute_setup_paths_does_not_include_user_paths(self) -> None:
+        """Root-mode only returns roots, not per-repo paths -- user custom paths are separate."""
+        meta = _make_meta(repos=[
+            RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            RepoEntry(label="lib", path="/home/user/projects/repo-b"),
+            RepoEntry(label="extra", path="/home/user/other/repo-c"),
+        ])
+        cfg = _make_cfg()
+        cfg.permissions.projects_root = "/home/user/projects"
+        cfg.permissions.tracking_root = None
+        cfg.tracking_dir = ""
+
+        paths = _compute_setup_paths(meta, cfg)
+
+        # Only root is included, not individual repo paths
+        assert paths == ["/home/user/projects"]
+        # Per-repo paths are NOT present
+        assert "/home/user/projects/repo-a" not in paths
+        assert "/home/user/projects/repo-b" not in paths
+        # Repos outside projects_root are also NOT present (root mode replaces per-repo)
+        assert "/home/user/other/repo-c" not in paths
 
 
 # ── Fixture ───────────────────────────────────────────────────────────────────

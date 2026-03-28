@@ -46,10 +46,17 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
 def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     """Derive the paths expected in sandbox.filesystem.allowWrite."""
     paths: set[str] = set()
-    for repo in meta.repos:
-        if not repo.reference:
-            paths.add(repo.path.rstrip("/"))
-    if cfg.tracking_dir:
+    if cfg.permissions.projects_root:
+        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
+    else:
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    if cfg.permissions.tracking_root:
+        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
+        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
+            paths.add(tracking)
+    elif cfg.tracking_dir:
         paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
     return paths
 
@@ -57,10 +64,17 @@ def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[st
 def _derive_expected_additional_dirs(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     """Derive the paths expected in permissions.additionalDirectories."""
     paths: set[str] = set()
-    for repo in meta.repos:
-        if not repo.reference:
-            paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    if cfg.tracking_dir:
+    if cfg.permissions.projects_root:
+        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
+    else:
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
+    if cfg.permissions.tracking_root:
+        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
+        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
+            paths.add(tracking)
+    elif cfg.tracking_dir:
         paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
     return paths
 
@@ -83,6 +97,7 @@ def run_sync(
     actual_rules: set[str],
     actual_sandbox_paths: set[str],
     actual_additional_dirs: set[str] | None = None,
+    actual_deny_rules: list[str] | None = None,
     sandbox_mode: bool,
     apply: bool = False,
     batch_setup_fn: Callable[..., str] | None = None,
@@ -104,8 +119,16 @@ def run_sync(
 
     target_name = "settings.local.json" if sandbox_mode else "settings.json"
 
+    # Check deny rules presence (v4 mode = projects_root is set)
+    deny_warning = ""
+    if cfg.permissions.projects_root and not actual_deny_rules:
+        deny_warning = "\n⚠️ No deny rules found. Run `/proj:migrate-sandbox` to install default deny rules."
+
     if not missing and not missing_sandbox_paths and not missing_additional_dirs:
-        return f"✅ {target_name} is in sync — all expected rules are present."
+        msg = f"✅ {target_name} is in sync — all expected rules are present."
+        if deny_warning:
+            msg += deny_warning
+        return msg
 
     # Group by type (only MCP rules expected in permissions.allow now)
     missing_mcp = sorted(r for r in missing if r.startswith("mcp__"))
@@ -122,7 +145,10 @@ def run_sync(
         )
         total = sum(counts.values())
         if total == 0 and not missing_sandbox_paths and not missing_additional_dirs:
-            return f"✅ {target_name} is in sync — all expected rules are present."
+            msg = f"✅ {target_name} is in sync — all expected rules are present."
+            if deny_warning:
+                msg += deny_warning
+            return msg
         parts: list[str] = []
         if counts["sandbox_paths"]:
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
@@ -131,7 +157,10 @@ def run_sync(
         if counts.get("additional_directories"):
             parts.append(f"{counts['additional_directories']} additional dir(s)")
         applied_total = total
-        return f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
+        msg = f"✅ Applied missing rules — added {applied_total} rule(s): {', '.join(parts)}."
+        if deny_warning:
+            msg += deny_warning
+        return msg
 
     lines = [f"❌ Missing rules in {target_name}:\n"]
     if missing_mcp:
@@ -150,6 +179,8 @@ def run_sync(
             "to add MCP rules individually."
         )
     lines.append(hint)
+    if deny_warning:
+        lines.append(deny_warning)
     return "\n".join(lines)
 
 
@@ -173,6 +204,7 @@ def register(app: FastMCP) -> None:
         actual_rules: list[str] | None = None,
         actual_sandbox_paths: list[str] | None = None,
         actual_additional_dirs: list[str] | None = None,
+        actual_deny_rules: list[str] | None = None,
         sandbox_mode: bool = False,
     ) -> str:
         if actual_rules is None:
@@ -191,6 +223,7 @@ def register(app: FastMCP) -> None:
             actual_rules=set(actual_rules),
             actual_sandbox_paths=set(actual_sandbox_paths or []),
             actual_additional_dirs=set(actual_additional_dirs) if actual_additional_dirs is not None else None,
+            actual_deny_rules=actual_deny_rules,
             sandbox_mode=sandbox_mode,
             apply=apply,
         )
