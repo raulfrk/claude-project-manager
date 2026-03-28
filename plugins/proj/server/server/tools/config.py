@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import Priority
-from server.lib.models import ProjConfig, ResilienceConfig, SmartGateConfig, TeamModeConfig
+from server.lib.models import ProjConfig, QualityLevel, ResilienceConfig, SmartGateConfig, TeamModeConfig
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -181,7 +181,7 @@ def register(app: FastMCP) -> None:
             failure_threshold=resilience_failure_threshold,
             recovery_timeout=resilience_recovery_timeout,
         )
-        _valid_quality = ("fast", "balanced", "careful", "paranoid")
+        _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level not in _valid_quality:
             return (
                 f"Invalid quality_level '{quality_level}'. "
@@ -234,6 +234,7 @@ def register(app: FastMCP) -> None:
         smart_gate_enabled: bool | None = None,
         smart_gate_auto_execute_threshold: int | None = None,
         smart_gate_light_review_threshold: int | None = None,
+        smart_gate_critical_path_patterns: list[str] | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -295,6 +296,7 @@ def register(app: FastMCP) -> None:
                 return "Invalid resilience_recovery_timeout: must be a positive integer."
 
         _valid_quality = ("fast", "balanced", "careful", "paranoid")
+        _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level is not None and quality_level not in _valid_quality:
             return (
                 f"Invalid quality_level '{quality_level}'. "
@@ -382,5 +384,7 @@ def register(app: FastMCP) -> None:
             cfg.smart_gate.auto_execute_threshold = smart_gate_auto_execute_threshold
         if smart_gate_light_review_threshold is not None:
             cfg.smart_gate.light_review_threshold = smart_gate_light_review_threshold
+        if smart_gate_critical_path_patterns is not None:
+            cfg.smart_gate.critical_path_patterns = smart_gate_critical_path_patterns
         storage.save_config(cfg)
         return "Configuration updated."

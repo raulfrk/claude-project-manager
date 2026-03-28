@@ -315,7 +315,7 @@ Compute complexity score (0-14) from 7 dimensions:
 **Evaluation order:**
 1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
 2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
-3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+3. Critical-path file guard (LAST, floor): if plan touches critical-path files (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW.
 
 **Gate routing:**
 - AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.
@@ -450,7 +450,7 @@ Compute complexity score (0-14) from 7 dimensions:
 **Evaluation order:**
 1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
 2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
-3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+3. Critical-path file guard (LAST, floor): if plan touches critical-path files (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW.
 
 **Gate routing:**
 - AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.
@@ -732,7 +732,7 @@ Compute complexity score (0-14) from 7 dimensions:
 **Evaluation order:**
 1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
 2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
-3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+3. Critical-path file guard (LAST, floor): if plan touches critical-path files (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW.
 
 **Gate routing:**
 - AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.

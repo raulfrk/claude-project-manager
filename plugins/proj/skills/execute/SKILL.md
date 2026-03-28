@@ -95,7 +95,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
    **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `**/migrations/**`, `**/auth/**`, `**/*.lock`, `**/schema*`) → minimum LIGHT REVIEW, even if score is 0-3.
+   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
 
    Gate routing:
    - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
@@ -232,7 +232,7 @@ For each todo in the range:
 
    **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `**/migrations/**`, `**/auth/**`, `**/*.lock`, `**/schema*`) → minimum LIGHT REVIEW, even if score is 0-3.
+   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
 
    Gate routing:
    - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
@@ -398,7 +398,7 @@ For each todo in the range:
 
    **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `**/migrations/**`, `**/auth/**`, `**/*.lock`, `**/schema*`) → minimum LIGHT REVIEW, even if score is 0-3.
+   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
 
    Gate routing:
    - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
@@ -517,7 +517,7 @@ Group todos into dependency batches (topological order). Todos within the same b
 
    **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `**/migrations/**`, `**/auth/**`, `**/*.lock`, `**/schema*`) → minimum LIGHT REVIEW, even if score is 0-3.
+   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
 
    Gate routing:
    - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
@@ -681,7 +681,7 @@ Execute in topological order (respect blocked_by chains). For each todo:
 
    **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `**/migrations/**`, `**/auth/**`, `**/*.lock`, `**/schema*`) → minimum LIGHT REVIEW, even if score is 0-3.
+   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
 
    Gate routing:
    - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
