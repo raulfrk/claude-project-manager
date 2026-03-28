@@ -7,10 +7,10 @@ argument-hint: "[--dry-run]"
 
 Migrate to sandbox-primary permissions: $ARGUMENTS
 
-**1. Parse arguments**
+**1.** Parse arguments
 - `dry_run` = true if `--dry-run` is in $ARGUMENTS
 
-**2. Pre-flight check**
+**2.** Pre-flight check
 
 Call `mcp__perms__perms_list` with `scope="user"` and `target="auto"` to get current rule counts.
 
@@ -24,7 +24,7 @@ Display:
 
 If `dry_run`: display what WOULD change and stop.
 
-**3. Backup**
+**3.** Backup
 
 Call `mcp__perms__perms_backup`. Display the backup timestamp.
 
@@ -33,7 +33,7 @@ Backed up settings files with timestamp <timestamp>.
 To restore: call perms_restore with this timestamp.
 ```
 
-**4. Configure sandbox**
+**4.** Configure sandbox
 
 Call `mcp__perms__perms_sandbox_init`. This will:
 - Enable sandbox if not already enabled
@@ -44,13 +44,13 @@ Call `mcp__perms__perms_sandbox_init`. This will:
 
 Display the result.
 
-**5. Clean up stale rules**
+**5.** Clean up stale rules
 
 Call `mcp__perms__perms_cleanup_stale`. This strips all remaining Read/Edit/Bash rules from BOTH settings files, keeping only MCP and WebFetch rules.
 
 Display before/after counts.
 
-**6. Verify**
+**6.** Verify
 
 Call `mcp__perms__perms_list` again to show the new state.
 
@@ -64,7 +64,7 @@ Display:
 To rollback: /proj:migrate-sandbox --restore <timestamp>
 ```
 
-**7. Rollback** (if $ARGUMENTS contains `--restore <timestamp>`)
+**7.** Rollback (if $ARGUMENTS contains `--restore <timestamp>`)
 
 Call `mcp__perms__perms_restore` with the provided timestamp.
 Display: "Restored settings from backup."

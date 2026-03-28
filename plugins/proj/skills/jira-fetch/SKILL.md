@@ -7,9 +7,7 @@ argument-hint: "[--user <username>] [--projects <key1,key2>]"
 
 Fetch Jira issues for a user. This is a sub-skill used by `/proj:jira-sync`.
 
-## Steps
-
-### 1. Read config
+**1.** Read config
 
 - Call `mcp__proj__config_load` -- read `jira.*` config values. Note `jira.enabled`, `jira.default_user`.
 - If `jira.enabled` is false or not set: stop with "Jira sync not enabled. Set `jira.enabled: true` in `~/.claude/proj.yaml`."
@@ -23,17 +21,16 @@ If the Jira MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Jira MCP server 'jira' is not available. Verify the server is running and that the
-> MCP server is registered with the name `jira`."
+> "Jira MCP server not available. Check your MCP server configuration and restart it."
 
 Do not proceed with any further steps.
 
-### 2. Fetch issues
+**2.** Fetch issues
 
 - Call `mcp__jira__jira_get_user_issues` with the resolved username and project keys (if provided).
 - If no issues are returned: "No open issues found." Stop.
 
-### 3. Display summary
+**3.** Display summary
 
 Show a summary of fetched issues:
 

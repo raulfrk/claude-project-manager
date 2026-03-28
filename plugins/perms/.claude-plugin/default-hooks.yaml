@@ -19,6 +19,15 @@ hooks:
     blocking: true
     condition: "perms_integration"
 
+  - id: verify-perms-setup
+    trigger_tool: proj_setup_permissions
+    target_tool: perms_check
+    server: perms
+    param_mapping:
+      scope: "user"
+    verification: true
+    condition: "perms_integration"
+
   - id: perms-on-proj-add-repo
     trigger_tool: proj_add_repo
     target_tool: perms_batch_setup

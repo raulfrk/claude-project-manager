@@ -23,5 +23,7 @@ Removed hook <hook_id>.
 
 **On not found**, display:
 ```
-Hook <hook_id> not found — no changes made.
+Hook '<hook_id>' not found. Run /proj:hooks-list to see available hooks.
 ```
+
+Suggested next: (1) /proj:hooks-list — see remaining hooks  (2) /proj:hooks-debug — check for failures

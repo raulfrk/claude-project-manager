@@ -7,14 +7,14 @@ argument-hint: "<todo-id> [--no-interactive]"
 
 Define and research todo: $ARGUMENTS
 
-**1. Parse arguments**
+**1.** Parse arguments
 
 Extract from $ARGUMENTS:
 - `todo_id` = the first non-flag token (the todo ID)
 - `no_interactive` = `true` if `--no-interactive` is present in $ARGUMENTS
 
 If `todo_id` is empty or not present, stop and output:
-"Todo ID required. Usage: /proj:define <todo-id>"
+"Todo ID required. Usage: `/proj:define <todo-id>`"
 
 If `no_interactive` is true, skip directly to the **Non-interactive path** below.
 
@@ -22,16 +22,16 @@ If `no_interactive` is true, skip directly to the **Non-interactive path** below
 
 ## Interactive path
 
-**2. Load context**
+**2.** Load context
 
 Call `mcp__proj__proj_get_todo_context` with the todo ID.
 
 If the result indicates the todo was not found (null todo or error), stop and output:
-"Todo <id> not found."
+"Todo <id> not found. Run `/proj:todo list` to see available todos."
 
 Review existing requirements, research, and notes. Store them for later reference.
 
-**3. Free-form writing**
+**3.** Free-form writing
 
 If existing requirements or research are present, display them under a "Previous context" heading so the user can see what already exists.
 
@@ -40,7 +40,7 @@ Prompt the user:
 
 Record the user's response as the freeform input.
 
-**4. Gap analysis**
+**4.** Gap analysis
 
 Analyze the freeform input (plus any previous context) for:
 - Vague or untestable language (e.g., "should be fast", "handle errors properly")
@@ -56,7 +56,7 @@ Produce a structured gap list. Classify each gap as:
 
 Present the gap list to the user before proceeding.
 
-**5. Probing Q&A**
+**5.** Probing Q&A
 
 Drive questions from the gap analysis — do NOT use predefined category lists. Rules:
 - Address CRITICAL gaps first, then MINOR gaps if the user is willing
@@ -73,7 +73,7 @@ When all CRITICAL gaps are resolved, ask:
 
 If the user picks 2, continue with MINOR gaps. If 3, continue open-ended Q&A.
 
-**6. Write requirements and research**
+**6.** Write requirements and research
 
 Write `requirements.md`:
 
@@ -132,7 +132,7 @@ Write `research.md`:
 Call `mcp__proj__content_set_requirements` with the requirements content.
 Call `mcp__proj__content_set_research` with the research content.
 
-**7. Quality gate loop (hard block)**
+**7.** Quality gate loop (hard block)
 
 Validate the written requirements against ALL of the following criteria:
 - [ ] Every acceptance criterion is testable (specific, measurable)
@@ -156,13 +156,13 @@ After 3 consecutive gate iterations without passing, suggest Restart:
 
 Do NOT proceed past this step until the gate passes.
 
-**8. CLAUDE.md update**
+**8.** CLAUDE.md update
 
 Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules, style conventions, standards, or implementation hints discovered during this define session.
 
 Only write rules that apply broadly to the project. Do NOT write todo-specific details — those belong in requirements.md.
 
-**9. Git tracking flush**
+**9.** Git tracking flush
 
 Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
@@ -180,7 +180,7 @@ Suggested next: (1) /proj:decompose <id> — break into subtasks  (2) /proj:exec
 Call `mcp__proj__proj_get_todo_context` with the todo ID.
 
 If the result indicates the todo was not found (null todo or error), stop and output:
-"Todo <id> not found."
+"Todo <id> not found. Run `/proj:todo list` to see available todos."
 
 **NI-2. Explore codebase**
 

@@ -15,6 +15,7 @@ class TestHook:
         assert h.blocking is False
         assert h.condition is None
         assert h.source is None
+        assert h.verification is False
 
     def test_to_dict_minimal(self):
         h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
@@ -68,6 +69,7 @@ class TestHook:
         assert restored.blocking == original.blocking
         assert restored.condition == original.condition
         assert restored.source == original.source
+        assert restored.verification == original.verification
 
     def test_from_dict_missing_fields_defaults(self):
         h = Hook.from_dict({})
@@ -79,6 +81,7 @@ class TestHook:
         assert h.blocking is False
         assert h.condition is None
         assert h.source is None
+        assert h.verification is False
 
     def test_from_dict_coerces_param_mapping_values_to_str(self):
         h = Hook.from_dict({
@@ -105,6 +108,86 @@ class TestHook:
         assert sample_hook.matches("proj_init", "perms_setup", "other") is False
         assert sample_hook.matches("proj_init", "other", "perms") is False
         assert sample_hook.matches("other", "perms_setup", "perms") is False
+
+    def test_verification_forces_blocking_true(self):
+        h = Hook(
+            id="hook-v01",
+            trigger_tool="todo_complete",
+            target_tool="todoist_verify",
+            server="todoist",
+            blocking=False,
+            verification=True,
+        )
+        assert h.verification is True
+        assert h.blocking is True
+
+    def test_verification_false_does_not_change_blocking(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            blocking=False,
+            verification=False,
+        )
+        assert h.verification is False
+        assert h.blocking is False
+
+    def test_verification_false_preserves_explicit_blocking(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            blocking=True,
+            verification=False,
+        )
+        assert h.verification is False
+        assert h.blocking is True
+
+    def test_to_dict_includes_verification_when_true(self):
+        h = Hook(
+            id="hook-v01",
+            trigger_tool="t",
+            target_tool="u",
+            server="sv",
+            verification=True,
+        )
+        d = h.to_dict()
+        assert d["verification"] is True
+        assert d["blocking"] is True
+
+    def test_to_dict_omits_verification_when_false(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        d = h.to_dict()
+        assert "verification" not in d
+
+    def test_from_dict_verification_true_round_trip(self):
+        original = Hook(
+            id="hook-v01",
+            trigger_tool="todo_complete",
+            target_tool="todoist_verify",
+            server="todoist",
+            verification=True,
+        )
+        d = original.to_dict()
+        restored = Hook.from_dict(d)
+        assert restored.verification is True
+        assert restored.blocking is True
+
+    def test_from_dict_verification_false_round_trip(self):
+        original = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            blocking=False,
+            verification=False,
+        )
+        d = original.to_dict()
+        restored = Hook.from_dict(d)
+        assert restored.verification is False
+        assert restored.blocking is False
 
 
 # ── HookRegistry dataclass ───────────────────────────────────────────────────

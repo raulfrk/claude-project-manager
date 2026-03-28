@@ -67,3 +67,12 @@ hooks:
       project_id: projectId
     blocking: false
     condition: "todoist.enabled and project.todoist_project_id"
+
+  - id: verify-todoist-complete
+    trigger_tool: todo_complete
+    target_tool: todoist_verify_complete
+    server: todoist
+    param_mapping:
+      todoist_task_id: "${result.todoist_task_id}"
+    verification: true
+    condition: "todoist.enabled and todoist.auto_sync"

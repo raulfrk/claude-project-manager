@@ -7,14 +7,14 @@ argument-hint: "[project-name]"
 
 Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
-1. Load config with `mcp__proj__config_load` to check settings.
+**1.** Load config with `mcp__proj__config_load` to check settings.
 
-2. Determine project name:
+**2.** Determine project name:
    - If $ARGUMENTS is non-empty, use that as the name
    - Otherwise, **ask**: "What is the project name?" (do not assume from cwd)
    - Confirm: "Project name: <name>?"
 
-3. Collect project directories (multi-directory loop):
+**3.** Collect project directories (multi-directory loop):
 
    Initialize: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred worktree creations), `_explored_dirs = set()` (labels of directories that had repo mapping + CLAUDE.md written).
 
@@ -43,7 +43,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
       - Ask for path (show default). Ask for label (default: "code" for first dir, require explicit for subsequent).
 
    d. Validate:
-      - Label must be unique within `_dirs`. If duplicate: "Label '<label>' already used. Choose a different label."
+      - Label must be unique within `_dirs`. If duplicate: "Label '<label>' already used. Choose a different label or run `/proj:remove-repo` to free it."
       - Path must not be empty.
 
    e. Add `{path: <resolved_path>, label: <label>}` to `_dirs`.
@@ -58,7 +58,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
    At least one directory is required. If `_dirs` is empty after the loop, error.
 
-3b. **Repo mapping** (for each directory that exists and has files):
+**3a.** Repo mapping (for each directory that exists and has files):
    - For each dir in `_dirs`:
      - Check: `Bash: ls -A <path> | head -1`
      - If output is **non-empty** (directory has existing content):
@@ -73,7 +73,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
        - If **no**: continue normally.
      - If output is **empty**: skip.
 
-4. Ask all metadata in one prompt:
+**4.** Ask all metadata in one prompt:
    ```
    Project details (all optional, press Enter to use defaults):
    - Description:
@@ -81,20 +81,20 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Git integration? [yes]:
    ```
 
-4b. **Zoxide**:
+**4a.** Zoxide:
    - If `zoxide_integration: True` in config: set `_zoxide = true` (inherits global, no question needed).
    - If `zoxide_integration: False` in config: ask "Enable zoxide for this project? (boosts project dirs for faster cd) [no]"
      - If yes: set `_zoxide = true`
      - If no: set `_zoxide = null` (use global default)
 
-5. Before calling `proj_init`, filter `_dirs` to exclude any entries whose path matches a `_worktree_entries` path. Store the excluded entries separately as `_deferred_dirs` — they will be registered via `proj_add_repo` after worktree creation in step 8.
+**5.** Before calling `proj_init`, filter `_dirs` to exclude any entries whose path matches a `_worktree_entries` path. Store the excluded entries separately as `_deferred_dirs` — they will be registered via `proj_add_repo` after worktree creation in step 8.
 
    Call `mcp__proj__proj_init` with name, dirs=<filtered _dirs (without deferred worktree entries)>, description, tags, git_enabled, zoxide_integration=_zoxide.
    - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
    Call `mcp__proj__proj_load_session` to set as active for this session.
 
-6. **Permissions** (if `perms_integration: true` in config and project's auto_grant != false):
+**6.** Permissions (if `perms_integration: true` in config and project's auto_grant != false):
    - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"
    - Ask: "Auto-allow plugin MCP tools for this project? [yes/no/use global: yes]"
    - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
@@ -105,7 +105,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - Store the decisions in `mcp__proj__proj_set_permissions`
    - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Install the perms plugin when available." and continue.
 
-7. **CLAUDE.md** — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
+**7.** CLAUDE.md — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
    Ask: "Create a CLAUDE.md in '<label>' (`<path>`) to help Claude understand the project context? [yes]"
    - If yes: call `mcp__proj__claudemd_write` with initial content:
      ```markdown
@@ -121,7 +121,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      None yet. Use /proj:todo add to add todos.
      ```
 
-8. **Worktrees** — executes deferred worktree creations from step 3:
+**8.** Worktrees — executes deferred worktree creations from step 3:
 
    - If `_worktree_entries` is empty: skip this step silently.
 
@@ -137,7 +137,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
         - If **yes**: `mkdir -p <path>`, note the fallback.
         - If **no**: note the failure and continue.
 
-9. **Git tracking overrides** (if `git_tracking.enabled: true` in config):
+**9.** Git tracking overrides (if `git_tracking.enabled: true` in config):
    Ask:
    ```
    Per-project git tracking overrides (Enter to use global defaults):
@@ -148,13 +148,13 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - If any answer is not "use global" / empty, call `mcp__proj__proj_update_meta` with the corresponding `git_tracking_enabled`, `git_tracking_github_enabled`, or `git_tracking_github_repo_format` values.
    - If all answers are empty/default: skip (None values inherit global defaults).
 
-10. Show summary of what was created. List all directories:
+**10.** Show summary of what was created. List all directories:
     ```
     Directories:
       - <label>: <path> (new directory | existing repo | worktree of <repo>, branch: <branch>)
       ...
     ```
 
-11. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
+**11.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
 
-💡 Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview
+Suggested next: (1) /proj:todo add — add your first task  (2) /proj:status — see the project overview

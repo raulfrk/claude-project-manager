@@ -82,6 +82,94 @@ def _fire_background(hook: Hook, source: dict[str, Any]) -> None:
     t.start()
 
 
+# ── Verification helpers ─────────────────────────────────────────────────────
+
+
+def _parse_verification_response(raw_result: str | None) -> tuple[str, str]:
+    """Parse a convention-based verification response.
+
+    Expected format: ``{"status": "pass|fail", "details": "..."}``
+
+    Returns ``(status, details)``.  Missing ``status`` field → fail.
+    """
+    if raw_result is None:
+        return "fail", "no response"
+    try:
+        data = json.loads(raw_result)
+    except (json.JSONDecodeError, TypeError):
+        return "fail", str(raw_result)
+    if isinstance(data, dict) and "status" in data:
+        return str(data["status"]), str(data.get("details", ""))
+    # Malformed — missing status field
+    return "fail", str(raw_result)
+
+
+async def _fire_verification(
+    hooks: list[Hook],
+    enriched_source: dict[str, Any],
+    trigger_tool: str,
+    raw_source_result: str,
+) -> list[dict[str, Any]]:
+    """Fire verification hooks (Phase 2).  All are blocking.
+
+    Each result is parsed for convention-based ``{"status", "details"}``
+    and stored via ``storage.store_verification_result()``.
+
+    Verification hooks do NOT increment depth (cannot trigger other hooks).
+    """
+    results: list[dict[str, Any]] = []
+
+    # Filter by condition
+    eligible = [h for h in hooks if evaluate_condition(h.condition)]
+
+    if not eligible:
+        return results
+
+    fire_results = await asyncio.gather(
+        *[_fire_single(h, enriched_source) for h in eligible],
+        return_exceptions=True,
+    )
+
+    for hook, result in zip(eligible, fire_results):
+        if isinstance(result, BaseException):
+            status, details = "fail", f"Exception: {result}"
+            storage.log_failure(
+                hook_id=hook.id,
+                trigger_tool=hook.trigger_tool,
+                target_tool=hook.target_tool,
+                server=hook.server,
+                error=details,
+                source_result=raw_source_result,
+            )
+        elif not result.ok:
+            err_msg = result.error or f"HTTP {result.status_code}"
+            status, details = "fail", err_msg
+            storage.log_failure(
+                hook_id=hook.id,
+                trigger_tool=hook.trigger_tool,
+                target_tool=hook.target_tool,
+                server=hook.server,
+                error=err_msg,
+                source_result=raw_source_result,
+            )
+        else:
+            status, details = _parse_verification_response(result.result)
+
+        storage.store_verification_result(
+            trigger_tool=trigger_tool,
+            hook_id=hook.id,
+            status=status,
+            details=details,
+        )
+        results.append({
+            "hook_id": hook.id,
+            "status": status,
+            "details": details,
+        })
+
+    return results
+
+
 # ── Tool function ────────────────────────────────────────────────────────────
 
 
@@ -136,13 +224,17 @@ async def hooks_fire(
     if not matched:
         return json.dumps({"hooks_fired": 0, "skipped": 0, "errors": [], "depth": _depth})
 
+    # Split into primary and verification hooks
+    primary_matched = [h for h in matched if not h.verification]
+    verification_matched = [h for h in matched if h.verification]
+
     fired = 0
     skipped = 0
     errors: list[dict[str, str]] = []
     blocking_hooks: list[Hook] = []
     background_hooks: list[Hook] = []
 
-    for hook in matched:
+    for hook in primary_matched:
         if not evaluate_condition(hook.condition):
             skipped += 1
             continue
@@ -151,12 +243,12 @@ async def hooks_fire(
         else:
             background_hooks.append(hook)
 
-    # Fire-and-forget hooks
+    # Phase 1: Fire-and-forget hooks
     for hook in background_hooks:
         _fire_background(hook, source)
         fired += 1
 
-    # Blocking hooks — await all concurrently
+    # Phase 1: Blocking hooks — await all concurrently
     blocking_results: list[dict[str, str | None]] = []
     if blocking_hooks:
         results = await asyncio.gather(
@@ -190,6 +282,19 @@ async def hooks_fire(
             else:
                 blocking_results.append({"hook_id": hook.id, "result": result.result})
 
+    # Phase 2: Fire verification hooks with enriched source_result
+    verification_results: list[dict[str, Any]] = []
+    if verification_matched:
+        # Build hook_results dict from Phase 1 blocking results
+        hook_results: dict[str, Any] = {}
+        for br in blocking_results:
+            hook_results[br["hook_id"]] = br["result"]  # type: ignore[index]
+
+        enriched = {**source, "hook_results": hook_results}
+        verification_results = await _fire_verification(
+            verification_matched, enriched, trigger_tool, source_result,
+        )
+
     summary: dict[str, Any] = {
         "hooks_fired": fired,
         "skipped": skipped,
@@ -198,6 +303,8 @@ async def hooks_fire(
         "depth": _depth,
         "max_depth": max_depth,
     }
+    if verification_results:
+        summary["verification"] = verification_results
     return json.dumps(summary, indent=2)
 
 

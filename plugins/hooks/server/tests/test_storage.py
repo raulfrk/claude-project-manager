@@ -11,9 +11,11 @@ from server.lib.storage import (
     clear_failures,
     load,
     load_failures,
+    load_verification_results,
     log_failure,
     save,
     save_failures,
+    store_verification_result,
 )
 
 
@@ -228,3 +230,119 @@ class TestFailureAccessors:
         save_failures(entries, failures_yaml)
         clear_failures(failures_yaml)
         assert load_failures(failures_yaml) == []
+
+
+# ── Verification results storage ─────────────────────────────────────────────
+
+
+class TestStoreVerificationResult:
+    def test_creates_file(self, verifications_yaml: Path):
+        result = store_verification_result(
+            "todo_complete",
+            "verify-todoist-complete",
+            "pass",
+            "Todoist task 12345 confirmed complete",
+            path=verifications_yaml,
+        )
+        assert result == verifications_yaml
+        assert verifications_yaml.exists()
+
+    def test_appends_entries(self, verifications_yaml: Path):
+        for i in range(3):
+            store_verification_result(
+                "todo_complete",
+                f"verify-{i}",
+                "pass",
+                f"details-{i}",
+                path=verifications_yaml,
+            )
+        entries = load_verification_results(limit=0, path=verifications_yaml)
+        assert len(entries) == 3
+
+    def test_includes_all_fields(self, verifications_yaml: Path):
+        store_verification_result(
+            "todo_complete",
+            "verify-todoist-complete",
+            "fail",
+            "Todoist task 12345 still open",
+            path=verifications_yaml,
+        )
+        entries = load_verification_results(path=verifications_yaml)
+        entry = entries[0]
+        assert "timestamp" in entry
+        assert entry["trigger_tool"] == "todo_complete"
+        assert entry["hook_id"] == "verify-todoist-complete"
+        assert entry["status"] == "fail"
+        assert entry["details"] == "Todoist task 12345 still open"
+
+    def test_rolling_cap_at_500(self, verifications_yaml: Path):
+        """Writing more than 500 entries trims to the cap."""
+        # Pre-fill with 500 entries
+        entries = []
+        for i in range(500):
+            entries.append({
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "trigger_tool": "t",
+                "hook_id": f"v-{i:04d}",
+                "status": "pass",
+                "details": f"details-{i}",
+            })
+        verifications_yaml.write_text(
+            yaml.dump(entries, default_flow_style=False)
+        )
+
+        # Add one more — should trim to 500
+        store_verification_result(
+            "t", "v-new", "pass", "new details", path=verifications_yaml,
+        )
+        result = load_verification_results(limit=0, path=verifications_yaml)
+        assert len(result) == 500
+        # Oldest entry dropped, newest is last
+        assert result[-1]["hook_id"] == "v-new"
+        assert result[0]["hook_id"] == "v-0001"
+
+
+class TestLoadVerificationResults:
+    def test_missing_file(self, verifications_yaml: Path):
+        assert load_verification_results(path=verifications_yaml) == []
+
+    def test_invalid_yaml(self, verifications_yaml: Path):
+        verifications_yaml.write_text("not: a: list: {{{")
+        result = load_verification_results(path=verifications_yaml)
+        assert isinstance(result, list)
+
+    def test_default_limit_50(self, verifications_yaml: Path):
+        entries = []
+        for i in range(80):
+            entries.append({
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "trigger_tool": "t",
+                "hook_id": f"v-{i:03d}",
+                "status": "pass",
+                "details": f"d-{i}",
+            })
+        verifications_yaml.write_text(
+            yaml.dump(entries, default_flow_style=False)
+        )
+        result = load_verification_results(path=verifications_yaml)
+        assert len(result) == 50
+        # Should return the 50 most recent (last 50)
+        assert result[0]["hook_id"] == "v-030"
+        assert result[-1]["hook_id"] == "v-079"
+
+    def test_custom_limit(self, verifications_yaml: Path):
+        for i in range(10):
+            store_verification_result(
+                "t", f"v-{i}", "pass", f"d-{i}", path=verifications_yaml,
+            )
+        result = load_verification_results(limit=3, path=verifications_yaml)
+        assert len(result) == 3
+        assert result[-1]["hook_id"] == "v-9"
+
+    def test_limit_zero_returns_all(self, verifications_yaml: Path):
+        for i in range(5):
+            store_verification_result(
+                "t", f"v-{i}", "pass", f"d-{i}", path=verifications_yaml,
+            )
+        result = load_verification_results(limit=0, path=verifications_yaml)
+        assert len(result) == 5

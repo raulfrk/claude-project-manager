@@ -7,10 +7,8 @@ argument-hint: "[path]"
 
 Remove a git worktree.
 
-1. If $ARGUMENTS provides a path, use it. Otherwise call `mcp__plugin_worktree_worktree__wt_list` and ask which worktree to remove.
-2. Confirm with the user before removing: "Remove worktree at <path>? This cannot be undone."
-3. Call `mcp__plugin_worktree_worktree__wt_remove` with the path. If it fails due to unclean state, ask the user if they want to force-remove.
+**1.** If $ARGUMENTS provides a path, use it. Otherwise call `mcp__plugin_worktree_worktree__wt_list` and ask which worktree to remove.
+**2.** Confirm with the user before removing: "Remove worktree at <path>? This cannot be undone."
+**3.** Call `mcp__plugin_worktree_worktree__wt_remove` with the path. If it fails due to unclean state, ask the user if they want to force-remove.
 
-💡 Suggested next:
-(1) /worktree:list — verify the worktree was removed
-(2) /worktree:prune — clean up any stale metadata
+Suggested next: (1) /worktree:list — verify the worktree was removed  (2) /worktree:prune — clean up any stale metadata

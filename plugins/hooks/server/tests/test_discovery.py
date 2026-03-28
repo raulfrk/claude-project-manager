@@ -117,6 +117,20 @@ class TestLoadHooksFromFile:
         ])
         assert len(load_hooks_from_file(path)) == 2
 
+    def test_preserves_verification_field(self, tmp_path: Path):
+        """The verification field in YAML entries is preserved in the raw dict."""
+        path = _setup_plugin(tmp_path, "todoist", hooks=[
+            {
+                "trigger_tool": "todo_complete",
+                "target_tool": "todoist_verify",
+                "server": "todoist",
+                "verification": True,
+            },
+        ])
+        result = load_hooks_from_file(path)
+        assert len(result) == 1
+        assert result[0]["verification"] is True
+
 
 # ── discover_and_register ───────────────────────────────────────────────────
 
@@ -212,6 +226,66 @@ class TestDiscoverAndRegister:
         assert len(registry.hooks) == 2
         assert registry.hooks[0].id == "hook-001"
         assert registry.hooks[1].id == "hook-002"
+
+    def test_registers_verification_hook(self, tmp_path: Path):
+        """Hooks with verification: true are registered with verification=True and blocking forced."""
+        _setup_plugin(tmp_path, "todoist", hooks=[
+            {
+                "trigger_tool": "todo_complete",
+                "target_tool": "todoist_verify_complete",
+                "server": "todoist",
+                "param_mapping": {"todoist_task_id": "${result.todoist_task_id}"},
+                "verification": True,
+                "condition": "todoist.enabled and todoist.auto_sync",
+            },
+        ])
+        registry = HookRegistry()
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"todoist": 1}
+        assert len(registry.hooks) == 1
+        hook = registry.hooks[0]
+        assert hook.verification is True
+        assert hook.blocking is True  # forced by verification
+        assert hook.condition == "todoist.enabled and todoist.auto_sync"
+        assert hook.source == "auto"
+
+    def test_verification_false_by_default(self, tmp_path: Path):
+        """Hooks without explicit verification field default to verification=False."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "proj_init", "target_tool": "perms_setup", "server": "perms"},
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+        assert registry.hooks[0].verification is False
+
+    def test_mixed_primary_and_verification_hooks(self, tmp_path: Path):
+        """Plugin with both primary and verification hooks registers both correctly."""
+        _setup_plugin(tmp_path, "todoist", hooks=[
+            {
+                "trigger_tool": "todo_complete",
+                "target_tool": "todoist_sync",
+                "server": "todoist",
+                "blocking": True,
+            },
+            {
+                "trigger_tool": "todo_complete",
+                "target_tool": "todoist_verify_complete",
+                "server": "todoist",
+                "verification": True,
+            },
+        ])
+        registry = HookRegistry()
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"todoist": 2}
+        assert len(registry.hooks) == 2
+
+        primary = [h for h in registry.hooks if not h.verification]
+        verification = [h for h in registry.hooks if h.verification]
+        assert len(primary) == 1
+        assert len(verification) == 1
+        assert verification[0].blocking is True
+        assert primary[0].target_tool == "todoist_sync"
+        assert verification[0].target_tool == "todoist_verify_complete"
 
 
 # ── populate_server_urls ─────────────────────────────────────────────────────

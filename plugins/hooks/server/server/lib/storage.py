@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 _HOOKS_FILE = Path.home() / ".claude" / "hooks.yaml"
 _FAILURES_FILE = Path.home() / ".claude" / "hooks-failures.yaml"
+_VERIFICATIONS_FILE = Path.home() / ".claude" / "hooks-verifications.yaml"
 _MAX_FAILURES = 200  # rolling cap — oldest entries are trimmed
+_MAX_VERIFICATIONS = 500  # rolling cap — oldest entries are trimmed
 
 
 def hooks_path() -> Path:
@@ -29,6 +31,11 @@ def hooks_path() -> Path:
 def failures_path() -> Path:
     """Return the path to the hooks-failures.yaml file."""
     return _FAILURES_FILE
+
+
+def verifications_path() -> Path:
+    """Return the path to the hooks-verifications.yaml file."""
+    return _VERIFICATIONS_FILE
 
 
 def load(path: Path | None = None) -> HookRegistry:
@@ -161,3 +168,66 @@ def clear_failures(path: Path | None = None) -> int:
     if count:
         _atomic_write(target, "")
     return count
+
+
+# ── Verification results ─────────────────────────────────────────────────────
+
+
+def _load_verifications(path: Path | None = None) -> list[dict[str, Any]]:
+    """Load existing verification entries from YAML. Returns empty list on any error."""
+    target = path or _VERIFICATIONS_FILE
+    if not target.exists():
+        return []
+    try:
+        with target.open() as f:
+            raw = yaml.safe_load(f)
+        if isinstance(raw, list):
+            return raw  # type: ignore[return-value]
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read %s — starting fresh", target)
+    return []
+
+
+def store_verification_result(
+    trigger_tool: str,
+    hook_id: str,
+    status: str,
+    details: str,
+    *,
+    path: Path | None = None,
+) -> Path:
+    """Append a verification result to ``~/.claude/hooks-verifications.yaml``.
+
+    The file is a YAML list capped at ``_MAX_VERIFICATIONS`` entries (oldest dropped).
+    Returns the path written to.
+    """
+    target = path or _VERIFICATIONS_FILE
+    entries = _load_verifications(target)
+
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "trigger_tool": trigger_tool,
+        "hook_id": hook_id,
+        "status": status,
+        "details": details,
+    }
+    entries.append(entry)
+
+    # Trim to rolling cap
+    if len(entries) > _MAX_VERIFICATIONS:
+        entries = entries[-_MAX_VERIFICATIONS:]
+
+    content = yaml.dump(entries, default_flow_style=False, sort_keys=False)
+    _atomic_write(target, content)
+    return target
+
+
+def load_verification_results(
+    limit: int = 50,
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Load recent verification results. Returns up to *limit* most recent entries."""
+    entries = _load_verifications(path)
+    if limit and len(entries) > limit:
+        return entries[-limit:]
+    return entries

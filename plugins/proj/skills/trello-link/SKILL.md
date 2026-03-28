@@ -9,13 +9,11 @@ Link Trello IDs back to local todos after push operations. This is a sub-skill u
 
 Accepts the creation results produced by `/proj:trello-push`.
 
-## Steps
-
-### 1. Accept creation results
+**1.** Accept creation results
 
 - Receive the creation results JSON (output from trello-push) containing new checklist IDs and item IDs mapped to local todo IDs.
 
-### 2. Link IDs locally
+**2.** Link IDs locally
 
 - Call `mcp__proj__proj_trello_apply` with the link data:
   ```json
@@ -29,11 +27,11 @@ Accepts the creation results produced by `/proj:trello-push`.
 - If a new card was created (from trello-setup), also include `link_trello_card_id` set to the new card ID.
 - **Batch linking**: combine all ID links into a single `proj_trello_apply` call.
 
-### 3. Git tracking flush
+**3.** Git tracking flush
 
 - Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello"`.
 
-### 4. Display results
+**4.** Display results
 
 ```
 Trello sync complete.

@@ -55,6 +55,40 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
   - Tags do NOT propagate to child todos; each todo is independent
   - No effect on Todoist sync
 
+## Verification
+
+`/proj:execute` and `/proj:run` include a verification step (execute step **4a.**) after implementation, before the satisfaction prompt. Three checks run in sequence:
+- **Automated checks**: detect test runner (`pyproject.toml` `[tool.pytest]` → `uv run pytest`, `package.json` `"test"` script → `npm test`) and linter (`[tool.ruff]` → `uv run ruff check`, `.eslintrc*` → `npx eslint`)
+- **Spec validation**: read requirements.md acceptance criteria, compare each against `git diff`, categorize as met/unmet/unverifiable
+- **Diff review**: compare approved plan's "Files to modify" list against `git diff --name-only`, flag planned-but-untouched and unplanned files
+
+**Report format**: single-todo uses inline per-category results; batch/range uses a combined table (`| Todo | Automated | Spec | Diff | Status |`).
+
+**Graceful degradation**: if no test runner, skip automated checks with note; if no requirements.md, skip spec validation; if no plan (`--no-interactive`), skip diff review. Never fail the whole step for missing prerequisites.
+
+- `--no-verify` flag skips the entire verification step (default: verification ON)
+- Reports persisted to `todos/<id>/verification-report.md` in the tracking dir (overwritten each run)
+- In batch/range mode, all todos are verified first, then a combined report is shown before prompting
+- Fix flow: user can choose to spawn agents to fix failures (max 2 retries), then re-verify
+- Full details: `plugins/proj/skills/execute/SKILL.md` (step **4a.**) and `plugins/proj/skills/run/SKILL.md`
+
+## Config Naming Conventions
+
+- **Field names**: `underscore_case` (`tracking_dir`, `auto_sync`, `default_priority`)
+- **Nested section names**: lowercase (`sync.todoist`, `permissions`, `archive`)
+- **Integration flags**: `underscore_case` (`perms_integration`, `worktree_integration`)
+- **MCP tool names**: `mcp__plugin_<name>_<name>__<tool_name>` (internal plugins), `mcp__<server>__<tool-name>` (external MCP servers)
+- **Git flush messages**: `"Action: subject"` pattern (`"Define: {todo-id}"`, `"Sync: Jira"`, `"Save: session"`)
+
 ## Skill Files
 
 New skills go in `plugins/<name>/skills/<skill-name>/SKILL.md`. Add new skills to the README skill reference table and the "Skills by category" list.
+
+### context/agent Frontmatter Criteria
+
+Add `context: fork` and `agent: general-purpose` to skills that can run autonomously without user interaction during execution. Criteria:
+- Skill performs a self-contained operation (list, sync, status display)
+- Skill does NOT require interactive Q&A during execution
+- Skill does NOT need plan mode approval mid-execution
+- Examples: hooks-*, status, todo, todoist-sync, trello-sync, jira-sync, jira-sync-trello
+- Do NOT add to: interactive skills (define, init, load), sub-skills, or skills needing plan approval (execute, run, quick)

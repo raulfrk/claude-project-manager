@@ -13,6 +13,7 @@ from server.lib.discovery import run_discovery
 from server.tools import fire as fire_tools
 from server.tools import recovery as recovery_tools
 from server.tools import registry as registry_tools
+from server.tools import verify as verify_tools
 
 logger = logging.getLogger("hooks")
 
@@ -20,6 +21,7 @@ mcp = FastMCP("hooks")
 registry_tools.register(mcp)
 fire_tools.register(mcp)
 recovery_tools.register(mcp)
+verify_tools.register(mcp)
 
 
 def _run_startup_discovery() -> None:

@@ -9,21 +9,19 @@ Apply a confirmed Jira-to-local mapping, creating projects and todos. This is a 
 
 Accepts the confirmed mapping produced by `/proj:jira-map` (after user review/editing).
 
-## Steps
-
-### 1. Accept confirmed mapping
+**1.** Accept confirmed mapping
 
 - Receive the confirmed mapping JSON (output from jira-map, after user confirmation).
 
-### 2. Apply mapping
+**2.** Apply mapping
 
 - Call `mcp__proj__proj_jira_apply` with the confirmed mapping JSON.
 
-### 3. Git tracking flush
+**3.** Git tracking flush
 
-- Call `mcp__proj__tracking_git_flush` with `commit_message="Jira sync"`.
+- Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Jira"`.
 
-### 4. Display results
+**4.** Display results
 
 If `status` is `"ok"` (no failures):
 

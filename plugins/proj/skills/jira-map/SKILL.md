@@ -9,20 +9,18 @@ Compute the Jira-to-local project/todo mapping using epic-first logic. This is a
 
 Accepts the issues data produced by `/proj:jira-fetch`.
 
-## Steps
-
-### 1. Accept issues data
+**1.** Accept issues data
 
 - Receive the fetched Jira issues JSON (output from jira-fetch).
 
-### 2. Compute mapping
+**2.** Compute mapping
 
 - Call `mcp__proj__proj_jira_map` with the fetched issues JSON.
 - The response includes a mapping plan with two sections:
   - **Auto-mapped** (epic groups): epics matched to existing or new projects
   - **Needs input** (standalone groups): issues with no epic that require user assignment
 
-### 3. Display mapping
+**3.** Display mapping
 
 Show the proposed mapping in two sections:
 

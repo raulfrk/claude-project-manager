@@ -32,7 +32,7 @@ If `still_failed` > 0, suggest: "Failures persist — use `/proj:hooks-debug` fo
 
 **Mode: interactive (no args)**
 1. Call `mcp__hooks__hooks_recover_tool` with no arguments to list all failures.
-2. If empty, output: "No failures to recover." and stop.
+2. If empty, output: "No hook failures recorded. All hooks are healthy." and stop.
 3. Display failures grouped by hook_id with counts.
 4. For each hook_id with failures, ask: "Retry failures for `<hook_id>`? (yes/no/clear)"
    - **yes**: call `mcp__hooks__hooks_recover_tool` with that `hook_id`

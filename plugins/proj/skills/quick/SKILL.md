@@ -7,7 +7,7 @@ allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__pro
 
 Quick-start: $ARGUMENTS
 
-## 1. Detect mode
+**1.** Detect mode
 
 Call `mcp__proj__proj_session_context`.
 > If proj_session_context returned "No active project" or "No config found", go to **Project Mode**.
@@ -98,9 +98,7 @@ Display: `Project '<name>' created. Todo <new_id>: <todo_title>. Running workflo
 
 Call the Skill tool: `skill: "proj:run", args: "<new_id> --iter 3"`
 
-Suggested next:
-- `/proj:todo list` -- review all todos
-- `/proj:status` -- see project overview
+Suggested next: (1) /proj:todo list — review all todos  (2) /proj:status — see project overview
 
 ---
 

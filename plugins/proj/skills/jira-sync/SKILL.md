@@ -22,9 +22,7 @@ This skill operates across all projects -- it does NOT require loading a project
 3. **Standalone issues (no epic)** -- flagged as `needs_user_decision`. The user must assign them to an existing project or create a new one. There is NO automatic catchall or default project.
 4. **Re-run matching** -- projects are matched by `jira_issue_key` first (instant, stable), then by fuzzy name. This makes re-runs idempotent.
 
-## Steps
-
-### 1. Setup
+**1.** Setup
 
 - Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
   - From the result, extract `integrations.jira.enabled` and other config values.
@@ -40,24 +38,23 @@ If the Jira MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Jira MCP server 'jira' is not available. Verify the server is running and that the
-> MCP server is registered with the name `jira`."
+> "Jira MCP server not available. Check your MCP server configuration and restart it."
 
 Do not proceed with any further sync steps.
 
-### 2. Fetch issues from Jira
+**2.** Fetch issues from Jira
 
 - Call `mcp__jira__jira_get_user_issues` with the resolved username and project keys (if provided).
 - If no issues are returned: "No open issues found." Stop.
 
-### 3. Compute mapping
+**3.** Compute mapping
 
 - Call `mcp__proj__proj_jira_map` with the fetched issues JSON.
 - The response includes a mapping plan with two sections:
   - **Auto-mapped** (epic groups): epics matched to existing or new projects
   - **Needs input** (standalone groups): issues with no epic that require user assignment
 
-### 4. Display dry-run
+**4.** Display dry-run
 
 Show the proposed mapping in two sections:
 
@@ -83,7 +80,7 @@ Issues to sync: 10 (7 auto-mapped, 3 need input)
 - **Will create** -- a new local project will be created from the epic
 - **(unmapped)** -- standalone issue with no automatic match; user must assign
 
-### 5. User confirmation/editing
+**5.** User confirmation/editing
 
 Present options:
 
@@ -101,7 +98,7 @@ If the user chooses **Edit**: ask which row number to change. The user can:
 
 Repeat editing until the user confirms with **Apply** or aborts with **Cancel**.
 
-### 6. Apply mapping
+**6.** Apply mapping
 
 - Call `mcp__proj__proj_jira_apply` with the confirmed mapping JSON.
 - Display results:
@@ -113,17 +110,17 @@ Repeat editing until the user confirms with **Apply** or aborts with **Cancel**.
   Skipped (unmapped): W
   ```
 
-### 7. Git tracking flush
+**7.** Git tracking flush
 
-- Call `mcp__proj__tracking_git_flush` with `commit_message="Jira sync"`.
+- Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Jira"`.
 
-### 8. Summary
+**8.** Summary
 
 Display a final summary with counts. If nothing changed: "Jira sync complete. Everything up to date."
 
-Suggest next steps:
-- `/proj:status` -- review project status after sync
-- `/proj:trello-sync` -- if Trello is also enabled, sync there too
+Display suggested next steps:
+- `/proj:status` — review project status after sync
+- `/proj:trello-sync` — if Trello is also enabled, sync there too
 
 ---
 
@@ -138,8 +135,4 @@ Suggest next steps:
 - Epics themselves are NOT synced as todos -- they define the project boundary.
 - Bulk tools: `jira_bulk_create_issues` (POST /rest/api/2/issue/bulk) and `jira_bulk_update_issues` (loops PUT per issue with rate limiting). Both return `{successes, failures}` for partial-failure handling.
 
-## Suggested next
-
-- `/proj:status` -- review project status after sync
-- `/proj:todo list` -- review todos after sync
-- `/proj:jira-sync` -- run again after making local changes
+Suggested next: (1) /proj:status — review project status after sync  (2) /proj:todo list — review todos after sync

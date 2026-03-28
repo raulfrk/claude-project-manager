@@ -6,7 +6,7 @@ allowed-tools: mcp__proj__proj_list
 
 List all non-archived tracked projects.
 
-1. Call `mcp__proj__proj_list` (no arguments — defaults to non-archived only).
-2. Display the result as-is.
+**1.** Call `mcp__proj__proj_list` (no arguments — defaults to non-archived only).
+**2.** Display the result as-is.
 
-💡 Suggested next: /proj:load <name> — load a project for this session
+Suggested next: (1) /proj:load <name> — load a project for this session

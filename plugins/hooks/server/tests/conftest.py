@@ -27,6 +27,12 @@ def failures_yaml(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
+def verifications_yaml(tmp_path: Path) -> Path:
+    """Return path to a temporary hooks-verifications.yaml file (does not exist yet)."""
+    return tmp_path / "hooks-verifications.yaml"
+
+
+@pytest.fixture()
 def proj_yaml(tmp_path: Path) -> Path:
     """Return path to a temporary proj.yaml file (does not exist yet)."""
     return tmp_path / "proj.yaml"

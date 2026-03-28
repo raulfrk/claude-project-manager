@@ -17,6 +17,11 @@ class Hook:
     blocking: bool = False
     condition: str | None = None
     source: str | None = None
+    verification: bool = False
+
+    def __post_init__(self) -> None:
+        if self.verification:
+            self.blocking = True
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -31,6 +36,8 @@ class Hook:
             result["condition"] = self.condition
         if self.source is not None:
             result["source"] = self.source
+        if self.verification:
+            result["verification"] = True
         return result
 
     @classmethod
@@ -48,6 +55,7 @@ class Hook:
             blocking=bool(data.get("blocking", False)),
             condition=str(data["condition"]) if data.get("condition") is not None else None,
             source=str(data["source"]) if data.get("source") is not None else None,
+            verification=bool(data.get("verification", False)),
         )
 
     def matches(self, trigger_tool: str, target_tool: str, server: str) -> bool:

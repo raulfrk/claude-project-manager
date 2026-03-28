@@ -115,9 +115,7 @@ Before syncing, verify:
 1. `trello.enabled` is `true` in config. If not, stop and tell the user to enable it with `mcp__proj__config_update(trello_enabled=True)`.
 2. The active project has a `trello.board_id` set (from per-project config) or `trello.default_board_id` set globally. If neither is set, stop and ask the user to configure a board ID.
 
-## Steps
-
-### 1. Setup
+**1.** Setup
 
 - Use the `proj_session_context` result from Mode Detection (already called above). Extract:
   - `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card)
@@ -130,18 +128,17 @@ If the Trello MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Trello MCP server 'trello' is not available. Verify the server is running and that the
-> MCP server is registered with the name `trello`."
+> "Trello MCP server not available. Check your MCP server configuration and restart it."
 
 Do not proceed with any further sync steps.
 
-### 2. Ensure `proj` label exists
+**2.** Ensure `proj` label exists
 
 - Call `mcp__trello__get_board_labels` with `boardId` set to the effective board ID.
 - If no label named `proj` exists, call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`.
 - Record the label ID for use in card creation.
 
-### 3. Ensure project card exists
+**3.** Ensure project card exists
 
 - If `trello_card_id` is set on the project meta, call `mcp__trello__get_card` to verify the card exists.
   - If the card is missing or archived, treat as needing a new card (proceed below).
@@ -155,13 +152,13 @@ Do not proceed with any further sync steps.
   - Record the returned card ID.
   - Call `mcp__proj__proj_trello_apply` with `link_trello_card_id` set to the new card ID.
 
-### 4. Fetch card state
+**4.** Fetch card state
 
 - Call `mcp__trello__get_card_checklists` (or `mcp__trello__get_checklists` or similar) with `cardId` = the project's `trello_card_id`.
 - The result should be a JSON array of checklists, each with `id`, `name`, and `checkItems` array (each item has `id`, `name`, `state`).
 - Format this as: `{"checklists": [<the array>]}`
 
-### 5. Compute diff
+**5.** Compute diff
 
 - Call `mcp__proj__proj_trello_diff` with:
   - `trello_card_json` = the formatted card state JSON from step 4
@@ -172,7 +169,7 @@ Do not proceed with any further sync steps.
   - `project_info` -- board_id, trello_card_id, default_list
   - `auto_applied` -- counts of pull operations already applied locally
 
-### 6. Execute push operations
+**6.** Execute push operations
 
 Process each push operation from the plan by calling the appropriate Trello MCP tools.
 All Trello tool names use the `mcp__trello__` prefix.
@@ -217,11 +214,11 @@ For each entry:
 
 **Batch linking**: When multiple IDs need linking, batch them into a single `proj_trello_apply` call.
 
-### 7. Git tracking flush
+**7.** Git tracking flush
 
 - Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Trello"`.
 
-### 8. Summary
+**8.** Summary
 
 Display only if changes occurred:
 
@@ -247,8 +244,4 @@ If all counts are zero: "Trello sync complete. Everything up to date."
 - Checklist item names for non-root descendants use ID prefixes (e.g., `1.1: Child title`) for disambiguation.
 - The "Tasks" checklist is a catch-all for root leaf todos (those with no children).
 
-## Suggested next
-
-- `/proj:todo list` -- review todos after sync
-- `/proj:todo add` -- add a new todo (will be pushed to Trello on next sync)
-- `/proj:trello-sync` -- run another sync after making local changes
+Suggested next: (1) /proj:todo list — review todos after sync  (2) /proj:todo add — add a new todo (will be pushed to Trello on next sync)

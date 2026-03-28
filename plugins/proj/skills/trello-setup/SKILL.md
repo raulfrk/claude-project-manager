@@ -2,14 +2,11 @@
 name: trello-setup
 description: Ensure the proj label and project card exist on the Trello board. Sub-skill of trello-sync.
 allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__config_load
-argument-hint: ""
 ---
 
 Ensure the `proj` label and project card exist on the configured Trello board. This is a sub-skill used by `/proj:trello-sync`.
 
-## Steps
-
-### 1. Read config and active project
+**1.** Read config and active project
 
 - Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
   - From the result, extract `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card), and `project.name`.
@@ -23,18 +20,17 @@ If the Trello MCP server is not reachable -- for example, a tool call raises a
 tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
 and say:
 
-> "Trello MCP server 'trello' is not available. Verify the server is running and that the
-> MCP server is registered with the name `trello`."
+> "Trello MCP server not available. Check your MCP server configuration and restart it."
 
 Do not proceed with any further steps.
 
-### 2. Ensure `proj` label exists
+**2.** Ensure `proj` label exists
 
 - Call `mcp__trello__get_board` with `boardId` set to the effective board ID to retrieve board labels.
 - If no label named `proj` exists, create one (name `proj`, color `blue`).
 - Record the label ID.
 
-### 3. Ensure project card exists
+**3.** Ensure project card exists
 
 - If `trello_card_id` is set on the project meta, verify the card exists and is not archived.
   - If valid, return the card ID and label ID.

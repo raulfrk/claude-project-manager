@@ -2,20 +2,19 @@
 name: hooks-debug
 description: Debug hook execution by listing recent failures with error details.
 allowed-tools: mcp__hooks__hooks_recover_tool
-argument-hint: ""
 context: fork
 agent: general-purpose
 ---
 
 List recent hook failures to help debug execution issues.
 
-**Step 1**: Call `mcp__hooks__hooks_recover_tool` with no arguments (lists all failures as a JSON array).
+**1.** Call `mcp__hooks__hooks_recover_tool` with no arguments (lists all failures as a JSON array).
 
-**Step 2**: Parse the JSON response. If the array is empty:
-- Output: "No hook failures recorded."
+**2.** Parse the JSON response. If the array is empty:
+- Output: "No hook failures recorded. All hooks are healthy."
 - Stop.
 
-**Step 3**: Display failures as a table:
+**3.** Display failures as a table:
 
 ```
 ## Hook Failures
@@ -25,12 +24,13 @@ List recent hook failures to help debug execution issues.
 | 1 | hook-001 | trigger | target | server | error msg | 0 | 2026-03-26T... |
 ```
 
+- **Hook ID**: if the failure entry has `verification_failed: true`, append `[verification]` after the hook ID (e.g., `verify-todoist-complete [verification]`).
 - **Retries**: the `retry_count` field, default 0 if absent.
 - **Timestamp**: the `timestamp` field.
 
-**Step 4**: Show a summary:
+**4.** Show a summary:
 `N failure(s) recorded.`
 
-**Step 5**: Suggest next actions:
-- "Use `/proj:hooks-recover <hook_id>` to retry a specific hook's failures."
-- "Use `/proj:hooks-recover clear` to clear all failure entries."
+**5.** Display suggested next actions.
+
+Suggested next: (1) /proj:hooks-recover <hook_id> — retry a specific hook's failures  (2) /proj:hooks-recover clear — clear all failure entries

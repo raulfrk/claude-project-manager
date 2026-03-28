@@ -11,7 +11,7 @@ import pytest
 from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
 from server.lib.storage import save
-from server.tools.fire import hooks_fire
+from server.tools.fire import _parse_verification_response, hooks_fire
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -34,6 +34,7 @@ def _hook(
     blocking: bool = False,
     condition: str | None = None,
     param_mapping: dict | None = None,
+    verification: bool = False,
 ) -> Hook:
     return Hook(
         id=hook_id,
@@ -43,6 +44,7 @@ def _hook(
         blocking=blocking,
         condition=condition,
         param_mapping=param_mapping or {},
+        verification=verification,
     )
 
 
@@ -280,3 +282,292 @@ class TestHooksFire:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert captured_params["path"] == "/tmp/project"
+
+
+# ── Verification response parsing ────────────────────────────────────────────
+
+
+class TestParseVerificationResponse:
+    def test_pass_response(self):
+        raw = json.dumps({"status": "pass", "details": "all good"})
+        status, details = _parse_verification_response(raw)
+        assert status == "pass"
+        assert details == "all good"
+
+    def test_fail_response(self):
+        raw = json.dumps({"status": "fail", "details": "task still open"})
+        status, details = _parse_verification_response(raw)
+        assert status == "fail"
+        assert details == "task still open"
+
+    def test_missing_status_field(self):
+        """Malformed response without status field → fail."""
+        raw = json.dumps({"result": "ok", "details": "something"})
+        status, details = _parse_verification_response(raw)
+        assert status == "fail"
+        assert raw in details  # raw response preserved as details
+
+    def test_none_result(self):
+        status, details = _parse_verification_response(None)
+        assert status == "fail"
+        assert details == "no response"
+
+    def test_non_json_string(self):
+        status, details = _parse_verification_response("not json at all")
+        assert status == "fail"
+        assert "not json at all" in details
+
+    def test_missing_details_field(self):
+        raw = json.dumps({"status": "pass"})
+        status, details = _parse_verification_response(raw)
+        assert status == "pass"
+        assert details == ""
+
+
+# ── Phase 2 verification firing ──────────────────────────────────────────────
+
+
+class TestVerificationFiring:
+    @pytest.mark.asyncio
+    async def test_phase2_fires_after_phase1(
+        self, hooks_yaml: Path, verifications_yaml: Path,
+    ):
+        """Verification hooks fire after primary hooks, with enriched source."""
+        reg = _make_registry([
+            _hook("primary-001", "trigger_a", "target_b", blocking=True),
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        call_order: list[str] = []
+
+        async def mock_fire_single(hook, source):
+            call_order.append(hook.id)
+            if hook.id == "primary-001":
+                return FireResult(
+                    hook_id="primary-001", status_code=200, body="ok",
+                    result="primary_done",
+                )
+            # Verification hook — return convention-based pass response
+            return FireResult(
+                hook_id="verify-001", status_code=200, body="ok",
+                result=json.dumps({"status": "pass", "details": "verified"}),
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # Primary fired first, then verification
+        assert call_order == ["primary-001", "verify-001"]
+        assert data["hooks_fired"] == 1  # Only primary counted
+        assert data["results"] == [{"hook_id": "primary-001", "result": "primary_done"}]
+        assert len(data["verification"]) == 1
+        assert data["verification"][0]["hook_id"] == "verify-001"
+        assert data["verification"][0]["status"] == "pass"
+        assert data["verification"][0]["details"] == "verified"
+
+    @pytest.mark.asyncio
+    async def test_verification_receives_aggregated_results(
+        self, hooks_yaml: Path, verifications_yaml: Path,
+    ):
+        """Verification hooks receive Phase 1 blocking results in hook_results."""
+        reg = _make_registry([
+            _hook("primary-001", "trigger_a", "target_b", blocking=True),
+            _hook("primary-002", "trigger_a", "target_c", blocking=True),
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        captured_source: dict = {}
+
+        async def mock_fire_single(hook, source):
+            if hook.verification:
+                captured_source.update(source)
+                return FireResult(
+                    hook_id=hook.id, status_code=200, body="ok",
+                    result=json.dumps({"status": "pass", "details": "ok"}),
+                )
+            return FireResult(
+                hook_id=hook.id, status_code=200, body="ok",
+                result=f"result_{hook.id}",
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            result = await hooks_fire(
+                "trigger_a", source_result='{"key": "val"}',
+            )
+
+        # Verification hook should have received hook_results from Phase 1
+        assert "hook_results" in captured_source
+        assert captured_source["hook_results"]["primary-001"] == "result_primary-001"
+        assert captured_source["hook_results"]["primary-002"] == "result_primary-002"
+        # Original source_result fields preserved
+        assert captured_source["key"] == "val"
+
+    @pytest.mark.asyncio
+    async def test_verification_fail_response(
+        self, hooks_yaml: Path, verifications_yaml: Path,
+    ):
+        """Verification hook returning fail status is recorded correctly."""
+        reg = _make_registry([
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire_single(hook, source):
+            return FireResult(
+                hook_id=hook.id, status_code=200, body="ok",
+                result=json.dumps({"status": "fail", "details": "task still open"}),
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["verification"][0]["status"] == "fail"
+        assert data["verification"][0]["details"] == "task still open"
+
+    @pytest.mark.asyncio
+    async def test_verification_malformed_response(
+        self, hooks_yaml: Path, verifications_yaml: Path,
+    ):
+        """Malformed verification response (missing status) → fail."""
+        reg = _make_registry([
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire_single(hook, source):
+            return FireResult(
+                hook_id=hook.id, status_code=200, body="ok",
+                result=json.dumps({"result": "ok"}),  # Missing 'status' field
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["verification"][0]["status"] == "fail"
+
+    @pytest.mark.asyncio
+    async def test_verification_http_error_treated_as_fail(
+        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+    ):
+        """HTTP error on verification hook → fail with error details."""
+        reg = _make_registry([
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire_single(hook, source):
+            return FireResult(
+                hook_id=hook.id, status_code=500,
+                body="Internal Server Error",
+                error="HTTP 500",
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["verification"][0]["status"] == "fail"
+        assert "HTTP 500" in data["verification"][0]["details"]
+
+    @pytest.mark.asyncio
+    async def test_verification_exception_treated_as_fail(
+        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+    ):
+        """Exception in verification hook → fail."""
+        reg = _make_registry([
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch(
+                "server.tools.fire._fire_single",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError("refused"),
+            ),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["verification"][0]["status"] == "fail"
+        assert "Exception" in data["verification"][0]["details"]
+
+    @pytest.mark.asyncio
+    async def test_no_verification_hooks_no_phase2(self, hooks_yaml: Path):
+        """When no verification hooks exist, no Phase 2 and no verification key."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+        mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert "verification" not in data
+
+    @pytest.mark.asyncio
+    async def test_verification_results_stored(
+        self, hooks_yaml: Path, verifications_yaml: Path,
+    ):
+        """Verification results are persisted via store_verification_result."""
+        reg = _make_registry([
+            _hook("verify-001", "trigger_a", "verify_target", verification=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire_single(hook, source):
+            return FireResult(
+                hook_id=hook.id, status_code=200, body="ok",
+                result=json.dumps({"status": "pass", "details": "confirmed"}),
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire_single),
+        ):
+            await hooks_fire("trigger_a")
+
+        # Check the verifications file was written
+        from server.lib.storage import load_verification_results
+        with patch("server.lib.storage._VERIFICATIONS_FILE", verifications_yaml):
+            entries = load_verification_results()
+        assert len(entries) == 1
+        assert entries[0]["hook_id"] == "verify-001"
+        assert entries[0]["status"] == "pass"
+        assert entries[0]["details"] == "confirmed"
+        assert entries[0]["trigger_tool"] == "trigger_a"

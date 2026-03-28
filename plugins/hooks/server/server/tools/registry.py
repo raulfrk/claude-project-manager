@@ -24,6 +24,7 @@ def hooks_register(
     param_mapping: str = "{}",
     blocking: bool = False,
     condition: str | None = None,
+    verification: bool = False,
 ) -> str:
     """Register a hook that links a trigger tool to a target tool on a server.
 
@@ -64,6 +65,10 @@ def hooks_register(
 
     # Generate next ID and create hook
     hook_id = registry.next_id()
+    # Verification hooks are always blocking
+    if verification:
+        blocking = True
+
     hook = Hook(
         id=hook_id,
         trigger_tool=trigger_tool,
@@ -72,6 +77,7 @@ def hooks_register(
         param_mapping=mapping,
         blocking=blocking,
         condition=condition,
+        verification=verification,
     )
     registry.hooks.append(hook)
 
@@ -91,6 +97,8 @@ def hooks_register(
     ]
     if condition is not None:
         lines.append(f"  condition: {condition}")
+    if verification:
+        lines.append(f"  verification: {verification}")
     return "\n".join(lines)
 
 
@@ -109,14 +117,19 @@ def hooks_list(trigger_tool: str | None = None) -> str:
     else:
         matched = list(registry.hooks)
 
-    hooks_out: list[dict[str, object]] = []
+    primary_out: list[dict[str, object]] = []
+    verification_out: list[dict[str, object]] = []
     for h in matched:
         entry = h.to_dict()
         entry["condition_status"] = resolve_condition_status(h.condition)
-        hooks_out.append(entry)
+        if h.verification:
+            verification_out.append(entry)
+        else:
+            primary_out.append(entry)
 
-    result = {
-        "hooks": hooks_out,
+    result: dict[str, object] = {
+        "hooks": primary_out,
+        "verification_hooks": verification_out,
         "servers": registry.servers,
     }
     return json.dumps(result, indent=2)
@@ -147,6 +160,7 @@ def register(app: FastMCP) -> None:
             "(e.g. '{\"path\": \"${result.path}\"}').  "
             "blocking: if true, trigger waits for target to complete (default false). "
             "condition: optional expression to gate the hook. "
+            "verification: if true, marks hook as a verification hook (always blocking). "
             "Duplicate detection: same trigger+target+server returns existing hook_id. "
             "YAML created on first register if it doesn't exist."
         )
@@ -158,6 +172,7 @@ def register(app: FastMCP) -> None:
         param_mapping: str = "{}",
         blocking: bool = False,
         condition: str | None = None,
+        verification: bool = False,
     ) -> str:
         return hooks_register(
             trigger_tool=trigger_tool,
@@ -166,6 +181,7 @@ def register(app: FastMCP) -> None:
             param_mapping=param_mapping,
             blocking=blocking,
             condition=condition,
+            verification=verification,
         )
 
     @app.tool(

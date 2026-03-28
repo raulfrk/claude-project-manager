@@ -154,6 +154,7 @@ class TestHooksList:
             result = hooks_list()
         data = json.loads(result)
         assert len(data["hooks"]) == 2
+        assert data["verification_hooks"] == []
         assert "perms" in data["servers"]
 
     def test_list_filter_by_trigger(self, populated_hooks_yaml: Path):
@@ -201,3 +202,133 @@ class TestHooksUnregister:
             hooks_unregister("hook-001")
             result = hooks_unregister("hook-001")
         assert "not found" in result
+
+
+# ── Verification hooks ──────────────────────────────────────────────────────
+
+
+class TestVerificationRegister:
+    def test_register_verification_hook(self, hooks_yaml: Path):
+        """Registering with verification=True sets verification and forces blocking."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="todo_complete",
+                target_tool="todoist_verify_complete",
+                server="todoist",
+                verification=True,
+            )
+        assert "Registered hook hook-001" in result
+        assert "verification: True" in result
+        assert "blocking: True" in result
+
+        reg = load(hooks_yaml)
+        hook = reg.hooks[0]
+        assert hook.verification is True
+        assert hook.blocking is True
+
+    def test_register_verification_forces_blocking(self, hooks_yaml: Path):
+        """Even when blocking=False is passed, verification=True forces blocking=True."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="todo_complete",
+                target_tool="verify_tool",
+                server="s",
+                blocking=False,
+                verification=True,
+            )
+        reg = load(hooks_yaml)
+        assert reg.hooks[0].blocking is True
+        assert reg.hooks[0].verification is True
+
+    def test_register_non_verification_default(self, hooks_yaml: Path):
+        """Default registration has verification=False."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+            )
+        reg = load(hooks_yaml)
+        assert reg.hooks[0].verification is False
+
+
+class TestVerificationList:
+    def test_list_separates_primary_and_verification(self, hooks_yaml: Path):
+        """hooks_list returns primary hooks in 'hooks' and verification in 'verification_hooks'."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="proj_init",
+                target_tool="perms_setup",
+                server="perms",
+            )
+            hooks_register(
+                trigger_tool="todo_complete",
+                target_tool="todoist_verify",
+                server="todoist",
+                verification=True,
+            )
+            hooks_register(
+                trigger_tool="proj_init",
+                target_tool="todoist_sync",
+                server="todoist",
+                blocking=True,
+            )
+            result = hooks_list()
+        data = json.loads(result)
+        assert len(data["hooks"]) == 2
+        assert len(data["verification_hooks"]) == 1
+        assert data["verification_hooks"][0]["target_tool"] == "todoist_verify"
+        assert data["verification_hooks"][0]["verification"] is True
+
+    def test_list_filter_with_verification(self, hooks_yaml: Path):
+        """Filtering by trigger_tool still separates primary and verification."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="todo_complete",
+                target_tool="todoist_sync",
+                server="todoist",
+            )
+            hooks_register(
+                trigger_tool="todo_complete",
+                target_tool="todoist_verify",
+                server="todoist-verify",
+                verification=True,
+            )
+            hooks_register(
+                trigger_tool="proj_init",
+                target_tool="perms_setup",
+                server="perms",
+            )
+            result = hooks_list(trigger_tool="todo_complete")
+        data = json.loads(result)
+        assert len(data["hooks"]) == 1
+        assert len(data["verification_hooks"]) == 1
+        assert data["hooks"][0]["target_tool"] == "todoist_sync"
+        assert data["verification_hooks"][0]["target_tool"] == "todoist_verify"
+
+    def test_list_empty_verification(self, hooks_yaml: Path):
+        """When no verification hooks exist, verification_hooks is empty list."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+            )
+            result = hooks_list()
+        data = json.loads(result)
+        assert len(data["hooks"]) == 1
+        assert data["verification_hooks"] == []
+
+    def test_list_only_verification(self, hooks_yaml: Path):
+        """When only verification hooks exist, hooks is empty."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                verification=True,
+            )
+            result = hooks_list()
+        data = json.loads(result)
+        assert data["hooks"] == []
+        assert len(data["verification_hooks"]) == 1

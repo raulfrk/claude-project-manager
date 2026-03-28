@@ -8,11 +8,11 @@ agent: general-purpose
 
 Show a comprehensive status report for the active project.
 
-1. Call `mcp__proj__proj_status_context` to get config, project metadata, categorised todos, and git activity in one call. If no active project, stop with: "No active project. Run /proj:load first."
+**1.** Call `mcp__proj__proj_status_context` to get config, project metadata, categorised todos, and git activity in one call. If no active project, stop with: "No active project. Run `/proj:load` to load one."
 
-2. For each in-progress todo matched to recent commits in `git_activity`, call `mcp__proj__todo_update(todo_id, git={branch: <branch>, commits: [<sha>, ...]})` to record the association.
+**2.** For each in-progress todo matched to recent commits in `git_activity`, call `mcp__proj__todo_update(todo_id, git={branch: <branch>, commits: [<sha>, ...]})` to record the association.
 
-3. Present a structured status summary. Display todos as bullet points with status icons, bold ID, title, priority in italics. Show children indented 2 spaces under their parent.
+**3.** Present a structured status summary. Display todos as bullet points with status icons, bold ID, title, priority in italics. Show children indented 2 spaces under their parent.
    ```
    ## <project-name>  [status] [priority]
    Target: <date>   Tracking: <tracking_dir>
@@ -21,10 +21,12 @@ Show a comprehensive status report for the active project.
    - 🔄 **2** — Implement MCP server _(medium)_ (branch: feat/mcp-server)
 
    ### Ready to Start
-   - 🔲 **3** — Write skills _(low)_
+   - 🔲 **3** — Write skills _(low)_ [manual]
 
    ### Blocked
    - 🔲 **4** — Integration tests _(medium)_ [blocked by 2]
+
+   Include `[manual]` badge after priority for manual-tagged todos.
 
    ### Recent Git Activity
    - abc1234  Fix storage layer (2026-02-26)

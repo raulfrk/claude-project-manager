@@ -9,13 +9,11 @@ Compute the diff between local todos and the Trello card state. This is a sub-sk
 
 Accepts the card data produced by `/proj:trello-fetch`.
 
-## Steps
-
-### 1. Accept card data
+**1.** Accept card data
 
 - Receive the Trello card state JSON (output from trello-fetch).
 
-### 2. Compute diff
+**2.** Compute diff
 
 - Call `mcp__proj__proj_trello_diff` with:
   - `trello_card_json` = the card state JSON from step 1
@@ -26,7 +24,7 @@ Accepts the card data produced by `/proj:trello-fetch`.
   - `project_info` -- board_id, trello_card_id, default_list
   - `auto_applied` -- counts of pull operations already applied locally
 
-### 3. Display plan
+**3.** Display plan
 
 Show the diff plan summarizing what will be pushed to Trello:
 

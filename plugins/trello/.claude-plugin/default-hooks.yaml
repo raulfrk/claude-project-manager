@@ -21,6 +21,16 @@ hooks:
     blocking: false
     condition: "trello.enabled and trello.auto_sync"
 
+  - id: verify-trello-checklist-item
+    trigger_tool: todo_complete
+    target_tool: trello_verify_checklist_item
+    server: trello
+    param_mapping:
+      card_id: "${result.trello_card_id}"
+      item_id: "${result.trello_checklist_item_id}"
+    verification: true
+    condition: "trello.enabled"
+
   - id: trello-on-todo-update
     trigger_tool: todo_update
     target_tool: rename_checklist_item

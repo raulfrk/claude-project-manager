@@ -6,9 +6,9 @@ allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__plugin_perms
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
 
-1. Check if already configured with `mcp__proj__config_load`. If already configured, ask the user if they want to reconfigure. If the user declines, respond with "Existing configuration kept — no changes made." and stop.
+**1.** Check if already configured with `mcp__proj__config_load`. If already configured, ask the user if they want to reconfigure. If the user declines, respond with "Existing configuration kept — no changes made." and stop.
 
-2. Ask the following questions one at a time with defaults shown:
+**2.** Ask the following questions one at a time with defaults shown:
 
    a. **Tracking directory** — "Where should project tracking data be stored? [~/projects/tracking]"
    b. **Projects base directory** — "Default directory where project content lives (e.g. ~/projects)? Leave blank to skip."
@@ -41,9 +41,9 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    i. **Plugins** — "Do you have the `perms` plugin installed? [no]"
    j. **Plugins** — "Do you have the `worktree` plugin installed? [no]"
 
-3. Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, `archive_purge_after_days`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
+**3.** Call `mcp__proj__config_init` with the collected values (including `auto_allow_mcps`, `projects_base_dir`, `zoxide_integration`, `archive_purge_after_days`, and `todoist_mcp_server` if Todoist is enabled). Omit `todoist_mcp_server` when `todoist_enabled: false`. If git tracking is enabled, also include `git_tracking_enabled`, `git_tracking_github_enabled`, and `git_tracking_github_repo_format`.
 
-4. **If `perms` plugin is installed**: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
+**4.** If `perms` plugin is installed: build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
    - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
    - If `auto_allow_mcps: true`, also include: `"plugin_proj_proj"`, `"plugin_perms_perms"`
    - If `auto_allow_mcps: true` and `worktree_integration: true`, also include: `"plugin_worktree_worktree"`
@@ -52,21 +52,21 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
    - If `auto_allow_mcps: true` and `trello.enabled: true`, also include: `"trello"`
    - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
    - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"` to allow zoxide commands without prompts.
-   If `perms` plugin is not installed, skip silently and note: "perms plugin not found — add MCP allow rules manually if needed."
+   If `perms` plugin is not installed, skip silently and note: "Perms MCP server not available. Check your MCP server configuration and restart it."
 
-4b. **Integration verification** (if `perms` plugin is installed):
+**4a.** Integration verification (if `perms` plugin is installed):
    Call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"` to get the current rules.
    Parse the JSON result and extract `permissions_allow` from the user scope entry.
 
    - If `perms_integration: true`: check if any entry matching `mcp__plugin_perms_perms__*` exists in `permissions_allow`. If not, display:
-     "Warning: perms plugin MCP rules not found in settings. The perms_batch_add_mcp_allow call above may have failed — verify manually or re-run /proj:init-plugin."
+     "Warning: perms plugin MCP rules not found in settings. The `perms_batch_add_mcp_allow` call may have failed — verify manually or re-run `/proj:init-plugin`."
    - If `worktree_integration: true`: check if any entry matching `mcp__plugin_worktree_worktree__*` exists in `permissions_allow`. If not, display:
-     "Warning: worktree plugin MCP rules not found in settings. Install the worktree plugin and re-run /proj:init-plugin."
+     "Warning: worktree plugin MCP rules not found in settings. Install the worktree plugin and re-run `/proj:init-plugin`."
 
-   If the `perms_list` call fails (tool not available), skip with: "perms plugin not available — cannot verify integration rules."
+   If the `perms_list` call fails (tool not available), skip with: "Perms MCP server not available. Check your MCP server configuration and restart it."
 
-5. Confirm: "proj plugin configured! Configuration saved to ~/.claude/proj.yaml"
+**5.** Confirm: "proj plugin configured! Configuration saved to `~/.claude/proj.yaml`"
 
-6. Show the user their next step: "Run /proj:init to start tracking your first project."
+**6.** Show the user their next step: "Run `/proj:init` to start tracking your first project."
 
-💡 Suggested next: (1) /proj:init — create your first project | (2) /proj:load — load an existing project
+Suggested next: (1) /proj:init — create your first project  (2) /proj:load — load an existing project

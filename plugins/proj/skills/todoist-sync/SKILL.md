@@ -9,18 +9,16 @@ agent: general-purpose
 
 Full bidirectional Todoist sync for the active project using batched operations.
 
-## Steps
-
-0. **Setup**: Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call.
+**1.** Setup: Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call.
    - Extract `integrations.todoist.enabled` and `integrations.todoist.project_id` (= `todoist_project_id`).
-   - If `todoist.enabled` is false: stop with "Todoist sync is not enabled. Set todoist.enabled: true in ~/.claude/proj.yaml to use /proj:todoist-sync."
+   - If `todoist.enabled` is false: stop with "Todoist sync not enabled. Set `todoist.enabled: true` in `~/.claude/proj.yaml`."
    - If no `todoist_project_id`: stop with "Project not linked to Todoist. Set todoist_project_id via mcp__proj__proj_update_meta first."
 
-1. **Fetch Todoist tasks**:
+**2.** Fetch Todoist tasks:
    - Call `mcp__todoist__todoist_find_tasks` with `project_id`. Collect all returned tasks.
    - This returns **open (uncompleted) tasks only**.
 
-2. **Compute sync plan + auto-apply pulls** (single call):
+**3.** Compute sync plan + auto-apply pulls (single call):
    - Call `mcp__proj__proj_todoist_diff` with `todoist_tasks_json` set to the JSON-stringified array of ALL Todoist tasks collected in step 1, and `auto_apply` set to `true`.
    - This returns a JSON object with:
      - `plan`: the sync plan with `push_create`, `push_update`, `push_complete`, `ghost_close`, `root_only_cleanup`, and summary counts.
@@ -30,7 +28,7 @@ Full bidirectional Todoist sync for the active project using batched operations.
    - If all summary counts are zero: output "Todoist sync complete. Everything up to date." and stop.
    - If only pull counts are non-zero and push counts are all zero: output the pull summary and stop (pulls already applied).
 
-3. **Execute Todoist-side changes** (batch calls, parallel where independent):
+**4.** Execute Todoist-side changes (batch calls, parallel where independent):
 
    a. **Ghost close** (if `ghost_close` is non-empty):
       - Call `mcp__todoist__todoist_complete_tasks` with `ids` = the `ghost_close` array.
@@ -52,15 +50,15 @@ Full bidirectional Todoist sync for the active project using batched operations.
       - For each entry: call `mcp__todoist__todoist_delete` with `id=todoist_task_id`.
       - Collect the `todo_id` values as `cleared_todoist_ids`.
 
-4. **Link IDs locally** (only if step 3b or 3e produced results):
+**5.** Link IDs locally (only if step 4b or 4e produced results):
    - Build the `apply_json` object with ONLY:
-     - `link_todoist_ids`: the mapping built in step 3b (from push_create results).
-     - `cleared_todoist_ids`: todo IDs from step 3e (root_only cleanup).
-   - All other fields (`created_locally`, `updated_locally`, `completed_locally`) should be empty arrays -- pulls were already applied in step 2.
+     - `link_todoist_ids`: the mapping built in step 4b (from push_create results).
+     - `cleared_todoist_ids`: todo IDs from step 4e (root_only cleanup).
+   - All other fields (`created_locally`, `updated_locally`, `completed_locally`) should be empty arrays -- pulls were already applied in step 3.
    - Call `mcp__proj__proj_todoist_apply` with the JSON-stringified object.
    - **Skip this step entirely** if there were no push_creates and no root_only_cleanup.
 
-5. **Summary**: Display only if any changes occurred:
+**6.** Summary: Display only if any changes occurred:
    ```
    Todoist sync complete.
    <- Pulled from Todoist: {pull_create_count} created, {pull_update_count} updated, {pull_complete_count} closed
@@ -72,16 +70,16 @@ Full bidirectional Todoist sync for the active project using batched operations.
    Removed from Todoist (root_only): {root_only_cleanup_count} child tasks deleted
    ```
 
-6. **Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Todoist"`.
+**7.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Todoist"`.
 
-Suggested next: /proj:status -- see updated project overview
+Suggested next: (1) /proj:status — see updated project overview
 
 ---
 
 ## Trello Sync
 
 If `trello.enabled` is true in the config, after completing the Todoist sync above, output:
-"Todoist sync complete. Trello sync is enabled -- run /proj:trello-sync to also sync root todos with Trello."
+"Todoist sync complete. Trello sync is enabled -- run `/proj:trello-sync` to also sync root todos with Trello."
 
 If the user invoked this skill with "sync all" or "sync everything", also output:
-"To sync Trello too, run /proj:trello-sync separately."
+"To sync Trello too, run `/proj:trello-sync` separately."

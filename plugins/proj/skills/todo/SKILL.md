@@ -65,11 +65,9 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
 **delete** `<id>` -- delete a todo
   - Call `mcp__proj__todo_delete`
 
-If $ARGUMENTS is empty or ambiguous, output usage: "Usage: /proj:todo [add|update|done|list|tree|block|unblock|delete] [args]"
+If $ARGUMENTS is empty or ambiguous, output usage: "Usage: `/proj:todo [add|update|done|list|tree|block|unblock|delete] [args]`"
 Always confirm the action taken and show the resulting todo.
 
-**Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Todo update"`.
+**Git tracking flush**: Call `mcp__proj__tracking_git_flush` with `commit_message="Todo: update"`.
 
-💡 After adding a vague todo → suggest /proj:define <id>
-   After adding a technical todo → suggest /proj:define <id>
-   After completing a todo → suggest /proj:status for overview
+Suggested next: After adding a todo → (1) /proj:define <id> — define requirements  After completing a todo → (1) /proj:status — see project overview

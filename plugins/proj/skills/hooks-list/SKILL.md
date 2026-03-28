@@ -13,14 +13,13 @@ List all registered hooks from the hooks registry.
 - If a trigger tool name is provided, pass it as `trigger_tool` to filter results.
 - If empty, list all hooks.
 
-**Step 1**: Call `mcp__hooks__hooks_list_tool` with optional `trigger_tool` filter.
+**1.** Call `mcp__hooks__hooks_list_tool` with optional `trigger_tool` filter.
 
-**Step 2**: Parse the JSON response. If `hooks` array is empty:
-- Output: "No hooks registered."
-- Suggest: "Use `/proj:hooks-add` to register a new hook."
+**2.** Parse the JSON response. If `hooks` array is empty:
+- Output: "No hooks registered. Run `/proj:hooks-add` to create one."
 - Stop.
 
-**Step 3**: Group hooks by `trigger_tool`. For each group, display a header and table:
+**3.** Group hooks by `trigger_tool`. For each group, display a header and table:
 
 ```
 ## trigger_tool_name
@@ -34,5 +33,19 @@ List all registered hooks from the hooks registry.
 - **Condition**: the `condition` string, or "—" if null.
 - **Status**: use the `condition_status` field from the response ("always", "active", or "inactive").
 
-**Step 4**: After the table, show a summary line:
-`N hook(s) registered across M trigger(s).`
+**4.** Check for `verification_hooks` array in the response. If present and non-empty, display a separate section:
+
+```
+## Verification Hooks
+
+| ID | Trigger | Target | Server | Condition | Status |
+|----|---------|--------|--------|-----------|--------|
+| verify-todoist-complete | todo_complete | todoist_verify_complete | todoist | todoist.enabled and todoist.auto_sync | active |
+```
+
+- Verification hooks are always blocking — omit the Blocking column.
+- Include the `trigger` column since verification hooks are not grouped by trigger.
+- **Condition** and **Status** follow the same rules as primary hooks.
+
+**5.** After all sections, show a summary line:
+`N hook(s) registered across M trigger(s). V verification hook(s).`

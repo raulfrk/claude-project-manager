@@ -1,17 +1,19 @@
 ---
 name: perms-backup
 description: Backup and restore permission configurations
+allowed-tools: mcp__plugin_perms_perms__perms_backup, mcp__plugin_perms_perms__perms_restore, mcp__plugin_perms_perms__perms_list
+argument-hint: "[list|create|restore <timestamp>]"
 ---
 
 # perms-backup
 
 Manage permission backups: list, create, or restore.
 
-## Parse arguments
+**1.** Parse arguments
 
 The user may provide: `[list|create|restore <timestamp>]`
 
-## Handle each subcommand
+**2.** Handle each subcommand
 
 **`list`** (or `ls`):
 - Call `mcp__plugin_perms_perms__perms_backup()` in list mode.
@@ -24,7 +26,7 @@ The user may provide: `[list|create|restore <timestamp>]`
 **`restore <timestamp>`**:
 - Call `mcp__plugin_perms_perms__perms_restore(timestamp=<timestamp>)`.
 - Display the restore result.
-- Suggest: "Run `perms:audit` to verify the restored permissions."
+- Display: "Run `/proj:perms-audit` to verify the restored permissions."
 
 **No arguments**:
 - Display usage:
