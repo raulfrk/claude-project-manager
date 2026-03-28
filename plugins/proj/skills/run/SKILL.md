@@ -2,7 +2,7 @@
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine]"
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve]"
 ---
 
 Run workflow for: $ARGUMENTS
@@ -27,8 +27,51 @@ Extract from $ARGUMENTS:
 - **`--resume`**: resume execution from the most recent checkpoint. See **Resume checkpoint** sections below.
 - **`--no-pipeline`**: disable plan-while-executing pipeline (default: pipeline enabled)
 - **`--refine`**: enable requirement refinement with 3 review agents after last prep iteration (default: off)
+- **`--fast`**: minimize review gates, auto-execute low-complexity todos, skip verification. Tag immunity: `security`/`breaking-change`/`migration` still get FULL REVIEW.
+- **`--balanced`**: default. Smart-gate scoring determines review level.
+- **`--careful`**: full review on all plans, auto-enable refine, enhanced verification.
+- **`--paranoid`**: sequential execution (max_parallel=1), cross-review agents, full verification with independent review agent.
+- Quality levels are mutually exclusive (last wins, default: `--balanced`).
+- **`--force-plan`**: force FULL REVIEW on all todos regardless of complexity score.
+- **`--batch-approve`**: auto-approve all speculative plans without review (subject to trust level).
+
+Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
+
+**Quality Level Parameter Mapping:**
+
+| Parameter | --fast | --balanced | --careful | --paranoid |
+|-----------|--------|-----------|-----------|-----------|
+| gate_override | auto-execute (tag-immune) | smart-gate | full-review | full-review |
+| batch_approve | auto | smart-gate | disabled | disabled |
+| speculative_planning | enabled | enabled | disabled | disabled |
+| pattern_detection | auto-approve | enabled | disabled | disabled |
+| verification_mode | skip | standard | enhanced | full |
+| max_parallel | 20 | 6 | 3 | 1 |
+| satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
+| preflight | skip | enabled | enabled | enabled |
+| refine | skip | if --refine set | auto-enabled | auto-enabled |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
+
+**Flag compatibility check** (validate before proceeding):
+- `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
+- `--fast --refine` → fast wins, refine skipped (warn).
+- `--careful --batch-approve` → careful wins, batch approve disabled (warn).
+- `--paranoid --batch-approve` → paranoid wins, batch approve disabled (warn).
+- `--force-plan --batch-approve` → ERROR: "Cannot combine --force-plan with --batch-approve."
+- `--no-verify --paranoid` → ERROR: "Cannot combine --no-verify with --paranoid."
+- `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification is skipped.
+- `--fast --steps refine` → ERROR: "Cannot use --fast with --steps refine (fast skips refine)."
+- `--batch-approve --no-pipeline` → Allowed (speculative planning is independent of pipeline).
+- `--paranoid --no-pipeline` → Redundant warning: "--paranoid already enforces max_parallel=1."
+- `--careful --no-pipeline` → Allowed (no conflict).
+- `--fast --no-pipeline` → Redundant warning: "--fast with auto-execute makes pipeline moot."
+- `--force-plan --careful` → Redundant warning: "--careful already forces full review."
+- `--force-plan --paranoid` → Redundant warning: "--paranoid already forces full review."
+- `--no-verify --balanced` → --no-verify wins, verification skipped.
+- `--no-verify --fast` → Redundant: --fast already skips verification.
+- `--refine --from execute` → Refine skipped (--from execute skips refine per step-order slicing).
+- `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3 (trust 3 skips planning)."
 
 If no todo ID, stop with: "Todo ID required. Usage: `/proj:run <id> [--steps define,execute] [--from <step>]`"
 
@@ -92,7 +135,7 @@ If Re-define: run interactive define on each flagged todo, then resume from deco
 
 **If `preflight`** — inline, main conversation:
 
-<!-- TODO: skip if --fast quality level is set (see todo 280) -->
+IF quality_level == fast: skip preflight entirely, proceed to next step.
 
 For each todo in descendant list:
 1. Read requirements.md via `content_get_requirements`. If not found: hard fail with "No requirements found. Run define first." (counts as all 5 checks failing).
@@ -183,10 +226,10 @@ Recommend "Ready to execute" when ALL dimensions are Stable or Minor changes wit
 When the user picks option 2, skip all remaining iterations and jump directly to step 5 (Execute).
 When the user picks option 3: prompt for todo IDs, run interactive define on each, then resume from decompose step.
 
-**4.5** Refine (if `--refine` flag set AND `refine` in steps AND NOT `--no-interactive`)
+**4.5** Refine (if (`--refine` flag set OR quality_level in [careful, paranoid]) AND `refine` in steps AND NOT `--no-interactive`)
 
-<!-- TODO: auto-enable for --careful/--paranoid quality levels (see todo 280) -->
-<!-- TODO: skip for --fast quality level (see todo 280) -->
+IF quality_level == fast: skip refine entirely, proceed to next step.
+IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
 Read the sibling `refine/SKILL.md` file. For each todo in descendant list:
   Execute the refine sub-skill with the todo's ID.
@@ -211,9 +254,21 @@ If NOT `--no-interactive`, prompt:
 **If has children** — execute all (parent + descendants) via step 5ii.
 
 **5i. Single execute:**
+
+IF quality_level == fast:
+  Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
+  **Fast-mode safety guardrails** (apply to all --fast execution):
+  - Minimal syntax check: verify modified files are parseable (Python: `py_compile`, JS: basic syntax check) even in fast mode.
+  - Todos completed under --fast are marked with metadata `fast_mode: true` via `todo_update`.
+  - External sync (Todoist/Trello) is deferred until workflow completes (not per-todo).
+  - Security-tagged todos (security/breaking-change/migration) that received FULL REVIEW under --fast also get STANDARD verification before completion.
+
 1. Call `mcp__proj__todo_check_executable` — if manual-tagged: display warning and stop.
 2. Read `execute/SKILL.md`.
 3. Execute the step (plan mode is built into the execute skill — it calls EnterPlanMode/ExitPlanMode).
+
+IF quality_level == fast:
+  After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 **5ii. Execute-all (parent + descendants):**
 
@@ -227,6 +282,9 @@ Call `mcp__proj__proj_identify_batches` for dependency order.
 
 **--- Team-based execution (5ii-T) ---**
 
+IF quality_level == fast:
+  Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
+
 **Phase 1 — Plan (sequential, main conversation):**
 
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
@@ -239,13 +297,43 @@ For each todo in dependency order:
 1. Call `mcp__proj__todo_check_executable` — if manual: display `Todo <id> [manual] — skipped`, add to `manual_skipped_ids`, continue.
 2. Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
 3. Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-4. `EnterPlanMode`. Read context and explore relevant source files. Create an implementation plan covering files to modify/create, key changes, implementation order, testing approach. Include any Related Context from step 3.
-5. Plan approval (respects trust level):
+
+**Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+
+Compute complexity score (0-14) from 7 dimensions:
+
+| Dimension | 0 points | 1 point | 2 points |
+|-----------|----------|---------|----------|
+| File count (from plan) | 1 file | 2-4 files | 5+ files |
+| Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
+| Requirements quality | detailed | basic | none/vague |
+| Research quality | detailed | basic | none |
+| Risk tags | none | general risk | security/breaking/migration |
+| Children count | 0 (leaf) | 1-3 | 4+ |
+| Blocked-by deps | 0 | 1 | 2+ |
+
+**Evaluation order:**
+1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
+2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
+3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+
+**Gate routing:**
+- AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.
+- LIGHT REVIEW: Display 1-line plan summary + `Proceed? [Y/n]` (default yes).
+- FULL REVIEW: Full EnterPlanMode/ExitPlanMode (current behavior).
+
+IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
+
+4. `EnterPlanMode` (for FULL REVIEW gate). Read context and explore relevant source files. Create an implementation plan covering files to modify/create, key changes, implementation order, testing approach. Include any Related Context from step 3. For LIGHT REVIEW: create a 1-line plan summary without EnterPlanMode. For AUTO-EXECUTE: skip plan creation entirely.
+5. Plan approval (respects trust level AND gate routing):
    - **Trust 0**: `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+   - AUTO-EXECUTE gate: skip approval entirely regardless of trust level.
+   - LIGHT REVIEW gate: display 1-line summary + `Proceed? [Y/n]` regardless of trust level (unless trust 2+).
 6. Store approved plan in `approved_plans[todo_id]`.
 7. IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs and their plan summaries.
@@ -253,7 +341,11 @@ After all plans are stored (trust 0-1): present a bulk approval summary showing 
 **File-Overlap Detection** (after Phase 1, before Phase 2, skip if trust 3):
 1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text. For dependency-batched execution, check overlaps **within each batch** (across-batch overlaps are acceptable since batches run sequentially).
 2. Build an overlap matrix: for each pair of plans within the same batch, check if their file lists intersect.
-3. If overlaps are found, display:
+3. Quality-level behavior for overlaps:
+   - IF quality_level == fast: auto-proceed on overlap (no prompt).
+   - IF quality_level in [careful, paranoid]: auto-serialize conflicting todos.
+   - IF quality_level == balanced: prompt user (current behavior below).
+4. If overlaps are found (and quality_level == balanced), display:
 
 ```
 ### File Overlap Warning
@@ -269,10 +361,10 @@ Options:
 3. **Cancel** — Stop execution
 ```
 
-4. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
-5. If user selects **Proceed**: continue as-is.
-6. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
-7. If no overlaps detected: skip silently.
+5. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
+6. If user selects **Proceed**: continue as-is.
+7. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
+8. If no overlaps detected: skip silently.
 
 **Resume checkpoint** (applies when `--resume` is passed):
 1. Look for the most recent checkpoint file in `<tracking_dir>/<project>/.team-state/*/checkpoint.yaml`.
@@ -325,6 +417,9 @@ ELSE:
 
 **--- Task agent execution (5ii-F, fallback) ---**
 
+IF quality_level == fast:
+  Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
+
 **Phase 1 — Plan (sequential, main conversation):**
 
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
@@ -337,13 +432,43 @@ For each todo in dependency order:
 1. Call `mcp__proj__todo_check_executable` — if manual: display `Todo <id> [manual] — skipped`, add to `manual_skipped_ids`, continue.
 2. Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
 3. Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-4. `EnterPlanMode`. Read context and explore relevant source files. Create an implementation plan covering files to modify/create, key changes, implementation order, testing approach. Include any Related Context from step 3.
-5. Plan approval (respects trust level):
+
+**Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+
+Compute complexity score (0-14) from 7 dimensions:
+
+| Dimension | 0 points | 1 point | 2 points |
+|-----------|----------|---------|----------|
+| File count (from plan) | 1 file | 2-4 files | 5+ files |
+| Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
+| Requirements quality | detailed | basic | none/vague |
+| Research quality | detailed | basic | none |
+| Risk tags | none | general risk | security/breaking/migration |
+| Children count | 0 (leaf) | 1-3 | 4+ |
+| Blocked-by deps | 0 | 1 | 2+ |
+
+**Evaluation order:**
+1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
+2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
+3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+
+**Gate routing:**
+- AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.
+- LIGHT REVIEW: Display 1-line plan summary + `Proceed? [Y/n]` (default yes).
+- FULL REVIEW: Full EnterPlanMode/ExitPlanMode (current behavior).
+
+IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
+
+4. `EnterPlanMode` (for FULL REVIEW gate). Read context and explore relevant source files. Create an implementation plan covering files to modify/create, key changes, implementation order, testing approach. Include any Related Context from step 3. For LIGHT REVIEW: create a 1-line plan summary without EnterPlanMode. For AUTO-EXECUTE: skip plan creation entirely.
+5. Plan approval (respects trust level AND gate routing):
    - **Trust 0**: `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: `ExitPlanMode` for user review. User approves this plan, then move to the next todo.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+   - AUTO-EXECUTE gate: skip approval entirely regardless of trust level.
+   - LIGHT REVIEW gate: display 1-line summary + `Proceed? [Y/n]` regardless of trust level (unless trust 2+).
 6. Store approved plan in `approved_plans[todo_id]`.
 7. IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 **Phase 2 — Execute (parallel Task agents):**
@@ -389,13 +514,24 @@ If any todo has failures, prompt:
 
 If all checks pass, display the report and proceed without prompting.
 
-**Satisfaction check** (sequential, main conversation): For each completed todo in the batch, run the satisfaction loop:
+**Satisfaction check** (sequential, main conversation):
+
+Satisfaction mode is determined by `quality_level.satisfaction`:
+- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch.
+- IF satisfaction == "per-todo": Run individual satisfaction loop per todo (default behavior below).
+- IF satisfaction == "skip": Auto-complete all todos without prompting (call `mcp__proj__todo_complete` on each).
+- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes.
+
+For per-todo and per-todo + re-verify modes, for each completed todo in the batch, run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
       1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
       2. **Not satisfied** — fix in scope: ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
       3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
 Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent. Otherwise display warning.
+
+IF quality_level == fast:
+  After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 Clear `executing_agents = {}` before proceeding to the next batch.
 
@@ -462,7 +598,7 @@ If Re-define: run interactive define on each flagged todo, then resume from deco
 
 **Phase A.5 — Preflight checklist:**
 
-<!-- TODO: skip if --fast quality level is set (see todo 280) -->
+IF quality_level == fast: skip preflight entirely, proceed to Phase B.
 
 For each todo in dependency order:
   Run the 5 preflight checks (same as single-ID mode above).
@@ -529,13 +665,13 @@ Compare `snapshot_<i>` with `snapshot_<i-1>` and display:
 
 Then show the between-iteration prompt (same 4 options as single-ID mode).
 
-**Phase B.75 — Refine (if `--refine` flag set AND `refine` in steps AND NOT `--no-interactive`):**
+**Phase B.75 — Refine (if (`--refine` flag set OR quality_level in [careful, paranoid]) AND `refine` in steps AND NOT `--no-interactive`):**
 
-<!-- TODO: auto-enable for --careful/--paranoid quality levels (see todo 280) -->
-<!-- TODO: skip for --fast quality level (see todo 280) -->
+IF quality_level == fast: skip refine entirely, proceed to Phase C.
+IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
 Read the sibling `refine/SKILL.md` file. For each todo in dependency order:
-  Execute the refine sub-skill per-todo (3 agents each, 3*N total for N todos).
+  Execute the refine sub-skill per-todo (3 agents each, 3*N total for N todos). Subject to `max_parallel` throttling from quality_level.
   Present per-todo refinement reports sequentially.
   If Apply on any todo: requirements/research updated, preflight re-runs on that todo.
 
@@ -553,6 +689,19 @@ If NOT `--no-interactive`, prompt:
 
 Read `execute/SKILL.md` instructions once.
 
+IF quality_level == fast:
+  Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
+
+**Phase C0 — Speculative planning (if quality_level != careful/paranoid AND trust level != 0 AND trust level != 3):**
+
+Spawn one read-only Task agent per todo in this batch. Each agent:
+- Receives: todo context, requirements.md, research.md, parent context
+- Restricted to read-only tools: Read, Glob, Grep, proj_get_todo_context, proj_explore_codebase, content_get_requirements, content_get_research
+- Produces structured plan: `{prose: "<plan text>", actions: [{type: "create"|"modify"|"delete"|"test", file: "<path>"}]}`
+
+Wait for all agents. If an agent fails: exclude that todo, fall back to sequential planning for it.
+Store plans in `speculative_plans[todo_id]`.
+
 **Phase C1 — Plan (sequential, main conversation):**
 
 Skip Phase C1 entirely if **trust level is 3** — go directly to Phase C2 with context only (no plans).
@@ -565,19 +714,95 @@ For each todo in dependency order:
 1. Call `mcp__proj__todo_check_executable` — if manual: skip with warning.
 2. Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
 3. Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-4. `EnterPlanMode` — create implementation plan. Include any Related Context from step 3.
-5. Plan approval (respects trust level):
+
+**Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+
+Compute complexity score (0-14) from 7 dimensions:
+
+| Dimension | 0 points | 1 point | 2 points |
+|-----------|----------|---------|----------|
+| File count (from plan) | 1 file | 2-4 files | 5+ files |
+| Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
+| Requirements quality | detailed | basic | none/vague |
+| Research quality | detailed | basic | none |
+| Risk tags | none | general risk | security/breaking/migration |
+| Children count | 0 (leaf) | 1-3 | 4+ |
+| Blocked-by deps | 0 | 1 | 2+ |
+
+**Evaluation order:**
+1. Tag overrides (FIRST): `auto-execute` tag → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW.
+2. Complexity score: AUTO-EXECUTE (0-3), LIGHT REVIEW (4-7), FULL REVIEW (8-14).
+3. Critical-path file guard (LAST, floor): if plan touches .env, secrets, auth, Dockerfile, CI workflows → minimum LIGHT REVIEW.
+
+**Gate routing:**
+- AUTO-EXECUTE: Create git tag `pre-auto-execute-{todo_id}`. Skip plan mode, execute with context only.
+- LIGHT REVIEW: Display 1-line plan summary + `Proceed? [Y/n]` (default yes).
+- FULL REVIEW: Full EnterPlanMode/ExitPlanMode (current behavior).
+
+IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
+
+4. `EnterPlanMode` (for FULL REVIEW gate) — create implementation plan. Include any Related Context from step 3. For LIGHT REVIEW: create a 1-line plan summary without EnterPlanMode. For AUTO-EXECUTE: skip plan creation entirely.
+5. Plan approval (respects trust level AND gate routing):
    - **Trust 0**: `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+   - AUTO-EXECUTE gate: skip approval entirely regardless of trust level.
+   - LIGHT REVIEW gate: display 1-line summary + `Proceed? [Y/n]` regardless of trust level (unless trust 2+).
 6. Store approved plan.
 7. IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+
+**Pattern detection** (skip if quality_level in [careful, paranoid]):
+
+1. Normalize each plan: strip todo-specific IDs, extract (action_type, file_pattern) tuples, replace unique path segments with *.
+2. Compute pairwise Jaccard similarity: |A∩B| / |A∪B|.
+3. Group plans with >80% similarity. Min group size: 2, max: 10.
+4. IF quality_level == fast: auto-approve all pattern groups.
+5. ELSE: display pattern groups as collapsible sections in batch review:
+
+   **Pattern Group 1** (3 todos: 1.1, 1.2, 1.3) — 85% similar
+   Common pattern: modify `tests/test_*.py`, modify `server/tools/*.py`
+   Deviations: todo 1.2 also creates `server/tools/new_helper.py`
+
+   Per-group actions: Approve pattern / Edit pattern / Review individually
+
+IF speculative_plans exist:
+  **Phase C1a — Batch review:**
+
+  Display batch review document:
+  ```
+  ### Batch Plan Review — N todos
+
+  **Todo <id>**: <1-line summary>
+  Actions: create X, modify Y, test Z
+
+  [repeat for each todo]
+
+  ### File Overlap Table
+  | File | Touched by |
+  |------|-----------|
+  | ... | ... |
+
+  ### Pattern Groups (if any — see pattern detection)
+  [collapsible pattern sections]
+
+  1. **Approve all** — proceed to execution
+  2. **Edit** — re-plan specific todos (enter IDs). After re-planning, re-run file-overlap detection on the updated plan set.
+  3. **Reject** — remove specific todos (enter IDs)
+  4. **Cancel** — abort batch
+  ```
+
+  IF `--batch-approve` OR trust level 2: auto-approve all, display "Batch auto-approved."
 
 **File-Overlap Detection** (after Phase C1, before Phase C2, skip if trust 3):
 1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text. For dependency-batched execution, check overlaps **within each batch** (across-batch overlaps are acceptable since batches run sequentially).
 2. Build an overlap matrix: for each pair of plans within the same batch, check if their file lists intersect.
-3. If overlaps are found, display:
+3. Quality-level behavior for overlaps:
+   - IF quality_level == fast: auto-proceed on overlap (no prompt).
+   - IF quality_level in [careful, paranoid]: auto-serialize conflicting todos.
+   - IF quality_level == balanced: prompt user (current behavior below).
+4. If overlaps are found (and quality_level == balanced), display:
 
 ```
 ### File Overlap Warning
@@ -593,10 +818,10 @@ Options:
 3. **Cancel** — Stop execution
 ```
 
-4. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
-5. If user selects **Proceed**: continue as-is.
-6. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
-7. If no overlaps detected: skip silently.
+5. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
+6. If user selects **Proceed**: continue as-is.
+7. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
+8. If no overlaps detected: skip silently.
 
 **Phase C2 — Execute:**
 
@@ -696,11 +921,21 @@ If any todo has failures, prompt:
 If all checks pass, display the report and proceed without prompting.
 
 **Satisfaction check** (sequential, main conversation):
-For each completed todo (excluding `manual_skipped_ids`), run the satisfaction loop:
+
+Satisfaction mode is determined by `quality_level.satisfaction`:
+- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch.
+- IF satisfaction == "per-todo": Run individual satisfaction loop per todo (default behavior below).
+- IF satisfaction == "skip": Auto-complete all todos without prompting (call `mcp__proj__todo_complete` on each).
+- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes.
+
+For per-todo and per-todo + re-verify modes, for each completed todo (excluding `manual_skipped_ids`), run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
       1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
       2. **Not satisfied** — fix in scope: ask what's missing, fix, re-ask
       3. **Redefine** — refine requirements and re-run workflow
+
+IF quality_level == fast:
+  After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 Clear `executing_agents = {}` before proceeding to the next batch.
 

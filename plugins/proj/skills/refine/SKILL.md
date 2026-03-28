@@ -20,6 +20,7 @@ Refine todo: $ARGUMENTS
 - Call `mcp__proj__content_get_requirements` with `todo_id`.
 - Call `mcp__proj__content_get_research` with `todo_id`.
 - If no requirements found: note as a critical gap but continue (agents will flag it).
+- If no research found: note for Architecture Reviewer (will flag missing research as a gap).
 
 **3.** Spawn 3 review agents in parallel (general-purpose, read-only: `Read, Glob, Grep`):
 

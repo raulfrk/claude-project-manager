@@ -3,6 +3,47 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+
+
+class QualityLevel(str, Enum):
+    """Quality level presets for run/execute workflows."""
+    FAST = "fast"
+    BALANCED = "balanced"
+    CAREFUL = "careful"
+    PARANOID = "paranoid"
+
+
+@dataclass
+class SmartGateConfig:
+    """Configuration for smart gate complexity scoring."""
+    enabled: bool = True
+    auto_execute_threshold: int = 3   # score 0-3 → AUTO-EXECUTE
+    light_review_threshold: int = 7   # score 4-7 → LIGHT REVIEW
+    # score 8-14 → FULL REVIEW (implicit)
+    critical_path_patterns: list[str] = field(default_factory=lambda: [
+        "*.env*", "*secret*", "*credential*", "*key*", "*auth*", "*permission*",
+        "Dockerfile", "docker-compose*", ".github/workflows/*",
+        "pyproject.toml", "package.json", "settings.json", "proj.yaml", "*.config.*",
+    ])
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "auto_execute_threshold": self.auto_execute_threshold,
+            "light_review_threshold": self.light_review_threshold,
+            "critical_path_patterns": self.critical_path_patterns,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "SmartGateConfig":
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            auto_execute_threshold=int(data.get("auto_execute_threshold", 3)),
+            light_review_threshold=int(data.get("light_review_threshold", 7)),
+            critical_path_patterns=list(data.get("critical_path_patterns", cls().critical_path_patterns)),
+        )
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -185,6 +226,43 @@ class PermissionsConfig:
 
 
 @dataclass
+class TeamModeConfig:
+    enabled: bool = False
+    max_agents: int = 4
+    trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
+
+    def to_dict(self) -> dict[str, object]:
+        return {"enabled": self.enabled, "max_agents": self.max_agents, "trust_level": self.trust_level}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> TeamModeConfig:
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            max_agents=int(data.get("max_agents", 4)),
+            trust_level=int(data.get("trust_level", 1)),
+        )
+
+
+@dataclass
+class ResilienceConfig:
+    failure_threshold: int = 3
+    recovery_timeout: int = 300
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "failure_threshold": self.failure_threshold,
+            "recovery_timeout": self.recovery_timeout,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ResilienceConfig:
+        return cls(
+            failure_threshold=int(data.get("failure_threshold", 3)),
+            recovery_timeout=int(data.get("recovery_timeout", 300)),
+        )
+
+
+@dataclass
 class ProjConfig:
     tracking_dir: str = "~/projects/tracking"
     projects_base_dir: str | None = None
@@ -201,6 +279,10 @@ class ProjConfig:
     zoxide_integration: bool = False
     claudemd_management: bool = False
     archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    team_mode: TeamModeConfig = field(default_factory=TeamModeConfig)
+    resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
+    smart_gate: SmartGateConfig = field(default_factory=SmartGateConfig)
+    quality_level: str = "balanced"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -217,6 +299,10 @@ class ProjConfig:
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
             "archive": self.archive.to_dict(),
+            "team_mode": self.team_mode.to_dict(),
+            "resilience": self.resilience.to_dict(),
+            "smart_gate": self.smart_gate.to_dict(),
+            "quality_level": self.quality_level,
         }
 
     @classmethod
@@ -246,6 +332,18 @@ class ProjConfig:
         if not isinstance(archive_raw, dict):
             archive_raw = {}
 
+        team_mode_raw = data.get("team_mode", {})
+        if not isinstance(team_mode_raw, dict):
+            team_mode_raw = {}
+
+        resilience_raw = data.get("resilience", {})
+        if not isinstance(resilience_raw, dict):
+            resilience_raw = {}
+
+        smart_gate_raw = data.get("smart_gate", {})
+        if not isinstance(smart_gate_raw, dict):
+            smart_gate_raw = {}
+
         pbd = data.get("projects_base_dir")
 
         return cls(
@@ -263,6 +361,10 @@ class ProjConfig:
             zoxide_integration=bool(data.get("zoxide_integration", False)),
             claudemd_management=bool(data.get("claudemd_management", False)),
             archive=ArchiveConfig.from_dict(archive_raw),
+            team_mode=TeamModeConfig.from_dict(team_mode_raw),
+            resilience=ResilienceConfig.from_dict(resilience_raw),
+            smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
+            quality_level=str(data.get("quality_level", "balanced")),
         )
 
 

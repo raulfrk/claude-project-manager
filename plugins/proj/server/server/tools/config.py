@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import Priority
-from server.lib.models import ProjConfig
+from server.lib.models import ProjConfig, ResilienceConfig, SmartGateConfig, TeamModeConfig
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -88,6 +88,17 @@ def register(app: FastMCP) -> None:
             f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
             f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
             f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
+            f"  team_mode.enabled: {cfg.team_mode.enabled}\n"
+            f"  team_mode.max_agents: {cfg.team_mode.max_agents}\n"
+            f"  team_mode.trust_level: {cfg.team_mode.trust_level}\n"
+            f"  resilience.failure_threshold: {cfg.resilience.failure_threshold}\n"
+            f"  resilience.recovery_timeout: {cfg.resilience.recovery_timeout}\n"
+            f"  smart_gate:\n"
+            f"    enabled: {cfg.smart_gate.enabled}\n"
+            f"    auto_execute_threshold: {cfg.smart_gate.auto_execute_threshold}\n"
+            f"    light_review_threshold: {cfg.smart_gate.light_review_threshold}\n"
+            f"    critical_path_patterns: {cfg.smart_gate.critical_path_patterns}\n"
+            f"  quality_level: {cfg.quality_level}\n"
             f"  config_path: {storage.config_path()}"
         )
 
@@ -123,6 +134,13 @@ def register(app: FastMCP) -> None:
         archive_destination: str = "~/projects/archived",
         archive_purge_after_days: int | None = None,
         archive_trash_grace_days: int = 7,
+        team_mode_enabled: bool = False,
+        team_mode_max_agents: int = 4,
+        team_mode_trust_level: int = 1,
+        resilience_failure_threshold: int = 3,
+        resilience_recovery_timeout: int = 300,
+        quality_level: str = "balanced",
+        smart_gate_enabled: bool = True,
     ) -> str:
         cfg = ProjConfig(
             tracking_dir=tracking_dir,
@@ -154,6 +172,23 @@ def register(app: FastMCP) -> None:
         cfg.archive.destination = archive_destination
         cfg.archive.purge_after_days = archive_purge_after_days
         cfg.archive.trash_grace_days = archive_trash_grace_days
+        cfg.team_mode = TeamModeConfig(
+            enabled=team_mode_enabled,
+            max_agents=team_mode_max_agents,
+            trust_level=team_mode_trust_level,
+        )
+        cfg.resilience = ResilienceConfig(
+            failure_threshold=resilience_failure_threshold,
+            recovery_timeout=resilience_recovery_timeout,
+        )
+        _valid_quality = ("fast", "balanced", "careful", "paranoid")
+        if quality_level not in _valid_quality:
+            return (
+                f"Invalid quality_level '{quality_level}'. "
+                f"Must be one of: {', '.join(_valid_quality)}."
+            )
+        cfg.quality_level = quality_level
+        cfg.smart_gate = SmartGateConfig(enabled=smart_gate_enabled)
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -190,6 +225,15 @@ def register(app: FastMCP) -> None:
         archive_destination: str | None = None,
         archive_purge_after_days: int | None = None,
         archive_trash_grace_days: int | None = None,
+        team_mode_enabled: bool | None = None,
+        team_mode_max_agents: int | None = None,
+        team_mode_trust_level: int | None = None,
+        resilience_failure_threshold: int | None = None,
+        resilience_recovery_timeout: int | None = None,
+        quality_level: str | None = None,
+        smart_gate_enabled: bool | None = None,
+        smart_gate_auto_execute_threshold: int | None = None,
+        smart_gate_light_review_threshold: int | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
             Priority.LOW, Priority.MEDIUM, Priority.HIGH
@@ -233,6 +277,37 @@ def register(app: FastMCP) -> None:
         if archive_trash_grace_days is not None:
             if not isinstance(archive_trash_grace_days, int) or archive_trash_grace_days <= 0:
                 return "Invalid archive_trash_grace_days: must be a positive integer."
+
+        if team_mode_max_agents is not None:
+            if not isinstance(team_mode_max_agents, int) or team_mode_max_agents <= 0:
+                return "Invalid team_mode_max_agents: must be a positive integer."
+
+        if team_mode_trust_level is not None:
+            if not isinstance(team_mode_trust_level, int) or team_mode_trust_level not in (0, 1, 2, 3):
+                return "Invalid team_mode_trust_level: must be 0, 1, 2, or 3."
+
+        if resilience_failure_threshold is not None:
+            if not isinstance(resilience_failure_threshold, int) or resilience_failure_threshold <= 0:
+                return "Invalid resilience_failure_threshold: must be a positive integer."
+
+        if resilience_recovery_timeout is not None:
+            if not isinstance(resilience_recovery_timeout, int) or resilience_recovery_timeout <= 0:
+                return "Invalid resilience_recovery_timeout: must be a positive integer."
+
+        _valid_quality = ("fast", "balanced", "careful", "paranoid")
+        if quality_level is not None and quality_level not in _valid_quality:
+            return (
+                f"Invalid quality_level '{quality_level}'. "
+                f"Must be one of: {', '.join(_valid_quality)}."
+            )
+
+        if smart_gate_auto_execute_threshold is not None:
+            if not isinstance(smart_gate_auto_execute_threshold, int) or smart_gate_auto_execute_threshold < 0:
+                return "Invalid smart_gate_auto_execute_threshold: must be a non-negative integer."
+
+        if smart_gate_light_review_threshold is not None:
+            if not isinstance(smart_gate_light_review_threshold, int) or smart_gate_light_review_threshold < 0:
+                return "Invalid smart_gate_light_review_threshold: must be a non-negative integer."
 
         cfg = require_config()
         if tracking_dir is not None:
@@ -289,5 +364,23 @@ def register(app: FastMCP) -> None:
             cfg.archive.purge_after_days = archive_purge_after_days
         if archive_trash_grace_days is not None:
             cfg.archive.trash_grace_days = archive_trash_grace_days
+        if team_mode_enabled is not None:
+            cfg.team_mode.enabled = team_mode_enabled
+        if team_mode_max_agents is not None:
+            cfg.team_mode.max_agents = team_mode_max_agents
+        if team_mode_trust_level is not None:
+            cfg.team_mode.trust_level = team_mode_trust_level
+        if resilience_failure_threshold is not None:
+            cfg.resilience.failure_threshold = resilience_failure_threshold
+        if resilience_recovery_timeout is not None:
+            cfg.resilience.recovery_timeout = resilience_recovery_timeout
+        if quality_level is not None:
+            cfg.quality_level = quality_level
+        if smart_gate_enabled is not None:
+            cfg.smart_gate.enabled = smart_gate_enabled
+        if smart_gate_auto_execute_threshold is not None:
+            cfg.smart_gate.auto_execute_threshold = smart_gate_auto_execute_threshold
+        if smart_gate_light_review_threshold is not None:
+            cfg.smart_gate.light_review_threshold = smart_gate_light_review_threshold
         storage.save_config(cfg)
         return "Configuration updated."

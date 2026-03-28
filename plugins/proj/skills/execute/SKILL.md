@@ -36,6 +36,7 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 | verification_mode | skip | standard | enhanced | full |
 | max_parallel | 20 | 6 | 3 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
+| pattern_detection | auto-approve | enabled | disabled | disabled |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
@@ -45,7 +46,17 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 - `--paranoid --batch-approve` → paranoid wins, batch approve disabled (warn).
 - `--force-plan --batch-approve` → ERROR: "Cannot combine --force-plan with --batch-approve."
 - `--no-verify --paranoid` → ERROR: "Cannot combine --no-verify with --paranoid."
-- `--no-verify --careful` → careful wins, verification still enhanced (warn).
+- `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification is skipped.
+- `--fast --steps refine` → ERROR (execute doesn't have refine, but document for consistency).
+- `--batch-approve --no-pipeline` → Allowed.
+- `--paranoid --no-pipeline` → Redundant warning.
+- `--careful --no-pipeline` → Allowed.
+- `--fast --no-pipeline` → Redundant warning.
+- `--force-plan --careful` → Redundant warning.
+- `--force-plan --paranoid` → Redundant warning.
+- `--no-verify --balanced` → --no-verify wins.
+- `--no-verify --fast` → Redundant.
+- `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
 - Empty → call `mcp__proj__todo_list` with `status="in_progress"` to find any in-progress todo;
   if none, call `mcp__proj__todo_list` with `status="ready"`. Display the results and proceed
   with the first (or ask the user if multiple).
@@ -62,6 +73,12 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 **3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
 **3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
 
+   **File-impact estimation** (for dimensions 1-2 when no speculative plan exists):
+   Spawn a lightweight read-only Task agent with: todo context, requirements, research. Tools: Read, Glob, Grep only.
+   Agent estimates: which files will be modified/created, which directories are involved.
+   Wait for agent. Use results to score dimensions 1 (file count) and 2 (directory spread).
+   If agent fails: score dimensions 1-2 as 0 (assume simple).
+
    Compute complexity score (0-14) from 7 dimensions:
 
    | Dimension | 0 points | 1 point | 2 points |
@@ -71,8 +88,8 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
    | Requirements quality | detailed | basic | none/vague |
    | Research quality | detailed | basic | none |
    | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0-1 | 2-4 | 5+ |
-   | Blocked-by deps | 0 | 1-2 | 3+ |
+   | Children count | 0 (leaf) | 1-3 | 4+ |
+   | Blocked-by deps | 0 | 1 | 2+ |
 
    Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
 
@@ -103,7 +120,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
    - `skip` (--fast): Skip verification entirely.
    - `standard` (--balanced): Current behavior (automated checks + spec validation + diff review).
    - `enhanced` (--careful): Standard + generate manual test checklist from acceptance criteria.
-   - `full` (--paranoid): Enhanced + spawn independent review agent that reads diff, requirements, plan, and produces a review report.
+   - `full` (--paranoid): Enhanced + spawn an independent review agent that reads the implementation diff, requirements.md, and the approved plan. Agent produces an assessment with a risk rating (LOW/MEDIUM/HIGH). If risk is HIGH, flag for user attention before satisfaction prompt.
 
    Run three check categories, then report results. If a check's prerequisites are missing, skip it gracefully with a note — never fail the whole step.
 
@@ -208,8 +225,8 @@ For each todo in the range:
    | Requirements quality | detailed | basic | none/vague |
    | Research quality | detailed | basic | none |
    | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0-1 | 2-4 | 5+ |
-   | Blocked-by deps | 0 | 1-2 | 3+ |
+   | Children count | 0 (leaf) | 1-3 | 4+ |
+   | Blocked-by deps | 0 | 1 | 2+ |
 
    Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
 
@@ -231,9 +248,17 @@ For each todo in the range:
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs and their plan summaries.
+
+**Cross-review** (if quality_level == paranoid AND N > 1):
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
+Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
+Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
+If any HIGH risk: flag for user attention before proceeding to execution.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text.
@@ -366,8 +391,8 @@ For each todo in the range:
    | Requirements quality | detailed | basic | none/vague |
    | Research quality | detailed | basic | none |
    | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0-1 | 2-4 | 5+ |
-   | Blocked-by deps | 0 | 1-2 | 3+ |
+   | Children count | 0 (leaf) | 1-3 | 4+ |
+   | Blocked-by deps | 0 | 1 | 2+ |
 
    Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
 
@@ -389,7 +414,15 @@ For each todo in the range:
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+
+**Cross-review** (if quality_level == paranoid AND N > 1):
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
+Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
+Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
+If any HIGH risk: flag for user attention before proceeding to execution.
 
 Phase 2 — Execute (parallel Task agents):
 
@@ -477,8 +510,8 @@ Group todos into dependency batches (topological order). Todos within the same b
    | Requirements quality | detailed | basic | none/vague |
    | Research quality | detailed | basic | none |
    | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0-1 | 2-4 | 5+ |
-   | Blocked-by deps | 0 | 1-2 | 3+ |
+   | Children count | 0 (leaf) | 1-3 | 4+ |
+   | Blocked-by deps | 0 | 1 | 2+ |
 
    Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
 
@@ -500,9 +533,17 @@ Group todos into dependency batches (topological order). Todos within the same b
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs, their batch assignments, and plan summaries.
+
+**Cross-review** (if quality_level == paranoid AND N > 1):
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
+Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
+Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
+If any HIGH risk: flag for user attention before proceeding to execution.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text. For dependency-batched execution, check overlaps **within each batch** (across-batch overlaps are acceptable since batches run sequentially).
@@ -633,8 +674,8 @@ Execute in topological order (respect blocked_by chains). For each todo:
    | Requirements quality | detailed | basic | none/vague |
    | Research quality | detailed | basic | none |
    | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0-1 | 2-4 | 5+ |
-   | Blocked-by deps | 0 | 1-2 | 3+ |
+   | Children count | 0 (leaf) | 1-3 | 4+ |
+   | Blocked-by deps | 0 | 1 | 2+ |
 
    Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
 
@@ -656,7 +697,15 @@ Execute in topological order (respect blocked_by chains). For each todo:
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
+     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+
+**Cross-review** (if quality_level == paranoid AND N > 1):
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
+Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
+Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
+If any HIGH risk: flag for user attention before proceeding to execution.
 
 Phase 2 — Execute (sequential, in dependency order):
 
