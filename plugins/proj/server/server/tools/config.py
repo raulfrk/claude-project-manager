@@ -295,7 +295,6 @@ def register(app: FastMCP) -> None:
             if not isinstance(resilience_recovery_timeout, int) or resilience_recovery_timeout <= 0:
                 return "Invalid resilience_recovery_timeout: must be a positive integer."
 
-        _valid_quality = ("fast", "balanced", "careful", "paranoid")
         _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level is not None and quality_level not in _valid_quality:
             return (
