@@ -1,7 +1,7 @@
 {
   "name": "hooks",
   "description": "Central MCP-to-MCP hook registry with schema-based param mapping, auto-registration, and recovery.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": { "name": "raulfrk" },
   "mcpServers": "./.mcp.json"
 }

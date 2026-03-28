@@ -197,7 +197,7 @@ class TestHooksFire:
         save(reg, hooks_yaml)
 
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            result = await hooks_fire("trigger_a", _depth=2)
+            result = await hooks_fire("trigger_a", depth=2)
 
         data = json.loads(result)
         assert data["depth_limited"] is True
@@ -210,7 +210,7 @@ class TestHooksFire:
         """Default max_depth is 3 when not configured."""
         save(HookRegistry(), hooks_yaml)
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            result = await hooks_fire("trigger_a", _depth=3)
+            result = await hooks_fire("trigger_a", depth=3)
         data = json.loads(result)
         assert data["depth_limited"] is True
         assert data["max_depth"] == 3

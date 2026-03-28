@@ -272,7 +272,7 @@ class TestDepthLimitIntegration:
 
     @pytest.mark.asyncio
     async def test_custom_max_depth(self, hooks_yaml: Path):
-        """Custom max_depth=1 in settings limits cascading."""
+        """Custom maxdepth=1 in settings limits cascading."""
         reg = HookRegistry(
             hooks=[],
             settings={"max_depth": 1},
@@ -283,7 +283,7 @@ class TestDepthLimitIntegration:
             hooks_register(trigger_tool="t", target_tool="u", server="s")
 
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            result = await hooks_fire("t", _depth=1)
+            result = await hooks_fire("t", depth=1)
 
         data = json.loads(result)
         assert data["depth_limited"] is True

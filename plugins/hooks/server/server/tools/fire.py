@@ -176,7 +176,7 @@ async def _fire_verification(
 async def hooks_fire(
     trigger_tool: str,
     source_result: str = "{}",
-    _depth: int = 0,
+    depth: int = 0,
 ) -> str:
     """Fire all hooks registered for *trigger_tool*.
 
@@ -184,7 +184,7 @@ async def hooks_fire(
     Template ``${}`` placeholders in each hook's ``param_mapping`` are resolved
     against the parsed *source_result*.
 
-    *_depth* tracks the current cascade level.  When it reaches *max_depth*
+    *depth* tracks the current cascade level.  When it reaches *max_depth*
     (default 3, configurable via ``settings.max_depth`` in hooks.yaml) the call
     is skipped with a warning to prevent runaway cascading.
 
@@ -194,9 +194,9 @@ async def hooks_fire(
     """
     # Runtime depth limit
     max_depth = _get_max_depth()
-    if _depth >= max_depth:
+    if depth >= max_depth:
         msg = (
-            f"Hook depth limit reached ({_depth}/{max_depth}) for trigger "
+            f"Hook depth limit reached ({depth}/{max_depth}) for trigger "
             f"'{trigger_tool}'. Skipping to prevent runaway cascade."
         )
         logger.warning(msg)
@@ -205,7 +205,7 @@ async def hooks_fire(
             "skipped": 0,
             "errors": [],
             "depth_limited": True,
-            "depth": _depth,
+            "depth": depth,
             "max_depth": max_depth,
             "message": msg,
         })
@@ -222,7 +222,7 @@ async def hooks_fire(
     matched = [h for h in registry.hooks if h.trigger_tool == trigger_tool]
 
     if not matched:
-        return json.dumps({"hooks_fired": 0, "skipped": 0, "errors": [], "depth": _depth})
+        return json.dumps({"hooks_fired": 0, "skipped": 0, "errors": [], "depth": depth})
 
     # Split into primary and verification hooks
     primary_matched = [h for h in matched if not h.verification]
@@ -300,7 +300,7 @@ async def hooks_fire(
         "skipped": skipped,
         "errors": errors,
         "results": blocking_results,
-        "depth": _depth,
+        "depth": depth,
         "max_depth": max_depth,
     }
     if verification_results:
@@ -319,7 +319,7 @@ def register(app: FastMCP) -> None:
             "Fire all hooks registered for a given trigger_tool. "
             "source_result is a JSON string of the trigger tool's output used to "
             "resolve ${} template placeholders in each hook's param_mapping. "
-            "_depth tracks the current cascade level (default 0); calls are "
+            "depth tracks the current cascade level (default 0); calls are "
             "skipped when depth >= max_depth (default 3, configurable in "
             "hooks.yaml settings.max_depth). "
             "Fire-and-forget hooks return immediately; blocking hooks are awaited. "
@@ -329,10 +329,10 @@ def register(app: FastMCP) -> None:
     async def hooks_fire_tool(
         trigger_tool: str,
         source_result: str = "{}",
-        _depth: int = 0,
+        depth: int = 0,
     ) -> str:
         return await hooks_fire(
             trigger_tool=trigger_tool,
             source_result=source_result,
-            _depth=_depth,
+            depth=depth,
         )
