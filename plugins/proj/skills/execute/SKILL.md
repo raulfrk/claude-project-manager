@@ -1,7 +1,7 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
 argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
 ---
 
@@ -42,6 +42,8 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 | max_parallel | 20 | 6 | 3 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | pattern_detection | auto-approve | enabled | disabled | disabled |
+| worktree | off unless explicit | off unless explicit | off unless explicit | off (max_parallel=1) |
+| overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
@@ -64,6 +66,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
 - `--paranoid --worktree` → paranoid wins, worktree disabled (warn).
 - `--worktree --no-interactive` → Allowed. Auto-resolve only for conflicts.
+- `--fast --worktree` → Allowed: worktree isolation + auto-execute coexist.
 - Empty → call `mcp__proj__todo_list` with `status="in_progress"` to find any in-progress todo;
   if none, call `mcp__proj__todo_list` with `status="ready"`. Display the results and proceed
   with the first (or ask the user if multiple).
@@ -185,6 +188,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
       - After define completes, check if todo has/needs children:
         - If decomposable: invoke `/proj:decompose <id>` via Skill tool
       - Invoke `/proj:execute <id>` via Skill tool
+      - When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2.
       - Re-ask satisfaction on original todo (go back to step 5a)
    d. Call `mcp__proj__todo_complete`
       - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
@@ -331,6 +335,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
+     Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
    - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
    - Wait for batch completion. Report any failures.
@@ -448,6 +453,7 @@ Each agent receives: the todo details, its requirements.md, its research.md, par
 If `worktree_enabled` and todo has `worktree_path`:
   Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
   Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
+  Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
 IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
 Each agent implements according to its approved plan. Agents do NOT call `todo_complete`.
 
@@ -622,6 +628,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
+     Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
    - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
    - Wait for this batch to complete before starting the next batch. Report any failures.
@@ -736,6 +743,7 @@ Execute each todo according to its approved plan (or context only if trust 3), o
 If `worktree_enabled` and todo has `worktree_path`:
   Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
   Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
+  Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
 IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
 
 Phase 2a — Verification (skip entirely if `--no-verify` was passed in $ARGUMENTS):

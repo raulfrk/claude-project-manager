@@ -38,7 +38,7 @@ Decompose todo $ARGUMENTS into sub-todos.
 
    **Step D — Worktree-aware conflict resolution** (if worktree mode available):
 
-   Check worktree availability: call `mcp__proj__config_load` and check if `execution.worktree_isolation` is enabled or `--worktree` flag was passed to the parent run/execute.
+   Check worktree availability: call `mcp__proj__config_load` and check if `worktree_isolation` is enabled or `--worktree` flag was passed to the parent run/execute.
 
    When a shared-file conflict is detected between two subtodos:
    1. Assess conflict granularity (LLM judgment):

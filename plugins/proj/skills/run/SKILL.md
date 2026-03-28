@@ -1,8 +1,8 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve]"
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
 ---
 
 Run workflow for: $ARGUMENTS
@@ -34,6 +34,10 @@ Extract from $ARGUMENTS:
 - Quality levels are mutually exclusive (last wins, default: `--balanced`).
 - **`--force-plan`**: force FULL REVIEW on all todos regardless of complexity score.
 - **`--batch-approve`**: auto-approve all speculative plans without review (subject to trust level).
+- **`--worktree`**: enable worktree isolation for parallel execution (opt-in).
+- **`--no-worktree`**: disable worktree isolation (overrides config default).
+
+Derive: `worktree_enabled` from flags and config (`execution.worktree_isolation` default).
 
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 
@@ -50,6 +54,8 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | preflight | skip | enabled | enabled | enabled |
 | refine | skip | if --refine set | auto-enabled | auto-enabled |
+| worktree | off unless explicit | off unless explicit | off unless explicit | off (max_parallel=1) |
+| overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
@@ -72,6 +78,8 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 - `--no-verify --fast` → Redundant: --fast already skips verification.
 - `--refine --from execute` → Refine skipped (--from execute skips refine per step-order slicing).
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3 (trust 3 skips planning)."
+- `--paranoid --worktree` → paranoid wins, worktree disabled (warn: "max_parallel=1 makes worktree isolation unnecessary").
+- `--worktree --no-interactive` → Allowed. Auto-resolve only for merge conflicts.
 
 If no todo ID, stop with: "Todo ID required. Usage: `/proj:run <id> [--steps define,execute] [--from <step>]`"
 
@@ -378,6 +386,29 @@ Options:
    - If Use anyway: proceed with the stale checkpoint data.
 4. If no checkpoint found: display `No checkpoint found — starting fresh` and proceed normally.
 
+**Phase 1.5 — Worktree setup** (if `worktree_enabled`):
+
+**Worktree prerequisite check**:
+- Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
+- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+
+Check `git status --porcelain` on main. If dirty (uncommitted changes):
+  Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
+  Stash: run `git stash push -m "pre-worktree-{timestamp}"`, proceed.
+  Commit: prompt for message, commit, proceed.
+  Abort: disable worktree for this run, fall back to main.
+  If `--no-interactive`: auto-stash.
+
+For each todo in current batch:
+1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+   If fails: fall back to main for this todo, display warning. Continue with remaining todos.
+2. Call `wt_lock` on the created worktree.
+3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+4. Store `worktree_path` and `worktree_branch` for this todo.
+
+With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
+Without pipeline: setup runs for all todos in batch before Phase 2 begins.
+
 **Phase 2 — Execute (batches sequential, within-batch parallel with Team):**
 
 IF `pipeline_enabled`:
@@ -402,6 +433,9 @@ ELSE:
 2. For each batch in dependency order (excluding `manual_skipped_ids`):
    - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
    - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content. Each implements the approved plan. Agents do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
+   - If `worktree_enabled` and todo has `worktree_path`:
+     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
    - Wait for this batch to complete before starting the next batch. Report failures: `Agent for todo <id> failed: <error>`.
    - **Write checkpoint** after each batch to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml
@@ -471,6 +505,29 @@ IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
      Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
+**Phase 1.5 — Worktree setup** (if `worktree_enabled`):
+
+**Worktree prerequisite check**:
+- Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
+- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+
+Check `git status --porcelain` on main. If dirty (uncommitted changes):
+  Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
+  Stash: run `git stash push -m "pre-worktree-{timestamp}"`, proceed.
+  Commit: prompt for message, commit, proceed.
+  Abort: disable worktree for this run, fall back to main.
+  If `--no-interactive`: auto-stash.
+
+For each todo in current batch:
+1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+   If fails: fall back to main for this todo, display warning. Continue with remaining todos.
+2. Call `wt_lock` on the created worktree.
+3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+4. Store `worktree_path` and `worktree_branch` for this todo.
+
+With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
+Without pipeline: setup runs for all todos in batch before Phase 2 begins.
+
 **Phase 2 — Execute (parallel Task agents):**
 
 IF `pipeline_enabled`:
@@ -482,9 +539,56 @@ ELSE:
 For each batch in dependency order (excluding `manual_skipped_ids`):
 1. Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
 2. Spawn one `general-purpose` Task agent per todo. Each receives: todo details, requirements.md, research.md, parent context, AND the approved plan (or context only if trust 3, or execute instructions if `--no-interactive`). Each implements the approved plan. Agents do NOT call `todo_complete`.
+   If `worktree_enabled` and todo has `worktree_path`:
+     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
 3. Wait for batch completion. Report failures: `Agent for todo <id> failed: <error>`.
 
 **--- Common post-execute (both modes) ---**
+
+Check `git status --porcelain` on main. If dirty: display warning "Main has uncommitted changes after worktree execution. This may cause merge conflicts."
+
+**Phase 2.5 — Merge worktree branches** (if `worktree_enabled`):
+
+Initialize `files_merged_this_batch = set()` and `reexecution_queue = []`.
+
+For each completed todo in batch order:
+  Create pre-merge backup: `git tag pre-merge-{todo_id}`.
+
+  Run `git merge --no-ff todo-{id}`:
+
+  **IF clean merge** (exit 0): commit. Add all modified files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`. Continue.
+
+  **IF conflict**:
+    Check auto-resolve eligibility:
+    - Conflicting file count <= 2
+    - No conflicting files match critical-path patterns
+    - All conflict hunks < 20 lines
+
+    **IF eligible for auto-resolve**:
+      For each conflicting file:
+      - If file NOT in `files_merged_this_batch`: accept "theirs" (worktree version).
+      - If file IN `files_merged_this_batch`: accept "ours" (main, already merged from earlier todo).
+      Stage resolved files. Commit. Add files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`.
+
+    **IF NOT eligible** (AND NOT `--no-interactive`):
+      Display conflict details. Prompt:
+      1. **Manual resolve** — user resolves in editor, then continue
+      2. **Abort this merge** — revert to `pre-merge-{todo_id}` tag, add to `reexecution_queue`
+
+    **IF NOT eligible AND `--no-interactive`**:
+      Abort merge. Revert to `pre-merge-{todo_id}`. Add to `reexecution_queue`.
+
+  **Post-merge test** (after each merge):
+    Run test suite (`uv run pytest --tb=short -q` or `npm test`).
+    If tests fail:
+    - If only 1 merge completed so far: revert that merge, re-execute todo on main.
+    - If multiple merges: use `git bisect` on merge commits to identify the breaking merge. Offer: (1) Revert breaking merge (2) Fix manually (3) Continue anyway.
+
+**Serialized re-execution queue** (after all batch merges):
+  If `reexecution_queue` is non-empty:
+    Display: "N todos need re-execution on main (merge conflicts aborted)."
+    For each queued todo: re-execute sequentially on main (no worktree, `--no-pipeline --balanced`).
 
 **Verification** (skip entirely if `--no-verify` was passed):
 
@@ -528,12 +632,23 @@ For per-todo and per-todo + re-verify modes, for each completed todo in the batc
       2. **Not satisfied** — fix in scope: ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
       3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
+   When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
+
 Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent. Otherwise display warning.
 
 IF quality_level == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 Clear `executing_agents = {}` before proceeding to the next batch.
+
+**Phase 5 — Worktree cleanup** (if `worktree_enabled`, always runs even on failure):
+
+For each worktree created during this execution:
+1. Call `wt_unlock` on the worktree.
+2. Call `wt_remove` to delete the worktree.
+3. Call `perms_cleanup_stale` to remove sandbox entries for deleted worktree paths.
+4. Call `wt_prune` to clean any stale worktree admin entries.
+Display: "Cleaned up N worktrees."
 
 **6.** Complete
 
@@ -823,6 +938,29 @@ Options:
 7. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
 8. If no overlaps detected: skip silently.
 
+**Phase C1.5 — Worktree setup** (if `worktree_enabled`):
+
+**Worktree prerequisite check**:
+- Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
+- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+
+Check `git status --porcelain` on main. If dirty (uncommitted changes):
+  Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
+  Stash: run `git stash push -m "pre-worktree-{timestamp}"`, proceed.
+  Commit: prompt for message, commit, proceed.
+  Abort: disable worktree for this run, fall back to main.
+  If `--no-interactive`: auto-stash.
+
+For each todo in current batch:
+1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+   If fails: fall back to main for this todo, display warning. Continue with remaining todos.
+2. Call `wt_lock` on the created worktree.
+3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+4. Store `worktree_path` and `worktree_branch` for this todo.
+
+With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
+Without pipeline: setup runs for all todos in batch before Phase C2 begins.
+
 **Phase C2 — Execute:**
 
 **Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine mode:
@@ -865,6 +1003,9 @@ ELSE:
 2. For each batch in dependency order (excluding `manual_skipped_ids`):
    - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
    - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3, or execute instructions if `--no-interactive`) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
+   - If `worktree_enabled` and todo has `worktree_path`:
+     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
    - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
    - Wait for this batch to complete before starting the next batch. Report failures.
    - **Write checkpoint** after each batch to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
@@ -890,7 +1031,54 @@ ELSE:
 For each batch in dependency order (excluding `manual_skipped_ids`):
 - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
 - Spawn one `general-purpose` Task agent per todo with approved plan (or context only if trust 3, or execute instructions if `--no-interactive`). Each receives: todo details, requirements.md, research.md, parent context. Agents do NOT call `todo_complete`.
+  If `worktree_enabled` and todo has `worktree_path`:
+    Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+    Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
 - Wait for completion. Report failures.
+
+Check `git status --porcelain` on main. If dirty: display warning "Main has uncommitted changes after worktree execution. This may cause merge conflicts."
+
+**Phase C2.5 — Merge worktree branches** (if `worktree_enabled`):
+
+Initialize `files_merged_this_batch = set()` and `reexecution_queue = []`.
+
+For each completed todo in batch order:
+  Create pre-merge backup: `git tag pre-merge-{todo_id}`.
+
+  Run `git merge --no-ff todo-{id}`:
+
+  **IF clean merge** (exit 0): commit. Add all modified files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`. Continue.
+
+  **IF conflict**:
+    Check auto-resolve eligibility:
+    - Conflicting file count <= 2
+    - No conflicting files match critical-path patterns
+    - All conflict hunks < 20 lines
+
+    **IF eligible for auto-resolve**:
+      For each conflicting file:
+      - If file NOT in `files_merged_this_batch`: accept "theirs" (worktree version).
+      - If file IN `files_merged_this_batch`: accept "ours" (main, already merged from earlier todo).
+      Stage resolved files. Commit. Add files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`.
+
+    **IF NOT eligible** (AND NOT `--no-interactive`):
+      Display conflict details. Prompt:
+      1. **Manual resolve** — user resolves in editor, then continue
+      2. **Abort this merge** — revert to `pre-merge-{todo_id}` tag, add to `reexecution_queue`
+
+    **IF NOT eligible AND `--no-interactive`**:
+      Abort merge. Revert to `pre-merge-{todo_id}`. Add to `reexecution_queue`.
+
+  **Post-merge test** (after each merge):
+    Run test suite (`uv run pytest --tb=short -q` or `npm test`).
+    If tests fail:
+    - If only 1 merge completed so far: revert that merge, re-execute todo on main.
+    - If multiple merges: use `git bisect` on merge commits to identify the breaking merge. Offer: (1) Revert breaking merge (2) Fix manually (3) Continue anyway.
+
+**Serialized re-execution queue** (after all batch merges):
+  If `reexecution_queue` is non-empty:
+    Display: "N todos need re-execution on main (merge conflicts aborted)."
+    For each queued todo: re-execute sequentially on main (no worktree, `--no-pipeline --balanced`).
 
 **Phase C2a — Verification** (skip entirely if `--no-verify` was passed):
 
@@ -934,10 +1122,21 @@ For per-todo and per-todo + re-verify modes, for each completed todo (excluding 
       2. **Not satisfied** — fix in scope: ask what's missing, fix, re-ask
       3. **Redefine** — refine requirements and re-run workflow
 
+   When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
+
 IF quality_level == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 Clear `executing_agents = {}` before proceeding to the next batch.
+
+**Phase C5 — Worktree cleanup** (if `worktree_enabled`, always runs even on failure):
+
+For each worktree created during this execution:
+1. Call `wt_unlock` on the worktree.
+2. Call `wt_remove` to delete the worktree.
+3. Call `perms_cleanup_stale` to remove sandbox entries for deleted worktree paths.
+4. Call `wt_prune` to clean any stale worktree admin entries.
+Display: "Cleaned up N worktrees."
 
 **d.** Summary
 
