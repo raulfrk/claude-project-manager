@@ -1,8 +1,8 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
-argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] e.g. 1 or 2-4"
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
+argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
 ---
 
 Execute todo(s): $ARGUMENTS
@@ -23,8 +23,13 @@ Execute todo(s): $ARGUMENTS
 - Parse `--fast`/`--balanced`/`--careful`/`--paranoid` flags. Mutually exclusive, last wins, default `--balanced`.
 - Parse `--force-plan` flag: force FULL REVIEW regardless of complexity score.
 - Parse `--batch-approve` flag: auto-approve all speculative plans without review.
+- Parse `--worktree` flag: enable worktree isolation for parallel execution.
+- Parse `--no-worktree` flag: disable worktree isolation.
 
+Derive: `worktree_enabled` from flags and config default.
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
+
+**Note**: Worktree lifecycle (Phase 1.5 setup, Phase 2.5 merge, Phase 5 cleanup) is orchestrated by `run/SKILL.md`. When execute is called directly with `--worktree`, worktree context is passed to agents but the full lifecycle (create/merge/cleanup) must be managed by the caller. For standalone execution, use `/proj:run` instead.
 
 **Quality Level Parameter Mapping:**
 
@@ -57,6 +62,8 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 - `--no-verify --balanced` → --no-verify wins.
 - `--no-verify --fast` → Redundant.
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
+- `--paranoid --worktree` → paranoid wins, worktree disabled (warn).
+- `--worktree --no-interactive` → Allowed. Auto-resolve only for conflicts.
 - Empty → call `mcp__proj__todo_list` with `status="in_progress"` to find any in-progress todo;
   if none, call `mcp__proj__todo_list` with `status="ready"`. Display the results and proceed
   with the first (or ask the user if multiple).
@@ -321,6 +328,9 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
    ELSE:
    - Display: `Executing batch: todos <id1>, <id2>, ...`
    - Spawn one Agent per todo with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
+   - If `worktree_enabled` and todo has `worktree_path`:
+     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
    - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
    - Wait for batch completion. Report any failures.
@@ -435,6 +445,9 @@ IF `pipeline_enabled`:
 ELSE:
 After all plans are approved (or skipped for trust 3), spawn one `general-purpose` Task agent per todo (excluding manual-skipped ones).
 Each agent receives: the todo details, its requirements.md, its research.md, parent context, AND the approved implementation plan (or context only if trust 3).
+If `worktree_enabled` and todo has `worktree_path`:
+  Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+  Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
 IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
 Each agent implements according to its approved plan. Agents do NOT call `todo_complete`.
 
@@ -606,6 +619,9 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
    ELSE:
    - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
    - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
+   - If `worktree_enabled` and todo has `worktree_path`:
+     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
    - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
    - Wait for this batch to complete before starting the next batch. Report any failures.
@@ -717,6 +733,9 @@ IF `pipeline_enabled`:
     IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
 ELSE:
 Execute each todo according to its approved plan (or context only if trust 3), one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan.
+If `worktree_enabled` and todo has `worktree_path`:
+  Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
+  Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
 IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
 
 Phase 2a — Verification (skip entirely if `--no-verify` was passed in $ARGUMENTS):
@@ -763,6 +782,18 @@ Clear `executing_agents = {}` after satisfaction checks complete.
 - **Verification failures**: presents combined report and offers Fix/Proceed/Skip options.
 - **Agent failures (team/task mode)**: reports failed agents per todo. Logged to `failed-teams.yaml`.
 - **Stale checkpoint (--resume)**: asks user whether to restart or use stale data.
+
+### Worktree Failure Handling
+
+| Failure | During | Action |
+|---------|--------|--------|
+| `wt_create` fails | Setup (Phase 1.5) | Fall back to main for that todo, warn |
+| Agent crashes in worktree | Execute (Phase 2) | Leave worktree intact for debugging, report in summary |
+| Clean merge | Merge (Phase 2.5) | Commit, continue |
+| Auto-resolvable conflict | Merge (Phase 2.5) | Apply per-file ours/theirs strategy, commit |
+| Non-auto-resolvable conflict | Merge (Phase 2.5) | Prompt user: manual resolve or abort to serial queue |
+| Post-merge test failure (1 merge) | Merge (Phase 2.5) | Revert merge, re-execute on main |
+| Post-merge test failure (N merges) | Merge (Phase 2.5) | Git bisect to find breaking merge, offer revert |
 
 ## Output
 
