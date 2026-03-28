@@ -37,7 +37,7 @@ Extract from $ARGUMENTS:
 - **`--worktree`**: enable worktree isolation for parallel execution (opt-in).
 - **`--no-worktree`**: disable worktree isolation (overrides config default).
 
-Derive: `worktree_enabled` from flags and config (`execution.worktree_isolation` default).
+Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
 
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 
