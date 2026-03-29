@@ -70,6 +70,34 @@ class Hook:
             feedback_tool=str(data["feedback_tool"]) if data.get("feedback_tool") is not None else None,
         )
 
+    def update_from(self, new_def: dict) -> None:
+        """Update content fields in-place from new_def. Preserves id, trigger_tool, target_tool, server, source."""
+        # Update blocking
+        if "blocking" in new_def:
+            self.blocking = bool(new_def["blocking"])
+        # Update condition
+        self.condition = str(new_def["condition"]) if new_def.get("condition") is not None else None
+        # Update param_mapping (normalize same as from_dict)
+        pm_raw = new_def.get("param_mapping", {})
+        param_mapping: dict[str, str] = {}
+        if isinstance(pm_raw, dict):
+            param_mapping = {str(k): str(v) for k, v in pm_raw.items()}
+        self.param_mapping = param_mapping
+        # Update feedback_tool
+        self.feedback_tool = str(new_def["feedback_tool"]) if new_def.get("feedback_tool") is not None else None
+        # Update feedback_mapping (normalize same as from_dict)
+        fm_raw = new_def.get("feedback_mapping", {})
+        feedback_mapping: dict[str, str] = {}
+        if isinstance(fm_raw, dict):
+            feedback_mapping = {str(k): str(v) for k, v in fm_raw.items()}
+        self.feedback_mapping = feedback_mapping
+        # Update verification
+        if "verification" in new_def:
+            self.verification = bool(new_def["verification"])
+        # Enforce invariant: verification implies blocking
+        if self.verification:
+            self.blocking = True
+
     def matches(self, trigger_tool: str, target_tool: str, server: str) -> bool:
         """Check if this hook matches the given trigger+target+server combination."""
         return (
