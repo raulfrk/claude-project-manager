@@ -9,12 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import pytest
+from pathlib import Path
 
 from hook_transport.dual_transport import (
     _cleanup_stale_socket,
+    _delete_socket_registry,
     _run_dual_async,
     _socket_path,
     _start_http,
+    _write_socket_registry,
 )
 
 
@@ -56,9 +59,11 @@ async def test_start_http_calls_serve():
 
 
 def test_socket_path_format():
-    """Socket path follows expected format."""
-    assert _socket_path("hooks") == "/tmp/claude-hooks-hooks.sock"
-    assert _socket_path("todoist") == "/tmp/claude-hooks-todoist.sock"
+    """Socket path follows expected PID-tagged format."""
+    path = _socket_path("hooks")
+    assert path.startswith("/tmp/claude-hooks-hooks-")
+    assert path.endswith(".sock")
+    assert str(os.getpid()) in path
 
 
 # ── _cleanup_stale_socket tests ─────────────────────────────────────────────
@@ -251,7 +256,8 @@ async def test_default_uses_unix_socket():
 
     mock_uvicorn.Config.assert_called_once()
     call_kwargs = mock_uvicorn.Config.call_args
-    assert call_kwargs.kwargs.get("uds") == "/tmp/claude-hooks-todoist.sock"
+    expected_path = _socket_path("todoist")
+    assert call_kwargs.kwargs.get("uds") == expected_path
     assert "host" not in call_kwargs.kwargs
     assert "port" not in call_kwargs.kwargs
 
@@ -355,3 +361,64 @@ async def test_stdio_shutdown_sets_should_exit():
         await _run_dual_async(mock_mcp, "hooks", default_port=19100)
 
     assert mock_server.should_exit is True
+
+
+# ── Socket registry tests ──────────────────────────────────────────────────
+
+
+class TestSocketRegistry:
+    def test_write_creates_registry_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-12345.sock")
+        registry_file = tmp_path / "hooks"
+        assert registry_file.exists()
+        assert registry_file.read_text() == "/tmp/claude-hooks-hooks-12345.sock"
+
+    def test_delete_removes_registry_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+        registry_file = tmp_path / "hooks"
+        registry_file.write_text("/tmp/some-socket.sock")
+        _delete_socket_registry("hooks")
+        assert not registry_file.exists()
+
+    def test_delete_silently_handles_missing_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+        # Should not raise
+        _delete_socket_registry("hooks")
+
+    @pytest.mark.anyio
+    async def test_run_dual_async_writes_registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Registry file is written when Unix socket is bound."""
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+
+        with (
+            patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
+            patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
+            patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+            patch("hook_transport.dual_transport._cleanup_stale_socket"),
+            patch("hook_transport.dual_transport._register_socket_cleanup"),
+        ):
+            mock_create.return_value = MagicMock()
+
+            mock_server = AsyncMock()
+            mock_server.serve = AsyncMock(return_value=None)
+            mock_server.should_exit = False
+            mock_uvicorn.Config.return_value = MagicMock()
+            mock_uvicorn.Server.return_value = mock_server
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+            mock_ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_stdio.return_value = mock_ctx
+
+            mock_mcp = MagicMock()
+            mock_mcp._mcp_server.run = AsyncMock(return_value=None)
+            mock_mcp._mcp_server.create_initialization_options.return_value = {}
+
+            await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+
+        registry_file = tmp_path / "hooks"
+        assert registry_file.exists()
+        content = registry_file.read_text()
+        assert "hooks" in content
+        assert str(os.getpid()) in content
