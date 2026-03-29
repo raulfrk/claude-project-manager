@@ -1,7 +1,8 @@
-"""MCP tools for managing base repository registry."""
+"""MCP tools for managing base repository registry and configuration."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -62,6 +63,15 @@ def get_repo(label: str) -> BaseRepo | None:
     return next((r for r in config.base_repos if r.label == label), None)
 
 
+def config_get() -> str:
+    """Get worktree configuration including default_worktree_dir."""
+    cfg = storage.load()
+    expanded: str | None = None
+    if cfg.default_worktree_dir:
+        expanded = str(Path(cfg.default_worktree_dir).expanduser().resolve())
+    return json.dumps({"default_worktree_dir": expanded})
+
+
 def register(app: FastMCP) -> None:
     """Register repo tools with the MCP application."""
 
@@ -76,3 +86,7 @@ def register(app: FastMCP) -> None:
     @app.tool(description="List all configured base repositories.")
     def wt_list_repos() -> str:
         return list_repos()
+
+    @app.tool(description="Get worktree configuration including default_worktree_dir (expanded to absolute path).")
+    def wt_config_get() -> str:
+        return config_get()
