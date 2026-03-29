@@ -295,7 +295,7 @@ class ProjConfig:
     resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
     smart_gate: SmartGateConfig = field(default_factory=SmartGateConfig)
     quality_level: str = "balanced"
-    worktree_isolation: bool = False  # opt-in: isolate parallel agents in git worktrees
+    worktree_isolation: bool = True  # default-on: isolate parallel agents in git worktrees
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -379,7 +379,7 @@ class ProjConfig:
             resilience=ResilienceConfig.from_dict(resilience_raw),
             smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
             quality_level=str(data.get("quality_level", "balanced")),
-            worktree_isolation=bool(data.get("worktree_isolation", False)),
+            worktree_isolation=bool(data.get("worktree_isolation", True)),
         )
 
 
