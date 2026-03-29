@@ -1,45 +1,45 @@
 hooks:
   - id: zoxide-on-proj-init
     trigger_tool: proj_init
-    target_tool: mcp__zoxide__zoxide_boost
+    target_tool: zoxide_boost
     server: zoxide
     param_mapping:
-      repo_path: path
+      path: ${repo_path}
     blocking: false
     condition: "zoxide.enabled"
 
   - id: zoxide-on-proj-add-repo
     trigger_tool: proj_add_repo
-    target_tool: mcp__zoxide__zoxide_boost
+    target_tool: zoxide_boost
     server: zoxide
     param_mapping:
-      path: path
+      path: ${path}
     blocking: false
     condition: "zoxide.enabled"
 
   - id: zoxide-on-proj-archive
     trigger_tool: proj_archive
-    target_tool: mcp__zoxide__zoxide_remove
+    target_tool: zoxide_remove
     server: zoxide
     param_mapping:
-      repo_path: path
+      path: ${repo_path}
     blocking: false
     condition: "zoxide.enabled"
 
   - id: zoxide-on-wt-create
     trigger_tool: wt_create
-    target_tool: mcp__zoxide__zoxide_boost
+    target_tool: zoxide_boost
     server: zoxide
     param_mapping:
-      worktree_path: path
+      path: ${worktree_path}
     blocking: false
     condition: "zoxide.enabled"
 
   - id: zoxide-on-wt-remove
     trigger_tool: wt_remove
-    target_tool: mcp__zoxide__zoxide_remove
+    target_tool: zoxide_remove
     server: zoxide
     param_mapping:
-      worktree_path: path
+      path: ${worktree_path}
     blocking: false
     condition: "zoxide.enabled"

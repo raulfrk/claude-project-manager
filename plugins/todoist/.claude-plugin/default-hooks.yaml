@@ -1,72 +1,73 @@
 hooks:
   - id: todoist-on-todo-add
     trigger_tool: todo_add
-    target_tool: mcp__todoist__todoist_add_tasks
+    target_tool: todoist_add_task_hook
     server: todoist
     param_mapping:
-      title: content
-      priority: priority
-      tags: labels
+      content: ${title}
+      priority: ${priority}
+      labels: ${tags}
+      projectId: ${todoist_project_id}
     blocking: false
-    condition: "todoist.enabled and todoist.auto_sync and project.todoist_project_id"
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"
 
   - id: todoist-on-todo-complete
     trigger_tool: todo_complete
-    target_tool: mcp__todoist__todoist_complete_tasks
+    target_tool: todoist_complete_tasks
     server: todoist
     param_mapping:
-      todoist_task_id: ids
+      ids: ${todoist_task_id}
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-todo-update
     trigger_tool: todo_update
-    target_tool: mcp__todoist__todoist_update_tasks
+    target_tool: todoist_update_tasks
     server: todoist
     param_mapping:
-      todoist_task_id: id
-      title: content
-      tags: labels
-      notes: description
-      due_date: dueString
+      id: ${todoist_task_id}
+      content: ${title}
+      labels: ${tags}
+      description: ${notes}
+      dueString: ${due_date}
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-todo-delete
     trigger_tool: todo_delete
-    target_tool: mcp__todoist__todoist_delete
+    target_tool: todoist_delete
     server: todoist
     param_mapping:
-      todoist_task_id: id
+      id: ${todoist_task_id}
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-proj-init
     trigger_tool: proj_init
-    target_tool: mcp__todoist__todoist_add_projects
+    target_tool: todoist_add_projects
     server: todoist
     param_mapping:
-      project_name: name
+      name: ${project_name}
     blocking: true
-    condition: "todoist.enabled"
+    condition: "sync.todoist.enabled"
 
   - id: todoist-on-proj-load
     trigger_tool: proj_load_session
-    target_tool: mcp__todoist__todoist_find_projects
+    target_tool: todoist_find_projects
     server: todoist
     param_mapping:
-      project_name: name
+      name: ${project_name}
     blocking: false
-    condition: "todoist.enabled"
+    condition: "sync.todoist.enabled"
 
   - id: todoist-on-proj-archive
     trigger_tool: proj_archive
-    target_tool: mcp__todoist__todoist_find_tasks
+    target_tool: todoist_find_tasks
     server: todoist
     param_mapping:
-      project_id: projectId
+      projectId: ${project_id}
     blocking: false
-    condition: "todoist.enabled and project.todoist_project_id"
+    condition: "sync.todoist.enabled and project.todoist_project_id"
 
   - id: verify-todoist-complete
     trigger_tool: todo_complete
@@ -76,4 +77,4 @@ hooks:
       todoist_task_id: "${result.todoist_task_id}"
     blocking: true
     verification: true
-    condition: "todoist.enabled and todoist.auto_sync"
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync"
