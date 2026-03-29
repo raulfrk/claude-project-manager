@@ -10,6 +10,7 @@ from server.tools import (
     cards,
     checklists,
     comments,
+    hooks,
     init,
     labels,
     lists,
@@ -26,6 +27,7 @@ labels.register(mcp)
 members.register(mcp)
 comments.register(mcp)
 checklists.register(mcp)
+hooks.register(mcp)
 attachments.register(mcp)
 
 
