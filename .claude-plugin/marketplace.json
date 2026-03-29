@@ -3,7 +3,14 @@
   "owner": { "name": "raulfrk" },
   "metadata": {
     "description": "Claude Code plugins for project management workflows",
-    "pluginRoot": "plugins"
+    "pluginRoot": "plugins",
+    "sharedDependencies": [
+      {
+        "name": "_shared",
+        "source": "./plugins/_shared",
+        "description": "claude-hook-transport — shared hook dispatch and transport library used by all plugins via [tool.uv.sources] path reference"
+      }
+    ]
   },
   "plugins": [
     {
