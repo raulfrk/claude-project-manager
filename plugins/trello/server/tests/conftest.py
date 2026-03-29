@@ -20,6 +20,7 @@ _GET_CLIENT_LOCATIONS = [
     "server.tools.comments.get_client",
     "server.tools.checklists.get_client",
     "server.tools.attachments.get_client",
+    "server.tools.hooks.get_client",
 ]
 
 

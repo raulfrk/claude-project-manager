@@ -215,6 +215,85 @@ class TestAddTasks:
         assert len(result["failures"]) == 2
 
 
+# -- todoist_add_task_hook / todoist_add_child_task_hook ---------------------
+
+
+class TestAddTaskHook:
+    def test_success(self, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _api_task(id="42", content="Child task")
+
+        from server.tools.tasks import register
+        from mcp.server.fastmcp import FastMCP
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_task_hook"]
+        result = json.loads(tool.fn(content="Child task", projectId="proj-1", parentId="parent-1"))
+
+        assert len(result["successes"]) == 1
+        assert result["successes"][0]["id"] == "42"
+        assert result["failures"] == []
+
+    def test_failure(self, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = RuntimeError("API error")
+
+        from server.tools.tasks import register
+        from mcp.server.fastmcp import FastMCP
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_task_hook"]
+        result = json.loads(tool.fn(content="Task"))
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 1
+
+
+class TestAddChildTaskHook:
+    def test_warning_when_no_parent_id(self, mock_client: MagicMock) -> None:
+        from server.tools.tasks import register
+        from mcp.server.fastmcp import FastMCP
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_child_task_hook"]
+        result = json.loads(tool.fn(content="Child", projectId="proj-1"))
+
+        assert "warning" in result
+        assert "parent_todoist_task_id is null" in result["warning"]
+        mock_client.post.assert_not_called()
+
+    def test_warning_when_parent_id_is_empty_string(self, mock_client: MagicMock) -> None:
+        from server.tools.tasks import register
+        from mcp.server.fastmcp import FastMCP
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_child_task_hook"]
+        result = json.loads(tool.fn(content="Child", projectId="proj-1", parentId=""))
+
+        assert "warning" in result
+        mock_client.post.assert_not_called()
+
+    def test_success_delegates_to_add_task_hook(self, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _api_task(id="77", content="Child")
+
+        from server.tools.tasks import register
+        from mcp.server.fastmcp import FastMCP
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_child_task_hook"]
+        result = json.loads(tool.fn(content="Child", projectId="proj-1", parentId="parent-99"))
+
+        assert len(result["successes"]) == 1
+        assert result["successes"][0]["id"] == "77"
+        assert result["failures"] == []
+        mock_client.post.assert_called_once()
+        call_kwargs = mock_client.post.call_args
+        assert call_kwargs[1]["json"]["parent_id"] == "parent-99"
+
+
 # -- todoist_complete_tasks --------------------------------------------------
 
 

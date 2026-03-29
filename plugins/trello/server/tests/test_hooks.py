@@ -1,8 +1,10 @@
-"""Tests for default-hooks.yaml: parse, validate structure, check all 8 hooks."""
+"""Tests for default-hooks.yaml structure and hook tool behaviour."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import yaml
 
@@ -74,3 +76,43 @@ class TestDefaultHooksYaml:
             "trello-on-todo-add-child",
         }
         assert ids == expected
+
+
+# -- trello_add_checklist_item_hook ------------------------------------------
+
+
+class TestAddChecklistItemHook:
+    def _get_tool(self) -> callable:
+        from mcp.server.fastmcp import FastMCP
+        from server.tools.hooks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["trello_add_checklist_item_hook"].fn
+
+    def test_warning_when_checklist_id_is_none(self) -> None:
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id=None, name="Child todo"))
+        assert "warning" in result
+        assert "parent_trello_checklist_id is null" in result["warning"]
+
+    def test_warning_when_checklist_id_is_empty_string(self) -> None:
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id="", name="Child todo"))
+        assert "warning" in result
+
+    def test_success_creates_checklist_item(self, mock_trello_client: MagicMock) -> None:
+        mock_trello_client.post.return_value = {"id": "item-123", "name": "Child todo", "state": "incomplete"}
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id="cl-abc", name="Child todo"))
+        assert result["id"] == "item-123"
+        mock_trello_client.post.assert_called_once_with(
+            "/checklists/cl-abc/checkItems", params={"name": "Child todo"}
+        )
+
+    def test_api_error_returns_error(self, mock_trello_client: MagicMock) -> None:
+        mock_trello_client.post.side_effect = RuntimeError("Trello API error")
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id="cl-abc", name="Child todo"))
+        assert "error" in result
+        assert "Trello API error" in result["error"]
