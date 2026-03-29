@@ -147,6 +147,9 @@ def register(app: FastMCP) -> None:
             "project_name": name,
             "repo_path": first_repo,
             "paths": [r.path for r in repo_entries],
+            "mcp_servers": [],
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
         })
 
     @app.tool(description="List all projects.")
@@ -469,6 +472,9 @@ def register(app: FastMCP) -> None:
             "project_name": project_name,
             "repo_path": meta.repos[0].path if meta.repos else "",
             "paths": [r.path for r in meta.repos],
+            "mcp_servers": [],
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
         }
         return json.dumps(result_dict)
 
@@ -615,7 +621,15 @@ def register(app: FastMCP) -> None:
             result_msg = f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
         else:
             result_msg = f"Added repo '{label}' at {abs_path} to project '{name}'."
-        return json.dumps({"result": result_msg, "paths": paths, "path": abs_path, "project_name": name})
+        return json.dumps({
+            "result": result_msg,
+            "paths": paths,
+            "path": abs_path,
+            "project_name": name,
+            "mcp_servers": [],
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
+        })
 
     @app.tool(description="Remove a repository from a project by label (cannot remove the last repo).")
     def proj_remove_repo(
@@ -638,7 +652,14 @@ def register(app: FastMCP) -> None:
         paths = [r.path for r in meta.repos if not r.reference]
         ref_note = " (reference, read-only)" if found.reference else ""
         result_msg = f"Removed repo '{label}' at {found.path}{ref_note} from project '{name}'."
-        return json.dumps({"result": result_msg, "paths": paths, "project_name": name})
+        return json.dumps({
+            "result": result_msg,
+            "paths": paths,
+            "project_name": name,
+            "mcp_servers": [],
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
+        })
 
     @app.tool(description="Set per-project permissions override (null = use global config).")
     def proj_set_permissions(auto_grant: bool | None, project_name: str | None = None) -> str:
@@ -691,6 +712,8 @@ def register(app: FastMCP) -> None:
             "project_name": name,
             "paths": paths,
             "mcp_servers": [],
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
         })
 
     def _migrate_single_dir(cfg: object, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict:
