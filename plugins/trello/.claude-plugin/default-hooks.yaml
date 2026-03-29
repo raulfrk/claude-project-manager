@@ -10,6 +10,7 @@ hooks:
     feedback_tool: proj_update_meta
     feedback_mapping:
       card_id: trello_card_id
+      checklist_id: trello_checklist_id
 
   - id: trello-on-proj-load
     trigger_tool: proj_load_session
