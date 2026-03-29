@@ -34,6 +34,13 @@ Categorize current `sandbox.filesystem.allowWrite` paths:
 - **proj-managed**: matches any active project repo path (from `proj_list`), tracking_dir, archive_destination, or is a sub-path of `projects_root`
 - **user-added**: everything else
 
+If `worktree_integration: true` in config (from step 1a):
+- Call `wt_config_get`. Store result as `wt_config`.
+- If the call fails: display `⚠️ Could not load worktree config — worktrees base will not be classified as proj-managed.` Set `wt_config = null`. Continue.
+- If successful: also classify any path equal to `wt_config.default_worktree_dir` (or a sub-path of it) as **proj-managed**.
+
+If `worktree_integration: false`: set `wt_config = null`.
+
 **1d.** Display summary:
 
 ```
@@ -104,10 +111,11 @@ On failure: display error and **stop**.
 
 - `sandbox_paths` = `[projects_root, tracking_root]`
 - If `archive_dest` is NOT a sub-path of `projects_root` (containment check): append `archive_dest` to `sandbox_paths`
-- Call `mcp__plugin_worktree_worktree__wt_config_get` to get the worktree configuration.
-  - If the call returns null or an error: display "Error: Worktree config not found. Ensure `/worktree:setup` has been run before migrating." and **stop migration**.
-  - For each configured worktree base path in the worktree config: check if `archive_dest` is contained within that base path.
-  - If `archive_dest` is within a worktree base path: append `archive_dest` to `sandbox_paths` (if not already added above).
+- Use `wt_config` loaded in step 1c:
+  - If `worktree_integration: true` and `wt_config` is null (call failed in step 1c): display "Error: Worktree config not found. Ensure `/worktree:setup` has been run before migrating." and **stop migration**.
+  - If `wt_config` is available:
+    - If `archive_dest` is a sub-path of `wt_config.default_worktree_dir`: append `archive_dest` to `sandbox_paths` (if not already added above).
+    - If `wt_config.default_worktree_dir` is NOT a sub-path of `projects_root`: append `wt_config.default_worktree_dir` to `sandbox_paths`.
 - Derive expected MCP servers from config:
   - Always: `plugin_proj_proj`, `claude_ai_Excalidraw`, `claude_ai_Mermaid_Chart`
   - If `perms_integration: true`: `plugin_perms_perms`
