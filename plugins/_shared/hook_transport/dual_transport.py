@@ -26,16 +26,44 @@ logger = logging.getLogger("hook_transport.dual")
 
 
 async def _start_http(server: Any, port: int) -> None:
-    """Start the uvicorn HTTP server, catching port-bind failures gracefully.
+    """Start the uvicorn HTTP server, catching all failures gracefully.
 
-    Note: uvicorn internally calls sys.exit(1) on port bind failure, raising
-    SystemExit rather than OSError. We catch both to handle all failure modes.
+    The HTTP endpoint is optional — if it fails to start (port conflict,
+    sandbox restrictions, permission errors), the stdio transport must
+    continue working.  We catch ``BaseException`` (except
+    ``KeyboardInterrupt``) because uvicorn may raise ``SystemExit`` on
+    bind failure and sandbox enforcement can surface as ``PermissionError``,
+    ``ConnectionRefusedError``, or opaque runtime errors depending on the
+    sandbox backend.
     """
     try:
         await server.serve()
-    except (OSError, SystemExit) as exc:
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        # Determine a helpful hint for the operator
+        exc_name = type(exc).__name__
+        if isinstance(exc, PermissionError):
+            hint = (
+                " (sandbox may be blocking network bind — "
+                "allowlist 127.0.0.1:{port} or disable sandbox to "
+                "restore hook HTTP endpoints)"
+            ).format(port=port)
+        elif isinstance(exc, OSError):
+            hint = " (port may already be in use)"
+        else:
+            hint = ""
+        logger.warning(
+            "HTTP hook server on port %d failed to start (%s: %s)%s "
+            "— falling back to stdio-only transport",
+            port,
+            exc_name,
+            exc,
+            hint,
+        )
         print(
-            f"[hook_transport] HTTP hook server on port {port} failed to start: {exc}",
+            f"[hook_transport] HTTP hook server on port {port} unavailable "
+            f"({exc_name}){hint} — stdio transport continues normally",
             file=sys.stderr,
         )
 
