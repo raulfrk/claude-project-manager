@@ -236,7 +236,7 @@ class TestDiscoverAndRegister:
                 "server": "todoist",
                 "param_mapping": {"todoist_task_id": "${result.todoist_task_id}"},
                 "verification": True,
-                "condition": "todoist.enabled and todoist.auto_sync",
+                "condition": "sync.todoist.enabled and sync.todoist.auto_sync",
             },
         ])
         registry = HookRegistry()
@@ -246,7 +246,7 @@ class TestDiscoverAndRegister:
         hook = registry.hooks[0]
         assert hook.verification is True
         assert hook.blocking is True  # forced by verification
-        assert hook.condition == "todoist.enabled and todoist.auto_sync"
+        assert hook.condition == "sync.todoist.enabled and sync.todoist.auto_sync"
         assert hook.source == "auto"
 
     def test_verification_false_by_default(self, tmp_path: Path):
