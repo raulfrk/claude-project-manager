@@ -39,6 +39,8 @@ def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[T
         parent_todo = next((t for t in todos if t.id == todo.parent), None)
         if parent_todo and parent_todo.todoist_task_id:
             fields["parent_todoist_task_id"] = parent_todo.todoist_task_id
+        if parent_todo and parent_todo.trello_checklist_id:
+            fields["parent_trello_checklist_id"] = parent_todo.trello_checklist_id
     return fields
 
 
