@@ -9,7 +9,7 @@ import pytest
 
 from server.lib import storage
 from server.lib.models import BaseRepo, WorktreeConfig
-from server.tools.repos import add_repo, list_repos, remove_repo
+from server.tools.repos import add_repo, config_get, list_repos, remove_repo
 
 
 @pytest.fixture()
@@ -73,3 +73,22 @@ class TestListRepos:
         result = list_repos()
         assert "myapp" in result
         assert str(tmp_path) in result
+
+
+class TestConfigGet:
+    def test_returns_expanded_default_worktree_dir(self, empty_config: Path) -> None:
+        config = WorktreeConfig(default_worktree_dir="~/worktrees")
+        storage.save(config)
+        import json
+
+        result = json.loads(config_get())
+        expected = str(Path("~/worktrees").expanduser().resolve())
+        assert result["default_worktree_dir"] == expected
+
+    def test_returns_null_when_empty(self, empty_config: Path) -> None:
+        config = WorktreeConfig(default_worktree_dir="")
+        storage.save(config)
+        import json
+
+        result = json.loads(config_get())
+        assert result["default_worktree_dir"] is None
