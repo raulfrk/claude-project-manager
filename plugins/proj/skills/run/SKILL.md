@@ -1,7 +1,7 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale
 argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
 ---
 
@@ -408,7 +408,27 @@ Options:
 
 **Worktree prerequisite check**:
 - Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
-- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+- If no repos registered:
+  - Get current project repos from `proj_session_context`.
+  - If project has 0 repos: disable worktree for this run, display "No worktree repos registered and no project repos found. Falling back to main." Continue.
+  - If project has exactly 1 repo (`<path>`):
+    - Display: "No worktree base registered. Add `<path>` as worktree base `<basename(path)>`? [Y/n]"
+    - If yes: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - If success: display "Registered `<path>` as worktree base `<basename(path)>`. Continuing." Proceed with worktree setup as normal.
+      - If failure: display error, disable worktree, fall back to main.
+    - If no: disable worktree, display "Falling back to main." Continue.
+  - If project has 2+ repos:
+    - Display: "No worktree base registered. Select repo(s) to register as worktree base:"
+      ```
+      1. <label>: <path>
+      2. <label>: <path>
+      (enter numbers comma-separated, or 0 to skip)
+      ```
+    - For each selected repo: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - Report success/failure per repo.
+      - On any success: proceed with worktree setup as normal.
+      - If all fail or none selected: disable worktree, fall back to main.
+  - If `--no-interactive`: if exactly 1 project repo, auto-register silently and display notice; if 0 or 2+ repos, disable worktree with warning "No worktree repos registered. Falling back to main."
 
 Check `git status --porcelain` on main. If dirty (uncommitted changes):
   Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
@@ -527,7 +547,27 @@ IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
 
 **Worktree prerequisite check**:
 - Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
-- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+- If no repos registered:
+  - Get current project repos from `proj_session_context`.
+  - If project has 0 repos: disable worktree for this run, display "No worktree repos registered and no project repos found. Falling back to main." Continue.
+  - If project has exactly 1 repo (`<path>`):
+    - Display: "No worktree base registered. Add `<path>` as worktree base `<basename(path)>`? [Y/n]"
+    - If yes: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - If success: display "Registered `<path>` as worktree base `<basename(path)>`. Continuing." Proceed with worktree setup as normal.
+      - If failure: display error, disable worktree, fall back to main.
+    - If no: disable worktree, display "Falling back to main." Continue.
+  - If project has 2+ repos:
+    - Display: "No worktree base registered. Select repo(s) to register as worktree base:"
+      ```
+      1. <label>: <path>
+      2. <label>: <path>
+      (enter numbers comma-separated, or 0 to skip)
+      ```
+    - For each selected repo: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - Report success/failure per repo.
+      - On any success: proceed with worktree setup as normal.
+      - If all fail or none selected: disable worktree, fall back to main.
+  - If `--no-interactive`: if exactly 1 project repo, auto-register silently and display notice; if 0 or 2+ repos, disable worktree with warning "No worktree repos registered. Falling back to main."
 
 Check `git status --porcelain` on main. If dirty (uncommitted changes):
   Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
@@ -960,7 +1000,27 @@ Options:
 
 **Worktree prerequisite check**:
 - Call `wt_list_repos` to verify the worktree plugin is installed and at least one base repo is registered.
-- If no repos registered: disable worktree for this run, display warning "No worktree repos registered. Falling back to main. Run /worktree:add-repo first."
+- If no repos registered:
+  - Get current project repos from `proj_session_context`.
+  - If project has 0 repos: disable worktree for this run, display "No worktree repos registered and no project repos found. Falling back to main." Continue.
+  - If project has exactly 1 repo (`<path>`):
+    - Display: "No worktree base registered. Add `<path>` as worktree base `<basename(path)>`? [Y/n]"
+    - If yes: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - If success: display "Registered `<path>` as worktree base `<basename(path)>`. Continuing." Proceed with worktree setup as normal.
+      - If failure: display error, disable worktree, fall back to main.
+    - If no: disable worktree, display "Falling back to main." Continue.
+  - If project has 2+ repos:
+    - Display: "No worktree base registered. Select repo(s) to register as worktree base:"
+      ```
+      1. <label>: <path>
+      2. <label>: <path>
+      (enter numbers comma-separated, or 0 to skip)
+      ```
+    - For each selected repo: call `wt_add_repo(label=basename(path), path=path, default_branch="main")`.
+      - Report success/failure per repo.
+      - On any success: proceed with worktree setup as normal.
+      - If all fail or none selected: disable worktree, fall back to main.
+  - If `--no-interactive`: if exactly 1 project repo, auto-register silently and display notice; if 0 or 2+ repos, disable worktree with warning "No worktree repos registered. Falling back to main."
 
 Check `git status --porcelain` on main. If dirty (uncommitted changes):
   Prompt: (1) Stash changes (2) Commit changes (3) Abort worktree setup
