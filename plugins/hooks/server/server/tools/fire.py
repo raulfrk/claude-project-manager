@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
@@ -19,6 +21,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_DEPTH = 3
+
+_DEFAULT_SERVER_PORTS: dict[str, int] = {
+    "hooks": 19100,
+    "perms": 19101,
+    "proj": 19102,
+    "worktree": 19103,
+    "trello": 19104,
+    "jira": 19105,
+    "todoist": 19106,
+    "zoxide": 19107,
+}
+
+_SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
+
+
+def _resolve_server_url(server_name: str, hooks_port: int) -> str | None:
+    """Resolve the URL for a plugin server.
+
+    In Unix mode (default): reads ~/.claude/sockets/{server_name} for the
+    current session's PID-tagged socket path.
+    In TCP mode: uses the default port mapping.
+    Returns None if the server is not reachable (registry missing).
+    """
+    transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
+    if transport_mode == "tcp":
+        port = _DEFAULT_SERVER_PORTS.get(server_name, hooks_port)
+        return f"http://127.0.0.1:{port}/hook"
+
+    # Unix mode: read registry file
+    registry_file = _SOCKET_REGISTRY_DIR / server_name
+    try:
+        path = registry_file.read_text().strip()
+        if path:
+            return f"unix://{path}"
+    except (FileNotFoundError, OSError):
+        pass
+    return None
 
 
 def _get_max_depth() -> int:
@@ -40,11 +79,10 @@ async def _fire_single(hook: Hook, source: dict[str, Any]) -> FireResult:
     params = resolve_mapping(hook.param_mapping, source)
 
     registry = storage.load()
-    server_info = registry.servers.get(hook.server, {})
-    url = server_info.get("url")
+    url = _resolve_server_url(hook.server, registry.settings.get("hooks_port", 19100))
     if not url:
-        logger.warning("No URL registered for server %r, using name as fallback", hook.server)
-        url = hook.server
+        logger.warning("No URL registered for server %r, skipping", hook.server)
+        return FireResult(hook_id=hook.id, status_code=0, body="", error=f"No URL for server {hook.server!r}")
 
     return await post_hook(
         hook_id=hook.id,
@@ -330,8 +368,7 @@ async def hooks_fire(
                 feedback_params["project_name"] = source["project_name"]
 
             # Call feedback tool on the trigger's server (proj)
-            trigger_server_info = registry.servers.get("proj", {})
-            trigger_url = trigger_server_info.get("url")
+            trigger_url = _resolve_server_url("proj", registry.settings.get("hooks_port", 19100))
             if trigger_url:
                 fb_result = await post_hook(
                     hook_id=f"{hook.id}-feedback",

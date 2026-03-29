@@ -276,6 +276,7 @@ class TestHooksFire:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.tools.fire.post_hook", side_effect=mock_post_hook),
+            patch("server.tools.fire._resolve_server_url", return_value="unix:///tmp/test.sock"),
         ):
             source = json.dumps({"result": {"path": "/tmp/project"}})
             result = await hooks_fire("trigger_a", source_result=source)
