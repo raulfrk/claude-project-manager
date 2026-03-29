@@ -128,6 +128,38 @@ def register(app: FastMCP) -> None:  # noqa: C901
 
     @app.tool(
         description=(
+            "Hook-friendly child task creation. Requires parentId — returns a warning "
+            "(not an error) if parentId is null/empty, which happens when the parent "
+            "todo has no Todoist task linked. "
+            "On success, delegates to todoist_add_task_hook with parentId set. "
+            "Returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def todoist_add_child_task_hook(
+        content: str,
+        projectId: str | None = None,
+        priority: str | int | None = None,
+        labels: list[str] | None = None,
+        description: str | None = None,
+        dueString: str | None = None,
+        parentId: str | None = None,
+    ) -> str:
+        if not parentId:
+            return json.dumps({
+                "warning": "parent_todoist_task_id is null — skipping Todoist sync for child todo",
+            })
+        return todoist_add_task_hook(
+            content=content,
+            projectId=projectId,
+            priority=priority,
+            labels=labels,
+            description=description,
+            dueString=dueString,
+            parentId=parentId,
+        )
+
+    @app.tool(
+        description=(
             "Hook-friendly single task completion. Accepts a single task ID "
             "and closes it via the Todoist API directly."
         ),
