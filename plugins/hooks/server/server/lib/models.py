@@ -18,6 +18,8 @@ class Hook:
     condition: str | None = None
     source: str | None = None
     verification: bool = False
+    feedback_mapping: dict[str, str] = field(default_factory=dict)
+    feedback_tool: str | None = None
 
     def __post_init__(self) -> None:
         if self.verification:
@@ -38,6 +40,10 @@ class Hook:
             result["source"] = self.source
         if self.verification:
             result["verification"] = True
+        if self.feedback_mapping:
+            result["feedback_mapping"] = self.feedback_mapping
+        if self.feedback_tool is not None:
+            result["feedback_tool"] = self.feedback_tool
         return result
 
     @classmethod
@@ -46,6 +52,10 @@ class Hook:
         param_mapping: dict[str, str] = {}
         if isinstance(pm_raw, dict):
             param_mapping = {str(k): str(v) for k, v in pm_raw.items()}
+        fm_raw = data.get("feedback_mapping", {})
+        feedback_mapping: dict[str, str] = {}
+        if isinstance(fm_raw, dict):
+            feedback_mapping = {str(k): str(v) for k, v in fm_raw.items()}
         return cls(
             id=str(data.get("id", "")),
             trigger_tool=str(data.get("trigger_tool", "")),
@@ -56,6 +66,8 @@ class Hook:
             condition=str(data["condition"]) if data.get("condition") is not None else None,
             source=str(data["source"]) if data.get("source") is not None else None,
             verification=bool(data.get("verification", False)),
+            feedback_mapping=feedback_mapping,
+            feedback_tool=str(data["feedback_tool"]) if data.get("feedback_tool") is not None else None,
         )
 
     def matches(self, trigger_tool: str, target_tool: str, server: str) -> bool:

@@ -11,7 +11,7 @@ from server.lib import storage
 from server.lib.conditions import evaluate_condition, _load_proj_config
 from server.lib.http_client import FireResult, post_hook
 from server.lib.models import Hook
-from server.lib.template import resolve_mapping
+from server.lib.template import _resolve_path, resolve_mapping
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -300,6 +300,52 @@ async def hooks_fire(
             else:
                 blocking_results.append({"hook_id": hook.id, "result": result.result})
 
+    # Phase 1.5: Feedback writeback for blocking hooks
+    feedback_results: list[dict[str, Any]] = []
+    if blocking_hooks and blocking_results:
+        for hook, br in zip(blocking_hooks, blocking_results):
+            if not hook.feedback_mapping or not hook.feedback_tool:
+                continue
+            raw_result = br.get("result")
+            if not raw_result:
+                continue
+            try:
+                result_data = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            feedback_params: dict[str, Any] = {}
+            for result_path, target_param in hook.feedback_mapping.items():
+                value = _resolve_path(result_data, result_path)
+                if value is not None:
+                    feedback_params[target_param] = value
+
+            if not feedback_params:
+                continue
+
+            # Add source entity ID for writeback context
+            if "todo_id" in source:
+                feedback_params["todo_id"] = source["todo_id"]
+            elif "project_name" in source:
+                feedback_params["project_name"] = source["project_name"]
+
+            # Call feedback tool on the trigger's server (proj)
+            trigger_server_info = registry.servers.get("proj", {})
+            trigger_url = trigger_server_info.get("url")
+            if trigger_url:
+                fb_result = await post_hook(
+                    hook_id=f"{hook.id}-feedback",
+                    url=trigger_url,
+                    target_tool=hook.feedback_tool,
+                    params=feedback_params,
+                )
+                feedback_results.append({
+                    "hook_id": hook.id,
+                    "feedback_tool": hook.feedback_tool,
+                    "ok": fb_result.ok,
+                    "error": fb_result.error,
+                })
+
     # Phase 2: Fire verification hooks with enriched source_result
     verification_results: list[dict[str, Any]] = []
     if verification_matched:
@@ -323,6 +369,8 @@ async def hooks_fire(
     }
     if verification_results:
         summary["verification"] = verification_results
+    if feedback_results:
+        summary["feedback"] = feedback_results
     return json.dumps(summary, indent=2)
 
 

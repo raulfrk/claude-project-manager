@@ -335,7 +335,7 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         todo = next((t for t in todos if t.id == todo_id), None)
         if not todo:
-            return f"Todo '{todo_id}' not found."
+            return json.dumps({"status": "not_found", "todo_id": todo_id})
         if title is not None:
             todo.title = title
         if status is not None:
