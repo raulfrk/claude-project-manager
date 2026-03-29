@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import git, storage
-from server.lib.git import GitError
+from server.lib.git import GitConflictError, GitError
 from server.tools.repos import get_repo
 
 if TYPE_CHECKING:
@@ -163,6 +164,66 @@ def unlock_worktree(path: str) -> str:
         return json.dumps({"error": f"Error: {e}", "path": abs_path})
 
 
+def merge_worktree(path: str, base_branch: str | None = None) -> str:
+    """Rebase a worktree onto base_branch, then fast-forward merge into the base repo."""
+    result = _find_worktree(path)
+    if not result:
+        return json.dumps({"result": "error", "message": f"No managed worktree found at: {path}"})
+    abs_path, repo_path = result
+
+    # Check if worktree is locked
+    for entry in git.list_worktrees(repo_path):
+        if entry.path == abs_path and entry.locked:
+            return json.dumps({"result": "error", "message": f"Worktree is locked: {abs_path}"})
+
+    # Check if worktree is on a detached HEAD
+    try:
+        head_ref = subprocess.run(
+            ["git", "-C", abs_path, "symbolic-ref", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if head_ref.returncode != 0:
+            return json.dumps({"result": "error", "message": f"Worktree is in detached HEAD state: {abs_path}"})
+        branch_name = head_ref.stdout.strip().removeprefix("refs/heads/")
+    except FileNotFoundError:
+        return json.dumps({"result": "error", "message": f"git not found or invalid path: {abs_path}"})
+
+    # Resolve base_branch if not provided
+    if not base_branch:
+        try:
+            origin_head = subprocess.run(
+                ["git", "-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
+                capture_output=True, text=True,
+            )
+            if origin_head.returncode == 0:
+                base_branch = origin_head.stdout.strip().removeprefix("refs/remotes/origin/")
+            else:
+                default_branch = subprocess.run(
+                    ["git", "-C", repo_path, "config", "init.defaultBranch"],
+                    capture_output=True, text=True,
+                )
+                if default_branch.returncode == 0 and default_branch.stdout.strip():
+                    base_branch = default_branch.stdout.strip()
+                else:
+                    return json.dumps({"result": "error", "message": "Cannot determine default branch. Provide base_branch explicitly."})
+        except FileNotFoundError:
+            return json.dumps({"result": "error", "message": f"git not found or invalid path: {repo_path}"})
+
+    # Rebase worktree onto base_branch
+    try:
+        git.rebase_worktree(repo_path, abs_path, base_branch)
+    except GitConflictError as e:
+        return json.dumps({"result": "conflict", "message": str(e), "worktree_path": abs_path, "branch": branch_name})
+
+    # Fast-forward merge into base repo
+    try:
+        git.merge_ff_only(repo_path, branch_name)
+    except GitError as e:
+        return json.dumps({"result": "ff_only_failed", "message": str(e), "worktree_path": abs_path, "branch": branch_name})
+
+    return json.dumps({"result": "merged", "worktree_path": abs_path, "branch": branch_name, "base_branch": base_branch})
+
+
 def register(app: FastMCP) -> None:
     """Register worktree tools with the MCP application."""
 
@@ -198,3 +259,7 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Unlock a previously locked worktree.")
     def wt_unlock(path: str) -> str:
         return unlock_worktree(path)
+
+    @app.tool(description="Rebase a worktree onto base_branch, then fast-forward merge into the base repo.")
+    def wt_merge(path: str, base_branch: str | None = None) -> str:
+        return merge_worktree(path, base_branch)
