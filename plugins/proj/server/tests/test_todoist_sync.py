@@ -576,6 +576,31 @@ class TestComputeDiff:
         assert len(plan.push_create) == 1
         assert plan.push_create[0]["content"] == "Local only"
 
+    def test_push_create_includes_project_id(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """push_create entries include project_id when meta.todoist_project_id is set."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Local todo with project")
+        storage.save_todos(cfg, name, [todo])
+        plan = compute_diff([], cfg, name)
+        assert len(plan.push_create) == 1
+        assert plan.push_create[0]["project_id"] == "abc123"
+
+    def test_push_create_omits_project_id_when_unset(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """push_create entries omit project_id when meta.todoist_project_id is empty."""
+        cfg, name = cfg_with_project
+        # Clear todoist_project_id on the meta
+        meta = storage.load_meta(cfg, name)
+        meta.todoist_project_id = ""
+        storage.save_meta(cfg, meta)
+
+        todo = _make_todo(cfg, name, "Local todo no project")
+        storage.save_todos(cfg, name, [todo])
+        plan = compute_diff([], cfg, name)
+        assert len(plan.push_create) == 1
+        assert "project_id" not in plan.push_create[0]
+
     def test_returns_sync_plan_type(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
         plan = compute_diff([], cfg, name)
