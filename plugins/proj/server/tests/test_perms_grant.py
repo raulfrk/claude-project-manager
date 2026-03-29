@@ -824,6 +824,41 @@ class TestComputeSetupPathsBackwardCompat:
 # ── T22: User custom sandbox paths (root mode exclusion) ────────────────────
 
 
+class TestComputeSetupPathsWorktreeRoot:
+    def test_includes_worktree_root_when_enabled(self) -> None:
+        """When worktree_integration=True and worktree_root_dir provided, it is included."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=True)
+        cfg.tracking_dir = "/tmp/tracking"
+
+        paths = _compute_setup_paths(meta, cfg, worktree_root_dir="/home/user/worktrees")
+
+        assert "/home/user/worktrees" in paths
+        assert "/home/user/proj" in paths
+        assert "/tmp/tracking" in paths
+
+    def test_skips_worktree_root_when_none(self) -> None:
+        """When worktree_root_dir is None, no worktree path is added."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=True)
+        cfg.tracking_dir = "/tmp/tracking"
+
+        paths = _compute_setup_paths(meta, cfg, worktree_root_dir=None)
+
+        assert len(paths) == 2  # repo + tracking only
+
+    def test_skips_worktree_root_when_integration_disabled(self) -> None:
+        """When worktree_integration=False, worktree_root_dir is ignored."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=False)
+        cfg.tracking_dir = "/tmp/tracking"
+
+        paths = _compute_setup_paths(meta, cfg, worktree_root_dir="/home/user/worktrees")
+
+        assert "/home/user/worktrees" not in paths
+        assert len(paths) == 2  # repo + tracking only
+
+
 class TestComputeSetupPathsUserPaths:
     def test_compute_setup_paths_does_not_include_user_paths(self) -> None:
         """Root-mode only returns roots, not per-repo paths -- user custom paths are separate."""

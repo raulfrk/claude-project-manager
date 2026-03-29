@@ -864,6 +864,87 @@ class TestRunSyncSandbox:
         assert "Read(" not in result
 
 
+# ── Worktree root dir tests ──────────────────────────────────────────────────
+
+
+class TestDeriveExpectedSandboxPathsWorktreeRoot:
+    def test_includes_worktree_root_when_integration_on(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=True, tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg, worktree_root_dir="/home/user/worktrees")
+
+        assert "/home/user/worktrees" in paths
+        assert "/home/user/proj" in paths
+        assert "/tmp/tracking" in paths
+
+    def test_skips_worktree_root_when_integration_off(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=False, tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg, worktree_root_dir="/home/user/worktrees")
+
+        assert "/home/user/worktrees" not in paths
+
+    def test_skips_worktree_root_when_none(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=True, tracking_dir="/tmp/tracking")
+
+        paths = _derive_expected_sandbox_paths(meta, cfg, worktree_root_dir=None)
+
+        assert len(paths) == 2  # repo + tracking only
+
+
+class TestRunSyncWorktreeRoot:
+    def test_missing_worktree_root_reported_as_missing_sandbox_path(self) -> None:
+        """When worktree_root_dir is provided but not in actual_sandbox_paths, it is reported missing."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(
+            auto_allow_mcps=True, todoist_enabled=False,
+            worktree_integration=True, tracking_dir="/tmp/tracking",
+        )
+        expected_rules = _derive_expected_rules(meta, cfg)
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=expected_rules,
+            actual_sandbox_paths={"/home/user/proj", "/tmp/tracking"},
+            sandbox_mode=True,
+            worktree_root_dir="/home/user/worktrees",
+        )
+
+        assert "❌" in result
+        assert "/home/user/worktrees" in result
+
+    def test_apply_true_adds_worktree_path(self) -> None:
+        """apply=True with missing worktree root forwards it to setup_permissions."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(
+            auto_allow_mcps=False,
+            worktree_integration=True, tracking_dir="/tmp/tracking",
+        )
+
+        def fake_batch_setup(
+            paths: list[str],
+            mcp_servers: list[str],
+            additional_directories: list[str] | None = None,
+        ) -> str:
+            return f"Sandbox paths added: {len(paths)}. MCP rules added: {len(mcp_servers)}. Additional directories added: {len(paths)}."
+
+        result = run_sync(
+            meta, cfg,
+            actual_rules=set(),
+            actual_sandbox_paths=set(),
+            sandbox_mode=True,
+            apply=True,
+            worktree_root_dir="/home/user/worktrees",
+            batch_setup_fn=fake_batch_setup,
+        )
+
+        assert "✅" in result
+        assert "Applied" in result
+
+
 # ── T21: Migration workflow (derive functions in root mode) ──────────────────
 
 
