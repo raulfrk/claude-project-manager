@@ -73,6 +73,7 @@ def register(app: FastMCP) -> None:
             f"  todoist.mcp_server: {cfg.todoist.mcp_server}\n"
             f"  todoist.root_only: {cfg.todoist.root_only}\n"
             f"  trello.enabled: {cfg.trello.enabled}\n"
+            f"  trello.auto_sync: {cfg.trello.auto_sync}\n"
             f"  trello.default_board_id: {cfg.trello.default_board_id or '(not set)'}\n"
             f"  trello.on_delete: {cfg.trello.on_delete}\n"
             f"  trello.list_mappings.active: {cfg.trello.list_mappings.active or '(not set)'}\n"
@@ -118,6 +119,7 @@ def register(app: FastMCP) -> None:
         todoist_mcp_server: str = "claude_ai_Todoist",
         todoist_root_only: bool = False,
         trello_enabled: bool = False,
+        trello_auto_sync: bool = True,
         trello_default_board_id: str = "",
         trello_on_delete: str = "archive",
         trello_list_active: str = "",
@@ -173,6 +175,7 @@ def register(app: FastMCP) -> None:
         cfg.todoist.mcp_server = todoist_mcp_server
         cfg.todoist.root_only = todoist_root_only
         cfg.trello.enabled = trello_enabled
+        cfg.trello.auto_sync = trello_auto_sync
         cfg.trello.default_board_id = trello_default_board_id
         cfg.trello.on_delete = trello_on_delete
         cfg.trello.list_mappings.active = trello_list_active
@@ -221,6 +224,7 @@ def register(app: FastMCP) -> None:
         todoist_mcp_server: str | None = None,
         todoist_root_only: bool | None = None,
         trello_enabled: bool | None = None,
+        trello_auto_sync: bool | None = None,
         trello_default_board_id: str | None = None,
         trello_on_delete: str | None = None,
         trello_list_active: str | None = None,
@@ -349,6 +353,8 @@ def register(app: FastMCP) -> None:
             cfg.todoist.root_only = todoist_root_only
         if trello_enabled is not None:
             cfg.trello.enabled = trello_enabled
+        if trello_auto_sync is not None:
+            cfg.trello.auto_sync = trello_auto_sync
         if trello_default_board_id is not None:
             cfg.trello.default_board_id = trello_default_board_id
         if trello_on_delete is not None:
