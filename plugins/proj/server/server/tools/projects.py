@@ -33,6 +33,21 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+def _resolve_hooks_socket_path() -> str:
+    """Read the hooks server socket path from the registry file.
+
+    Falls back to the legacy path if the registry file does not exist.
+    """
+    registry_file = Path.home() / ".claude" / "sockets" / "hooks"
+    try:
+        path = registry_file.read_text().strip()
+        if path:
+            return path
+    except (FileNotFoundError, OSError):
+        pass
+    return "/tmp/claude-hooks-hooks.sock"
+
+
 def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
     """Create the tracking directory structure for a new project."""
     proj_dir = tracking_dir / project_name
@@ -144,7 +159,7 @@ def register(app: FastMCP) -> None:
         # Best-effort hook auto-discovery
         try:
             import httpx
-            sock_path = "/tmp/claude-hooks-hooks.sock"
+            sock_path = _resolve_hooks_socket_path()
             transport = httpx.HTTPTransport(uds=sock_path)
             with httpx.Client(transport=transport, timeout=5.0) as client:
                 client.post(
