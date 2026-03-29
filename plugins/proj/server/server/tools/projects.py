@@ -141,7 +141,13 @@ def register(app: FastMCP) -> None:
         # Auto-set as session active so the newly created project is immediately usable
         state.set_session_active(name)
 
-        return json.dumps({"result": f"Initialized project '{name}' at {tracking}", "project_name": name})
+        first_repo = str(repo_entries[0].path) if repo_entries else ""
+        return json.dumps({
+            "result": f"Initialized project '{name}' at {tracking}",
+            "project_name": name,
+            "repo_path": first_repo,
+            "paths": [r.path for r in repo_entries],
+        })
 
     @app.tool(description="List all projects.")
     def proj_list(include_archived: bool = False) -> str:
@@ -454,10 +460,14 @@ def register(app: FastMCP) -> None:
         except Exception:  # noqa: BLE001
             pass  # Archive succeeds even if hint generation fails
 
-        return json.dumps({
+        # Build result dict with repo paths
+        result_dict = {
             "result": f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}",
-            "project_name": project_name
-        })
+            "project_name": project_name,
+            "repo_path": meta.repos[0].path if meta.repos else "",
+            "paths": [r.path for r in meta.repos],
+        }
+        return json.dumps(result_dict)
 
     @app.tool(description="List or execute purge of archived projects older than purge_after_days.")
     def proj_purge_archive(confirm: bool = False) -> str:
@@ -602,7 +612,7 @@ def register(app: FastMCP) -> None:
             result_msg = f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
         else:
             result_msg = f"Added repo '{label}' at {abs_path} to project '{name}'."
-        return json.dumps({"result": result_msg, "paths": paths, "project_name": name})
+        return json.dumps({"result": result_msg, "paths": paths, "path": abs_path, "project_name": name})
 
     @app.tool(description="Remove a repository from a project by label (cannot remove the last repo).")
     def proj_remove_repo(

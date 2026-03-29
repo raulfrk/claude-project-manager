@@ -79,6 +79,7 @@ def evaluate_condition(
     condition: str | None,
     *,
     config_path: Path | None = None,
+    config: dict[str, Any] | None = None,
 ) -> bool:
     """Return ``True`` when the hook should fire based on proj config.
 
@@ -94,13 +95,16 @@ def evaluate_condition(
     if not condition:
         return True
 
-    config = _load_proj_config(config_path)
+    if config is not None:
+        _config = config
+    else:
+        _config = _load_proj_config(config_path)
 
     # Split by 'or' first (lower precedence), then 'and' (higher precedence)
     or_groups = [g.strip() for g in condition.split(" or ")]
     for or_group in or_groups:
         and_terms = [t.strip() for t in or_group.split(" and ")]
-        if all(_evaluate_single(term, config) for term in and_terms):
+        if all(_evaluate_single(term, _config) for term in and_terms):
             return True
     return False
 
@@ -109,6 +113,7 @@ def resolve_condition_status(
     condition: str | None,
     *,
     config_path: Path | None = None,
+    config: dict[str, Any] | None = None,
 ) -> str:
     """Human-readable status string for ``hooks_list`` display.
 
@@ -119,4 +124,4 @@ def resolve_condition_status(
     """
     if not condition:
         return "always"
-    return "active" if evaluate_condition(condition, config_path=config_path) else "inactive"
+    return "active" if evaluate_condition(condition, config_path=config_path, config=config) else "inactive"

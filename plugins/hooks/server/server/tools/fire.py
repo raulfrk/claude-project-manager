@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
-from server.lib.conditions import evaluate_condition
+from server.lib.conditions import evaluate_condition, _load_proj_config
 from server.lib.http_client import FireResult, post_hook
 from server.lib.models import Hook
 from server.lib.template import resolve_mapping
@@ -109,6 +109,7 @@ async def _fire_verification(
     enriched_source: dict[str, Any],
     trigger_tool: str,
     raw_source_result: str,
+    config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Fire verification hooks (Phase 2).  All are blocking.
 
@@ -120,7 +121,7 @@ async def _fire_verification(
     results: list[dict[str, Any]] = []
 
     # Filter by condition
-    eligible = [h for h in hooks if evaluate_condition(h.condition)]
+    eligible = [h for h in hooks if evaluate_condition(h.condition, config=config)]
 
     if not eligible:
         return results
@@ -218,6 +219,23 @@ async def hooks_fire(
     except json.JSONDecodeError as e:
         return f"Error: source_result is not valid JSON: {e}"
 
+    # Build merged config for condition evaluation
+    base_config = _load_proj_config()
+    if source:
+        # Inject todo-level fields
+        todo_fields = {k: v for k, v in source.items() if k in (
+            "todoist_task_id", "trello_card_id", "trello_checklist_id",
+            "trello_checklist_item_id", "jira_issue_key",
+        )}
+        if todo_fields:
+            base_config.setdefault("todo", {}).update(todo_fields)
+        # Inject project-level fields
+        project_fields = {k: v for k, v in source.items() if k in (
+            "todoist_project_id", "trello_card_id", "trello_checklist_id",
+        )}
+        if project_fields:
+            base_config.setdefault("project", {}).update(project_fields)
+
     registry = storage.load()
     matched = [h for h in registry.hooks if h.trigger_tool == trigger_tool]
 
@@ -235,7 +253,7 @@ async def hooks_fire(
     background_hooks: list[Hook] = []
 
     for hook in primary_matched:
-        if not evaluate_condition(hook.condition):
+        if not evaluate_condition(hook.condition, config=base_config):
             skipped += 1
             continue
         if hook.blocking:
@@ -292,7 +310,7 @@ async def hooks_fire(
 
         enriched = {**source, "hook_results": hook_results}
         verification_results = await _fire_verification(
-            verification_matched, enriched, trigger_tool, source_result,
+            verification_matched, enriched, trigger_tool, source_result, base_config,
         )
 
     summary: dict[str, Any] = {

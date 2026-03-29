@@ -189,3 +189,61 @@ class TestResolveConditionStatus:
     def test_negated_inactive(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"flag": True}))
         assert resolve_condition_status("!flag", config_path=proj_yaml) == "inactive"
+
+
+# ── runtime config (optional config param) ────────────────────────────────────────
+
+
+class TestRuntimeConfig:
+    """Tests for the optional `config` parameter added to evaluate_condition()."""
+
+    def test_explicit_config_true(self):
+        assert evaluate_condition(
+            "todo.todoist_task_id",
+            config={"todo": {"todoist_task_id": "abc123"}},
+        ) is True
+
+    def test_explicit_config_false(self):
+        assert evaluate_condition(
+            "todo.todoist_task_id",
+            config={"todo": {}},
+        ) is False
+
+    def test_project_dot_path_true(self):
+        assert evaluate_condition(
+            "project.todoist_project_id",
+            config={"project": {"todoist_project_id": "12345"}},
+        ) is True
+
+    def test_project_dot_path_false(self):
+        assert evaluate_condition(
+            "project.todoist_project_id",
+            config={"project": {}},
+        ) is False
+
+    def test_compound_with_runtime(self):
+        assert evaluate_condition(
+            "todoist.enabled and todo.todoist_task_id",
+            config={"todoist": {"enabled": True}, "todo": {"todoist_task_id": "abc"}},
+        ) is True
+
+    def test_compound_runtime_missing(self):
+        assert evaluate_condition(
+            "todoist.enabled and todo.todoist_task_id",
+            config={"todoist": {"enabled": True}, "todo": {}},
+        ) is False
+
+    def test_backward_compat_no_config(self, tmp_path: Path):
+        # Without config param, should still load from file (backward compat)
+        nonexistent = tmp_path / "does-not-exist.yaml"
+        assert evaluate_condition("nonexistent.path", config_path=nonexistent) is False
+
+    def test_none_condition_with_config(self):
+        assert evaluate_condition(None, config={"anything": True}) is True
+
+    def test_empty_condition_with_config(self):
+        assert evaluate_condition("", config={"anything": True}) is True
+
+    def test_negation_with_config(self):
+        assert evaluate_condition("!todo.todoist_task_id", config={"todo": {"todoist_task_id": "abc"}}) is False
+        assert evaluate_condition("!todo.todoist_task_id", config={"todo": {}}) is True

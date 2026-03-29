@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import yaml
 
 from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
@@ -571,3 +572,217 @@ class TestVerificationFiring:
         assert entries[0]["status"] == "pass"
         assert entries[0]["details"] == "confirmed"
         assert entries[0]["trigger_tool"] == "trigger_a"
+
+
+# ── Condition merge with source_result ───────────────────────────────────────────
+
+
+class TestConditionMerge:
+    """Tests for source_result → condition merge behavior in hooks_fire."""
+
+    @pytest.mark.asyncio
+    async def test_todo_condition_fires_with_task_id(self, hooks_yaml: Path, proj_yaml: Path):
+        """Hook with condition 'todo.todoist_task_id' fires when source_result contains it."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="todo.todoist_task_id"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")  # Empty base config
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            # source_result contains todoist_task_id
+            source = json.dumps({"todoist_task_id": "abc123"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        assert data["skipped"] == 0
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_todo_condition_skips_without_task_id(self, hooks_yaml: Path, proj_yaml: Path):
+        """Hook with condition 'todo.todoist_task_id' skips when source_result lacks it."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="todo.todoist_task_id"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")  # Empty base config
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+        ):
+            # source_result does NOT contain todoist_task_id
+            source = json.dumps({"other_field": "value"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_project_condition_fires_with_project_id(self, hooks_yaml: Path, proj_yaml: Path):
+        """Hook with condition 'project.todoist_project_id' fires when source_result contains it."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="project.todoist_project_id"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")  # Empty base config
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            source = json.dumps({"todoist_project_id": "proj456"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        assert data["skipped"] == 0
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_project_condition_skips_without_project_id(self, hooks_yaml: Path, proj_yaml: Path):
+        """Hook with condition 'project.todoist_project_id' skips when source_result lacks it."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="project.todoist_project_id"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+        ):
+            source = json.dumps({"other": "value"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_compound_condition_with_mixed_config(self, hooks_yaml: Path, proj_yaml: Path):
+        """Compound condition evaluates using both base config and source_result."""
+        reg = _make_registry([
+            _hook(
+                "hook-001",
+                "trigger_a",
+                "target_b",
+                condition="todoist.enabled and project.todoist_project_id",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        # Base config has todoist.enabled=True
+        proj_yaml.write_text(yaml.dump({"todoist": {"enabled": True}}))
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            # source_result provides the project_id
+            source = json.dumps({"todoist_project_id": "proj789"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        assert data["skipped"] == 0
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_trello_card_id_merges_to_project(self, hooks_yaml: Path, proj_yaml: Path):
+        """trello_card_id from source_result merges into 'project' section."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="project.trello_card_id"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            source = json.dumps({"trello_card_id": "cardABC"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_trello_checklist_id_merges_to_both(self, hooks_yaml: Path, proj_yaml: Path):
+        """trello_checklist_id merges into both 'todo' and 'project' sections."""
+        reg = _make_registry([
+            _hook(
+                "hook-001",
+                "trigger_a",
+                "target_b",
+                condition="project.trello_checklist_id and todo.trello_checklist_id",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            source = json.dumps({"trello_checklist_id": "check123"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_jira_issue_key_merges_to_todo(self, hooks_yaml: Path, proj_yaml: Path):
+        """jira_issue_key from source_result merges into 'todo' section."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="todo.jira_issue_key"),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            source = json.dumps({"jira_issue_key": "PROJ-123"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        mock_bg.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_base_config_overrides_source_result(self, hooks_yaml: Path, proj_yaml: Path):
+        """Base config values take precedence over source_result merge."""
+        reg = _make_registry([
+            _hook("hook-001", "trigger_a", "target_b", condition="todo.todoist_task_id"),
+        ])
+        save(reg, hooks_yaml)
+        # Base config has the field
+        proj_yaml.write_text(yaml.dump({"todo": {"todoist_task_id": "base_value"}}))
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_background") as mock_bg,
+        ):
+            # source_result also has it, but base config wins
+            source = json.dumps({"todoist_task_id": "source_value"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        # Should fire because base config has it
+        assert data["hooks_fired"] == 1
+        mock_bg.assert_called_once()

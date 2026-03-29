@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
+from server.lib.conditions import _load_proj_config
 from server.lib.models import Hook
 from server.tools.fire import _fire_verification
 
@@ -38,6 +39,23 @@ async def hooks_verify(
     except json.JSONDecodeError as e:
         return f"Error: source_result is not valid JSON: {e}"
 
+    # Build merged config for condition evaluation
+    base_config = _load_proj_config()
+    if source:
+        # Inject todo-level fields
+        todo_fields = {k: v for k, v in source.items() if k in (
+            "todoist_task_id", "trello_card_id", "trello_checklist_id",
+            "trello_checklist_item_id", "jira_issue_key",
+        )}
+        if todo_fields:
+            base_config.setdefault("todo", {}).update(todo_fields)
+        # Inject project-level fields
+        project_fields = {k: v for k, v in source.items() if k in (
+            "todoist_project_id", "trello_card_id", "trello_checklist_id",
+        )}
+        if project_fields:
+            base_config.setdefault("project", {}).update(project_fields)
+
     registry = storage.load()
     verification_hooks: list[Hook] = [
         h for h in registry.hooks
@@ -52,6 +70,7 @@ async def hooks_verify(
         enriched_source=source,
         trigger_tool=trigger_tool,
         raw_source_result=source_result,
+        config=base_config,
     )
 
     # Build summary

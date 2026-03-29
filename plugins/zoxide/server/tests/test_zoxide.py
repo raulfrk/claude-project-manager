@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -48,7 +49,10 @@ class TestZoxideBoost:
         assert mock_run.call_count == 10
         for c in mock_run.call_args_list:
             assert c == call(["zoxide", "add", "/some/path"], check=False, capture_output=True)
-        assert result == "Boosted /some/path (x10)"
+        parsed = json.loads(result)
+        assert parsed["result"] == "Boosted /some/path (x10)"
+        assert parsed["path"] == "/some/path"
+        assert parsed["times"] == 10
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_custom_times(self, mock_run, zoxide_boost):
@@ -57,20 +61,27 @@ class TestZoxideBoost:
         assert mock_run.call_count == 3
         for c in mock_run.call_args_list:
             assert c == call(["zoxide", "add", "/custom/path"], check=False, capture_output=True)
-        assert result == "Boosted /custom/path (x3)"
+        parsed = json.loads(result)
+        assert parsed["result"] == "Boosted /custom/path (x3)"
+        assert parsed["path"] == "/custom/path"
+        assert parsed["times"] == 3
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_zero_times(self, mock_run, zoxide_boost):
         result = zoxide_boost("/some/path", times=0)
 
         assert mock_run.call_count == 0
-        assert result == "Boosted /some/path (x0)"
+        parsed = json.loads(result)
+        assert parsed["result"] == "Boosted /some/path (x0)"
+        assert parsed["path"] == "/some/path"
+        assert parsed["times"] == 0
 
     @patch("server.tools.zoxide.subprocess.run", side_effect=FileNotFoundError)
     def test_zoxide_not_found(self, mock_run, zoxide_boost):
         result = zoxide_boost("/some/path")
 
-        assert result == "zoxide not found, skipping"
+        parsed = json.loads(result)
+        assert parsed["result"] == "zoxide not found, skipping"
         assert mock_run.call_count == 1  # fails on first call, stops immediately
 
 
@@ -85,13 +96,16 @@ class TestZoxideRemove:
         mock_run.assert_called_once_with(
             ["zoxide", "remove", "/old/path"], check=False, capture_output=True
         )
-        assert result == "Removed /old/path from zoxide"
+        parsed = json.loads(result)
+        assert parsed["result"] == "Removed /old/path from zoxide"
+        assert parsed["path"] == "/old/path"
 
     @patch("server.tools.zoxide.subprocess.run", side_effect=FileNotFoundError)
     def test_zoxide_not_found(self, mock_run, zoxide_remove):
         result = zoxide_remove("/old/path")
 
-        assert result == "zoxide not found, skipping"
+        parsed = json.loads(result)
+        assert parsed["result"] == "zoxide not found, skipping"
         assert mock_run.call_count == 1
 
 
@@ -110,7 +124,10 @@ class TestZoxideQuery:
         mock_run.assert_called_once_with(
             ["zoxide", "query", "home"], capture_output=True, text=True, check=False
         )
-        assert result == "/home/user/projects\n/home/user/docs\n/home/user/code"
+        parsed = json.loads(result)
+        assert parsed["result"] == ["/home/user/projects", "/home/user/docs", "/home/user/code"]
+        assert parsed["paths"] == ["/home/user/projects", "/home/user/docs", "/home/user/code"]
+        assert parsed["count"] == 3
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_empty_output(self, mock_run, zoxide_query):
@@ -118,7 +135,10 @@ class TestZoxideQuery:
 
         result = zoxide_query("nonexistent")
 
-        assert result == "No matches found"
+        parsed = json.loads(result)
+        assert parsed["result"] == []
+        assert parsed["paths"] == []
+        assert parsed["count"] == 0
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_whitespace_only_output(self, mock_run, zoxide_query):
@@ -126,13 +146,19 @@ class TestZoxideQuery:
 
         result = zoxide_query("something")
 
-        assert result == "No matches found"
+        parsed = json.loads(result)
+        assert parsed["result"] == []
+        assert parsed["paths"] == []
+        assert parsed["count"] == 0
 
     @patch("server.tools.zoxide.subprocess.run", side_effect=FileNotFoundError)
     def test_zoxide_not_found(self, mock_run, zoxide_query):
         result = zoxide_query("home")
 
-        assert result == "zoxide not found, skipping"
+        parsed = json.loads(result)
+        assert parsed["result"] == []
+        assert parsed["paths"] == []
+        assert parsed["count"] == 0
         assert mock_run.call_count == 1
 
     @patch("server.tools.zoxide.subprocess.run")
@@ -143,7 +169,10 @@ class TestZoxideQuery:
 
         result = zoxide_query("path", max_results=3)
 
-        assert result == "/path/1\n/path/2\n/path/3"
+        parsed = json.loads(result)
+        assert parsed["result"] == ["/path/1", "/path/2", "/path/3"]
+        assert parsed["paths"] == ["/path/1", "/path/2", "/path/3"]
+        assert parsed["count"] == 3
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_default_max_results(self, mock_run, zoxide_query):
@@ -153,8 +182,9 @@ class TestZoxideQuery:
 
         result = zoxide_query("path")
 
-        lines = result.split("\n")
-        assert len(lines) == 5  # default max_results=5
+        parsed = json.loads(result)
+        assert len(parsed["result"]) == 5  # default max_results=5
+        assert parsed["count"] == 5
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_strips_whitespace_from_lines(self, mock_run, zoxide_query):
@@ -162,4 +192,7 @@ class TestZoxideQuery:
 
         result = zoxide_query("home")
 
-        assert result == "/home/user/projects\n/home/user/docs"
+        parsed = json.loads(result)
+        assert parsed["result"] == ["/home/user/projects", "/home/user/docs"]
+        assert parsed["paths"] == ["/home/user/projects", "/home/user/docs"]
+        assert parsed["count"] == 2

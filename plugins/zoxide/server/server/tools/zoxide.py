@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -23,8 +24,8 @@ def register(mcp: FastMCP) -> None:
                     capture_output=True,
                 )
         except FileNotFoundError:
-            return "zoxide not found, skipping"
-        return f"Boosted {path} (x{times})"
+            return json.dumps({"result": "zoxide not found, skipping"})
+        return json.dumps({"result": f"Boosted {path} (x{times})", "path": path, "times": times})
 
     @mcp.tool()
     def zoxide_remove(path: str) -> str:
@@ -36,8 +37,8 @@ def register(mcp: FastMCP) -> None:
                 capture_output=True,
             )
         except FileNotFoundError:
-            return "zoxide not found, skipping"
-        return f"Removed {path} from zoxide"
+            return json.dumps({"result": "zoxide not found, skipping"})
+        return json.dumps({"result": f"Removed {path} from zoxide", "path": path})
 
     @mcp.tool()
     def zoxide_query(keyword: str, max_results: int = 5) -> str:
@@ -50,8 +51,9 @@ def register(mcp: FastMCP) -> None:
                 check=False,
             )
         except FileNotFoundError:
-            return "zoxide not found, skipping"
+            return json.dumps({"result": [], "paths": [], "count": 0})
         lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         if not lines:
-            return "No matches found"
-        return "\n".join(lines[:max_results])
+            return json.dumps({"result": [], "paths": [], "count": 0})
+        results_list = lines[:max_results]
+        return json.dumps({"result": results_list, "paths": results_list, "count": len(results_list)})

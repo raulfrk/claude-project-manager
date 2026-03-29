@@ -9,13 +9,31 @@ from typing import TYPE_CHECKING
 from server.lib import storage
 from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import ProjConfig, Todo
+from server.lib.models import ProjectMeta, ProjConfig, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _UTC = timezone.utc
+
+
+def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str) -> dict:
+    """Return enriched fields for hook dispatch from a todo and its project metadata."""
+    return {
+        "title": todo.title,
+        "priority": todo.priority,
+        "tags": todo.tags,
+        "notes": todo.notes,
+        "due_date": todo.due_date,
+        "todoist_task_id": todo.todoist_task_id,
+        "trello_card_id": meta.trello_card_id,
+        "trello_checklist_id": todo.trello_checklist_id,
+        "trello_checklist_item_id": todo.trello_checklist_item_id,
+        "jira_issue_key": todo.jira_issue_key,
+        "project_name": name,
+        "todoist_project_id": meta.todoist_project_id,
+    }
 
 
 def _now() -> str:
@@ -194,7 +212,7 @@ def register(app: FastMCP) -> None:
         todos.append(todo)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id})
+        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id, **_todo_hook_fields(todo, meta, name)})
 
     @app.tool(
         description=(
@@ -335,8 +353,9 @@ def register(app: FastMCP) -> None:
                 return "due_date cannot be empty. Omit it or provide a value."
             todo.due_date = due_date
         todo.updated = _now()
+        meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"result": f"Updated todo {todo_id}.", "todo_id": todo_id})
+        return json.dumps({"result": f"Updated todo {todo_id}.", "todo_id": todo_id, **_todo_hook_fields(todo, meta, name)})
 
     @app.tool(description="Mark a todo as done.")
     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
@@ -349,12 +368,18 @@ def register(app: FastMCP) -> None:
         if not todo:
             return f"Todo '{todo_id}' not found."
         today = _now()
+        meta = storage.load_meta(cfg, name)
 
         if todo.parent:
-            return _complete_child(cfg, name, todo, todos, today)
-        if todo.children:
-            return _complete_parent(cfg, name, todo, todos, today)
-        return _complete_leaf(cfg, name, todo, todos, today)
+            result_str = _complete_child(cfg, name, todo, todos, today)
+        elif todo.children:
+            result_str = _complete_parent(cfg, name, todo, todos, today)
+        else:
+            result_str = _complete_leaf(cfg, name, todo, todos, today)
+
+        result_data = json.loads(result_str)
+        result_data.update(_todo_hook_fields(todo, meta, name))
+        return json.dumps(result_data)
 
     @app.tool(
         description=(
@@ -440,6 +465,11 @@ def register(app: FastMCP) -> None:
             return result
         cfg, name = result
         todos = storage.load_todos(cfg, name)
+        todo = next((t for t in todos if t.id == todo_id), None)
+        if not todo:
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
+        meta = storage.load_meta(cfg, name)
+        snapshot = _todo_hook_fields(todo, meta, name)
         today = _now()
         # Clean up references
         for t in todos:
@@ -454,7 +484,7 @@ def register(app: FastMCP) -> None:
                 t.updated = today
         todos = [t for t in todos if t.id != todo_id]
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"result": f"Deleted todo {todo_id}.", "todo_id": todo_id})
+        return json.dumps({"result": f"Deleted todo {todo_id}.", "todo_id": todo_id, **snapshot})
 
     @app.tool(
         description=(
@@ -519,7 +549,7 @@ def register(app: FastMCP) -> None:
         todos.append(child)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id})
+        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id, **_todo_hook_fields(child, meta, name)})
 
     @app.tool(
         description=(
