@@ -2,6 +2,7 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.tools import (
     attachments,
@@ -16,6 +17,7 @@ from server.tools import (
 )
 
 mcp = FastMCP("trello")
+enable_hook_dispatch(mcp)
 init.register(mcp)
 boards.register(mcp)
 lists.register(mcp)

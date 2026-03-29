@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.lib.discovery import run_discovery
 from server.tools import fire as fire_tools
@@ -18,6 +19,7 @@ from server.tools import verify as verify_tools
 logger = logging.getLogger("hooks")
 
 mcp = FastMCP("hooks")
+enable_hook_dispatch(mcp, exclude=["hooks_fire_tool", "hooks_list_tool", "hooks_recover_tool"])
 registry_tools.register(mcp)
 fire_tools.register(mcp)
 recovery_tools.register(mcp)

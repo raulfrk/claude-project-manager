@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, Bash, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -84,6 +84,30 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
 **4d.** **Persist root paths:**
    - Call `config_update` with `permissions_projects_root=<projects_root>` and `permissions_tracking_root=<tracking_root>`
 
+**4e.** **Verify hooks server connectivity:**
+   - Call `mcp__plugin_hooks_hooks__hooks_list_tool` to check if the hooks server is reachable.
+   - If the call fails (tool not available or connection error), warn the user:
+     "Warning: Hooks server is not reachable. You can check manually with `GET http://127.0.0.1:19100/health`."
+     Offer two options: (1) Continue without hooks (2) Stop and fix.
+     Do NOT hard-fail — if the user chooses to continue, proceed to step 5.
+   - If reachable, proceed to step 4f.
+
+**4f.** **Check default hooks exist** (only if hooks server is reachable):
+   - Inspect the result from `mcp__plugin_hooks_hooks__hooks_list_tool`.
+   - If no hooks are registered (empty list), warn:
+     "Warning: No hooks registered. Restart Claude Code to trigger auto-discovery of hook definitions."
+   - If hooks are registered, proceed to step 4g.
+
+**4g.** **Validate hook condition paths** (only if hooks are registered):
+   - Inspect the `condition` field of each returned hook for known mismatched config paths. Known fixes:
+     - `todoist.enabled` should be `sync.todoist.enabled`
+     - `todoist.auto_sync` should be `sync.todoist.auto_sync`
+     - `trello.enabled` should be `sync.trello.enabled`
+     - `trello.auto_sync` should be `sync.trello.auto_sync`
+     - `zoxide.enabled` should be `zoxide_integration`
+   - If any mismatched conditions are found, list them and offer to fix by editing `~/.claude/hooks.yaml` (update the condition paths to the correct values).
+   - If no mismatches found, skip silently.
+
 **5.** Confirm: "proj plugin configured! Configuration saved to `~/.claude/proj.yaml`"
 
 **6.** Show the user their next step: "Run `/proj:init` to start tracking your first project."
@@ -98,6 +122,9 @@ Set up the proj plugin. This is required before any other `/proj:*` command work
 - **Config init failure**: displays error from `config_init` and stops.
 - **Perms plugin not available**: skips permission setup silently with a note.
 - **MCP rule verification failure**: displays warning about missing rules and suggests re-running.
+- **Hooks server unreachable**: warns user with options to continue without hooks or stop and fix. Does not hard-fail.
+- **No hooks registered**: warns user to restart Claude Code for auto-discovery.
+- **Mismatched hook conditions**: lists affected hooks and offers to fix `~/.claude/hooks.yaml`.
 
 ## Output
 

@@ -2,10 +2,12 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.tools import zoxide as zoxide_tools
 
 mcp = FastMCP("zoxide")
+enable_hook_dispatch(mcp)
 zoxide_tools.register(mcp)
 
 

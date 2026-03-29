@@ -2,10 +2,12 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.tools import projects, tasks
 
 mcp = FastMCP("todoist")
+enable_hook_dispatch(mcp)
 projects.register(mcp)
 tasks.register(mcp)
 

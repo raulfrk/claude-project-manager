@@ -4,12 +4,14 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.lib import state
 from server.tools import config, content, context, decisions, digest, explore, git, jira_sync, knowledge, migrate, perms_grant, perms_sync, projects, todoist_sync, trello_sync, todos, tracking_git
 from server.tools.context import ctx_detect_project_name
 
 mcp = FastMCP("proj")
+enable_hook_dispatch(mcp)
 config.register(mcp)
 projects.register(mcp)
 todos.register(mcp)

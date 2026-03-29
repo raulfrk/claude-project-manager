@@ -9,10 +9,11 @@ description = "Shared dual-transport library for MCP plugin inter-server hook co
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
+    "httpx>=0.28",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hook_transport"]
+packages = ["hook_transport", "hook_dispatch"]
 
 [dependency-groups]
 test = [
@@ -30,4 +31,4 @@ select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "PTH"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov-fail-under=80"]
+addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov-fail-under=80"]

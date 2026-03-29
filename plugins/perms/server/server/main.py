@@ -2,10 +2,12 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.tools import settings as settings_tools
 
 mcp = FastMCP("perms")
+enable_hook_dispatch(mcp)
 settings_tools.register(mcp)
 
 

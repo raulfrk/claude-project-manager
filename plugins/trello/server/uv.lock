@@ -240,11 +240,15 @@ name = "claude-hook-transport"
 version = "0.1.0"
 source = { directory = "../../_shared" }
 dependencies = [
+    { name = "httpx" },
     { name = "mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", specifier = ">=1.2.0" }]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "mcp", specifier = ">=1.2.0" },
+]
 
 [package.metadata.requires-dev]
 test = [
@@ -1346,7 +1350,7 @@ wheels = [
 
 [[package]]
 name = "trello-mcp-server"
-version = "1.1.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "claude-hook-transport" },

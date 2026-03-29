@@ -72,6 +72,59 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 - Fix flow: user can choose to spawn agents to fix failures (max 2 retries), then re-verify
 - Full details: `plugins/proj/skills/execute/SKILL.md` (step **4a.**) and `plugins/proj/skills/run/SKILL.md`
 
+## Hook Architecture
+
+**Dispatch flow** (full path): tool called → `_wrap_tool_fn` wrapper (injected by `enable_hook_dispatch`) → tool executes → result serialized to JSON (max 100KB) → HTTP POST to hooks server (`http://127.0.0.1:19100/hook`) with `{tool: "hooks_fire_tool", params: {trigger_tool, source_result, depth: 0}}` → `hooks_fire_tool` loads registry, matches hooks by `trigger_tool` → evaluates each hook's `condition` against `~/.claude/proj.yaml` → POSTs to target server URL (from `hooks.yaml` `servers` map) → target tool executes → result returned.
+
+**Port assignments**:
+| Plugin | Port |
+|--------|-------|
+| hooks | 19100 |
+| perms | 19101 |
+| proj | 19102 |
+| worktree | 19103 |
+| trello | 19104 |
+| jira | 19105 |
+| todoist | 19106 |
+| zoxide | 19107 |
+
+**`enable_hook_dispatch()`** (source: `plugins/_shared/hook_dispatch/dispatch.py`): called in each plugin's `main.py` **before** any `register()` calls. Monkey-patches `mcp.tool()` on the FastMCP instance so all subsequently registered tools get a post-execution wrapper. The patch intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms. After the original tool function returns, the wrapper calls `_dispatch_hook()` which serializes the result and POSTs to the hooks server. If the hooks server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged. Tool exceptions propagate without dispatch.
+
+Usage pattern in each plugin's `main.py`:
+```python
+from hook_dispatch import enable_hook_dispatch
+mcp = FastMCP("plugin_name")
+enable_hook_dispatch(mcp, exclude={"meta_tool_1", "meta_tool_2"})
+# register() calls come after — they use the patched mcp.tool()
+```
+
+The `exclude` parameter prevents dispatch for meta-tools that should not trigger hooks. The hooks plugin excludes: `hooks_fire_tool`, `hooks_list_tool`, `hooks_recover_tool`.
+
+**Condition evaluation**: `hooks.yaml` conditions are evaluated against `~/.claude/proj.yaml` at fire time. Dot-path resolution walks nested YAML keys. Supports `and`/`or` operators (`and` binds tighter) and `!` negation. Missing keys or missing config file evaluate to `False`.
+
+Condition-to-`proj.yaml` path mapping (from `default-hooks.yaml` files):
+
+| Condition | `proj.yaml` path | Used by |
+|-----------|------------------|---------|
+| `perms_integration` | `perms_integration` (top-level bool) | perms, proj, worktree |
+| `zoxide_integration` | `zoxide_integration` (top-level bool) | worktree, zoxide |
+| `git_tracking.enabled` | `git_tracking.enabled` | proj |
+| `sync.todoist.enabled` | `sync.todoist.enabled` | todoist |
+| `sync.todoist.auto_sync` | `sync.todoist.auto_sync` | todoist |
+| `todo.todoist_task_id` | `todo.todoist_task_id` (runtime) | todoist |
+| `project.todoist_project_id` | `project.todoist_project_id` (runtime) | todoist |
+| `sync.trello.enabled` | `sync.trello.enabled` | trello |
+| `sync.trello.auto_sync` | `sync.trello.auto_sync` | trello |
+| `project.trello_card_id` | `project.trello_card_id` (runtime) | trello |
+
+Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"`.
+
+**Blocking vs non-blocking**: the dispatcher always awaits the `hooks_fire_tool` HTTP response (30s timeout). Inside `hooks_fire_tool`, blocking hooks (`blocking: true`) are awaited concurrently via `asyncio.gather`; non-blocking hooks (`blocking: false`, the default) are dispatched in background daemon threads and return immediately.
+
+**Depth tracking**: `max_depth=3` (configurable in `hooks.yaml` `settings.max_depth`). Prevents runaway cascades when hooks trigger tools that trigger hooks. The `depth` param is passed through the dispatch chain and checked at the start of `hooks_fire_tool`.
+
+**Verification hooks**: hooks with `verification: true` fire in Phase 2 after all primary hooks complete. They receive an enriched source containing `hook_results` from Phase 1 blocking hooks. Verification hooks are always blocking and do not increment depth.
+
 ## Config Naming Conventions
 
 - **Field names**: `underscore_case` (`tracking_dir`, `auto_sync`, `default_priority`)
