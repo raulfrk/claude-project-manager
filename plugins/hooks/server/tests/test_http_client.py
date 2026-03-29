@@ -153,6 +153,68 @@ class TestPostHook:
         assert fr.result is None
 
     @pytest.mark.asyncio
+    async def test_post_hook_unix_socket_url(self):
+        """unix:// URL creates UDS transport and uses localhost as placeholder."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"ok": true, "result": "done"}'
+        mock_resp.json.return_value = {"ok": True, "result": "done"}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client) as mock_cls, \
+             patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls:
+            mock_transport_cls.return_value = MagicMock()
+            fr = await post_hook(
+                hook_id="h1",
+                url="unix:///tmp/claude-hooks-todoist.sock",
+                target_tool="some_tool",
+                params={"key": "val"},
+            )
+
+        assert fr.ok is True
+        assert fr.result == "done"
+        # Verify UDS transport was created with the socket path
+        mock_transport_cls.assert_called_once_with(uds="/tmp/claude-hooks-todoist.sock")
+        # Verify the effective URL used localhost, not the unix:// path
+        mock_client.post.assert_awaited_once()
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == "http://localhost/hook"
+
+    @pytest.mark.asyncio
+    async def test_post_hook_tcp_url_unchanged(self):
+        """http:// URL uses normal TCP transport (backward compat)."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"ok": true, "result": "ok"}'
+        mock_resp.json.return_value = {"ok": True, "result": "ok"}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client) as mock_cls, \
+             patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls:
+            mock_transport_cls.return_value = MagicMock()
+            fr = await post_hook(
+                hook_id="h1",
+                url="http://127.0.0.1:19101/hook",
+                target_tool="some_tool",
+                params={},
+            )
+
+        assert fr.ok is True
+        # TCP transport uses proxy=None, not uds
+        mock_transport_cls.assert_called_once_with(proxy=None)
+        # URL passed through as-is
+        mock_client.post.assert_awaited_once()
+        assert mock_client.post.call_args[0][0] == "http://127.0.0.1:19101/hook"
+
+    @pytest.mark.asyncio
     async def test_post_hook_4xx_with_json_error(self):
         """4xx response with JSON error body captures error message."""
         mock_resp = MagicMock()

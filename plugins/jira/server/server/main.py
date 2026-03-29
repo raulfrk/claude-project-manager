@@ -14,7 +14,7 @@ projects.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, 19105)
+    run_dual(mcp, "jira", default_port=19105)
 
 
 if __name__ == "__main__":

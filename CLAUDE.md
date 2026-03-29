@@ -74,9 +74,11 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 
 ## Hook Architecture
 
-**Dispatch flow** (full path): tool called → `_wrap_tool_fn` wrapper (injected by `enable_hook_dispatch`) → tool executes → result serialized to JSON (max 100KB) → HTTP POST to hooks server (`http://127.0.0.1:19100/hook`) with `{tool: "hooks_fire_tool", params: {trigger_tool, source_result, depth: 0}}` → `hooks_fire_tool` loads registry, matches hooks by `trigger_tool` → evaluates each hook's `condition` against `~/.claude/proj.yaml` → POSTs to target server URL (from `hooks.yaml` `servers` map) → target tool executes → result returned.
+**Dispatch flow** (full path): tool called → `_wrap_tool_fn` wrapper (injected by `enable_hook_dispatch`) → tool executes → result serialized to JSON (max 100KB) → POST to hooks server via Unix domain socket (`/tmp/claude-hooks-hooks.sock`) with `{tool: "hooks_fire_tool", params: {trigger_tool, source_result, depth: 0}}` → `hooks_fire_tool` loads registry, matches hooks by `trigger_tool` → evaluates each hook's `condition` against `~/.claude/proj.yaml` → POSTs to target server socket (from `hooks.yaml` `servers` map, e.g. `unix:///tmp/claude-hooks-todoist.sock`) → target tool executes → result returned.
 
-**Port assignments**:
+**Transport**: Unix domain sockets at `/tmp/claude-hooks-{plugin}.sock` (default). Set `HOOK_TRANSPORT=tcp` env var to fall back to TCP on 127.0.0.1 (legacy ports below). Each plugin's `run_dual()` call passes the plugin name for socket path construction.
+
+**Port assignments** (TCP fallback only, via `HOOK_TRANSPORT=tcp`):
 | Plugin | Port |
 |--------|-------|
 | hooks | 19100 |

@@ -42,7 +42,7 @@ def main() -> None:
                 state.set_session_active(detected)
         except Exception:
             pass  # graceful no-op: missing config, untracked dir, etc.
-    run_dual(mcp, 19102)
+    run_dual(mcp, "proj", default_port=19102)
 
 
 if __name__ == "__main__":

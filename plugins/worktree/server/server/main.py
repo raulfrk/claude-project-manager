@@ -13,7 +13,7 @@ worktrees.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, 19103)
+    run_dual(mcp, "worktree", default_port=19103)
 
 
 if __name__ == "__main__":

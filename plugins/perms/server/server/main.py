@@ -12,7 +12,7 @@ settings_tools.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, 19101)
+    run_dual(mcp, "perms", default_port=19101)
 
 
 if __name__ == "__main__":
