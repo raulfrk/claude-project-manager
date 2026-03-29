@@ -5,7 +5,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Todo: complete ${todo_id}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-tracking-flush-on-todo-add
@@ -14,7 +14,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Todo: add ${todo_id}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-tracking-flush-on-todo-update
@@ -23,7 +23,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Todo: update ${todo_id}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-tracking-flush-on-todo-delete
@@ -32,7 +32,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Todo: delete ${todo_id}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-tracking-flush-on-archive
@@ -41,7 +41,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Archive: ${project_name}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-tracking-flush-on-init
@@ -50,7 +50,7 @@ hooks:
     server: proj
     param_mapping:
       commit_message: "Init: ${project_name}"
-    blocking: false
+    blocking: true
     condition: "git_tracking.enabled"
 
   - id: proj-perms-sync-on-load-session
@@ -58,5 +58,5 @@ hooks:
     target_tool: proj_perms_sync
     server: proj
     param_mapping: {}
-    blocking: false
+    blocking: true
     condition: "perms_integration"

@@ -5,7 +5,7 @@ hooks:
     server: perms
     param_mapping:
       path: "${worktree_path}"
-    blocking: false
+    blocking: true
     condition: "perms_integration"
 
   - id: worktree-on-wt-remove-perms
@@ -14,7 +14,7 @@ hooks:
     server: perms
     param_mapping:
       path: "${worktree_path}"
-    blocking: false
+    blocking: true
     condition: "perms_integration"
 
   - id: worktree-on-wt-create-zoxide
@@ -23,7 +23,7 @@ hooks:
     server: worktree
     param_mapping:
       path: "${worktree_path}"
-    blocking: false
+    blocking: true
     condition: "zoxide_integration"
 
   - id: worktree-on-wt-remove-zoxide
@@ -32,5 +32,5 @@ hooks:
     server: worktree
     param_mapping:
       path: "${worktree_path}"
-    blocking: false
+    blocking: true
     condition: "zoxide_integration"
