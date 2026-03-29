@@ -353,6 +353,106 @@ class TestDiscoverAndRegister:
         assert stats["perms"]["updated"] == 1
         assert registry.hooks[0].condition == "new_cond"
 
+    def test_drift_updates_feedback_mapping(self, tmp_path: Path):
+        """Drift detection catches feedback_mapping changes and preserves hook ID."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "feedback_mapping": {"key": "old_value"},
+            },
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+        original_id = registry.hooks[0].id
+        assert registry.hooks[0].feedback_mapping == {"key": "old_value"}
+
+        # Change feedback_mapping in YAML
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "feedback_mapping": {"key": "new_value"},
+            },
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 1}}
+        assert len(registry.hooks) == 1
+        assert registry.hooks[0].id == original_id  # ID preserved
+        assert registry.hooks[0].feedback_mapping == {"key": "new_value"}
+
+    def test_drift_source_none_not_updated(self, tmp_path: Path):
+        """Hooks with source=None (manually registered without source) are not updated."""
+        existing = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            blocking=False,
+            source=None,
+        )
+        registry = HookRegistry(hooks=[existing])
+
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": True},
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 0}}
+        assert registry.hooks[0].blocking is False  # unchanged
+
+    def test_drift_multiple_hooks_updated_count(self, tmp_path: Path):
+        """Stats correctly count multiple updated hooks in one plugin."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": False},
+            {"trigger_tool": "c", "target_tool": "d", "server": "s", "condition": "old"},
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+
+        # Change both hooks
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": True},
+            {"trigger_tool": "c", "target_tool": "d", "server": "s", "condition": "new"},
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 2}}
+
+
+# ── run_discovery summary ──────────────────────────────────────────────────
+
+
+class TestRunDiscoverySummary:
+    def test_summary_includes_updated_count(self, tmp_path: Path, monkeypatch):
+        """run_discovery() summary string includes updated count when hooks drift."""
+        from unittest.mock import MagicMock, patch
+
+        from server.lib import discovery as discovery_mod
+
+        # Set up a plugin with one hook
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": False},
+        ])
+
+        # First run: registers one hook
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+
+        # Modify the hook
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": True},
+        ])
+
+        # Mock storage (lazy-imported inside run_discovery)
+        mock_storage = MagicMock()
+        mock_storage.load.return_value = registry
+
+        with patch.dict("sys.modules", {"server.lib.storage": mock_storage}):
+            summary = discovery_mod.run_discovery(root=tmp_path)
+        assert "updated" in summary.lower()
+        assert "1 updated" in summary
+
 
 # ── _hook_content_differs ──────────────────────────────────────────────────
 

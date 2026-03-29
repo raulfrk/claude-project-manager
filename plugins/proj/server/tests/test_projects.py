@@ -66,6 +66,71 @@ class TestProjInit:
         assert (tracking / "todos.yaml").exists()
 
 
+class TestProjInitHooksSync:
+    """Tests for the hooks_sync call in proj_init."""
+
+    def _call_proj_init(self, name: str, tmp_path: Path) -> str:
+        """Call proj_init via the registered MCP tool directly."""
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.projects import register
+
+        app = FastMCP("test-hooks-sync")
+        register(app)
+        tool_fn = app._tool_manager.get_tool("proj_init")
+        assert tool_fn is not None
+
+        async def _run() -> str:
+            result = await tool_fn.run({"name": name, "path": str(tmp_path)}, {})
+            if isinstance(result, list):
+                return "".join(getattr(c, "text", str(c)) for c in result)
+            return str(result)
+
+        return asyncio.run(_run())
+
+    def test_proj_init_calls_hooks_sync_on_success(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """proj_init posts to the hooks server on success."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with patch("httpx.HTTPTransport") as mock_transport, \
+             patch("httpx.Client", return_value=mock_client):
+            result = self._call_proj_init("hooktest", tmp_path)
+
+        import json
+        data = json.loads(result)
+        assert "project_name" in data
+        assert data["project_name"] == "hooktest"
+        # Verify post was called with hooks_sync_tool
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        assert call_args[1]["json"]["tool"] == "hooks_sync_tool"
+
+    def test_proj_init_succeeds_when_hooks_unreachable(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """proj_init still returns success when hooks server is not running."""
+        from unittest.mock import patch
+
+        with patch("httpx.HTTPTransport", side_effect=Exception("connection refused")):
+            result = self._call_proj_init("nohooks", tmp_path)
+
+        import json
+        data = json.loads(result)
+        assert "project_name" in data
+        assert data["project_name"] == "nohooks"
+        # Project was still created
+        index = storage.load_index(cfg)
+        assert "nohooks" in index.projects
+
+
 class TestTodoOperations:
     def test_add_and_list(self, cfg: ProjConfig, tmp_path: Path) -> None:
         from server.lib.models import Todo
