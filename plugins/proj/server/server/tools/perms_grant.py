@@ -124,8 +124,9 @@ def _compute_setup_paths(
     cfg: ProjConfig,
     *,
     archive_destination: str | None = None,
+    worktree_root_dir: str | None = None,
 ) -> list[str]:
-    """Compute resolved absolute paths for sandbox allowWrite (writable repos + tracking + archive)."""
+    """Compute resolved absolute paths for sandbox allowWrite (writable repos + tracking + archive + worktree root)."""
     paths = []
     if cfg.permissions.projects_root:
         root = str(Path(cfg.permissions.projects_root).expanduser().resolve())
@@ -148,6 +149,12 @@ def _compute_setup_paths(
         # Containment check: skip if already under projects_root
         if not any(archive.startswith(p + "/") or archive == p for p in paths):
             paths.append(archive)
+
+    if cfg.worktree_integration and worktree_root_dir:
+        wt_root = str(Path(worktree_root_dir).expanduser().resolve())
+        if not any(wt_root.startswith(p + "/") or wt_root == p for p in paths):
+            paths.append(wt_root)
+
     return paths
 
 
@@ -157,6 +164,7 @@ def setup_permissions(
     *,
     mcp_servers: list[str] | None = None,
     archive_destination: str | None = None,
+    worktree_root_dir: str | None = None,
     batch_setup_fn: Callable[..., str] | None = None,
 ) -> dict[str, int]:
     """Add sandbox allowWrite paths + MCP wildcard rules via the perms batch_setup function.
@@ -173,7 +181,7 @@ def setup_permissions(
     Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N, "additional_directories": N}.
     Idempotent.
     """
-    paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination)
+    paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination, worktree_root_dir=worktree_root_dir)
     servers = mcp_servers or []
 
     if not paths and not servers:
@@ -321,6 +329,7 @@ def register(app: FastMCP) -> None:
         project_name: str | None = None,
         mcp_servers: list[str] | None = None,
         archive_destination: str | None = None,
+        worktree_root_dir: str | None = None,
     ) -> str:
         cfg = require_config()
         index = storage.load_index(cfg)
@@ -346,6 +355,7 @@ def register(app: FastMCP) -> None:
             cfg,
             mcp_servers=mcp_servers or [],
             archive_destination=archive_destination,
+            worktree_root_dir=worktree_root_dir,
         )
         total = sum(counts.values())
         return json.dumps({
