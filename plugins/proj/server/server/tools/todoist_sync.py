@@ -201,6 +201,42 @@ def _find_link_candidate(
     return None
 
 
+def _find_link_candidate_reverse(
+    todoist_task: dict, local_todos: list[Todo], threshold: float = 0.7
+) -> dict | None:
+    """Find a local todo that likely matches an unlinked Todoist task by title similarity.
+
+    Reverse direction of _find_link_candidate: given a Todoist task, find the
+    best-matching local Todo object.
+    """
+    import unicodedata, re
+
+    def normalize(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s).lower()
+        s = re.sub(r"[^\w\s]", "", s)
+        return " ".join(s.split())
+
+    def similarity(a: str, b: str) -> float:
+        a_words = set(normalize(a).split())
+        b_words = set(normalize(b).split())
+        if not a_words or not b_words:
+            return 0.0
+        intersection = a_words & b_words
+        return len(intersection) / max(len(a_words), len(b_words))
+
+    task_content = todoist_task.get("content", "")
+    best_match: Todo | None = None
+    best_score = 0.0
+    for todo in local_todos:
+        score = similarity(task_content, todo.title)
+        if score > best_score:
+            best_score = score
+            best_match = todo
+    if best_score >= threshold and best_match:
+        return {"local_todo": best_match, "todoist_task": todoist_task, "score": best_score}
+    return None
+
+
 def compute_diff(
     todoist_tasks: list[dict[str, Any]],
     cfg: Any,
@@ -237,6 +273,9 @@ def compute_diff(
 
     plan = SyncPlan()
 
+    # Track local todo IDs matched via link candidates so they're excluded from push_create
+    linked_local_ids: set[str] = set()
+
     # ── Todoist -> Local (pull) ───────────────────────────────────────
 
     for todoist_id, task in todoist_by_id.items():
@@ -251,6 +290,17 @@ def compute_diff(
             # New task from Todoist — ghost check
             if _ghost_check(content, archived):
                 plan.ghost_close.append(todoist_id)
+                continue
+            # Link candidate check: see if an unlinked local todo matches this Todoist task
+            link_match = _find_link_candidate_reverse(task, local_unlinked)
+            if link_match:
+                matched_todo: Todo = link_match["local_todo"]
+                plan.potential_links.append({
+                    "local_todo": {"id": matched_todo.id, "title": matched_todo.title},
+                    "todoist_task": {"id": todoist_id, "content": content},
+                    "score": link_match["score"],
+                })
+                linked_local_ids.add(matched_todo.id)
                 continue
             # Prepare for local creation
             new_notes, new_synced = _apply_description_sync("", "", todoist_desc)
@@ -305,10 +355,12 @@ def compute_diff(
                     })
 
     # Split unlinked into roots (phase 1) and children-of-unlinked (phase 2)
-    unlinked_ids = {t.id for t in local_unlinked}
+    # Exclude todos that were matched as link candidates to prevent duplicate push_create
+    remaining_unlinked = [t for t in local_unlinked if t.id not in linked_local_ids]
+    unlinked_ids = {t.id for t in remaining_unlinked}
     unlinked_roots: list[Todo] = []
     unlinked_children: list[Todo] = []
-    for todo in local_unlinked:
+    for todo in remaining_unlinked:
         if effective_root_only and todo.parent:
             continue
         if todo.parent and todo.parent in unlinked_ids:
