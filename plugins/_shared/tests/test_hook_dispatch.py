@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from hook_dispatch.dispatch import _serialize_result, enable_hook_dispatch
+from hook_dispatch.dispatch import (
+    _resolve_hooks_transport,
+    _serialize_result,
+    enable_hook_dispatch,
+)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -333,3 +338,75 @@ async def test_dispatch_payload_format_tcp(mock_mcp, monkeypatch):
 
     url = mock_client.post.call_args[0][0]
     assert url == "http://127.0.0.1:19100/hook"
+
+
+# ── _resolve_hooks_transport registry tests ─────────────────────────────────
+
+
+class TestResolveHooksTransport:
+    """Tests for registry-aware transport resolution."""
+
+    def test_reads_registry_file_in_unix_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unix mode reads ~/.claude/sockets/hooks for the socket path."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        sockets_dir = tmp_path / ".claude" / "sockets"
+        sockets_dir.mkdir(parents=True)
+        registry_file = sockets_dir / "hooks"
+        registry_file.write_text("/tmp/claude-hooks-hooks-99999.sock")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            url, transport = _resolve_hooks_transport(19100)
+
+        assert url == "http://localhost/hook"
+        assert isinstance(transport, httpx.AsyncHTTPTransport)
+        # Verify the transport was configured with the registry socket path
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks-99999.sock"
+
+    def test_fallback_when_registry_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Falls back to legacy socket path when registry file is absent."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        # tmp_path has no .claude/sockets/hooks — triggers FileNotFoundError
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            url, transport = _resolve_hooks_transport(19100)
+
+        assert url == "http://localhost/hook"
+        assert isinstance(transport, httpx.AsyncHTTPTransport)
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks.sock"
+
+    def test_fallback_when_registry_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Falls back to legacy socket path when registry file is empty."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        sockets_dir = tmp_path / ".claude" / "sockets"
+        sockets_dir.mkdir(parents=True)
+        registry_file = sockets_dir / "hooks"
+        registry_file.write_text("   \n")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            url, transport = _resolve_hooks_transport(19100)
+
+        assert url == "http://localhost/hook"
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks.sock"
+
+    def test_tcp_mode_uses_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TCP mode returns http URL with the given port, no UDS."""
+        monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+
+        url, transport = _resolve_hooks_transport(19100)
+
+        assert url == "http://127.0.0.1:19100/hook"
+        assert isinstance(transport, httpx.AsyncHTTPTransport)
+
+    def test_tcp_mode_different_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TCP mode respects the hooks_port argument."""
+        monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+
+        url, transport = _resolve_hooks_transport(19200)
+
+        assert url == "http://127.0.0.1:19200/hook"
