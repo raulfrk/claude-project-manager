@@ -72,26 +72,16 @@ class Hook:
 
     def update_from(self, new_def: dict) -> None:
         """Update content fields in-place from new_def. Preserves id, trigger_tool, target_tool, server, source."""
-        # Update blocking
         if "blocking" in new_def:
             self.blocking = bool(new_def["blocking"])
-        # Update condition
-        self.condition = str(new_def["condition"]) if new_def.get("condition") is not None else None
-        # Update param_mapping (normalize same as from_dict)
-        pm_raw = new_def.get("param_mapping", {})
-        param_mapping: dict[str, str] = {}
-        if isinstance(pm_raw, dict):
-            param_mapping = {str(k): str(v) for k, v in pm_raw.items()}
-        self.param_mapping = param_mapping
-        # Update feedback_tool
-        self.feedback_tool = str(new_def["feedback_tool"]) if new_def.get("feedback_tool") is not None else None
-        # Update feedback_mapping (normalize same as from_dict)
-        fm_raw = new_def.get("feedback_mapping", {})
-        feedback_mapping: dict[str, str] = {}
-        if isinstance(fm_raw, dict):
-            feedback_mapping = {str(k): str(v) for k, v in fm_raw.items()}
-        self.feedback_mapping = feedback_mapping
-        # Update verification
+        if "condition" in new_def:
+            self.condition = str(new_def["condition"]) if new_def["condition"] is not None else None
+        if "param_mapping" in new_def:
+            self.param_mapping = {str(k): str(v) for k, v in (new_def["param_mapping"] or {}).items()}
+        if "feedback_tool" in new_def:
+            self.feedback_tool = str(new_def["feedback_tool"]) if new_def["feedback_tool"] is not None else None
+        if "feedback_mapping" in new_def:
+            self.feedback_mapping = {str(k): str(v) for k, v in (new_def["feedback_mapping"] or {}).items()}
         if "verification" in new_def:
             self.verification = bool(new_def["verification"])
         # Enforce invariant: verification implies blocking
