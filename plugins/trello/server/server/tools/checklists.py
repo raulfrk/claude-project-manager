@@ -91,6 +91,31 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Verify a checklist item's current state on a card. "
+            "Returns the item's verified status, state, and name."
+        ),
+    )
+    def trello_verify_checklist_item(card_id: str, item_id: str) -> str:
+        client = get_client()
+        checklists = client.get(f"/cards/{card_id}/checklists")
+        for checklist in checklists:
+            for item in checklist.get("checkItems", []):
+                if item.get("id") == item_id:
+                    return json.dumps({
+                        "verified": True,
+                        "item_id": item_id,
+                        "state": item.get("state", "incomplete"),
+                        "name": item.get("name", ""),
+                    })
+        return json.dumps({
+            "verified": False,
+            "item_id": item_id,
+            "state": "unknown",
+            "name": "",
+        })
+
+    @app.tool(
+        description=(
             "Update multiple checklist items in one call. "
             "Each update dict has 'checklist_id', 'item_id' (both required), "
             "and optional 'name' and 'state' ('complete' or 'incomplete'). "
