@@ -109,6 +109,19 @@ def evaluate_condition(
     return False
 
 
+_RUNTIME_PREFIXES = ("project.", "todo.")
+
+
+def _is_runtime_term(expr: str) -> bool:
+    """Return True if *expr* refers to a runtime-injected field.
+
+    Runtime fields (``project.*``, ``todo.*``) are only available when a hook
+    fires — they cannot be resolved from the static ``proj.yaml``.
+    """
+    clean = expr.strip().lstrip("!").strip()
+    return any(clean.startswith(p) for p in _RUNTIME_PREFIXES)
+
+
 def resolve_condition_status(
     condition: str | None,
     *,
@@ -121,7 +134,39 @@ def resolve_condition_status(
     * ``"always"``       — no condition set
     * ``"active"``       — condition evaluates to True right now
     * ``"inactive"``     — condition evaluates to False right now
+    * ``"runtime"``      — config terms pass but runtime terms are unevaluable
     """
     if not condition:
         return "always"
-    return "active" if evaluate_condition(condition, config_path=config_path, config=config) else "inactive"
+
+    if config is not None:
+        _config = config
+    else:
+        _config = _load_proj_config(config_path)
+
+    has_runtime = False
+
+    # Split by 'or' first (lower precedence), then 'and' (higher precedence)
+    or_groups = [g.strip() for g in condition.split(" or ")]
+    for or_group in or_groups:
+        and_terms = [t.strip() for t in or_group.split(" and ")]
+
+        config_terms = [t for t in and_terms if not _is_runtime_term(t)]
+        runtime_terms = [t for t in and_terms if _is_runtime_term(t)]
+
+        # All config terms in this or-group must pass
+        if not all(_evaluate_single(term, _config) for term in config_terms):
+            continue
+
+        # Config terms passed for this or-group
+        if runtime_terms:
+            has_runtime = True
+        else:
+            # Fully evaluable or-group passed — condition is active
+            return "active"
+
+    # If we found an or-group where config terms passed but had runtime terms
+    if has_runtime:
+        return "runtime"
+
+    return "inactive"
