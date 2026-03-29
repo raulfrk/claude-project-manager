@@ -74,5 +74,6 @@ hooks:
     server: todoist
     param_mapping:
       todoist_task_id: "${result.todoist_task_id}"
+    blocking: true
     verification: true
     condition: "todoist.enabled and todoist.auto_sync"

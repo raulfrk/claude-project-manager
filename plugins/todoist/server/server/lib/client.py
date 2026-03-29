@@ -1,4 +1,4 @@
-"""Todoist REST API client with Bearer token auth and error handling."""
+"""Todoist API v1 client with Bearer token auth and error handling."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ import httpx
 
 from server.lib.config import TodoistConfig, load_config
 
-BASE_URL = "https://api.todoist.com/rest/v2"
+BASE_URL = "https://api.todoist.com/api/v1"
 
 
 class TodoistClient:
-    """HTTP client for the Todoist REST API v2."""
+    """HTTP client for the Todoist API v1."""
 
     def __init__(self, config: TodoistConfig) -> None:
         self._config = config

@@ -1,4 +1,4 @@
-"""Tests for default-hooks.yaml: parse, validate structure, check all 7 hooks."""
+"""Tests for default-hooks.yaml: parse, validate structure, check all 8 hooks."""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ class TestDefaultHooksYaml:
         assert isinstance(data, dict)
         assert "hooks" in data
 
-    def test_has_7_hooks(self) -> None:
+    def test_has_8_hooks(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
-        assert len(data["hooks"]) == 7
+        assert len(data["hooks"]) == 8
 
     def test_all_hooks_have_required_fields(self) -> None:
         with _HOOKS_PATH.open() as f:
@@ -71,5 +71,6 @@ class TestDefaultHooksYaml:
             "todoist-on-proj-init",
             "todoist-on-proj-load",
             "todoist-on-proj-archive",
+            "verify-todoist-complete",
         }
         assert ids == expected
