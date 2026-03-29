@@ -16,6 +16,7 @@ import os
 import socket
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -34,8 +35,26 @@ SOCKET_PREFIX = "claude-hooks-"
 
 
 def _socket_path(plugin_name: str) -> str:
-    """Return the Unix domain socket path for a plugin."""
-    return f"{SOCKET_DIR}/{SOCKET_PREFIX}{plugin_name}.sock"
+    """Return the Unix domain socket path for a plugin (PID-tagged)."""
+    pid = os.getpid()
+    return f"{SOCKET_DIR}/{SOCKET_PREFIX}{plugin_name}-{pid}.sock"
+
+
+_SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
+
+
+def _write_socket_registry(plugin_name: str, sock_path: str) -> None:
+    """Write the socket path to the registry file for client discovery."""
+    _SOCKET_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    (_SOCKET_REGISTRY_DIR / plugin_name).write_text(sock_path)
+
+
+def _delete_socket_registry(plugin_name: str) -> None:
+    """Remove the registry file on shutdown. Swallows errors silently."""
+    try:
+        (_SOCKET_REGISTRY_DIR / plugin_name).unlink()
+    except (FileNotFoundError, PermissionError):
+        pass
 
 
 def _cleanup_stale_socket(path: str) -> None:
@@ -139,7 +158,9 @@ async def _run_dual_async(
         # Unix domain socket (default)
         sock_path = _socket_path(plugin_name)
         _cleanup_stale_socket(sock_path)
+        _write_socket_registry(plugin_name, sock_path)
         _register_socket_cleanup(sock_path)
+        atexit.register(_delete_socket_registry, plugin_name)
         config = uvicorn.Config(
             hook_app,
             uds=sock_path,
