@@ -157,6 +157,7 @@ class TrelloSync:
     """Global Trello sync configuration stored under sync.trello in proj.yaml."""
 
     enabled: bool = False
+    auto_sync: bool = True
     default_board_id: str = ""
     default_list: str = "Active"
     list_mappings: TrelloListMappings = field(default_factory=TrelloListMappings)
@@ -165,6 +166,7 @@ class TrelloSync:
     def to_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
+            "auto_sync": self.auto_sync,
             "default_board_id": self.default_board_id,
             "default_list": self.default_list,
             "list_mappings": self.list_mappings.to_dict(),
@@ -176,6 +178,7 @@ class TrelloSync:
         lm_raw = data.get("list_mappings", {})
         return cls(
             enabled=bool(data.get("enabled", False)),
+            auto_sync=bool(data.get("auto_sync", True)),
             default_board_id=str(data.get("default_board_id", "")),
             default_list=str(data.get("default_list", "Active")),
             list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),  # type: ignore[arg-type]
