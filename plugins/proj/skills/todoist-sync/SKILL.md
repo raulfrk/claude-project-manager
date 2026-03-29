@@ -28,15 +28,43 @@ Full bidirectional Todoist sync for the active project using batched operations.
    - If all summary counts are zero: output "Todoist sync complete. Everything up to date." and stop.
    - If only pull counts are non-zero and push counts are all zero: output the pull summary and stop (pulls already applied).
 
+**3b.** Resolve potential links (only if `plan.potential_links` is non-empty):
+   - For each entry in `potential_links`, display:
+     ```
+     Local: "<todo title>" ↔ Todoist: "<task content>" (similarity: <score as %>%)
+     ```
+   - Prompt the user with:
+     ```
+     1. Link — connect this local todo to this Todoist task (set todoist_task_id)
+     2. Link to other — enter a different Todoist task ID to link to
+     3. Skip — leave both as-is (they'll diverge)
+     4. Create new — ignore the match; push_create and pull_create as separate tasks
+     ```
+   - Handle each choice:
+     - **Option 1 (Link)**: add `{ todo_id, todoist_task_id }` to `link_todoist_ids` for writeback. Remove the local todo from `push_create` and the Todoist task from `pull_create`.
+     - **Option 2 (Link to other)**: prompt for the Todoist task ID, add `{ todo_id, <entered todoist_task_id> }` to `link_todoist_ids`. Remove the local todo from `push_create`.
+     - **Option 3 (Skip)**: remove the local todo from `push_create` (don't create a duplicate in Todoist); the existing Todoist task stays as-is.
+     - **Option 4 (Create new)**: put the local todo back in `push_create` and the Todoist task back in `pull_create` (both proceed independently).
+   - All potential links must be resolved before proceeding to step 4.
+
 **4.** Execute Todoist-side changes (batch calls, parallel where independent):
 
    a. **Ghost close** (if `ghost_close` is non-empty):
       - Call `mcp__todoist__todoist_complete_tasks` with `ids` = the `ghost_close` array.
 
-   b. **Push create** (if `push_create` is non-empty):
-      - Call `mcp__todoist__todoist_add_tasks` with the `push_create` array as `tasks`.
+   b. **Push create — Phase 1 (roots)** (if `push_create` is non-empty):
+      - Call `mcp__todoist__todoist_add_tasks` with `push_create` (root todos only) as `tasks`.
         Each entry has: `content`, `priority`, `description`, `labels`, and optionally `dueString`, `parentId`.
       - The tool returns created tasks with their IDs. Build a `link_todoist_ids` array mapping each `todo_id` (from push_create) to the returned Todoist task ID.
+      - Also build a `parent_id_map`: for each returned task, map `todo_id` → Todoist task ID.
+      - If any entry had `complete_after_create: true`, collect those Todoist task IDs for completion.
+
+   b-phase2. **Push create — Phase 2 (children)** (if `push_create_phase2` is non-empty):
+      - For each entry in `push_create_phase2`:
+        - Look up `entry["_parent_local_id"]` in `parent_id_map` to get the Todoist parent task ID.
+        - Set `entry["parentId"]` = that Todoist task ID.
+      - Call `mcp__todoist__todoist_add_tasks` with the updated `push_create_phase2` entries.
+      - Add returned task IDs to `link_todoist_ids`.
       - If any entry had `complete_after_create: true`, collect those Todoist task IDs for completion.
 
    c. **Push update** (if `push_update` is non-empty):
@@ -50,13 +78,13 @@ Full bidirectional Todoist sync for the active project using batched operations.
       - For each entry: call `mcp__todoist__todoist_delete` with `id=todoist_task_id`.
       - Collect the `todo_id` values as `cleared_todoist_ids`.
 
-**5.** Link IDs locally (only if step 4b or 4e produced results):
+**5.** Link IDs locally (only if step 4b, 4b-phase2, or 4e produced results):
    - Build the `apply_json` object with ONLY:
-     - `link_todoist_ids`: the mapping built in step 4b (from push_create results).
+     - `link_todoist_ids`: the mapping built in steps 3b, 4b, and 4b-phase2 (from potential_links resolution and push_create results).
      - `cleared_todoist_ids`: todo IDs from step 4e (root_only cleanup).
    - All other fields (`created_locally`, `updated_locally`, `completed_locally`) should be empty arrays -- pulls were already applied in step 3.
    - Call `mcp__proj__proj_todoist_apply` with the JSON-stringified object.
-   - **Skip this step entirely** if there were no push_creates and no root_only_cleanup.
+   - **Skip this step entirely** if there were no push_creates, no push_create_phase2, no potential_links resolutions, and no root_only_cleanup.
 
 **6.** Summary: Display only if any changes occurred:
    ```
