@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 _UTC = timezone.utc
 
 
-def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str) -> dict:
+def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None) -> dict:
     """Return enriched fields for hook dispatch from a todo and its project metadata."""
-    return {
+    fields: dict = {
         "title": todo.title,
         "priority": todo.priority,
         "tags": todo.tags,
@@ -34,6 +34,12 @@ def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str) -> dict:
         "project_name": name,
         "todoist_project_id": meta.todoist_project_id,
     }
+    # Resolve parent's Todoist task ID for child todos so hooks can set parentId.
+    if todo.parent and todos:
+        parent_todo = next((t for t in todos if t.id == todo.parent), None)
+        if parent_todo and parent_todo.todoist_task_id:
+            fields["parent_todoist_task_id"] = parent_todo.todoist_task_id
+    return fields
 
 
 def _now() -> str:
@@ -212,7 +218,7 @@ def register(app: FastMCP) -> None:
         todos.append(todo)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id, **_todo_hook_fields(todo, meta, name)})
+        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id, **_todo_hook_fields(todo, meta, name, todos=todos)})
 
     @app.tool(
         description=(
@@ -549,7 +555,7 @@ def register(app: FastMCP) -> None:
         todos.append(child)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id, **_todo_hook_fields(child, meta, name)})
+        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id, **_todo_hook_fields(child, meta, name, todos=todos)})
 
     @app.tool(
         description=(
