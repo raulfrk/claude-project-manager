@@ -8,12 +8,13 @@ import yaml
 
 from server.lib.discovery import (
     _DEFAULT_SERVER_PORTS,
+    _hook_content_differs,
     discover_and_register,
     find_default_hooks_files,
     load_hooks_from_file,
     populate_server_urls,
 )
-from server.lib.models import HookRegistry
+from server.lib.models import Hook, HookRegistry
 
 
 def _setup_plugin(
@@ -149,7 +150,7 @@ class TestDiscoverAndRegister:
         ])
         registry = HookRegistry()
         stats = discover_and_register(registry, root=tmp_path)
-        assert stats == {"perms": 1}
+        assert stats == {"perms": {"registered": 1, "updated": 0}}
         assert len(registry.hooks) == 1
         assert registry.hooks[0].source == "auto"
         assert registry.hooks[0].trigger_tool == "proj_init"
@@ -164,7 +165,7 @@ class TestDiscoverAndRegister:
 
         # Run again — should not add duplicates
         stats2 = discover_and_register(registry, root=tmp_path)
-        assert stats2 == {"perms": 0}
+        assert stats2 == {"perms": {"registered": 0, "updated": 0}}
         assert len(registry.hooks) == 1
 
     def test_skips_hooks_missing_required_fields(self, tmp_path: Path):
@@ -174,7 +175,7 @@ class TestDiscoverAndRegister:
         ])
         registry = HookRegistry()
         stats = discover_and_register(registry, root=tmp_path)
-        assert stats == {"perms": 1}
+        assert stats == {"perms": {"registered": 1, "updated": 0}}
         assert len(registry.hooks) == 1
 
     def test_multiple_plugins(self, tmp_path: Path):
@@ -186,7 +187,7 @@ class TestDiscoverAndRegister:
         ])
         registry = HookRegistry()
         stats = discover_and_register(registry, root=tmp_path)
-        assert stats == {"perms": 1, "proj": 1}
+        assert stats == {"perms": {"registered": 1, "updated": 0}, "proj": {"registered": 1, "updated": 0}}
         assert len(registry.hooks) == 2
 
     def test_assigns_incremental_ids(self, tmp_path: Path):
@@ -241,7 +242,7 @@ class TestDiscoverAndRegister:
         ])
         registry = HookRegistry()
         stats = discover_and_register(registry, root=tmp_path)
-        assert stats == {"todoist": 1}
+        assert stats == {"todoist": {"registered": 1, "updated": 0}}
         assert len(registry.hooks) == 1
         hook = registry.hooks[0]
         assert hook.verification is True
@@ -276,7 +277,7 @@ class TestDiscoverAndRegister:
         ])
         registry = HookRegistry()
         stats = discover_and_register(registry, root=tmp_path)
-        assert stats == {"todoist": 2}
+        assert stats == {"todoist": {"registered": 2, "updated": 0}}
         assert len(registry.hooks) == 2
 
         primary = [h for h in registry.hooks if not h.verification]
@@ -286,6 +287,98 @@ class TestDiscoverAndRegister:
         assert verification[0].blocking is True
         assert primary[0].target_tool == "todoist_sync"
         assert verification[0].target_tool == "todoist_verify_complete"
+
+    def test_drift_updates_auto_hook(self, tmp_path: Path):
+        """When an auto hook's content changes in YAML, discover_and_register updates it."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": False},
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+        assert registry.hooks[0].blocking is False
+
+        # Change blocking in the YAML
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": True},
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 1}}
+        assert len(registry.hooks) == 1
+        assert registry.hooks[0].blocking is True
+
+    def test_drift_skips_manual_hook(self, tmp_path: Path):
+        """Hooks with source != 'auto' are never updated by drift detection."""
+        existing = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            blocking=False,
+            source="manual",
+        )
+        registry = HookRegistry(hooks=[existing])
+
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": True},
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 0}}
+        assert registry.hooks[0].blocking is False  # unchanged
+
+    def test_drift_no_change_no_update(self, tmp_path: Path):
+        """When content matches, no update is counted."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "blocking": False},
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+
+        # Re-discover with same content
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats == {"perms": {"registered": 0, "updated": 0}}
+
+    def test_drift_updates_condition(self, tmp_path: Path):
+        """Drift detection catches condition changes."""
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "condition": "old_cond"},
+        ])
+        registry = HookRegistry()
+        discover_and_register(registry, root=tmp_path)
+        assert registry.hooks[0].condition == "old_cond"
+
+        _setup_plugin(tmp_path, "perms", hooks=[
+            {"trigger_tool": "a", "target_tool": "b", "server": "s", "condition": "new_cond"},
+        ])
+        stats = discover_and_register(registry, root=tmp_path)
+        assert stats["perms"]["updated"] == 1
+        assert registry.hooks[0].condition == "new_cond"
+
+
+# ── _hook_content_differs ──────────────────────────────────────────────────
+
+
+class TestHookContentDiffers:
+    def test_identical_hooks(self):
+        hook = Hook(id="1", trigger_tool="a", target_tool="b", server="s")
+        assert _hook_content_differs(hook, {}) is False
+
+    def test_blocking_differs(self):
+        hook = Hook(id="1", trigger_tool="a", target_tool="b", server="s", blocking=False)
+        assert _hook_content_differs(hook, {"blocking": True}) is True
+
+    def test_none_and_missing_equivalent(self):
+        hook = Hook(id="1", trigger_tool="a", target_tool="b", server="s", condition=None)
+        assert _hook_content_differs(hook, {}) is False
+
+    def test_param_mapping_differs(self):
+        hook = Hook(id="1", trigger_tool="a", target_tool="b", server="s",
+                    param_mapping={"x": "1"})
+        assert _hook_content_differs(hook, {"param_mapping": {"x": "2"}}) is True
+
+    def test_param_mapping_same(self):
+        hook = Hook(id="1", trigger_tool="a", target_tool="b", server="s",
+                    param_mapping={"x": "1"})
+        assert _hook_content_differs(hook, {"param_mapping": {"x": "1"}}) is False
 
 
 # ── populate_server_urls ─────────────────────────────────────────────────────
