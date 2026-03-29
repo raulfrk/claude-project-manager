@@ -128,7 +128,7 @@ def hooks_list(trigger_tool: str | None = None) -> str:
 
     Returns a JSON object with 'hooks' (array of hook objects) and 'servers' (dict).
     Each hook includes a ``condition_status`` field resolved against the live
-    proj config (``"always"`` / ``"active"`` / ``"inactive"``).
+    proj config (``"always"`` / ``"active"`` / ``"inactive"`` / ``"runtime"``).
     Returns empty hooks array (not an error) when no matches are found.
     """
     registry = storage.load()

@@ -190,6 +190,85 @@ class TestResolveConditionStatus:
         proj_yaml.write_text(yaml.dump({"flag": True}))
         assert resolve_condition_status("!flag", config_path=proj_yaml) == "inactive"
 
+    # ── runtime partial evaluation ───────────────────────────────────────
+
+    def test_runtime_only_term(self, proj_yaml: Path):
+        """Pure runtime condition (project.*) returns 'runtime'."""
+        proj_yaml.write_text(yaml.dump({}))
+        assert resolve_condition_status("project.todoist_project_id", config_path=proj_yaml) == "runtime"
+
+    def test_runtime_todo_term(self, proj_yaml: Path):
+        """Pure runtime condition (todo.*) returns 'runtime'."""
+        proj_yaml.write_text(yaml.dump({}))
+        assert resolve_condition_status("todo.todoist_task_id", config_path=proj_yaml) == "runtime"
+
+    def test_config_active_and_runtime(self, proj_yaml: Path):
+        """Config term passes + runtime term present -> 'runtime'."""
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) == "runtime"
+
+    def test_config_inactive_and_runtime(self, proj_yaml: Path):
+        """Config term fails + runtime term present -> 'inactive'."""
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": False}}}))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) == "inactive"
+
+    def test_compound_and_all_config_active(self, proj_yaml: Path):
+        """All config terms, no runtime -> 'active'."""
+        proj_yaml.write_text(yaml.dump({
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
+        }))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and sync.todoist.auto_sync",
+            config_path=proj_yaml,
+        ) == "active"
+
+    def test_real_todoist_condition_runtime(self, proj_yaml: Path):
+        """Real todoist condition: config terms pass, runtime term present."""
+        proj_yaml.write_text(yaml.dump({
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
+        }))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) == "runtime"
+
+    def test_real_todoist_condition_inactive(self, proj_yaml: Path):
+        """Real todoist condition: config term fails -> inactive."""
+        proj_yaml.write_text(yaml.dump({
+            "sync": {"todoist": {"enabled": False, "auto_sync": True}},
+        }))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
+            config_path=proj_yaml,
+        ) == "inactive"
+
+    def test_or_with_runtime_and_active_branch(self, proj_yaml: Path):
+        """Or: one branch is fully active (no runtime) -> 'active'."""
+        proj_yaml.write_text(yaml.dump({"flag": True}))
+        assert resolve_condition_status(
+            "project.todoist_project_id or flag",
+            config_path=proj_yaml,
+        ) == "active"
+
+    def test_or_with_runtime_only_branches(self, proj_yaml: Path):
+        """Or: all branches have runtime terms, config terms pass -> 'runtime'."""
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
+        assert resolve_condition_status(
+            "sync.todoist.enabled and project.todoist_project_id or todo.todoist_task_id",
+            config_path=proj_yaml,
+        ) == "runtime"
+
+    def test_negated_runtime_term(self, proj_yaml: Path):
+        """Negated runtime term is still recognized as runtime."""
+        proj_yaml.write_text(yaml.dump({}))
+        assert resolve_condition_status("!todo.todoist_task_id", config_path=proj_yaml) == "runtime"
+
 
 # ── runtime config (optional config param) ────────────────────────────────────────
 
