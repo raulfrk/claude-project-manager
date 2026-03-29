@@ -23,7 +23,15 @@ def _serialize_result(result: Any) -> str:
     if result is None:
         serialized = "null"
     elif isinstance(result, str):
-        serialized = json.dumps(result)
+        # If the string is already valid JSON object/array, pass through as-is
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, (dict, list)):
+                serialized = result
+            else:
+                serialized = json.dumps(result)
+        except (json.JSONDecodeError, ValueError):
+            serialized = json.dumps(result)
     elif isinstance(result, (dict, int, float, bool)):
         serialized = json.dumps(result)
     elif isinstance(result, (list, tuple)):

@@ -21,13 +21,14 @@ def project(cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str]:
 
 
 async def _add_todo(mcp_app: Any, title: str, parent: str | None = None) -> str:
-    """Add a todo and return its ID (parsed from 'Added todo <id>: <title>')."""
+    """Add a todo and return its ID (parsed from JSON result)."""
+    import json
+
     kwargs: dict[str, Any] = {"title": title}
     if parent is not None:
         kwargs["parent"] = parent
     result = await call_tool(mcp_app, "todo_add", **kwargs)
-    # result is like "Added todo 1: Fix bug" or "Added todo 1.1: Child task"
-    return result.split(" ")[2].rstrip(":")
+    return json.loads(result)["todo_id"]
 
 
 @pytest.mark.asyncio

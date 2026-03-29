@@ -61,7 +61,7 @@ def _complete_leaf(
         if changed:
             t.updated = today
     storage.archive_and_remove_todos(cfg, name, remaining, [todo])
-    return f"Archived {todo_id}."
+    return json.dumps({"result": f"Archived {todo_id}.", "todo_id": todo_id})
 
 
 def _complete_child(
@@ -75,7 +75,7 @@ def _complete_child(
     todo.status = TodoStatus.DONE
     todo.updated = today
     storage.save_todos(cfg, name, todos)
-    return f"Marked {todo.id} as done (will archive with parent when parent completes)."
+    return json.dumps({"result": f"Marked {todo.id} as done (will archive with parent when parent completes).", "todo_id": todo.id})
 
 
 def _complete_parent(
@@ -111,7 +111,7 @@ def _complete_parent(
         if changed:
             t.updated = today
     storage.archive_and_remove_todos(cfg, name, remaining, family)
-    return f"Archived {todo_id} and family ({len(family)} todo(s))."
+    return json.dumps({"result": f"Archived {todo_id} and family ({len(family)} todo(s)).", "todo_id": todo_id})
 
 
 def _filter_todos(
@@ -194,7 +194,7 @@ def register(app: FastMCP) -> None:
         todos.append(todo)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return f"Added todo {todo.id}: {title}"
+        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id})
 
     @app.tool(
         description=(
@@ -336,7 +336,7 @@ def register(app: FastMCP) -> None:
             todo.due_date = due_date
         todo.updated = _now()
         storage.save_todos(cfg, name, todos)
-        return f"Updated todo {todo_id}."
+        return json.dumps({"result": f"Updated todo {todo_id}.", "todo_id": todo_id})
 
     @app.tool(description="Mark a todo as done.")
     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
@@ -454,7 +454,7 @@ def register(app: FastMCP) -> None:
                 t.updated = today
         todos = [t for t in todos if t.id != todo_id]
         storage.save_todos(cfg, name, todos)
-        return f"Deleted todo {todo_id}."
+        return json.dumps({"result": f"Deleted todo {todo_id}.", "todo_id": todo_id})
 
     @app.tool(
         description=(
@@ -519,7 +519,7 @@ def register(app: FastMCP) -> None:
         todos.append(child)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return f"Added child todo {child.id} under {parent_id}: {title}"
+        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id})
 
     @app.tool(
         description=(
