@@ -57,18 +57,32 @@ def _serialize_result(result: Any) -> str:
 
 
 def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTransport | None]:
-    """Return (url, transport) for the hooks server based on HOOK_TRANSPORT env.
+    """Resolve the hooks server transport URL.
 
-    - Default (unix): connect via Unix domain socket at /tmp/claude-hooks-hooks.sock
-    - HOOK_TRANSPORT=tcp: connect via TCP to 127.0.0.1:{hooks_port}
+    In Unix mode (default): reads ~/.claude/sockets/hooks to get the current
+    session's socket path. Falls back to legacy path if registry missing.
+    In TCP mode (HOOK_TRANSPORT=tcp): returns http://127.0.0.1:{hooks_port}/hook
     """
     import os
+    from pathlib import Path
 
     transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
     if transport_mode == "tcp":
         return f"http://127.0.0.1:{hooks_port}/hook", httpx.AsyncHTTPTransport(proxy=None)
-    # Unix domain socket
-    sock_path = "/tmp/claude-hooks-hooks.sock"
+
+    # Unix mode: read registry file for current session's socket path
+    registry_file = Path.home() / ".claude" / "sockets" / "hooks"
+    sock_path = "/tmp/claude-hooks-hooks.sock"  # legacy fallback
+    try:
+        path = registry_file.read_text().strip()
+        if path:
+            sock_path = path
+    except (FileNotFoundError, OSError):
+        logger.warning(
+            "hooks socket registry not found at %s, falling back to legacy path",
+            registry_file,
+        )
+
     return "http://localhost/hook", httpx.AsyncHTTPTransport(uds=sock_path)
 
 
