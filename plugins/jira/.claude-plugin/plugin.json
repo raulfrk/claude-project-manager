@@ -1,7 +1,7 @@
 {
   "name": "jira",
   "description": "Read-only Jira Server issue and project access via REST API.",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": { "name": "raulfrk" },
   "mcpServers": "./.mcp.json"
 }

@@ -220,8 +220,8 @@ async def test_e2e_excluded_tool_no_dispatch():
 
 @pytest.mark.anyio
 async def test_e2e_sync_tool_dispatches():
-    """Sync tool functions are wrapped as async and dispatch correctly."""
-    captured: list[dict] = []
+    """Sync tool functions dispatch in background thread."""
+    from unittest.mock import patch as mock_patch
 
     mcp = FastMCP("test_sync")
     enable_hook_dispatch(mcp, hooks_port=19999)
@@ -230,12 +230,11 @@ async def test_e2e_sync_tool_dispatches():
     def sync_add(a: int, b: int) -> int:
         return a + b
 
-    with _patch_client_factory(_capturing_transport(captured)):
+    with mock_patch("hook_dispatch.dispatch._dispatch_hook_background") as mock_bg:
         result = await mcp._tool_manager.call_tool("sync_add", {"a": 3, "b": 4})
 
-    assert len(captured) == 1
-    source = json.loads(captured[0]["params"]["source_result"])
-    assert source == 7 or "7" in str(source)
+    mock_bg.assert_called_once()
+    assert mock_bg.call_args[0][0] == "sync_add"
 
 
 # ── Test: tool exception propagates without dispatch ─────────────────────────
