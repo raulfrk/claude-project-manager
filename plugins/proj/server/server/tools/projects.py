@@ -141,6 +141,19 @@ def register(app: FastMCP) -> None:
         # Auto-set as session active so the newly created project is immediately usable
         state.set_session_active(name)
 
+        # Best-effort hook auto-discovery
+        try:
+            import httpx
+            sock_path = "/tmp/claude-hooks-hooks.sock"
+            transport = httpx.HTTPTransport(uds=sock_path)
+            with httpx.Client(transport=transport, timeout=5.0) as client:
+                client.post(
+                    "http://localhost/hook",
+                    json={"tool": "hooks_sync_tool", "params": {}},
+                )
+        except Exception:  # noqa: BLE001
+            pass  # hooks server not running — ignore silently
+
         first_repo = str(repo_entries[0].path) if repo_entries else ""
         return json.dumps({
             "result": f"Initialized project '{name}' at {tracking}",
