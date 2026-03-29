@@ -91,6 +91,116 @@ def register(app: FastMCP) -> None:  # noqa: C901
 
     @app.tool(
         description=(
+            "Hook-friendly single task creation. Accepts flat params: "
+            "content (required), description, priority, labels, dueString, "
+            "projectId, parentId. Calls the Todoist API directly (inlined)."
+        ),
+    )
+    def todoist_add_task_hook(
+        content: str,
+        projectId: str | None = None,
+        priority: str | int | None = None,
+        labels: list[str] | None = None,
+        description: str | None = None,
+        dueString: str | None = None,
+        parentId: str | None = None,
+    ) -> str:
+        task: dict[str, Any] = {"content": content}
+        if projectId:
+            task["projectId"] = projectId
+        if priority:
+            task["priority"] = priority
+        if labels:
+            task["labels"] = labels
+        if description:
+            task["description"] = description
+        if dueString:
+            task["dueString"] = dueString
+        if parentId:
+            task["parentId"] = parentId
+        client = get_client()
+        try:
+            payload = _build_task_payload(task)
+            result = client.post("/tasks", json=payload)
+            return json.dumps({"successes": [TodoistTask.from_api(result).to_dict()], "failures": []})
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"successes": [], "failures": [{"content": content, "error": str(exc)}]})
+
+    @app.tool(
+        description=(
+            "Hook-friendly single task completion. Accepts a single task ID "
+            "and closes it via the Todoist API directly."
+        ),
+    )
+    def todoist_complete_task_hook(id: str) -> str:
+        client = get_client()
+        try:
+            client.close_task(id)
+            return json.dumps({"successes": [{"id": id}], "failures": []})
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"successes": [], "failures": [{"id": id, "error": str(exc)}]})
+
+    @app.tool(
+        description=(
+            "Hook-friendly single task update. Accepts flat params: "
+            "id (required), plus optional content, priority, labels, "
+            "description, dueString. Calls the Todoist API directly."
+        ),
+    )
+    def todoist_update_task_hook(
+        id: str,
+        content: str | None = None,
+        priority: str | int | None = None,
+        labels: list[str] | None = None,
+        description: str | None = None,
+        dueString: str | None = None,
+    ) -> str:
+        task: dict[str, Any] = {"id": id}
+        if content is not None:
+            task["content"] = content
+        if priority is not None:
+            task["priority"] = priority
+        if labels is not None:
+            task["labels"] = labels
+        if description is not None:
+            task["description"] = description
+        if dueString is not None:
+            task["dueString"] = dueString
+        client = get_client()
+        try:
+            payload = _build_task_payload(task)
+            result = client.post(f"/tasks/{id}", json=payload)
+            return json.dumps({"successes": [TodoistTask.from_api(result).to_dict()], "failures": []})
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"successes": [], "failures": [{"id": id, "error": str(exc)}]})
+
+    @app.tool(
+        description=(
+            "Verify that a Todoist task is completed. Fetches the task "
+            "and checks its completion status. Returns JSON with "
+            "verified (bool), task_id, and status."
+        ),
+    )
+    def todoist_verify_complete(todoist_task_id: str) -> str:
+        client = get_client()
+        try:
+            task = client.get(f"/tasks/{todoist_task_id}")
+            is_completed = task.get("is_completed", False)
+            return json.dumps({
+                "verified": is_completed,
+                "task_id": todoist_task_id,
+                "status": "completed" if is_completed else "open",
+            })
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({
+                "verified": False,
+                "task_id": todoist_task_id,
+                "status": "error",
+                "error": str(exc),
+            })
+
+    @app.tool(
+        description=(
             "Complete (close) multiple Todoist tasks by ID. "
             "Returns {successes: [...], failures: [...]}."
         ),
