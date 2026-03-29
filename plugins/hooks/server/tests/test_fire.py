@@ -12,7 +12,7 @@ import yaml
 from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
 from server.lib.storage import save
-from server.tools.fire import _parse_verification_response, hooks_fire
+from server.tools.fire import _parse_verification_response, _resolve_server_url, hooks_fire
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -47,6 +47,46 @@ def _hook(
         param_mapping=param_mapping or {},
         verification=verification,
     )
+
+
+# ── _resolve_server_url tests ─────────────────────────────────────────────────
+
+
+class TestResolveServerUrl:
+    def test_unix_mode_reads_registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In Unix mode, reads the socket path from the registry file."""
+        registry_file = tmp_path / "trello"
+        registry_file.write_text("/tmp/claude-hooks-trello-99999.sock")
+        monkeypatch.setenv("HOOK_TRANSPORT", "unix")
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
+        result = _resolve_server_url("trello", 19100)
+        assert result == "unix:///tmp/claude-hooks-trello-99999.sock"
+
+    def test_unix_mode_returns_none_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when registry file doesn't exist (server not running)."""
+        monkeypatch.setenv("HOOK_TRANSPORT", "unix")
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
+        result = _resolve_server_url("trello", 19100)
+        assert result is None
+
+    def test_tcp_mode_uses_port_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In TCP mode, uses the default port for the server."""
+        monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+        result = _resolve_server_url("trello", 19100)
+        assert result == "http://127.0.0.1:19104/hook"
+
+    def test_tcp_mode_fallback_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In TCP mode, unknown servers use the hooks_port fallback."""
+        monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+        result = _resolve_server_url("unknown-plugin", 19100)
+        assert result == "http://127.0.0.1:19100/hook"
+
+    def test_default_is_unix_mode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default mode (no HOOK_TRANSPORT env var) is Unix."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
+        result = _resolve_server_url("proj", 19100)
+        assert result is None  # registry file doesn't exist in tmp_path
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
