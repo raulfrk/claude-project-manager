@@ -64,7 +64,8 @@ async def _dispatch_hook(
         },
     }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        transport = httpx.AsyncHTTPTransport(proxy=None)
+        async with httpx.AsyncClient(timeout=30.0, transport=transport) as client:
             await client.post(hooks_url, json=payload)
     except (httpx.ConnectError, httpx.TimeoutException):
         logger.warning("Hook dispatch failed for %s: hooks server unreachable", tool_name)

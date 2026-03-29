@@ -47,7 +47,8 @@ async def post_hook(
     """
     payload = {"tool": target_tool, "params": params}
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        transport = httpx.AsyncHTTPTransport(proxy=None)
+        async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             resp = await client.post(url, json=payload)
             body_text = resp.text
             # Handle empty response
