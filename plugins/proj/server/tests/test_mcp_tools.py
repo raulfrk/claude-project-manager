@@ -662,6 +662,21 @@ class TestTodosMCPTools:
 
 
 @pytest.mark.asyncio
+class TestNotFoundResponses:
+    async def test_todo_update_not_found(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+        result = await call_tool(mcp_app, "todo_update", todo_id="nonexistent-999")
+        data = _json.loads(result)
+        assert data["status"] == "not_found"
+        assert data["todo_id"] == "nonexistent-999"
+
+    async def test_proj_update_meta_not_found(self, mcp_app: Any, cfg: ProjConfig) -> None:
+        state.set_session_active("nonexistent-project")
+        result = await call_tool(mcp_app, "proj_update_meta", name="nonexistent-project", status="active")
+        data = _json.loads(result)
+        assert data["status"] == "not_found"
+
+
+@pytest.mark.asyncio
 class TestContentMCPTools:
     async def test_set_and_get_requirements(
         self, mcp_app: Any, project: tuple[ProjConfig, str]

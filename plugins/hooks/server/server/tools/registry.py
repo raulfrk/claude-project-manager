@@ -25,6 +25,8 @@ def hooks_register(
     blocking: bool = False,
     condition: str | None = None,
     verification: bool = False,
+    feedback_mapping: str = "{}",
+    feedback_tool: str | None = None,
 ) -> str:
     """Register a hook that links a trigger tool to a target tool on a server.
 
@@ -45,6 +47,27 @@ def hooks_register(
     except json.JSONDecodeError as e:
         return json.dumps({
             "result": f"Error: param_mapping is not valid JSON: {e}",
+            "hook_id": None,
+        })
+
+    # Validate feedback_mapping is valid JSON
+    try:
+        fb_mapping: dict[str, str] = json.loads(feedback_mapping)
+        if not isinstance(fb_mapping, dict):
+            return json.dumps({
+                "result": f"Error: feedback_mapping must be a JSON object (dict), got {type(fb_mapping).__name__}",
+                "hook_id": None,
+            })
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "result": f"Error: feedback_mapping is not valid JSON: {e}",
+            "hook_id": None,
+        })
+
+    # Validate: feedback requires blocking
+    if (fb_mapping or feedback_tool) and not blocking and not verification:
+        return json.dumps({
+            "result": "Error: feedback_mapping/feedback_tool require blocking=true.",
             "hook_id": None,
         })
 
@@ -95,6 +118,8 @@ def hooks_register(
         blocking=blocking,
         condition=condition,
         verification=verification,
+        feedback_mapping=fb_mapping,
+        feedback_tool=feedback_tool,
     )
     registry.hooks.append(hook)
 
@@ -116,6 +141,10 @@ def hooks_register(
         lines.append(f"  condition: {condition}")
     if verification:
         lines.append(f"  verification: {verification}")
+    if fb_mapping:
+        lines.append(f"  feedback_mapping: {feedback_mapping}")
+    if feedback_tool is not None:
+        lines.append(f"  feedback_tool: {feedback_tool}")
 
     return json.dumps({
         "result": "\n".join(lines),
@@ -194,6 +223,9 @@ def register(app: FastMCP) -> None:
             "blocking: if true, trigger waits for target to complete (default false). "
             "condition: optional expression to gate the hook. "
             "verification: if true, marks hook as a verification hook (always blocking). "
+            "feedback_mapping: JSON mapping from result dot-paths to target param names "
+            "for automatic writeback (requires blocking=true). "
+            "feedback_tool: the tool to call on the trigger's server with mapped results. "
             "Duplicate detection: same trigger+target+server returns existing hook_id. "
             "YAML created on first register if it doesn't exist."
         )
@@ -206,6 +238,8 @@ def register(app: FastMCP) -> None:
         blocking: bool = False,
         condition: str | None = None,
         verification: bool = False,
+        feedback_mapping: str = "{}",
+        feedback_tool: str | None = None,
     ) -> str:
         return hooks_register(
             trigger_tool=trigger_tool,
@@ -215,6 +249,8 @@ def register(app: FastMCP) -> None:
             blocking=blocking,
             condition=condition,
             verification=verification,
+            feedback_mapping=feedback_mapping,
+            feedback_tool=feedback_tool,
         )
 
     @app.tool(

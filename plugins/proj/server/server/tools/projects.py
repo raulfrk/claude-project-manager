@@ -276,9 +276,12 @@ def register(app: FastMCP) -> None:
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
-            return json.dumps({"error": result})
+            return json.dumps({"status": "not_found", "project_name": name, "error": result})
         cfg, project_name = result
-        meta = storage.load_meta(cfg, project_name)
+        try:
+            meta = storage.load_meta(cfg, project_name)
+        except FileNotFoundError:
+            return json.dumps({"status": "not_found", "project_name": project_name})
         if description is not None:
             meta.description = description
         old_status = meta.status
