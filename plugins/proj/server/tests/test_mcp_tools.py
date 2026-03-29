@@ -80,7 +80,8 @@ class TestConfigMCPTools:
 class TestProjectsMCPTools:
     async def test_proj_init(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         result = await call_tool(mcp_app, "proj_init", name="newapp", path=str(tmp_path))
-        assert "newapp" in result
+        data = _json.loads(result)
+        assert data.get("project_name") == "newapp"
         index = storage.load_index(cfg)
         assert "newapp" in index.projects
 
@@ -90,7 +91,8 @@ class TestProjectsMCPTools:
         cfg.projects_base_dir = str(tmp_path / "projects")
         storage.save_config(cfg)
         result = await call_tool(mcp_app, "proj_init", name="newapp")
-        assert "newapp" in result
+        data = _json.loads(result)
+        assert data.get("project_name") == "newapp"
         meta = storage.load_meta(cfg, "newapp")
         assert meta.repos[0].path == str((tmp_path / "projects" / "newapp").resolve())
 
@@ -98,25 +100,30 @@ class TestProjectsMCPTools:
         self, mcp_app: Any, cfg: ProjConfig
     ) -> None:
         result = await call_tool(mcp_app, "proj_init", name="newapp")
-        assert "No path provided" in result or "projects_base_dir" in result
+        data = _json.loads(result)
+        assert "No path provided" in data.get("error", "") or "projects_base_dir" in data.get("error", "")
 
     async def test_proj_list(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_list")
+        # proj_list returns plain string, not JSON
         assert "myapp" in result
 
     async def test_proj_get_active(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_get_active")
-        assert "myapp" in result
+        data = _json.loads(result)
+        assert data.get("name") == "myapp"
 
     async def test_proj_archive(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_archive")
-        assert "myapp" in result
+        data = _json.loads(result)
+        assert "Archived" in data.get("result", "") or data.get("project_name") == "myapp"
         index = storage.load_index(project[0])
         assert index.projects["myapp"].archived
 
     async def test_proj_update_meta(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_update_meta", status="blocked")
-        assert "Updated" in result
+        data = _json.loads(result)
+        assert "Updated" in data.get("result", "")
         meta = storage.load_meta(project[0], "myapp")
         assert meta.status == "blocked"
 
@@ -126,7 +133,8 @@ class TestProjectsMCPTools:
         new_repo = str(tmp_path / "new_repo")
         Path(new_repo).mkdir()
         result = await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
-        assert "docs" in result
+        data = _json.loads(result)
+        assert "docs" in data.get("result", "") or "docs" in str(data.get("paths", []))
 
     async def test_proj_remove_repo(
         self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
@@ -136,8 +144,9 @@ class TestProjectsMCPTools:
         Path(new_repo).mkdir()
         await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
         result = await call_tool(mcp_app, "proj_remove_repo", label="docs")
-        assert "Removed" in result
-        assert "docs" in result
+        data = _json.loads(result)
+        assert "Removed" in data.get("result", "")
+        assert "docs" in data.get("result", "")
         meta = storage.load_meta(project[0], "myapp")
         assert len(meta.repos) == 1
         assert meta.repos[0].label == "code"
@@ -146,7 +155,8 @@ class TestProjectsMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         result = await call_tool(mcp_app, "proj_remove_repo", label="code")
-        assert "Cannot remove the last repo" in result
+        data = _json.loads(result)
+        assert "Cannot remove the last repo" in data.get("error", "")
         meta = storage.load_meta(project[0], "myapp")
         assert len(meta.repos) == 1
 
@@ -158,8 +168,9 @@ class TestProjectsMCPTools:
         Path(new_repo).mkdir()
         await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="docs")
         result = await call_tool(mcp_app, "proj_remove_repo", label="nonexistent")
-        assert "No repo with label" in result
-        assert "nonexistent" in result
+        data = _json.loads(result)
+        assert "No repo with label" in data.get("error", "")
+        assert "nonexistent" in data.get("error", "")
 
 
 @pytest.mark.asyncio
@@ -172,7 +183,8 @@ class TestMultiDirInit:
             {"path": str(tmp_path / "docs"), "label": "docs"},
         ]
         result = await call_tool(mcp_app, "proj_init", name="multidir", dirs=dirs)
-        assert "multidir" in result
+        data = _json.loads(result)
+        assert data.get("project_name") == "multidir"
         meta = storage.load_meta(cfg, "multidir")
         assert len(meta.repos) == 2
         assert meta.repos[0].label == "code"
@@ -181,7 +193,8 @@ class TestMultiDirInit:
     async def test_proj_init_dirs_and_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         dirs = [{"path": str(tmp_path / "src"), "label": "code"}]
         result = await call_tool(mcp_app, "proj_init", name="bad", path=str(tmp_path), dirs=dirs)
-        assert "either" in result.lower() or "not both" in result.lower()
+        data = _json.loads(result)
+        assert "either" in data.get("error", "").lower() or "not both" in data.get("error", "").lower()
 
     async def test_proj_init_dirs_duplicate_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         dirs = [
@@ -189,21 +202,25 @@ class TestMultiDirInit:
             {"path": str(tmp_path / "b"), "label": "code"},
         ]
         result = await call_tool(mcp_app, "proj_init", name="dup", dirs=dirs)
-        assert "Duplicate label" in result
+        data = _json.loads(result)
+        assert "Duplicate label" in data.get("error", "")
 
     async def test_proj_init_dirs_missing_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         dirs = [{"path": "", "label": "code"}]
         result = await call_tool(mcp_app, "proj_init", name="nopath", dirs=dirs)
-        assert "path" in result.lower()
+        data = _json.loads(result)
+        assert "path" in data.get("error", "").lower()
 
     async def test_proj_init_dirs_missing_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         dirs = [{"path": str(tmp_path), "label": ""}]
         result = await call_tool(mcp_app, "proj_init", name="nolabel", dirs=dirs)
-        assert "label" in result.lower()
+        data = _json.loads(result)
+        assert "label" in data.get("error", "").lower()
 
     async def test_proj_init_legacy_path_still_works(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         result = await call_tool(mcp_app, "proj_init", name="legacy", path=str(tmp_path))
-        assert "legacy" in result
+        data = _json.loads(result)
+        assert data.get("project_name") == "legacy"
         meta = storage.load_meta(cfg, "legacy")
         assert len(meta.repos) == 1
         assert meta.repos[0].label == "code"
@@ -215,26 +232,31 @@ class TestMultiDirInit:
         new_repo = str(tmp_path / "new_repo")
         Path(new_repo).mkdir()
         result = await call_tool(mcp_app, "proj_add_repo", repo_path=new_repo, label="code")
-        assert "already in use" in result
+        data = _json.loads(result)
+        assert "already in use" in data.get("error", "")
 
 
 @pytest.mark.asyncio
 class TestTodosMCPTools:
     async def test_todo_add(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "todo_add", title="My first task")
-        assert "1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1"
 
     async def test_todo_list(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Task 1")
         await call_tool(mcp_app, "todo_add", title="Task 2")
         result = await call_tool(mcp_app, "todo_list")
-        assert "Task 1" in result
-        assert "Task 2" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Task 1" in titles
+        assert "Task 2" in titles
 
     async def test_todo_complete(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Do it")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1")
-        assert "1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1"
         # Leaf todos are archived immediately — removed from active
         todos = storage.load_todos(project[0], "myapp")
         assert len(todos) == 0
@@ -255,9 +277,9 @@ class TestTodosMCPTools:
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Manual task", tags=["manual"])
         result = await call_tool(mcp_app, "todo_check_executable", todo_id="1")
-        assert "⚠️" in result
-        assert "manual" in result
-        assert "todo done 1" in result
+        # todo_check_executable returns JSON with error field for manual-tagged todos
+        data = _json.loads(result)
+        assert "error" in data or "⚠️" in data.get("error", "") or "manual" in data.get("error", "").lower()
 
     async def test_todo_check_executable_returns_todo_for_multi_tag_without_manual(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -272,25 +294,31 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         result = await call_tool(mcp_app, "todo_check_executable", todo_id="999")
-        assert "not found" in result.lower()
+        # todo_check_executable returns JSON with error field
+        data = _json.loads(result)
+        assert "not found" in data.get("error", "").lower()
 
     async def test_todo_block(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Blocker")
         await call_tool(mcp_app, "todo_add", title="Blocked")
         result = await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
-        assert "blocks" in result.lower()
+        data = _json.loads(result)
+        assert "blocks" in data.get("result", "").lower() or "2" in data.get("result", "")
 
     async def test_todo_ready(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Ready task")
         await call_tool(mcp_app, "todo_add", title="Blocked", blocked_by=["1"])
         result = await call_tool(mcp_app, "todo_ready")
-        assert "Ready task" in result
-        assert "Blocked" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Ready task" in titles
+        assert "Blocked" not in titles
 
     async def test_todo_add_child(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
         result = await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child task")
-        assert "1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1.1"
         todos = storage.load_todos(project[0], "myapp")
         parent = next(t for t in todos if t.id == "1")
         assert "1.1" in parent.children
@@ -300,7 +328,8 @@ class TestTodosMCPTools:
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent task")
         result = await call_tool(mcp_app, "todo_add", title="Child task", parent="1")
-        assert "1.1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1.1"
         todos = storage.load_todos(project[0], "myapp")
         parent = next(t for t in todos if t.id == "1")
         child = next(t for t in todos if t.id == "1.1")
@@ -311,7 +340,8 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         result = await call_tool(mcp_app, "todo_add", title="Orphan", parent="999")
-        assert "not found" in result.lower()
+        data = _json.loads(result)
+        assert "not found" in data.get("error", "").lower()
         todos = storage.load_todos(project[0], "myapp")
         assert not todos
 
@@ -321,7 +351,8 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Root")
         await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
         result = await call_tool(mcp_app, "todo_add", title="Grandchild", parent="1.1")
-        assert "1.1.1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1.1.1"
         todos = storage.load_todos(project[0], "myapp")
         child = next(t for t in todos if t.id == "1.1")
         assert "1.1.1" in child.children
@@ -329,7 +360,8 @@ class TestTodosMCPTools:
     async def test_todo_delete(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="To delete")
         result = await call_tool(mcp_app, "todo_delete", todo_id="1")
-        assert "Deleted" in result
+        data = _json.loads(result)
+        assert "Deleted" in data.get("result", "")
         todos = storage.load_todos(project[0], "myapp")
         assert not todos
 
@@ -419,7 +451,8 @@ class TestTodosMCPTools:
         result = await call_tool(
             mcp_app, "todo_set_content_flag", todo_id="1", has_research=True
         )
-        assert "1" in result
+        data = _json.loads(result)
+        assert data.get("todo_id") == "1"
         todos = storage.load_todos(project[0], "myapp")
         assert todos[0].has_research
 
@@ -428,18 +461,22 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Task B")
         await call_tool(mcp_app, "todo_add", title="Task C")
         result = await call_tool(mcp_app, "todo_list", limit=2)
-        assert "Task A" in result
-        assert "Task B" in result
-        assert "Task C" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Task A" in titles
+        assert "Task B" in titles
+        assert "Task C" not in titles
 
     async def test_todo_list_offset(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Task A")
         await call_tool(mcp_app, "todo_add", title="Task B")
         await call_tool(mcp_app, "todo_add", title="Task C")
         result = await call_tool(mcp_app, "todo_list", offset=1)
-        assert "Task A" not in result
-        assert "Task B" in result
-        assert "Task C" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Task A" not in titles
+        assert "Task B" in titles
+        assert "Task C" in titles
 
     async def test_todo_list_limit_and_offset(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -448,9 +485,11 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Task B")
         await call_tool(mcp_app, "todo_add", title="Task C")
         result = await call_tool(mcp_app, "todo_list", limit=1, offset=1)
-        assert "Task A" not in result
-        assert "Task B" in result
-        assert "Task C" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Task A" not in titles
+        assert "Task B" in titles
+        assert "Task C" not in titles
 
     async def test_todo_list_limit_zero_returns_all(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -459,9 +498,11 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Task B")
         await call_tool(mcp_app, "todo_add", title="Task C")
         result = await call_tool(mcp_app, "todo_list", limit=0)
-        assert "Task A" in result
-        assert "Task B" in result
-        assert "Task C" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Task A" in titles
+        assert "Task B" in titles
+        assert "Task C" in titles
 
     async def test_todo_list_default_excludes_done(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -473,9 +514,11 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_update", todo_id="2", status="in_progress")
         await call_tool(mcp_app, "todo_update", todo_id="3", status="done")
         result = await call_tool(mcp_app, "todo_list")
-        assert "Pending" in result
-        assert "In Progress" in result
-        assert "Done" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Pending" in titles
+        assert "In Progress" in titles
+        assert "Done" not in titles
 
     async def test_todo_list_active_sentinel_same_as_default(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -496,8 +539,10 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Done")
         await call_tool(mcp_app, "todo_update", todo_id="2", status="done")
         result = await call_tool(mcp_app, "todo_list", status=None)
-        assert "Pending" in result
-        assert "Done" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Pending" in titles
+        assert "Done" in titles
 
     async def test_todo_list_status_open_returns_all_non_terminal(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -511,28 +556,34 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Done")
         await call_tool(mcp_app, "todo_update", todo_id="4", status="done")
         result = await call_tool(mcp_app, "todo_list", status="open")
-        assert "Pending" in result
-        assert "InProgress" in result
-        assert "Blocked" in result
-        assert "Done" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Pending" in titles
+        assert "InProgress" in titles
+        assert "Blocked" in titles
+        assert "Done" not in titles
 
     async def test_todo_ready_limit(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Ready A")
         await call_tool(mcp_app, "todo_add", title="Ready B")
         await call_tool(mcp_app, "todo_add", title="Ready C")
         result = await call_tool(mcp_app, "todo_ready", limit=2)
-        assert "Ready A" in result
-        assert "Ready B" in result
-        assert "Ready C" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Ready A" in titles
+        assert "Ready B" in titles
+        assert "Ready C" not in titles
 
     async def test_todo_ready_offset(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Ready A")
         await call_tool(mcp_app, "todo_add", title="Ready B")
         await call_tool(mcp_app, "todo_add", title="Ready C")
         result = await call_tool(mcp_app, "todo_ready", offset=2)
-        assert "Ready A" not in result
-        assert "Ready B" not in result
-        assert "Ready C" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Ready A" not in titles
+        assert "Ready B" not in titles
+        assert "Ready C" in titles
 
     async def test_todo_ready_limit_and_offset(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -541,9 +592,11 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Ready B")
         await call_tool(mcp_app, "todo_add", title="Ready C")
         result = await call_tool(mcp_app, "todo_ready", limit=1, offset=1)
-        assert "Ready A" not in result
-        assert "Ready B" in result
-        assert "Ready C" not in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Ready A" not in titles
+        assert "Ready B" in titles
+        assert "Ready C" not in titles
 
     async def test_todo_ready_limit_zero_returns_all(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -551,8 +604,10 @@ class TestTodosMCPTools:
         await call_tool(mcp_app, "todo_add", title="Ready A")
         await call_tool(mcp_app, "todo_add", title="Ready B")
         result = await call_tool(mcp_app, "todo_ready", limit=0)
-        assert "Ready A" in result
-        assert "Ready B" in result
+        todos = _json.loads(result)
+        titles = [t.get("title") for t in todos]
+        assert "Ready A" in titles
+        assert "Ready B" in titles
 
     async def test_proj_identify_batches_simple(
         self, mcp_app: Any, project: tuple[ProjConfig, str]

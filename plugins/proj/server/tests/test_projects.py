@@ -398,20 +398,49 @@ class TestProjInitValidation:
         return asyncio.run(_run())
 
     def test_rejects_path_traversal(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
         result = self._call_proj_init("../../etc", tmp_path)
-        assert "path traversal" in result.lower() or ".." in result
+        # Result is JSON - check for error in result field or parse as error message
+        try:
+            data = json.loads(result)
+            assert "path traversal" in data.get("error", "").lower() or "path traversal" in data.get("result", "").lower()
+        except json.JSONDecodeError:
+            assert "path traversal" in result.lower() or ".." in result
 
     def test_rejects_slash(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
         result = self._call_proj_init("foo/bar", tmp_path)
-        assert "path separator" in result.lower() or "/" in result
+        try:
+            data = json.loads(result)
+            # Check either error or result key
+            msg = data.get("error", data.get("result", ""))
+            assert "path separator" in msg.lower() or "/" in msg
+        except json.JSONDecodeError:
+            assert "path separator" in result.lower() or "/" in result
 
     def test_rejects_empty(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
         result = self._call_proj_init("", tmp_path)
-        assert "empty" in result.lower() or "whitespace" in result.lower()
+        try:
+            data = json.loads(result)
+            msg = data.get("error", data.get("result", ""))
+            assert "empty" in msg.lower() or "whitespace" in msg.lower()
+        except json.JSONDecodeError:
+            assert "empty" in result.lower() or "whitespace" in result.lower()
 
     def test_rejects_dot_git(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        import json
+
         result = self._call_proj_init(".git", tmp_path)
-        assert "." in result or "reserved" in result.lower()
+        try:
+            data = json.loads(result)
+            msg = data.get("error", data.get("result", ""))
+            assert "." in msg or "reserved" in msg.lower()
+        except json.JSONDecodeError:
+            assert "." in result or "reserved" in result.lower()
 
     def test_no_directory_created_on_invalid_name(
         self, cfg: ProjConfig, tmp_path: Path
@@ -420,3 +449,13 @@ class TestProjInitValidation:
         self._call_proj_init("../../evil", tmp_path)
         # No directory should have been created under the tracking root
         assert not any(tracking_root.iterdir()) if tracking_root.exists() else True
+
+    def test_valid_init_returns_json_with_project_name(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Test that proj_init returns JSON with project_name field."""
+        import json
+
+        result = self._call_proj_init("validproject", tmp_path)
+        data = json.loads(result)
+        assert "project_name" in data
+        assert data["project_name"] == "validproject"
+        assert "result" in data

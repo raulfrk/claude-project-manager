@@ -326,10 +326,21 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
         name = state.resolve_project(project_name)
         if not name:
-            return "No active project."
+            return json.dumps({"error": "No active project.", "success": False})
         if name not in index.projects:
-            return f"Project '{name}' not found."
+            return json.dumps({"error": f"Project '{name}' not found.", "success": False})
         meta = storage.load_meta(cfg, name)
+
+        # Collect paths (writable repos + tracking dir)
+        paths = []
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.append(str(Path(repo.path).expanduser().resolve()))
+        if cfg.tracking_dir:
+            tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
+            if tracking not in paths:
+                paths.append(tracking)
+
         counts = setup_permissions(
             meta,
             cfg,
@@ -337,16 +348,14 @@ def register(app: FastMCP) -> None:
             archive_destination=archive_destination,
         )
         total = sum(counts.values())
-        if total == 0:
-            return f"All permission rules already up to date for '{name}'."
-        parts = []
-        if counts["sandbox_paths"]:
-            parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-        if counts["mcp_rules"]:
-            parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        if counts.get("additional_directories"):
-            parts.append(f"{counts['additional_directories']} additional dir(s)")
-        return f"Added {total} rule(s) for '{name}': {', '.join(parts)}."
+        return json.dumps({
+            "result": "success",
+            "project_name": name,
+            "total": total,
+            "counts": counts,
+            "paths": paths,
+            "mcp_servers": mcp_servers or [],
+        })
 
     @app.tool(
         description=(
@@ -366,19 +375,28 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
         name = state.resolve_project(project_name)
         if not name:
-            return "No active project."
+            return json.dumps({"error": "No active project.", "success": False})
         if name not in index.projects:
-            return f"Project '{name}' not found."
+            return json.dumps({"error": f"Project '{name}' not found.", "success": False})
         meta = storage.load_meta(cfg, name)
+
+        # Collect paths (writable repos + tracking dir)
+        paths = []
+        for repo in meta.repos:
+            if not repo.reference:
+                paths.append(str(Path(repo.path).expanduser().resolve()))
+        if cfg.tracking_dir:
+            tracking = str(Path(cfg.tracking_dir).expanduser().resolve())
+            if tracking not in paths:
+                paths.append(tracking)
+
         counts = revoke_all_permissions(meta, cfg, mcp_servers=mcp_servers)
         total = sum(counts.values())
-        if total == 0:
-            return f"No permission rules found for '{name}' -- nothing to remove."
-        parts = []
-        if counts["sandbox_paths"]:
-            parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
-        if counts["mcp_rules"]:
-            parts.append(f"{counts['mcp_rules']} MCP rule(s)")
-        if counts.get("additional_directories"):
-            parts.append(f"{counts['additional_directories']} additional dir(s)")
-        return f"Removed {total} rule(s) for '{name}': {', '.join(parts)}."
+        return json.dumps({
+            "result": "success",
+            "project_name": name,
+            "total": total,
+            "counts": counts,
+            "paths": paths,
+            "mcp_servers": mcp_servers or [],
+        })

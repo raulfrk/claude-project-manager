@@ -51,7 +51,9 @@ def user_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestAddAllow:
     def test_adds_rules_to_new_file(self, user_settings: Path) -> None:
         result = add_allow("/home/user/proj", scope="user")
-        assert "Added 2" in result
+        data = json.loads(result)
+        assert "Added 2" in data["result"]
+        assert data["added"] == 2
         allow = _read_allow(user_settings)
         assert "Read(//home/user/proj/**)" in allow
         assert "Edit(//home/user/proj/**)" in allow
@@ -59,13 +61,17 @@ class TestAddAllow:
     def test_idempotent(self, user_settings: Path) -> None:
         add_allow("/home/user/proj", scope="user")
         result = add_allow("/home/user/proj", scope="user")
-        assert "already present" in result
+        data = json.loads(result)
+        assert "already present" in data["result"]
+        assert data["added"] == 0
         # No duplicates
         assert _read_allow(user_settings).count("Read(//home/user/proj/**)") == 1
 
     def test_expands_tilde(self, user_settings: Path) -> None:
         result = add_allow("~/testdir", scope="user")
-        assert "Added" in result
+        data = json.loads(result)
+        assert "Added" in data["result"]
+        assert data["added"] == 2
         allow = _read_allow(user_settings)
         # Should be expanded to absolute path
         assert any("testdir" in e for e in allow)
@@ -98,12 +104,16 @@ class TestRemoveAllow:
             },
         )
         result = remove_allow("/home/user/proj", scope="user")
-        assert "Removed 2" in result
+        data = json.loads(result)
+        assert "Removed 2" in data["result"]
+        assert data["removed"] == 2
         assert _read_allow(user_settings) == []
 
     def test_no_match_is_idempotent(self, user_settings: Path) -> None:
         result = remove_allow("/nonexistent/path", scope="user")
-        assert "No matching" in result
+        data = json.loads(result)
+        assert "No matching" in data["result"]
+        assert data["removed"] == 0
 
     def test_only_removes_matching(self, user_settings: Path) -> None:
         _write_settings(
@@ -138,7 +148,9 @@ class TestListAllow:
 class TestCheckAllow:
     def test_missing(self, user_settings: Path) -> None:
         result = check_allow("/home/user/proj", scope="user")
-        assert "MISSING" in result
+        data = json.loads(result)
+        assert "MISSING" in data["result"]
+        assert data["scopes"][0]["status"] == "missing"
 
     def test_present(self, user_settings: Path) -> None:
         _write_settings(
@@ -150,7 +162,9 @@ class TestCheckAllow:
             },
         )
         result = check_allow("/home/user/proj", scope="user")
-        assert "OK" in result
+        data = json.loads(result)
+        assert "OK" in data["result"]
+        assert data["scopes"][0]["status"] == "ok"
 
     def test_partial(self, user_settings: Path) -> None:
         _write_settings(
@@ -160,7 +174,9 @@ class TestCheckAllow:
             },
         )
         result = check_allow("/home/user/proj", scope="user")
-        assert "PARTIAL" in result
+        data = json.loads(result)
+        assert "PARTIAL" in data["result"]
+        assert data["scopes"][0]["status"] == "partial"
 
 
 class TestMcpAllow:
@@ -315,7 +331,9 @@ def project_and_user_settings(
 class TestAddAllowProjectScope:
     def test_adds_rules_to_project_settings(self, project_settings: Path) -> None:
         result = add_allow("/home/user/proj", scope="project")
-        assert "Added 2" in result
+        data = json.loads(result)
+        assert "Added 2" in data["result"]
+        assert data["added"] == 2
         allow = _read_allow(project_settings)
         assert "Read(//home/user/proj/**)" in allow
         assert "Edit(//home/user/proj/**)" in allow
@@ -331,14 +349,17 @@ class TestAddAllowProjectScope:
     def test_message_references_project_path(self, project_settings: Path) -> None:
         result = add_allow("/home/user/proj", scope="project")
         # Result message should mention the project-local path, not ~/.claude/settings.json
-        assert ".claude/settings.json" in result
+        data = json.loads(result)
+        assert ".claude/settings.json" in data["result"]
         home_settings = str(Path.home() / ".claude" / "settings.json")
-        assert home_settings not in result
+        assert home_settings not in data["result"]
 
     def test_idempotent(self, project_settings: Path) -> None:
         add_allow("/home/user/proj", scope="project")
         result = add_allow("/home/user/proj", scope="project")
-        assert "already present" in result
+        data = json.loads(result)
+        assert "already present" in data["result"]
+        assert data["added"] == 0
         assert _read_allow(project_settings).count("Read(//home/user/proj/**)") == 1
 
     def test_preserves_existing_rules(self, project_settings: Path) -> None:
@@ -369,7 +390,9 @@ class TestRemoveAllowProjectScope:
             },
         )
         result = remove_allow("/home/user/proj", scope="project")
-        assert "Removed 2" in result
+        data = json.loads(result)
+        assert "Removed 2" in data["result"]
+        assert data["removed"] == 2
         assert _read_allow(project_settings) == []
 
     def test_does_not_touch_user_settings(
@@ -385,7 +408,9 @@ class TestRemoveAllowProjectScope:
 
     def test_no_match_is_idempotent(self, project_settings: Path) -> None:
         result = remove_allow("/nonexistent/path", scope="project")
-        assert "No matching" in result
+        data = json.loads(result)
+        assert "No matching" in data["result"]
+        assert data["removed"] == 0
 
     def test_only_removes_matching(self, project_settings: Path) -> None:
         _write_settings(
@@ -409,7 +434,9 @@ class TestRemoveAllowProjectScope:
 class TestCheckAllowProjectScope:
     def test_missing(self, project_settings: Path) -> None:
         result = check_allow("/home/user/proj", scope="project")
-        assert "MISSING" in result
+        data = json.loads(result)
+        assert "MISSING" in data["result"]
+        assert data["scopes"][0]["status"] == "missing"
 
     def test_present(self, project_settings: Path) -> None:
         _write_settings(
@@ -421,7 +448,9 @@ class TestCheckAllowProjectScope:
             },
         )
         result = check_allow("/home/user/proj", scope="project")
-        assert "OK" in result
+        data = json.loads(result)
+        assert "OK" in data["result"]
+        assert data["scopes"][0]["status"] == "ok"
 
     def test_partial(self, project_settings: Path) -> None:
         _write_settings(
@@ -429,7 +458,9 @@ class TestCheckAllowProjectScope:
             {"permissions": {"allow": ["Read(//home/user/proj/**)"]}},
         )
         result = check_allow("/home/user/proj", scope="project")
-        assert "PARTIAL" in result
+        data = json.loads(result)
+        assert "PARTIAL" in data["result"]
+        assert data["scopes"][0]["status"] == "partial"
 
     def test_does_not_check_user_settings(
         self, project_and_user_settings: tuple[Path, Path]
@@ -441,7 +472,8 @@ class TestCheckAllowProjectScope:
             {"permissions": {"allow": ["Read(//home/user/proj/**)", "Edit(//home/user/proj/**)"]}},
         )
         result = check_allow("/home/user/proj", scope="project")
-        assert "MISSING" in result
+        data = json.loads(result)
+        assert "MISSING" in data["result"]
 
 
 class TestMcpAllowProjectScope:
@@ -558,20 +590,25 @@ def sandbox_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestAddAllowSandboxMode:
     def test_adds_path_to_sandbox_allow_write(self, sandbox_settings: Path) -> None:
         result = add_allow("/home/user/proj", scope="user", target="sandbox")
-        assert "sandbox" in result.lower()
+        data = json.loads(result)
+        assert "sandbox" in data["result"].lower()
+        assert data["added"] == 1
         aw = _read_sandbox_allow_write(sandbox_settings)
         assert "/home/user/proj" in aw
 
     def test_idempotent(self, sandbox_settings: Path) -> None:
         add_allow("/home/user/proj", scope="user", target="sandbox")
         result = add_allow("/home/user/proj", scope="user", target="sandbox")
-        assert "already present" in result
+        data = json.loads(result)
+        assert "already present" in data["result"]
+        assert data["added"] == 0
         aw = _read_sandbox_allow_write(sandbox_settings)
         assert aw.count("/home/user/proj") == 1
 
     def test_auto_detects_sandbox(self, sandbox_settings: Path) -> None:
         result = add_allow("/home/user/proj", scope="user", target="auto")
-        assert "sandbox" in result.lower()
+        data = json.loads(result)
+        assert "sandbox" in data["result"].lower()
         aw = _read_sandbox_allow_write(sandbox_settings)
         assert "/home/user/proj" in aw
 
@@ -597,13 +634,17 @@ class TestRemoveAllowSandboxMode:
             },
         })
         result = remove_allow("/home/user/proj", scope="user", target="sandbox")
-        assert "Removed" in result
+        data = json.loads(result)
+        assert "Removed" in data["result"]
+        assert data["removed"] == 1
         aw = _read_sandbox_allow_write(sandbox_settings)
         assert "/home/user/proj" not in aw
 
     def test_no_match_idempotent(self, sandbox_settings: Path) -> None:
         result = remove_allow("/nonexistent", scope="user", target="sandbox")
-        assert "No matching" in result
+        data = json.loads(result)
+        assert "No matching" in data["result"]
+        assert data["removed"] == 0
 
 
 class TestListAllowSandboxMode:
@@ -726,11 +767,15 @@ class TestCheckAllowSandboxMode:
             },
         })
         result = check_allow("/home/user/proj", scope="user", target="sandbox")
-        assert "OK" in result
+        data = json.loads(result)
+        assert "OK" in data["result"]
+        assert data["scopes"][0]["status"] == "ok"
 
     def test_missing(self, sandbox_settings: Path) -> None:
         result = check_allow("/home/user/proj", scope="user", target="sandbox")
-        assert "MISSING" in result
+        data = json.loads(result)
+        assert "MISSING" in data["result"]
+        assert data["scopes"][0]["status"] == "missing"
 
 
 class TestMcpAllowSandboxMode:

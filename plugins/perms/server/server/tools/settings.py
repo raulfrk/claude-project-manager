@@ -103,6 +103,9 @@ def add_allow(path: str, scope: str = "user", target: str = "auto") -> str:
     In ``auto`` mode: detects sandbox from settings.local.json and chooses accordingly.
 
     The path must be absolute. Idempotent.
+
+    Returns JSON with keys: result (message), path (absolute path that was processed),
+    settings_path (the settings file that was modified).
     """
     abs_path = str(Path(path).expanduser().resolve())
     resolved = storage.resolve_target(target, scope)
@@ -113,8 +116,18 @@ def add_allow(path: str, scope: str = "user", target: str = "auto") -> str:
         if added:
             storage.save(settings)
             rules = "\n".join(f"  {e}" for e in added)
-            return f"Added {len(added)} sandbox rule(s) to {settings.path}:\n{rules}"
-        return f"Path already present in sandbox allowWrite in {settings.path} — no changes made."
+            return json.dumps({
+                "result": f"Added {len(added)} sandbox rule(s) to {settings.path}:\n{rules}",
+                "path": abs_path,
+                "settings_path": str(settings.path),
+                "added": len(added),
+            })
+        return json.dumps({
+            "result": f"Path already present in sandbox allowWrite in {settings.path} — no changes made.",
+            "path": abs_path,
+            "settings_path": str(settings.path),
+            "added": 0,
+        })
 
     # Standard mode
     new_entries = storage.allow_entries_for_path(abs_path)
@@ -128,8 +141,18 @@ def add_allow(path: str, scope: str = "user", target: str = "auto") -> str:
     if added_entries:
         storage.save(settings)
         rules = "\n".join(f"  {e}" for e in added_entries)
-        return f"Added {len(added_entries)} rule(s) to {settings.path}:\n{rules}"
-    return f"Rules already present in {settings.path} — no changes made."
+        return json.dumps({
+            "result": f"Added {len(added_entries)} rule(s) to {settings.path}:\n{rules}",
+            "path": abs_path,
+            "settings_path": str(settings.path),
+            "added": len(added_entries),
+        })
+    return json.dumps({
+        "result": f"Rules already present in {settings.path} — no changes made.",
+        "path": abs_path,
+        "settings_path": str(settings.path),
+        "added": 0,
+    })
 
 
 def remove_allow(path: str, scope: str = "user", target: str = "auto") -> str:
@@ -138,6 +161,9 @@ def remove_allow(path: str, scope: str = "user", target: str = "auto") -> str:
     In ``sandbox`` mode: removes from ``sandbox.filesystem.allowWrite``.
     In ``settings`` mode: removes Read+Edit rules from ``permissions.allow``.
     Idempotent.
+
+    Returns JSON with keys: result (message), path (absolute path that was processed),
+    settings_path, removed (count of rules removed).
     """
     abs_path = str(Path(path).expanduser().resolve())
     resolved = storage.resolve_target(target, scope)
@@ -147,8 +173,18 @@ def remove_allow(path: str, scope: str = "user", target: str = "auto") -> str:
         removed = _remove_path_sandbox(settings, abs_path)
         if removed:
             storage.save(settings)
-            return f"Removed {removed} sandbox path(s) from {settings.path}."
-        return f"No matching sandbox paths found in {settings.path} — no changes made."
+            return json.dumps({
+                "result": f"Removed {removed} sandbox path(s) from {settings.path}.",
+                "path": abs_path,
+                "settings_path": str(settings.path),
+                "removed": removed,
+            })
+        return json.dumps({
+            "result": f"No matching sandbox paths found in {settings.path} — no changes made.",
+            "path": abs_path,
+            "settings_path": str(settings.path),
+            "removed": 0,
+        })
 
     # Standard mode
     entries_to_remove = set(storage.allow_entries_for_path(abs_path))
@@ -161,8 +197,18 @@ def remove_allow(path: str, scope: str = "user", target: str = "auto") -> str:
 
     if removed:
         storage.save(settings)
-        return f"Removed {removed} rule(s) from {settings.path}."
-    return f"No matching rules found in {settings.path} — no changes made."
+        return json.dumps({
+            "result": f"Removed {removed} rule(s) from {settings.path}.",
+            "path": abs_path,
+            "settings_path": str(settings.path),
+            "removed": removed,
+        })
+    return json.dumps({
+        "result": f"No matching rules found in {settings.path} — no changes made.",
+        "path": abs_path,
+        "settings_path": str(settings.path),
+        "removed": 0,
+    })
 
 
 def list_allow(scope: str = "all", target: str = "auto", format: str = "text") -> str:
@@ -232,12 +278,17 @@ def list_allow(scope: str = "all", target: str = "auto", format: str = "text") -
 
 
 def check_allow(path: str, scope: str = "all", target: str = "auto") -> str:
-    """Check whether a path already has allow rules in settings."""
+    """Check whether a path already has allow rules in settings.
+
+    Returns JSON with keys: result (message), path (absolute path that was checked),
+    scopes (array of scope check results with status).
+    """
     abs_path = str(Path(path).expanduser().resolve())
     clean = abs_path.rstrip("/")
 
     scopes = ["user", "project"] if scope == "all" else [scope]
     results: list[str] = []
+    scope_results: list[dict[str, object]] = []
     for s in scopes:
         resolved = storage.resolve_target(target, s)
 
@@ -245,8 +296,10 @@ def check_allow(path: str, scope: str = "all", target: str = "auto") -> str:
             settings = storage.load_local(s)
             if clean in settings.sandbox.filesystem.allow_write:
                 results.append(f"[{s}] OK — path present in sandbox allowWrite")
+                scope_results.append({"scope": s, "status": "ok", "present": True})
             else:
                 results.append(f"[{s}] MISSING — path not in sandbox allowWrite")
+                scope_results.append({"scope": s, "status": "missing", "present": False})
         else:
             expected = set(storage.allow_entries_for_path(abs_path))
             settings = storage.load(s)
@@ -254,11 +307,19 @@ def check_allow(path: str, scope: str = "all", target: str = "auto") -> str:
             missing = expected - found
             if not found:
                 results.append(f"[{s}] MISSING — no rules for this path")
+                scope_results.append({"scope": s, "status": "missing", "present": False, "missing_count": len(expected)})
             elif missing:
                 results.append(f"[{s}] PARTIAL — missing: {', '.join(sorted(missing))}")
+                scope_results.append({"scope": s, "status": "partial", "present": True, "missing_count": len(missing)})
             else:
                 results.append(f"[{s}] OK — all rules present")
-    return "\n".join(results)
+                scope_results.append({"scope": s, "status": "ok", "present": True})
+
+    return json.dumps({
+        "result": "\n".join(results),
+        "path": abs_path,
+        "scopes": scope_results,
+    })
 
 
 def add_mcp_allow(server_name: str, scope: str = "user", target: str = "auto") -> str:
@@ -394,8 +455,16 @@ def batch_setup(
     # ── Persist & report ──────────────────────────────────────────────────
     total_added = len(sandbox_added) + len(mcp_added) + len(addl_added)
     if not total_added:
-        total_skipped = sandbox_skipped + mcp_skipped
-        return f"Already up to date — {total_skipped} existing entry/entries skipped in {settings.path}."
+        total_skipped = sandbox_skipped + mcp_skipped + addl_skipped
+        return json.dumps({
+            "result": f"Already up to date — {total_skipped} existing entry/entries skipped in {settings.path}.",
+            "settings_path": str(settings.path),
+            "added": 0,
+            "skipped": total_skipped,
+            "sandbox_added": 0,
+            "mcp_added": 0,
+            "addl_added": 0,
+        })
 
     storage.save(settings)
 
@@ -415,7 +484,17 @@ def batch_setup(
         lines.extend(f"    {e}" for e in addl_added)
     if addl_skipped:
         lines.append(f"  Additional directories skipped (already present): {addl_skipped}")
-    return "\n".join(lines)
+
+    total_skipped = sandbox_skipped + mcp_skipped + addl_skipped
+    return json.dumps({
+        "result": "\n".join(lines),
+        "settings_path": str(settings.path),
+        "added": total_added,
+        "skipped": total_skipped,
+        "sandbox_added": len(sandbox_added),
+        "mcp_added": len(mcp_added),
+        "addl_added": len(addl_added),
+    })
 
 
 def batch_revoke(
@@ -438,13 +517,27 @@ def batch_revoke(
     additional_directories = additional_directories or []
 
     if not paths and not mcp_servers and not additional_directories:
-        return "Nothing to revoke — paths, mcp_servers, and additional_directories are all empty."
+        return json.dumps({
+            "result": "Nothing to revoke — paths, mcp_servers, and additional_directories are all empty.",
+            "settings_path": None,
+            "removed": 0,
+            "sandbox_removed": 0,
+            "mcp_removed": 0,
+            "addl_removed": 0,
+        })
 
     resolved = storage.resolve_target(target, scope)
     settings = _load_for_target(resolved, scope)
 
     if not settings.path.exists():
-        return f"Settings file {settings.path} does not exist — nothing to revoke."
+        return json.dumps({
+            "result": f"Settings file {settings.path} does not exist — nothing to revoke.",
+            "settings_path": str(settings.path),
+            "removed": 0,
+            "sandbox_removed": 0,
+            "mcp_removed": 0,
+            "addl_removed": 0,
+        })
 
     sandbox_removed = 0
     mcp_removed = 0
@@ -476,7 +569,14 @@ def batch_revoke(
 
     total = sandbox_removed + mcp_removed + addl_removed
     if total == 0:
-        return f"No matching entries found in {settings.path} — nothing removed."
+        return json.dumps({
+            "result": f"No matching entries found in {settings.path} — nothing removed.",
+            "settings_path": str(settings.path),
+            "removed": 0,
+            "sandbox_removed": 0,
+            "mcp_removed": 0,
+            "addl_removed": 0,
+        })
 
     storage.save(settings)
 
@@ -487,7 +587,14 @@ def batch_revoke(
         parts.append(f"  MCP rules removed: {mcp_removed}")
     if addl_removed:
         parts.append(f"  additional directories removed: {addl_removed}")
-    return "\n".join(parts)
+    return json.dumps({
+        "result": "\n".join(parts),
+        "settings_path": str(settings.path),
+        "removed": total,
+        "sandbox_removed": sandbox_removed,
+        "mcp_removed": mcp_removed,
+        "addl_removed": addl_removed,
+    })
 
 
 _PATH_RULE_RE = re.compile(r"^(?:Read|Edit)\(//(.+?)/\*\*\)$")

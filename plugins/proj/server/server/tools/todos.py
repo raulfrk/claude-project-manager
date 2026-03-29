@@ -93,7 +93,7 @@ def _complete_parent(
         if (child := todo_map.get(c)) is not None and child.status != TodoStatus.DONE
     ]
     if undone:
-        return f"Cannot complete {todo_id}: children not done yet: {', '.join(undone)}."
+        return json.dumps({"error": f"Cannot complete {todo_id}: children not done yet: {', '.join(undone)}."})
     family_ids = _collect_family(todo_id, todos)
     family = [t for t in todos if t.id in family_ids]
     for t in family:
@@ -169,10 +169,10 @@ def register(app: FastMCP) -> None:
         if parent:
             parent_todo = next((t for t in todos if t.id == parent), None)
             if not parent_todo:
-                return f"Parent todo '{parent}' not found."
+                return json.dumps({"error": f"Parent todo '{parent}' not found."})
 
         if due_date is not None and not due_date.strip():
-            return "due_date cannot be empty. Omit it or provide a value (e.g. '2026-03-15' or 'next Friday')."
+            return json.dumps({"error": "due_date cannot be empty. Omit it or provide a value (e.g. '2026-03-15' or 'next Friday')."})
 
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
@@ -245,7 +245,7 @@ def register(app: FastMCP) -> None:
                 lines.append(f"{t.id} | {t.status} | {t.title} | {t.priority} | {tags_str}")
             if truncated:
                 lines.append(f"... {truncated} more items")
-            return "\n".join(lines)
+            return json.dumps({"result": "\n".join(lines), "truncated": truncated, "count": len(filtered)})
         result_json = json.dumps([t.to_dict() for t in filtered], indent=2)
         if truncated:
             result_json += f"\n... {truncated} more items"
@@ -371,12 +371,12 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         todo = next((t for t in todos if t.id == todo_id), None)
         if not todo:
-            return f"Todo '{todo_id}' not found."
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
         if MANUAL_TAG in todo.tags:
-            return (
-                f"⚠️ Todo '{todo_id}' is tagged `manual` — execute it yourself, "
-                f"then run `/proj:todo done {todo_id}`"
-            )
+            return json.dumps({
+                "error": f"⚠️ Todo '{todo_id}' is tagged `manual` — execute it yourself, then run `/proj:todo done {todo_id}`",
+                "todo_id": todo_id,
+            })
         return json.dumps(todo.to_dict(), indent=2)
 
     @app.tool(description="Set blocking relationships between todos.")
@@ -393,11 +393,11 @@ def register(app: FastMCP) -> None:
         todo_map = {t.id: t for t in todos}
         blocker = todo_map.get(todo_id)
         if not blocker:
-            return f"Todo '{todo_id}' not found."
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
         today = _now()
         self_refs = [bid for bid in blocks_ids if bid == todo_id]
         if self_refs:
-            return f"Error: todo cannot block itself ('{todo_id}')."
+            return json.dumps({"error": f"Error: todo cannot block itself ('{todo_id}')."})
         for blocked_id in blocks_ids:
             target = todo_map.get(blocked_id)
             if not target:
@@ -409,7 +409,7 @@ def register(app: FastMCP) -> None:
             target.updated = today
         blocker.updated = today
         storage.save_todos(cfg, name, todos)
-        return f"{todo_id} now blocks: {', '.join(blocks_ids)}"
+        return json.dumps({"result": f"{todo_id} now blocks: {', '.join(blocks_ids)}", "todo_id": todo_id})
 
     @app.tool(description="Remove blocking relationships for a todo.")
     def todo_unblock(todo_id: str, project_name: str | None = None) -> str:
@@ -422,7 +422,7 @@ def register(app: FastMCP) -> None:
         today = _now()
         todo = todo_map.get(todo_id)
         if not todo:
-            return f"Todo '{todo_id}' not found."
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
         for blocked_id in todo.blocks:
             target = todo_map.get(blocked_id)
             if target and todo_id in target.blocked_by:
@@ -431,7 +431,7 @@ def register(app: FastMCP) -> None:
         todo.blocks = []
         todo.updated = today
         storage.save_todos(cfg, name, todos)
-        return f"Removed all blocking relationships from {todo_id}."
+        return json.dumps({"result": f"Removed all blocking relationships from {todo_id}.", "todo_id": todo_id})
 
     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
     def todo_delete(todo_id: str, project_name: str | None = None) -> str:
@@ -501,7 +501,7 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         parent = next((t for t in todos if t.id == parent_id), None)
         if not parent:
-            return f"Parent todo '{parent_id}' not found."
+            return json.dumps({"error": f"Parent todo '{parent_id}' not found."})
         today = _now()
         child = Todo(
             id=next_todo_id(meta, parent=parent),
@@ -564,22 +564,22 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         parent = next((t for t in todos if t.id == parent_id), None)
         if not parent:
-            return f"Parent todo '{parent_id}' not found."
+            return json.dumps({"error": f"Parent todo '{parent_id}' not found."})
 
         # --- Parse JSON inputs ---
         try:
             child_specs: list[dict[str, object]] = json.loads(children)
         except json.JSONDecodeError as exc:
-            return f"Invalid JSON for children: {exc}"
+            return json.dumps({"error": f"Invalid JSON for children: {exc}"})
         if not isinstance(child_specs, list) or not child_specs:
-            return "children must be a non-empty JSON array."
+            return json.dumps({"error": "children must be a non-empty JSON array."})
 
         try:
             pairs: list[list[int]] = json.loads(blocking_pairs)
         except json.JSONDecodeError as exc:
-            return f"Invalid JSON for blocking_pairs: {exc}"
+            return json.dumps({"error": f"Invalid JSON for blocking_pairs: {exc}"})
         if not isinstance(pairs, list):
-            return "blocking_pairs must be a JSON array."
+            return json.dumps({"error": "blocking_pairs must be a JSON array."})
 
         today = _now()
         created: list[dict[str, str]] = []  # {id, title, parent}
@@ -783,7 +783,7 @@ def register(app: FastMCP) -> None:
                 lines = lines[:max_items]
             if truncated:
                 lines.append(f"... {truncated} more items")
-            return "\n".join(lines)
+            return json.dumps({"result": "\n".join(lines), "truncated": truncated, "count": len(roots)})
 
         result_json = json.dumps(roots, indent=2)
         if truncated:
@@ -895,14 +895,14 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         todo = next((t for t in todos if t.id == todo_id), None)
         if not todo:
-            return f"Todo '{todo_id}' not found."
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
         if has_requirements is not None:
             todo.has_requirements = has_requirements
         if has_research is not None:
             todo.has_research = has_research
         todo.updated = _now()
         storage.save_todos(cfg, name, todos)
-        return f"Updated content flags for {todo_id}."
+        return json.dumps({"result": f"Updated content flags for {todo_id}.", "todo_id": todo_id})
 
     @app.tool(description="Find archived todos by title using fuzzy matching.")
     def proj_find_archived_by_title(

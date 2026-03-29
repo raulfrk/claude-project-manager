@@ -45,21 +45,21 @@ def create_worktree(
 ) -> str:
     """Create a worktree from a registered base repo."""
     if not branch or not branch.strip():
-        return "Error: branch name cannot be empty."
+        return json.dumps({"result": "Error: branch name cannot be empty.", "worktree_path": None})
     repo = get_repo(repo_label)
     if repo is None:
-        return f"Error: no repo with label '{repo_label}'. Run /worktree:add-repo first."
+        return json.dumps({"result": f"Error: no repo with label '{repo_label}'. Run /worktree:add-repo first.", "worktree_path": None})
 
     worktree_path = _resolve_worktree_path(repo_label, branch, path)
     if Path(worktree_path).exists():
-        return f"Error: path already exists: {worktree_path}"
+        return json.dumps({"result": f"Error: path already exists: {worktree_path}", "worktree_path": None})
 
     try:
         git.add_worktree(repo.path, worktree_path, branch, new_branch=new_branch)
     except GitError as e:
-        return f"Error: {e}"
+        return json.dumps({"result": f"Error: {e}", "worktree_path": None})
 
-    return f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label})."
+    return json.dumps({"result": f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label}).", "worktree_path": worktree_path})
 
 
 def list_worktrees(repo_label: str | None = None) -> str:
@@ -96,25 +96,25 @@ def get_worktree(path: str) -> str:
     abs_path = str(Path(path).expanduser().resolve())
     result = _find_worktree(path)
     if not result:
-        return f"No worktree found at: {abs_path}"
+        return json.dumps({"error": f"No worktree found at: {abs_path}"})
     abs_path, repo_path = result
     for entry in git.list_worktrees(repo_path):
         if entry.path == abs_path:
             return json.dumps(entry.to_dict(), indent=2)
-    return f"No worktree found at: {abs_path}"
+    return json.dumps({"error": f"No worktree found at: {abs_path}"})
 
 
 def remove_worktree(path: str, force: bool = False) -> str:
     """Remove a worktree by path."""
     result = _find_worktree(path)
     if not result:
-        return f"No managed worktree found at: {path}"
+        return json.dumps({"result": f"No managed worktree found at: {path}", "worktree_path": None})
     abs_path, repo_path = result
     try:
         git.remove_worktree(repo_path, abs_path, force=force)
-        return f"Removed worktree at {abs_path}."
+        return json.dumps({"result": f"Removed worktree at {abs_path}.", "worktree_path": abs_path})
     except GitError as e:
-        return f"Error: {e}\nTip: use force=true for unclean worktrees."
+        return json.dumps({"result": f"Error: {e}\nTip: use force=true for unclean worktrees.", "worktree_path": abs_path})
 
 
 def prune_worktrees(repo_label: str | None = None) -> str:
@@ -141,26 +141,26 @@ def lock_worktree(path: str, reason: str = "") -> str:
     """Lock a worktree to prevent pruning."""
     result = _find_worktree(path)
     if not result:
-        return f"No managed worktree found at: {path}"
+        return json.dumps({"error": f"No managed worktree found at: {path}"})
     abs_path, repo_path = result
     try:
         git.lock_worktree(repo_path, abs_path, reason=reason)
-        return f"Locked worktree at {abs_path}."
+        return json.dumps({"result": f"Locked worktree at {abs_path}.", "path": abs_path})
     except GitError as e:
-        return f"Error: {e}"
+        return json.dumps({"error": f"Error: {e}", "path": abs_path})
 
 
 def unlock_worktree(path: str) -> str:
     """Unlock a worktree."""
     result = _find_worktree(path)
     if not result:
-        return f"No managed worktree found at: {path}"
+        return json.dumps({"error": f"No managed worktree found at: {path}"})
     abs_path, repo_path = result
     try:
         git.unlock_worktree(repo_path, abs_path)
-        return f"Unlocked worktree at {abs_path}."
+        return json.dumps({"result": f"Unlocked worktree at {abs_path}.", "path": abs_path})
     except GitError as e:
-        return f"Error: {e}"
+        return json.dumps({"error": f"Error: {e}", "path": abs_path})
 
 
 def register(app: FastMCP) -> None:

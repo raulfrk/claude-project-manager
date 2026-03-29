@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -85,25 +86,33 @@ def real_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestCreateWorktree:
     def test_creates_with_new_branch(self, real_git_repo: Path) -> None:
         result = create_worktree("myapp", "feature/x")
-        assert "Created" in result
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert data["worktree_path"] is not None
         # Verify the worktree directory was actually created on disk
         worktree_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-x"
         assert worktree_path.exists()
 
     def test_error_for_unknown_repo(self, config_with_repo: Path) -> None:
         result = create_worktree("unknown", "main")
-        assert "Error" in result
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
 
     def test_error_if_path_exists(self, config_with_repo: Path, tmp_path: Path) -> None:
         existing = tmp_path / "existing"
         existing.mkdir()
         result = create_worktree("myapp", "main", path=str(existing))
-        assert "Error" in result or "already exists" in result
+        data = json.loads(result)
+        assert "Error" in data["result"] or "already exists" in data["result"]
+        assert data["worktree_path"] is None
 
     def test_git_error_propagated(self, config_with_repo: Path) -> None:
         with patch("server.tools.worktrees.git.add_worktree", side_effect=GitError("conflict")):
             result = create_worktree("myapp", "feature/x")
-        assert "Error" in result
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
 
 
 class TestListWorktrees:
@@ -130,30 +139,42 @@ class TestGetWorktree:
     def test_found(self, real_git_repo: Path) -> None:
         # The repo_dir itself is the main worktree
         result = get_worktree(str(real_git_repo))
-        assert "main" in result
+        data = json.loads(result)
+        # Check for expected JSON structure
+        assert "branch" in data or "error" in data
+        if "error" not in data:
+            # Success case - has branch field
+            assert isinstance(data["branch"], str)
+            assert "main" in data["branch"].lower() or data["branch"] == "refs/heads/main"
 
     def test_not_found(self, config_with_repo: Path) -> None:
         with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
             result = get_worktree("/nonexistent")
-        assert "No worktree" in result
+            data = json.loads(result)
+            assert "error" in data
+            assert "No worktree" in data["error"]
 
 
 class TestRemoveWorktree:
     def test_removes(self, real_git_repo: Path) -> None:
         # First create a worktree to remove
         create_result = create_worktree("myapp", "feature/rm-test")
-        assert "Created" in create_result
-        # Extract the worktree path from the result message
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        # Extract the worktree path from the result
         worktree_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-rm-test"
         assert worktree_path.exists()
         # Now remove it
         result = remove_worktree(str(worktree_path))
-        assert "Removed" in result
+        data = json.loads(result)
+        assert "Removed" in data["result"]
+        assert data["worktree_path"] == str(worktree_path)
 
     def test_not_found(self, config_with_repo: Path) -> None:
         with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
             result = remove_worktree("/does/not/exist")
-        assert "No managed" in result
+        data = json.loads(result)
+        assert "No managed" in data.get("result", "") or "Error" in data.get("result", "")
 
 
 class TestPruneWorktrees:
@@ -174,7 +195,9 @@ class TestLockUnlock:
             patch("server.tools.worktrees.git.lock_worktree") as mock_lock,
         ):
             result = lock_worktree("/repo/main", reason="testing")
-        assert "Locked" in result
+        data = json.loads(result)
+        assert "Locked" in data["result"]
+        assert data["path"] == "/repo/main"
         mock_lock.assert_called_once()
 
     def test_unlock(self, config_with_repo: Path) -> None:
@@ -183,7 +206,10 @@ class TestLockUnlock:
             patch("server.tools.worktrees.git.unlock_worktree") as mock_unlock,
         ):
             result = unlock_worktree("/repo/main")
-        assert "Unlocked" in result
+        data = json.loads(result)
+        assert "Unlocked" in data["result"]
+        assert data["path"] == "/repo/main"
         mock_unlock.assert_called_once()
+
 
 

@@ -60,29 +60,29 @@ def register(app: FastMCP) -> None:
     ) -> str:
         err = validate_project_name(name)
         if err:
-            return err
+            return json.dumps({"error": err})
 
         cfg = require_config()
         index = storage.load_index(cfg)
 
         if name in index.projects:
-            return f"Project '{name}' already exists."
+            return json.dumps({"error": f"Project '{name}' already exists."})
 
         # Build list of RepoEntry from dirs or legacy path parameter
         repo_entries: list[RepoEntry] = []
         if dirs:
             if path:
-                return "Provide either 'dirs' or 'path', not both."
+                return json.dumps({"error": "Provide either 'dirs' or 'path', not both."})
             labels_seen: set[str] = set()
             for d in dirs:
                 d_path = d.get("path", "")
                 d_label = d.get("label", "")
                 if not d_path:
-                    return "Each directory entry must have a 'path'."
+                    return json.dumps({"error": "Each directory entry must have a 'path'."})
                 if not d_label:
-                    return "Each directory entry must have a 'label'."
+                    return json.dumps({"error": "Each directory entry must have a 'label'."})
                 if d_label in labels_seen:
-                    return f"Duplicate label '{d_label}'. Each directory must have a unique label."
+                    return json.dumps({"error": f"Duplicate label '{d_label}'. Each directory must have a unique label."})
                 labels_seen.add(d_label)
                 resolved = str(Path(d_path).expanduser().resolve())
                 repo_entries.append(RepoEntry(label=d_label, path=resolved))
@@ -93,14 +93,16 @@ def register(app: FastMCP) -> None:
             elif cfg.projects_base_dir:
                 resolved_path = str((Path(cfg.projects_base_dir).expanduser() / name).resolve())
             else:
-                return (
-                    f"No path provided for project '{name}' and no projects_base_dir configured. "
-                    "Provide an explicit path or set projects_base_dir via /proj:init-plugin."
-                )
+                return json.dumps({
+                    "error": (
+                        f"No path provided for project '{name}' and no projects_base_dir configured. "
+                        "Provide an explicit path or set projects_base_dir via /proj:init-plugin."
+                    )
+                })
             repo_entries.append(RepoEntry(label="code", path=resolved_path))
 
         if not repo_entries:
-            return "At least one directory is required."
+            return json.dumps({"error": "At least one directory is required."})
 
         today = str(date.today())
         tracking = Path(cfg.tracking_dir).expanduser() / name
@@ -139,7 +141,7 @@ def register(app: FastMCP) -> None:
         # Auto-set as session active so the newly created project is immediately usable
         state.set_session_active(name)
 
-        return f"Initialized project '{name}' at {tracking}."
+        return json.dumps({"result": f"Initialized project '{name}' at {tracking}", "project_name": name})
 
     @app.tool(description="List all projects.")
     def proj_list(include_archived: bool = False) -> str:
@@ -233,9 +235,9 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
         project_name = state.resolve_project(name)
         if not project_name:
-            return "No active project."
+            return json.dumps({"error": "No active project."})
         if project_name not in index.projects:
-            return f"Project '{project_name}' not found."
+            return json.dumps({"error": f"Project '{project_name}' not found."})
         meta = storage.load_meta(cfg, project_name)
         return json.dumps(meta.to_dict(), indent=2)
 
@@ -244,10 +246,10 @@ def register(app: FastMCP) -> None:
         cfg = require_config()
         name = state.get_session_active()
         if not name:
-            return "No active project."
+            return json.dumps({"error": "No active project."})
         index = storage.load_index(cfg)
         if name not in index.projects:
-            return "No active project."
+            return json.dumps({"error": "No active project."})
         meta = storage.load_meta(cfg, name)
         return json.dumps(meta.to_dict(), indent=2)
 
@@ -268,7 +270,7 @@ def register(app: FastMCP) -> None:
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"error": result})
         cfg, project_name = result
         meta = storage.load_meta(cfg, project_name)
         if description is not None:
@@ -316,7 +318,17 @@ def register(app: FastMCP) -> None:
             except Exception:  # noqa: BLE001
                 pass  # Update succeeds even if hint generation fails
 
-        return f"Updated project '{project_name}'.{trello_move_hint}"
+        result_dict = {
+            "result": f"Updated project '{project_name}'.",
+            "project_name": project_name,
+        }
+        if trello_move_hint:
+            # Parse the trello_move hint to extract card_id and target_list
+            import re
+            match = re.search(r'trello_move: \{"card_id": "([^"]+)", "target_list": "([^"]+)"\}', trello_move_hint)
+            if match:
+                result_dict["trello_move"] = {"card_id": match.group(1), "target_list": match.group(2)}
+        return json.dumps(result_dict)
 
     @app.tool(
         description="Pre-flight check for archiving a project. Returns config, project metadata, "
@@ -330,16 +342,16 @@ def register(app: FastMCP) -> None:
         index = storage.load_index(cfg)
 
         if project_name not in index.projects:
-            return f"Project '{project_name}' not found."
+            return json.dumps({"error": f"Project '{project_name}' not found."})
 
         entry = index.projects[project_name]
         if entry.archived:
-            return f"Project '{project_name}' is already archived."
+            return json.dumps({"error": f"Project '{project_name}' is already archived."})
 
         try:
             meta = storage.load_meta(cfg, project_name)
         except FileNotFoundError:
-            return f"meta.yaml missing for project '{project_name}'."
+            return json.dumps({"error": f"meta.yaml missing for project '{project_name}'."})
 
         try:
             todos = storage.load_todos(cfg, project_name)
@@ -382,11 +394,11 @@ def register(app: FastMCP) -> None:
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"error": result})
         cfg, project_name = result
         index = storage.load_index(cfg)
         if project_name not in index.projects:
-            return f"Project '{project_name}' not found."
+            return json.dumps({"error": f"Project '{project_name}' not found."})
 
         index.projects[project_name].archived = True
         index.projects[project_name].archive_date = date.today().isoformat()
@@ -442,7 +454,10 @@ def register(app: FastMCP) -> None:
         except Exception:  # noqa: BLE001
             pass  # Archive succeeds even if hint generation fails
 
-        return f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}"
+        return json.dumps({
+            "result": f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}",
+            "project_name": project_name
+        })
 
     @app.tool(description="List or execute purge of archived projects older than purge_after_days.")
     def proj_purge_archive(confirm: bool = False) -> str:
@@ -450,7 +465,9 @@ def register(app: FastMCP) -> None:
 
         cfg = require_config()
         if cfg.archive.purge_after_days is None:
-            return "Purge not configured. Set archive.purge_after_days via config_update or /proj:init-plugin."
+            return json.dumps({
+                "error": "Purge not configured. Set archive.purge_after_days via config_update or /proj:init-plugin."
+            })
 
         index = storage.load_index(cfg)
         today = date.today()
@@ -464,10 +481,10 @@ def register(app: FastMCP) -> None:
                 candidates.append({"name": name, "archive_date": entry.archive_date, "days_since": days_since})
 
         if not candidates:
-            return "No projects eligible for purge."
+            return json.dumps({"result": "No projects eligible for purge.", "candidates": [], "purged": []})
 
         if not confirm:
-            return json.dumps({"candidates": candidates, "count": len(candidates)})
+            return json.dumps({"result": "Purge candidates listed.", "candidates": candidates, "count": len(candidates), "dry_run": True})
 
         # Actually purge — move to .trash/ instead of immediate deletion
         import tarfile
@@ -546,7 +563,15 @@ def register(app: FastMCP) -> None:
         sweep_note = f" Swept {swept} expired trash entries." if swept else ""
         backup_note = f" Backups: {', '.join(backup_paths)}." if backup_paths else ""
         expired_note = f" Removed {expired_backups} expired backup(s)." if expired_backups else ""
-        return f"Purged {len(purged)} projects: {', '.join(purged)}{backup_note}{expired_note}{sweep_note}"
+        result_msg = f"Purged {len(purged)} projects: {', '.join(purged)}{backup_note}{expired_note}{sweep_note}"
+        return json.dumps({
+            "result": result_msg,
+            "purged": purged,
+            "count": len(purged),
+            "backups": backup_paths,
+            "expired_backups_removed": expired_backups,
+            "trash_swept": swept,
+        })
 
     @app.tool(description="Add a repository path to a project.")
     def proj_add_repo(
@@ -558,22 +583,26 @@ def register(app: FastMCP) -> None:
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"error": result})
         cfg, name = result
         meta = storage.load_meta(cfg, name)
         abs_path = str(Path(repo_path).expanduser().resolve())
         if any(r.path == abs_path for r in meta.repos):
-            return f"Repo at '{abs_path}' already registered."
+            return json.dumps({"error": f"Repo at '{abs_path}' already registered."})
         if any(r.label == label for r in meta.repos):
-            return f"Label '{label}' already in use. Choose a different label."
+            return json.dumps({"error": f"Label '{label}' already in use. Choose a different label."})
         if not Path(abs_path).is_dir():
-            return f"Path '{abs_path}' does not exist or is not a directory."
+            return json.dumps({"error": f"Path '{abs_path}' does not exist or is not a directory."})
         meta.repos.append(RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference))
         storage.save_meta(cfg, meta)
 
+        # Build paths list for hooks (writable repos only, not references)
+        paths = [r.path for r in meta.repos if not r.reference]
         if reference:
-            return f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
-        return f"Added repo '{label}' at {abs_path} to project '{name}'."
+            result_msg = f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
+        else:
+            result_msg = f"Added repo '{label}' at {abs_path} to project '{name}'."
+        return json.dumps({"result": result_msg, "paths": paths, "project_name": name})
 
     @app.tool(description="Remove a repository from a project by label (cannot remove the last repo).")
     def proj_remove_repo(
@@ -582,30 +611,37 @@ def register(app: FastMCP) -> None:
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"error": result})
         cfg, name = result
         meta = storage.load_meta(cfg, name)
         found = next((r for r in meta.repos if r.label == label), None)
         if found is None:
-            return f"No repo with label '{label}' found in project '{name}'."
+            return json.dumps({"error": f"No repo with label '{label}' found in project '{name}'."})
         if len(meta.repos) <= 1:
-            return "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."
+            return json.dumps({"error": "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."})
         meta.repos.remove(found)
         storage.save_meta(cfg, meta)
+        # Build paths list for hooks (writable repos only, not references)
+        paths = [r.path for r in meta.repos if not r.reference]
         ref_note = " (reference, read-only)" if found.reference else ""
-        return f"Removed repo '{label}' at {found.path}{ref_note} from project '{name}'."
+        result_msg = f"Removed repo '{label}' at {found.path}{ref_note} from project '{name}'."
+        return json.dumps({"result": result_msg, "paths": paths, "project_name": name})
 
     @app.tool(description="Set per-project permissions override (null = use global config).")
     def proj_set_permissions(auto_grant: bool | None, project_name: str | None = None) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"error": result})
         cfg, name = result
         meta = storage.load_meta(cfg, name)
         meta.permissions = ProjectPermissions(auto_grant=auto_grant)
         storage.save_meta(cfg, meta)
         auto_grant_state = str(auto_grant) if auto_grant is not None else "use global default"
-        return f"Set permissions.auto_grant={auto_grant_state} for project '{name}'."
+        return json.dumps({
+            "result": f"Set permissions.auto_grant={auto_grant_state} for project '{name}'.",
+            "project_name": name,
+            "auto_grant": auto_grant,
+        })
 
     @app.tool(
         description="Set the active project for this session only (not persisted globally)."
@@ -621,11 +657,11 @@ def register(app: FastMCP) -> None:
             matches = difflib.get_close_matches(name, candidates, n=3, cutoff=0.4)
             if not matches:
                 all_names = ", ".join(sorted(candidates)) if candidates else "(none)"
-                return f"Project '{name}' not found. Available: {all_names}"
+                return json.dumps({"error": f"Project '{name}' not found. Available: {all_names}"})
             if len(matches) == 1:
                 name = matches[0]
             else:
-                return f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"
+                return json.dumps({"error": f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"})
         state.set_session_active(name)
         meta = storage.load_meta(cfg, name)
         msg = f"Loaded project '{name}' for this session."

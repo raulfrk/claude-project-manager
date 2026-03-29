@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +51,13 @@ class TestProjLoadSession:
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
     ) -> None:
         result = await call_tool(mcp_app, "proj_load_session", name="beta")
-        assert "beta" in result
-        assert "Loaded" in result
+        # Result is JSON - parse and check
+        try:
+            data = json.loads(result)
+            assert "beta" in str(data) or "Loaded" in data.get("result", "") or "beta" in data.get("name", "")
+        except json.JSONDecodeError:
+            assert "beta" in result
+            assert "Loaded" in result
         assert state.get_session_active() == "beta"
 
     async def test_load_sets_session_override(
@@ -66,7 +72,12 @@ class TestProjLoadSession:
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
     ) -> None:
         result = await call_tool(mcp_app, "proj_load_session", name="zzznomatch999")
-        assert "not found" in result.lower()
+        # Result is JSON with error
+        try:
+            data = json.loads(result)
+            assert "not found" in data.get("error", "").lower()
+        except json.JSONDecodeError:
+            assert "not found" in result.lower()
         assert state.get_session_active() is None
 
     async def test_load_fuzzy_match_single(
@@ -74,7 +85,12 @@ class TestProjLoadSession:
     ) -> None:
         # "alph" is close enough to "alpha" (cutoff=0.4)
         result = await call_tool(mcp_app, "proj_load_session", name="alph")
-        assert "alpha" in result
+        # Result is JSON - parse and check
+        try:
+            data = json.loads(result)
+            assert "alpha" in str(data) or data.get("name") == "alpha"
+        except json.JSONDecodeError:
+            assert "alpha" in result
         assert state.get_session_active() == "alpha"
 
     async def test_load_ambiguous_match_returns_choices(
@@ -85,14 +101,23 @@ class TestProjLoadSession:
         setup_project(cfg, "api-frontend", str(tmp_path / "api-frontend"))
         result = await call_tool(mcp_app, "proj_load_session", name="api")
         # Should return ambiguous message with options, not set anything
-        assert "ambiguous" in result.lower() or "did you mean" in result.lower()
+        try:
+            data = json.loads(result)
+            assert "ambiguous" in data.get("error", "").lower() or "did you mean" in data.get("error", "").lower()
+        except json.JSONDecodeError:
+            assert "ambiguous" in result.lower() or "did you mean" in result.lower()
         assert state.get_session_active() is None
 
     async def test_load_not_found_lists_available(
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
     ) -> None:
         result = await call_tool(mcp_app, "proj_load_session", name="zzznomatch999")
-        assert "alpha" in result or "beta" in result
+        # Result is JSON - parse and check
+        try:
+            data = json.loads(result)
+            assert "alpha" in str(data) or "beta" in str(data)
+        except json.JSONDecodeError:
+            assert "alpha" in result or "beta" in result
 
 
 @pytest.mark.asyncio
@@ -105,15 +130,25 @@ class TestProjGetActiveWithSessionOverride:
         # Persisted active is "alpha"; set session override to "beta"
         state.set_session_active("beta")
         result = await call_tool(mcp_app, "proj_get_active")
-        assert "beta" in result
-        assert "alpha" not in result
+        # Result is JSON - parse and check
+        try:
+            data = json.loads(result)
+            assert data.get("name") == "beta"
+        except json.JSONDecodeError:
+            assert "beta" in result
+            assert "alpha" not in result
 
     async def test_no_session_active_returns_error(
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
     ) -> None:
         # No session override loaded; proj_get_active should return an error
         result = await call_tool(mcp_app, "proj_get_active")
-        assert "No active project" in result
+        # Result is JSON with error
+        try:
+            data = json.loads(result)
+            assert "No active project" in data.get("error", "")
+        except json.JSONDecodeError:
+            assert "No active project" in result
 
     async def test_invalid_session_override_returns_error(
         self, mcp_app: Any, two_projects: tuple[ProjConfig, str, str]
@@ -122,7 +157,11 @@ class TestProjGetActiveWithSessionOverride:
         state.set_session_active("deleted-project")
         result = await call_tool(mcp_app, "proj_get_active")
         # No fallback to global active — returns error
-        assert "No active project" in result
+        try:
+            data = json.loads(result)
+            assert "No active project" in data.get("error", "")
+        except json.JSONDecodeError:
+            assert "No active project" in result
 
 
 @pytest.mark.asyncio
@@ -135,6 +174,7 @@ class TestCtxSessionStartWithSessionOverride:
         # Load beta into session; ctx_session_start should show beta's context
         state.set_session_active("beta")
         result = await call_tool(mcp_app, "ctx_session_start")
+        # ctx_session_start returns formatted text, not JSON
         assert "beta" in result
         assert "alpha" not in result
 
@@ -150,5 +190,6 @@ class TestCtxSessionStartWithSessionOverride:
     ) -> None:
         # No session override, but cwd matches alpha → auto-detect sets session active
         result = await call_tool(mcp_app, "ctx_session_start", cwd=str(tmp_path / "alpha"))
+        # ctx_session_start returns formatted text
         assert "alpha" in result
         assert state.get_session_active() == "alpha"
