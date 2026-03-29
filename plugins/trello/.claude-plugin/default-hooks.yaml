@@ -8,6 +8,9 @@ hooks:
       name: "${title}"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
+    feedback_tool: todo_update
+    feedback_mapping:
+      result.id: trello_checklist_item_id
 
   - id: trello-on-todo-complete
     trigger_tool: todo_complete
