@@ -9,11 +9,14 @@ from unittest.mock import patch
 import pytest
 
 from server.lib.git import (
+    GitConflictError,
     GitError,
     _parse_porcelain,
     add_worktree,
     is_git_repo,
     list_worktrees,
+    merge_ff_only,
+    rebase_worktree,
     remove_worktree,
 )
 
@@ -294,3 +297,183 @@ class TestParsePorcelainCorruptedOutput:
             result = list_worktrees("/some/repo")
         assert len(result) == 1
         assert result[0].path == "/main"
+
+
+# ---------------------------------------------------------------------------
+# Helper: initialise a real git repo with an initial commit
+# ---------------------------------------------------------------------------
+
+def _init_repo(path: Path) -> None:
+    """Create a git repo at *path* with one initial commit."""
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(path), check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(path), check=True, capture_output=True,
+    )
+    (path / "init.txt").write_text("init")
+    subprocess.run(["git", "add", "."], cwd=str(path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=str(path), check=True, capture_output=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# rebase_worktree tests
+# ---------------------------------------------------------------------------
+
+class TestRebaseWorktree:
+    """Tests for rebase_worktree using real git repos."""
+
+    def test_rebase_success_clean(self, tmp_path: Path) -> None:
+        """Clean rebase onto base branch returns status 'rebased'."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+
+        # Create a feature branch with one commit
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "feature.txt").write_text("feature work")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        # Add a commit on main that doesn't conflict
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "main.txt").write_text("main work")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main commit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        # Switch back to feature for rebase
+        subprocess.run(
+            ["git", "checkout", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        result = rebase_worktree(str(repo), str(repo), "main")
+        assert result == {"status": "rebased", "base_branch": "main"}
+
+    def test_rebase_conflict_raises_and_aborts(self, tmp_path: Path) -> None:
+        """Diverged commits on the same file raise GitConflictError and abort."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+
+        # Create feature branch that edits init.txt
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "init.txt").write_text("feature version")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature edit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        # Create conflicting commit on main
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "init.txt").write_text("main version")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main edit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        # Switch to feature and attempt rebase
+        subprocess.run(
+            ["git", "checkout", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        with pytest.raises(GitConflictError, match="Rebase conflict"):
+            rebase_worktree(str(repo), str(repo), "main")
+
+        # Verify rebase was aborted (no .git/rebase-merge dir)
+        git_dir = repo / ".git"
+        assert not (git_dir / "rebase-merge").exists()
+        assert not (git_dir / "rebase-apply").exists()
+
+
+# ---------------------------------------------------------------------------
+# merge_ff_only tests
+# ---------------------------------------------------------------------------
+
+class TestMergeFFOnly:
+    """Tests for merge_ff_only using real git repos."""
+
+    def test_merge_ff_success(self, tmp_path: Path) -> None:
+        """Fast-forward merge succeeds when branch is strictly ahead."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+
+        # Create a branch with one commit ahead of main
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "feature.txt").write_text("feature")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        # Go back to main and ff-merge
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        result = merge_ff_only(str(repo), "feature")
+        assert result == {"status": "merged", "branch": "feature"}
+
+        # Verify main now has the feature file
+        assert (repo / "feature.txt").exists()
+
+    def test_merge_ff_fails_on_diverged(self, tmp_path: Path) -> None:
+        """Diverged branches cannot fast-forward; raises GitError."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+
+        # Create diverging branches
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "feature.txt").write_text("feature")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        (repo / "main.txt").write_text("main")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main commit"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        with pytest.raises(GitError, match="Fast-forward merge failed"):
+            merge_ff_only(str(repo), "feature")
