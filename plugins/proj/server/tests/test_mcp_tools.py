@@ -323,6 +323,20 @@ class TestTodosMCPTools:
         parent = next(t for t in todos if t.id == "1")
         assert "1.1" in parent.children
 
+    async def test_todo_add_child_exposes_parent_trello_checklist_id(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        await call_tool(mcp_app, "todo_add", title="Parent")
+        cfg, name = project
+        todos = storage.load_todos(cfg, name)
+        parent = next(t for t in todos if t.id == "1")
+        parent.trello_checklist_id = "checklist-abc"
+        storage.save_todos(cfg, name, todos)
+
+        result = await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        data = _json.loads(result)
+        assert data.get("parent_trello_checklist_id") == "checklist-abc"
+
     async def test_todo_add_with_explicit_parent(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
