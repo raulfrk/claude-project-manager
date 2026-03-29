@@ -113,16 +113,18 @@ class SyncPlan:
     pull_update: list[dict[str, object]] = field(default_factory=list)
     pull_complete: list[str] = field(default_factory=list)
     push_create: list[dict[str, object]] = field(default_factory=list)
+    push_create_phase2: list[dict[str, object]] = field(default_factory=list)
     push_update: list[dict[str, object]] = field(default_factory=list)
     push_complete: list[str] = field(default_factory=list)
     ghost_close: list[str] = field(default_factory=list)
+    potential_links: list[dict] = field(default_factory=list)
     root_only_cleanup: list[dict[str, str]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not any([
             self.pull_create, self.pull_update, self.pull_complete,
-            self.push_create, self.push_update, self.push_complete,
-            self.ghost_close, self.root_only_cleanup,
+            self.push_create, self.push_create_phase2, self.push_update, self.push_complete,
+            self.ghost_close, self.potential_links, self.root_only_cleanup,
         ])
 
     def to_dict(self) -> dict[str, object]:
@@ -131,18 +133,22 @@ class SyncPlan:
             "pull_update": self.pull_update,
             "pull_complete": self.pull_complete,
             "push_create": self.push_create,
+            "push_create_phase2": self.push_create_phase2,
             "push_update": self.push_update,
             "push_complete": self.push_complete,
             "ghost_close": self.ghost_close,
+            "potential_links": self.potential_links,
             "root_only_cleanup": self.root_only_cleanup,
             "summary": {
                 "pull_create_count": len(self.pull_create),
                 "pull_update_count": len(self.pull_update),
                 "pull_complete_count": len(self.pull_complete),
                 "push_create_count": len(self.push_create),
+                "push_create_phase2_count": len(self.push_create_phase2),
                 "push_update_count": len(self.push_update),
                 "push_complete_count": len(self.push_complete),
                 "ghost_close_count": len(self.ghost_close),
+                "potential_links_count": len(self.potential_links),
                 "root_only_cleanup_count": len(self.root_only_cleanup),
             },
         }
@@ -160,6 +166,39 @@ class ApplyInput:
 
 
 # ── Core logic (standalone functions) ─────────────────────────────────────────
+
+
+def _find_link_candidate(
+    local_todo: dict, todoist_tasks: list[dict], threshold: float = 0.7
+) -> dict | None:
+    """Find a Todoist task that likely matches an unlinked local todo by title similarity."""
+    import unicodedata, re
+
+    def normalize(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s).lower()
+        s = re.sub(r"[^\w\s]", "", s)
+        return " ".join(s.split())
+
+    def similarity(a: str, b: str) -> float:
+        a_words = set(normalize(a).split())
+        b_words = set(normalize(b).split())
+        if not a_words or not b_words:
+            return 0.0
+        intersection = a_words & b_words
+        return len(intersection) / max(len(a_words), len(b_words))
+
+    local_title = local_todo.get("title", "")
+    best_match = None
+    best_score = 0.0
+    for task in todoist_tasks:
+        task_content = task.get("content", "")
+        score = similarity(local_title, task_content)
+        if score > best_score:
+            best_score = score
+            best_match = task
+    if best_score >= threshold and best_match:
+        return {"todo": local_todo, "task": best_match, "score": best_score}
+    return None
 
 
 def compute_diff(
@@ -265,14 +304,21 @@ def compute_diff(
                         "todo_id": local_todo.id,
                     })
 
-    # Sort: root todos first for parent ID resolution
-    sortable_unlinked = sorted(local_unlinked, key=lambda t: (t.parent is not None, t.id))
-
-    for todo in sortable_unlinked:
+    # Split unlinked into roots (phase 1) and children-of-unlinked (phase 2)
+    unlinked_ids = {t.id for t in local_unlinked}
+    unlinked_roots: list[Todo] = []
+    unlinked_children: list[Todo] = []
+    for todo in local_unlinked:
         if effective_root_only and todo.parent:
             continue
+        if todo.parent and todo.parent in unlinked_ids:
+            unlinked_children.append(todo)
+        else:
+            unlinked_roots.append(todo)
+
+    # Phase 1: roots and children whose parent already has a todoist_task_id
+    for todo in sorted(unlinked_roots, key=lambda t: t.id):
         todoist_priority = _LOCAL_TO_TODOIST.get(todo.priority, "p4")
-        # Resolve parent's Todoist task ID if child
         parent_todoist_id: str | None = None
         if todo.parent:
             parent_todo = next((t for t in todos if t.id == todo.parent), None)
@@ -290,9 +336,30 @@ def compute_diff(
             entry["dueString"] = todo.due_date
         if parent_todoist_id:
             entry["parentId"] = parent_todoist_id
+        if meta.todoist_project_id:
+            entry["project_id"] = meta.todoist_project_id
         if todo.status == TodoStatus.DONE:
             entry["complete_after_create"] = True
         plan.push_create.append(entry)
+
+    # Phase 2: children whose parent is also unlinked (needs phase 1 to resolve parent)
+    for todo in sorted(unlinked_children, key=lambda t: t.id):
+        todoist_priority = _LOCAL_TO_TODOIST.get(todo.priority, "p4")
+        entry_p2: dict[str, object] = {
+            "todo_id": todo.id,
+            "content": todo.title,
+            "priority": todoist_priority,
+            "description": todo.notes,
+            "labels": todo.tags,
+            "_parent_local_id": todo.parent,
+        }
+        if todo.due_date:
+            entry_p2["dueString"] = todo.due_date
+        if meta.todoist_project_id:
+            entry_p2["project_id"] = meta.todoist_project_id
+        if todo.status == TodoStatus.DONE:
+            entry_p2["complete_after_create"] = True
+        plan.push_create_phase2.append(entry_p2)
 
     # Push updates for linked todos where local is newer
     for todoist_id, task in todoist_by_id.items():
@@ -315,6 +382,26 @@ def compute_diff(
                 # Local is done, Todoist still open
                 if not (task.get("isCompleted") or task.get("checked")):
                     plan.push_complete.append(todoist_id)
+
+    # ── Fix parent linkage for linked todos missing Todoist parentId ──
+    for todoist_id, task in todoist_by_id.items():
+        if todoist_id not in local_by_todoist_id:
+            continue
+        local_todo = local_by_todoist_id[todoist_id]
+        if not local_todo.parent:
+            continue
+        # Local todo has a parent — find parent's todoist_task_id
+        parent_todo = next((t for t in todos if t.id == local_todo.parent), None)
+        if not parent_todo or not parent_todo.todoist_task_id:
+            continue
+        # Check if Todoist task already has the correct parent_id set
+        if task.get("parentId"):
+            continue
+        # Todoist task is missing parentId — push an update to set it
+        plan.push_update.append({
+            "id": todoist_id,
+            "parentId": parent_todo.todoist_task_id,
+        })
 
     return plan
 
