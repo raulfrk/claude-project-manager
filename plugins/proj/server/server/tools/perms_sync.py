@@ -43,7 +43,11 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
     return rules
 
 
-def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
+def _derive_expected_sandbox_paths(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    worktree_root_dir: str | None = None,
+) -> set[str]:
     """Derive the paths expected in sandbox.filesystem.allowWrite."""
     paths: set[str] = set()
     if cfg.permissions.projects_root:
@@ -58,10 +62,18 @@ def _derive_expected_sandbox_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[st
             paths.add(tracking)
     elif cfg.tracking_dir:
         paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
+    if cfg.worktree_integration and worktree_root_dir:
+        wt_root = str(Path(worktree_root_dir).expanduser().resolve()).rstrip("/")
+        if not any(wt_root.startswith(p + "/") or wt_root == p for p in paths):
+            paths.add(wt_root)
     return paths
 
 
-def _derive_expected_additional_dirs(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
+def _derive_expected_additional_dirs(
+    meta: ProjectMeta,
+    cfg: ProjConfig,
+    worktree_root_dir: str | None = None,
+) -> set[str]:
     """Derive the paths expected in permissions.additionalDirectories."""
     paths: set[str] = set()
     if cfg.permissions.projects_root:
@@ -76,6 +88,10 @@ def _derive_expected_additional_dirs(meta: ProjectMeta, cfg: ProjConfig) -> set[
             paths.add(tracking)
     elif cfg.tracking_dir:
         paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
+    if cfg.worktree_integration and worktree_root_dir:
+        wt_root = str(Path(worktree_root_dir).expanduser().resolve()).rstrip("/")
+        if not any(wt_root.startswith(p + "/") or wt_root == p for p in paths):
+            paths.add(wt_root)
     return paths
 
 
@@ -100,6 +116,7 @@ def run_sync(
     actual_deny_rules: list[str] | None = None,
     sandbox_mode: bool,
     apply: bool = False,
+    worktree_root_dir: str | None = None,
     batch_setup_fn: Callable[..., str] | None = None,
 ) -> str:
     expected = _derive_expected_rules(meta, cfg)
@@ -108,12 +125,12 @@ def run_sync(
     # In sandbox mode, also check sandbox.filesystem.allowWrite
     missing_sandbox_paths: set[str] = set()
     if sandbox_mode:
-        expected_paths = _derive_expected_sandbox_paths(meta, cfg)
+        expected_paths = _derive_expected_sandbox_paths(meta, cfg, worktree_root_dir=worktree_root_dir)
         missing_sandbox_paths = expected_paths - actual_sandbox_paths
 
     # Check permissions.additionalDirectories
     missing_additional_dirs: set[str] = set()
-    expected_additional = _derive_expected_additional_dirs(meta, cfg)
+    expected_additional = _derive_expected_additional_dirs(meta, cfg, worktree_root_dir=worktree_root_dir)
     if actual_additional_dirs is not None:
         missing_additional_dirs = expected_additional - actual_additional_dirs
 
@@ -141,6 +158,7 @@ def run_sync(
             meta,
             cfg,
             mcp_servers=mcp_servers,
+            worktree_root_dir=worktree_root_dir,
             batch_setup_fn=batch_setup_fn,
         )
         total = sum(counts.values())
@@ -206,6 +224,7 @@ def register(app: FastMCP) -> None:
         actual_additional_dirs: list[str] | None = None,
         actual_deny_rules: list[str] | None = None,
         sandbox_mode: bool = False,
+        worktree_root_dir: str | None = None,
     ) -> str:
         if actual_rules is None:
             return "Error: actual_rules is a required parameter."
@@ -226,4 +245,5 @@ def register(app: FastMCP) -> None:
             actual_deny_rules=actual_deny_rules,
             sandbox_mode=sandbox_mode,
             apply=apply,
+            worktree_root_dir=worktree_root_dir,
         )
