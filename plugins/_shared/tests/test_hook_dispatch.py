@@ -55,11 +55,11 @@ async def test_wraps_sync_function(mock_mcp):
     def my_sync_tool(x: int) -> str:
         return f"result-{x}"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook_background") as mock_dispatch:
-        result = mock_mcp._registered_tools["my_sync_tool"](42)
+    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock) as mock_dispatch:
+        result = await mock_mcp._registered_tools["my_sync_tool"](42)
 
     assert result == "result-42"
-    mock_dispatch.assert_called_once()
+    mock_dispatch.assert_awaited_once()
     call_args = mock_dispatch.call_args
     assert call_args[0][0] == "my_sync_tool"
     assert call_args[0][1] == "result-42"

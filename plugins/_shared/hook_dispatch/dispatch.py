@@ -121,23 +121,17 @@ def enable_hook_dispatch(
     mcp.tool = patched_tool  # type: ignore[method-assign]
 
 
-def _dispatch_hook_background(tool_name: str, result: Any, hooks_url: str) -> None:
-    """Fire hook dispatch in a background thread (for sync tool wrappers)."""
-    import threading
-
-    def _run() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_dispatch_hook(tool_name, result, hooks_url))
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-
-
 def _wrap_tool_fn(fn: Any, tool_name: str, hooks_url: str) -> Any:
-    """Wrap a tool function to dispatch hooks after successful execution."""
+    """Wrap a tool function to dispatch hooks after successful execution.
+
+    Both sync and async tools get an async wrapper. FastMCP's call_fn_with_arg_validation
+    checks is_async on the wrapper (not the original), so async wrappers work for both.
+    The key: we must NOT use functools.wraps for sync→async conversion, because wraps
+    copies __wrapped__ which FastMCP may inspect. Instead we manually copy __name__,
+    __doc__, and __module__, and set __signature__ from the original.
+    """
+    import inspect
+
     if asyncio.iscoroutinefunction(fn):
 
         @functools.wraps(fn)
@@ -148,10 +142,17 @@ def _wrap_tool_fn(fn: Any, tool_name: str, hooks_url: str) -> Any:
 
         return async_wrapper
 
-    @functools.wraps(fn)
-    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+    # Sync tool: wrap as async so dispatch can be awaited.
+    # Copy signature from original fn so FastMCP argument validation works.
+    async def sync_to_async_wrapper(*args: Any, **kwargs: Any) -> Any:
         result = fn(*args, **kwargs)
-        _dispatch_hook_background(tool_name, result, hooks_url)
+        await _dispatch_hook(tool_name, result, hooks_url)
         return result
 
-    return sync_wrapper
+    sync_to_async_wrapper.__name__ = fn.__name__
+    sync_to_async_wrapper.__doc__ = fn.__doc__
+    sync_to_async_wrapper.__module__ = fn.__module__
+    sync_to_async_wrapper.__signature__ = inspect.signature(fn)
+    sync_to_async_wrapper.__annotations__ = getattr(fn, "__annotations__", {})
+
+    return sync_to_async_wrapper
