@@ -273,6 +273,8 @@ def register(app: FastMCP) -> None:
         git_tracking_enabled: bool | None = None,
         git_tracking_github_enabled: bool | None = None,
         git_tracking_github_repo_format: str | None = None,
+        todoist_project_id: str | None = None,
+        trello_card_id: str | None = None,
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
@@ -305,6 +307,10 @@ def register(app: FastMCP) -> None:
             meta.git_tracking.github_enabled = git_tracking_github_enabled
         if git_tracking_github_repo_format is not None:
             meta.git_tracking.github_repo_format = git_tracking_github_repo_format
+        if todoist_project_id is not None:
+            meta.todoist_project_id = todoist_project_id
+        if trello_card_id is not None:
+            meta.trello_card_id = trello_card_id
         storage.save_meta(cfg, meta)
 
         # Build trello_move hint if status changed and project has Trello card
@@ -691,6 +697,8 @@ def register(app: FastMCP) -> None:
             "project_name": name,
             "paths": paths,
             "mcp_servers": [],
+            "trello_card_id": meta.trello_card_id or "",
+            "todoist_project_id": meta.todoist_project_id or "",
         })
 
     def _migrate_single_dir(cfg: object, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict:
