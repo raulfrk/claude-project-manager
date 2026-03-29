@@ -607,6 +607,69 @@ class TestComputeDiff:
         assert isinstance(plan, SyncPlan)
 
 
+class TestPotentialLinks:
+    """Tests for potential_links detection (todo 373.5)."""
+
+    def test_matching_titles_detected_as_potential_link(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Unlinked local todo + Todoist task with similar title → potential_links."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Implement user authentication")
+        storage.save_todos(cfg, name, [todo])
+
+        tasks = [_make_todoist_task("t1", "Implement user authentication")]
+        plan = compute_diff(tasks, cfg, name)  # type: ignore[arg-type]
+
+        assert len(plan.potential_links) == 1
+        assert plan.potential_links[0]["local_todo"]["id"] == todo.id
+        assert plan.potential_links[0]["todoist_task"]["id"] == "t1"
+        assert plan.pull_create == []
+        assert plan.push_create == []
+
+    def test_dissimilar_titles_not_linked(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Unlinked local todo + Todoist task with dissimilar title → normal pull/push."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Implement user authentication")
+        storage.save_todos(cfg, name, [todo])
+
+        tasks = [_make_todoist_task("t1", "Fix database migration script")]
+        plan = compute_diff(tasks, cfg, name)  # type: ignore[arg-type]
+
+        assert plan.potential_links == []
+        assert len(plan.pull_create) == 1
+        assert len(plan.push_create) == 1
+
+
+class TestTwoPhasePush:
+    """Tests for two-phase push: roots first, then children (todo 374.6)."""
+
+    def test_parent_in_phase1_child_in_phase2(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Unlinked parent → push_create; unlinked child → push_create_phase2."""
+        cfg, name = cfg_with_project
+        parent = _make_todo(cfg, name, "Parent task")
+        child = _make_todo(cfg, name, "Child task", parent=parent.id)
+        parent.children.append(child.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        plan = compute_diff([], cfg, name)
+
+        # Parent should be in phase 1 (push_create) with no parentId
+        assert len(plan.push_create) == 1
+        assert plan.push_create[0]["content"] == "Parent task"
+        assert "parentId" not in plan.push_create[0]
+
+        # Child should be in phase 2 with _parent_local_id set
+        assert len(plan.push_create_phase2) == 1
+        assert plan.push_create_phase2[0]["content"] == "Child task"
+        assert plan.push_create_phase2[0]["_parent_local_id"] == parent.id
+        assert "parentId" not in plan.push_create_phase2[0]
+
+
 class TestApplyChanges:
     def test_create_locally(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
