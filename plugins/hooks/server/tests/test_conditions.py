@@ -113,20 +113,20 @@ class TestEvaluateCondition:
 
     def test_and_with_dot_paths(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({
-            "todoist": {"enabled": True, "auto_sync": True},
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
             "project": {"todoist_project_id": "abc123"},
         }))
         assert evaluate_condition(
-            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
             config_path=proj_yaml,
         ) is True
 
     def test_and_with_dot_paths_one_missing(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({
-            "todoist": {"enabled": True, "auto_sync": True},
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
         }))
         assert evaluate_condition(
-            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
             config_path=proj_yaml,
         ) is False
 
@@ -146,18 +146,18 @@ class TestEvaluateCondition:
     def test_todoist_real_condition(self, proj_yaml: Path):
         """Real condition from todoist default-hooks.yaml."""
         proj_yaml.write_text(yaml.dump({
-            "todoist": {"enabled": True, "auto_sync": True},
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
             "project": {"todoist_project_id": "6g5Rc5v5WjJCHHgX"},
         }))
         assert evaluate_condition(
-            "todoist.enabled and todoist.auto_sync and project.todoist_project_id",
+            "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
             config_path=proj_yaml,
         ) is True
 
     def test_zoxide_simple_condition(self, proj_yaml: Path):
         """Real condition from zoxide default-hooks.yaml."""
-        proj_yaml.write_text(yaml.dump({"zoxide": {"enabled": True}}))
-        assert evaluate_condition("zoxide.enabled", config_path=proj_yaml) is True
+        proj_yaml.write_text(yaml.dump({"zoxide_integration": True}))
+        assert evaluate_condition("zoxide_integration", config_path=proj_yaml) is True
 
 
 # ── resolve_condition_status ─────────────────────────────────────────────────
@@ -302,14 +302,14 @@ class TestRuntimeConfig:
 
     def test_compound_with_runtime(self):
         assert evaluate_condition(
-            "todoist.enabled and todo.todoist_task_id",
-            config={"todoist": {"enabled": True}, "todo": {"todoist_task_id": "abc"}},
+            "sync.todoist.enabled and todo.todoist_task_id",
+            config={"sync": {"todoist": {"enabled": True}}, "todo": {"todoist_task_id": "abc"}},
         ) is True
 
     def test_compound_runtime_missing(self):
         assert evaluate_condition(
-            "todoist.enabled and todo.todoist_task_id",
-            config={"todoist": {"enabled": True}, "todo": {}},
+            "sync.todoist.enabled and todo.todoist_task_id",
+            config={"sync": {"todoist": {"enabled": True}}, "todo": {}},
         ) is False
 
     def test_backward_compat_no_config(self, tmp_path: Path):

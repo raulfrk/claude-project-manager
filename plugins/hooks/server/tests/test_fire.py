@@ -674,12 +674,12 @@ class TestConditionMerge:
                 "hook-001",
                 "trigger_a",
                 "target_b",
-                condition="todoist.enabled and project.todoist_project_id",
+                condition="sync.todoist.enabled and project.todoist_project_id",
             ),
         ])
         save(reg, hooks_yaml)
-        # Base config has todoist.enabled=True
-        proj_yaml.write_text(yaml.dump({"todoist": {"enabled": True}}))
+        # Base config has sync.todoist.enabled=True
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
