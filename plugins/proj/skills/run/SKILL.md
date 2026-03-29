@@ -301,6 +301,24 @@ If `--no-interactive`: skip Phase 1, proceed directly to Phase 2 with execute in
 
 Store `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
 
+**If `--batch-approve` is set:**
+
+1. `EnterPlanMode` once (single session for all todos).
+2. For each todo in dependency order (inside plan mode):
+   - Call `mcp__proj__todo_check_executable` — if manual: display `Todo <id> [manual] — skipped`, add to `manual_skipped_ids`, continue.
+   - Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
+   - Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan. If no snippets are returned, skip silently.
+   - Smart gate scoring (same rules as default cycle below) — AUTO-EXECUTE todos skip plan creation; LIGHT REVIEW todos get a 1-line plan summary (no separate EnterPlanMode since already in plan mode); FULL REVIEW todos get a full implementation plan.
+   - Create implementation plan (for FULL REVIEW and LIGHT REVIEW todos): read context and explore relevant source files. Cover files to modify/create, key changes, implementation order, testing approach. Include any Related Context. For AUTO-EXECUTE: create git tag `pre-auto-execute-{todo_id}`, skip plan creation entirely.
+   - Store plan in `approved_plans[todo_id]`.
+3. `ExitPlanMode` once, presenting all plans together as a combined summary.
+4. Plan approval:
+   - **Trust 0-1**: User reviews all plans in one pass. User can approve the batch, reject individual plans (offer re-plan or skip for rejected ones — don't abort the whole batch), or modify individual plans before approving the rest.
+   - **Trust 2** with `--batch-approve`: single plan mode session, skip `ExitPlanMode` user review (auto-approve all). Display: `Batch auto-approved (trust 2): <N> plans`.
+5. Store all approved plans in `approved_plans`. Pipeline: spawn execution agents as plans are approved (same spawning rules as default cycle step 7).
+
+**Otherwise (default per-todo cycle):**
+
 For each todo in dependency order:
 1. Call `mcp__proj__todo_check_executable` — if manual: display `Todo <id> [manual] — skipped`, add to `manual_skipped_ids`, continue.
 2. Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
