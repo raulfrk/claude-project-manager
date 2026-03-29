@@ -141,7 +141,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 **9.** Git tracking overrides (if `git_tracking.enabled: true` in config):
    Ask:
    ```
-   Per-project git tracking overrides (Enter to use global defaults):
+   Per-project git tracking configuration overrides for the shared tracking repo (Enter to use global defaults):
    - Override git tracking for this project? [use global]:
    - Override GitHub push for this project? [use global]:
    - Custom GitHub repo name format? [use global]:
