@@ -10,13 +10,14 @@ from unittest.mock import patch
 import pytest
 
 from server.lib import storage
-from server.lib.git import GitError
+from server.lib.git import GitConflictError, GitError
 from server.lib.models import BaseRepo, WorktreeConfig, WorktreeEntry
 from server.tools.worktrees import (
     create_worktree,
     get_worktree,
     list_worktrees,
     lock_worktree,
+    merge_worktree,
     prune_worktrees,
     remove_worktree,
     unlock_worktree,
@@ -212,4 +213,142 @@ class TestLockUnlock:
         mock_unlock.assert_called_once()
 
 
+def _git(repo: Path, *args: str) -> str:
+    """Run a git command in a repo and return stdout."""
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+class TestMergeWorktree:
+    def test_merge_success(self, real_git_repo: Path) -> None:
+        """Rebase + ff-only both succeed -> result='merged'."""
+        # Create a worktree with a new branch
+        create_result = create_worktree("myapp", "feature/merge-ok")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-merge-ok")
+
+        # Make a commit in the worktree
+        (Path(wt_path) / "newfile.txt").write_text("hello")
+        _git(Path(wt_path), "add", ".")
+        _git(Path(wt_path), "commit", "-m", "add newfile")
+
+        result = merge_worktree(wt_path, base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "merged"
+        assert data["branch"] == "feature/merge-ok"
+        assert data["base_branch"] == "main"
+
+    def test_merge_conflict(self, real_git_repo: Path) -> None:
+        """Rebase conflict -> result='conflict', worktree left intact."""
+        # Create a worktree
+        create_result = create_worktree("myapp", "feature/conflict")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-conflict")
+
+        # Edit README on the feature branch
+        (Path(wt_path) / "README.md").write_text("feature change")
+        _git(Path(wt_path), "add", ".")
+        _git(Path(wt_path), "commit", "-m", "feature edit")
+
+        # Also edit README on main so they diverge
+        (real_git_repo / "README.md").write_text("main change")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main edit")
+
+        result = merge_worktree(wt_path, base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+        assert data["branch"] == "feature/conflict"
+        assert data["worktree_path"] == wt_path
+        # Worktree directory still exists
+        assert Path(wt_path).exists()
+
+    def test_ff_only_failed(self, real_git_repo: Path) -> None:
+        """Rebase succeeds but merge --ff-only fails -> result='ff_only_failed'."""
+        create_result = create_worktree("myapp", "feature/ff-fail")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-ff-fail")
+
+        # Make a commit in the worktree
+        (Path(wt_path) / "newfile.txt").write_text("hello")
+        _git(Path(wt_path), "add", ".")
+        _git(Path(wt_path), "commit", "-m", "add newfile")
+
+        # Mock: rebase succeeds, but ff-only merge fails
+        with patch("server.tools.worktrees.git.merge_ff_only", side_effect=GitError("not a fast-forward")):
+            result = merge_worktree(wt_path, base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "ff_only_failed"
+        assert data["branch"] == "feature/ff-fail"
+
+    def test_worktree_not_found(self, config_with_repo: Path) -> None:
+        """Non-existent worktree path -> error."""
+        with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
+            result = merge_worktree("/does/not/exist")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "No managed worktree" in data["message"]
+
+    def test_locked_worktree(self, real_git_repo: Path) -> None:
+        """Locked worktree -> error."""
+        create_result = create_worktree("myapp", "feature/locked")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-locked")
+
+        # Lock the worktree
+        lock_worktree(wt_path, reason="testing")
+
+        result = merge_worktree(wt_path, base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "locked" in data["message"].lower()
+
+    def test_detached_head(self, real_git_repo: Path) -> None:
+        """Detached HEAD -> error."""
+        create_result = create_worktree("myapp", "feature/detach")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-detach")
+
+        # Detach HEAD by checking out a commit directly
+        head_sha = _git(Path(wt_path), "rev-parse", "HEAD")
+        _git(Path(wt_path), "checkout", head_sha)
+
+        result = merge_worktree(wt_path, base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "detached HEAD" in data["message"]
+
+    def test_missing_base_branch_no_default(self, real_git_repo: Path) -> None:
+        """No base_branch and no discoverable default -> error."""
+        create_result = create_worktree("myapp", "feature/no-default")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-no-default")
+
+        real_run = subprocess.run
+
+        def patched_run(cmd, *args, **kwargs):
+            # Intercept the two base_branch resolution calls, let everything else through
+            if "symbolic-ref" in cmd and "refs/remotes/origin/HEAD" in cmd:
+                return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
+            if "config" in cmd and "init.defaultBranch" in cmd:
+                return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("server.tools.worktrees.subprocess.run", side_effect=patched_run):
+            result = merge_worktree(wt_path, base_branch=None)
+
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "Cannot determine default branch" in data["message"]
 
