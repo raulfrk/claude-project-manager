@@ -6,7 +6,7 @@ hooks:
     param_mapping:
       repo_path: path
     blocking: false
-    condition: "zoxide.enabled"
+    condition: "zoxide_integration"
 
   - id: zoxide-on-proj-add-repo
     trigger_tool: proj_add_repo
@@ -15,7 +15,7 @@ hooks:
     param_mapping:
       path: path
     blocking: false
-    condition: "zoxide.enabled"
+    condition: "zoxide_integration"
 
   - id: zoxide-on-proj-archive
     trigger_tool: proj_archive
@@ -24,7 +24,7 @@ hooks:
     param_mapping:
       repo_path: path
     blocking: false
-    condition: "zoxide.enabled"
+    condition: "zoxide_integration"
 
   - id: zoxide-on-wt-create
     trigger_tool: wt_create
@@ -33,7 +33,7 @@ hooks:
     param_mapping:
       worktree_path: path
     blocking: false
-    condition: "zoxide.enabled"
+    condition: "zoxide_integration"
 
   - id: zoxide-on-wt-remove
     trigger_tool: wt_remove
@@ -42,4 +42,4 @@ hooks:
     param_mapping:
       worktree_path: path
     blocking: false
-    condition: "zoxide.enabled"
+    condition: "zoxide_integration"

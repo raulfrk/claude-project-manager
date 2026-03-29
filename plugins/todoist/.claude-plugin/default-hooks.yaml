@@ -8,7 +8,7 @@ hooks:
       priority: priority
       tags: labels
     blocking: false
-    condition: "todoist.enabled and todoist.auto_sync and project.todoist_project_id"
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"
 
   - id: todoist-on-todo-complete
     trigger_tool: todo_complete
@@ -17,7 +17,7 @@ hooks:
     param_mapping:
       todoist_task_id: ids
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-todo-update
     trigger_tool: todo_update
@@ -30,7 +30,7 @@ hooks:
       notes: description
       due_date: dueString
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-todo-delete
     trigger_tool: todo_delete
@@ -39,7 +39,7 @@ hooks:
     param_mapping:
       todoist_task_id: id
     blocking: false
-    condition: "todoist.enabled and todo.todoist_task_id"
+    condition: "sync.todoist.enabled and todo.todoist_task_id"
 
   - id: todoist-on-proj-init
     trigger_tool: proj_init
@@ -48,7 +48,7 @@ hooks:
     param_mapping:
       project_name: name
     blocking: true
-    condition: "todoist.enabled"
+    condition: "sync.todoist.enabled"
 
   - id: todoist-on-proj-load
     trigger_tool: proj_load_session
@@ -57,7 +57,7 @@ hooks:
     param_mapping:
       project_name: name
     blocking: false
-    condition: "todoist.enabled"
+    condition: "sync.todoist.enabled"
 
   - id: todoist-on-proj-archive
     trigger_tool: proj_archive
@@ -66,7 +66,7 @@ hooks:
     param_mapping:
       project_id: projectId
     blocking: false
-    condition: "todoist.enabled and project.todoist_project_id"
+    condition: "sync.todoist.enabled and project.todoist_project_id"
 
   - id: verify-todoist-complete
     trigger_tool: todo_complete
@@ -76,4 +76,4 @@ hooks:
       todoist_task_id: "${result.todoist_task_id}"
     blocking: true
     verification: true
-    condition: "todoist.enabled and todoist.auto_sync"
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync"
