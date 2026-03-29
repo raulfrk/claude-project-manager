@@ -16,6 +16,10 @@ class GitError(Exception):
     """Raised when a git command fails."""
 
 
+class GitConflictError(GitError):
+    """Raised when a git rebase encounters conflicts."""
+
+
 def _run(args: list[str], cwd: str | None = None) -> str:
     """Run a git command and return stdout. Raises GitError on failure."""
     result = subprocess.run(
@@ -129,3 +133,46 @@ def is_git_repo(path: str) -> bool:
         return True
     except GitError:
         return False
+
+
+def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dict:
+    """Rebase the worktree's branch onto base_branch.
+
+    On conflict, aborts the rebase and raises GitConflictError.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rebase", base_branch],
+            capture_output=True,
+            text=True,
+            cwd=worktree_path,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            subprocess.run(
+                ["git", "rebase", "--abort"],
+                capture_output=True,
+                text=True,
+                cwd=worktree_path,
+            )
+            raise GitConflictError(f"Rebase conflict in {worktree_path}: {stderr}")
+    except FileNotFoundError:
+        raise GitError(f"git not found or invalid path: {worktree_path}")
+    return {"status": "rebased", "base_branch": base_branch}
+
+
+def merge_ff_only(repo_path: str, branch: str) -> dict:
+    """Fast-forward merge a branch into the current branch at repo_path."""
+    try:
+        result = subprocess.run(
+            ["git", "merge", "--ff-only", branch],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            raise GitError(f"Fast-forward merge failed for branch {branch}: {stderr}")
+    except FileNotFoundError:
+        raise GitError(f"git not found or invalid path: {repo_path}")
+    return {"status": "merged", "branch": branch}
