@@ -40,7 +40,14 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Find Todoist projects, optionally filtering by name.")
     def todoist_find_projects(name: str | None = None) -> str:
         client = get_client()
-        projects = client.get("/projects")
+        response = client.get("/projects")
+        # API v1 returns {"results": [...]}, API v2 returns bare list
+        if isinstance(response, dict) and "results" in response:
+            projects = response["results"]
+        elif isinstance(response, list):
+            projects = response
+        else:
+            projects = []
         if name is not None:
             lower = name.lower()
             projects = [p for p in projects if lower in p.get("name", "").lower()]
