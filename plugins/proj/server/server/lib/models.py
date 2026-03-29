@@ -239,7 +239,7 @@ class PermissionsConfig:
 
 @dataclass
 class TeamModeConfig:
-    enabled: bool = False
+    enabled: bool = True
     max_agents: int = 4
     trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
 
@@ -249,7 +249,7 @@ class TeamModeConfig:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> TeamModeConfig:
         return cls(
-            enabled=bool(data.get("enabled", False)),
+            enabled=bool(data.get("enabled", True)),
             max_agents=int(data.get("max_agents", 4)),
             trust_level=int(data.get("trust_level", 1)),
         )

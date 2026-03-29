@@ -223,21 +223,21 @@ class TestProjectGitTrackingConfig:
 class TestTeamModeConfig:
     def test_defaults(self) -> None:
         tmc = TeamModeConfig()
-        assert tmc.enabled is False
+        assert tmc.enabled is True
         assert tmc.max_agents == 4
         assert tmc.trust_level == 1
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
-        tmc = TeamModeConfig(enabled=True, max_agents=8, trust_level=3)
+        tmc = TeamModeConfig(enabled=False, max_agents=8, trust_level=3)
         data = tmc.to_dict()
         tmc2 = TeamModeConfig.from_dict(data)
-        assert tmc2.enabled is True
+        assert tmc2.enabled is False
         assert tmc2.max_agents == 8
         assert tmc2.trust_level == 3
 
     def test_from_dict_empty_uses_defaults(self) -> None:
         tmc = TeamModeConfig.from_dict({})
-        assert tmc.enabled is False
+        assert tmc.enabled is True
         assert tmc.max_agents == 4
         assert tmc.trust_level == 1
 
@@ -246,13 +246,13 @@ class TestProjConfigTeamModeBackwardCompat:
     def test_from_dict_without_team_mode_key_uses_defaults(self) -> None:
         """ProjConfig.from_dict({}) without 'team_mode' key uses TeamModeConfig defaults."""
         cfg = ProjConfig.from_dict({})
-        assert cfg.team_mode.enabled is False
+        assert cfg.team_mode.enabled is True
         assert cfg.team_mode.max_agents == 4
         assert cfg.team_mode.trust_level == 1
 
     def test_from_dict_with_team_mode_key_preserves_value(self) -> None:
-        cfg = ProjConfig.from_dict({"team_mode": {"enabled": True, "max_agents": 2, "trust_level": 3}})
-        assert cfg.team_mode.enabled is True
+        cfg = ProjConfig.from_dict({"team_mode": {"enabled": False, "max_agents": 2, "trust_level": 3}})
+        assert cfg.team_mode.enabled is False
         assert cfg.team_mode.max_agents == 2
         assert cfg.team_mode.trust_level == 3
 
@@ -260,4 +260,4 @@ class TestProjConfigTeamModeBackwardCompat:
         cfg = ProjConfig()
         d = cfg.to_dict()
         assert "team_mode" in d
-        assert d["team_mode"] == {"enabled": False, "max_agents": 4, "trust_level": 1}
+        assert d["team_mode"] == {"enabled": True, "max_agents": 4, "trust_level": 1}
