@@ -1,7 +1,7 @@
 ---
 name: migrate-sandbox
 description: Migrate from permissions.allow rules to sandbox-primary permission management. Backs up settings, configures sandbox, cleans up stale rules, reconciles MCP, installs deny rules, and verifies. Use when asked "migrate to sandbox", "clean up permissions", or "switch to sandbox mode".
-allowed-tools: mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, mcp__plugin_perms_perms__perms_reconcile_mcp, mcp__plugin_proj_proj__config_update, mcp__plugin_proj_proj__proj_list, mcp__plugin_proj_proj__proj_get, mcp__plugin_perms_perms__perms_backup, mcp__plugin_perms_perms__perms_restore, mcp__plugin_perms_perms__perms_cleanup_stale, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_proj_proj__proj_get_active, mcp__plugin_proj_proj__config_load, Bash
+allowed-tools: mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, mcp__plugin_perms_perms__perms_reconcile_mcp, mcp__plugin_proj_proj__config_update, mcp__plugin_proj_proj__proj_list, mcp__plugin_proj_proj__proj_get, mcp__plugin_perms_perms__perms_backup, mcp__plugin_perms_perms__perms_restore, mcp__plugin_perms_perms__perms_cleanup_stale, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_proj_proj__proj_get_active, mcp__plugin_proj_proj__config_load, mcp__plugin_worktree_worktree__wt_config_get, Bash
 argument-hint: "[--dry-run] [--restore <timestamp>]"
 ---
 
@@ -25,7 +25,7 @@ If `restore_timestamp` is set, jump to **step 10 (Rollback)**.
 Categorize all `permissions.allow` rules from BOTH files:
 - **Stale Read/Edit/Bash**: any `Read(...)`, `Edit(...)`, or `Bash(...)` rule
 - **MCP**: any `mcp__*` rule
-- **WebFetch**: any `WebFetch(...)` rule
+- **WebFetch/WebSearch**: any `WebFetch(...)` or `WebSearch(...)` rule
 - **Other**: anything not matching above categories
 
 **1c.** Call `perms_is_sandbox_enabled` to check current sandbox state.
@@ -41,8 +41,8 @@ Categorize current `sandbox.filesystem.allowWrite` paths:
 
 **Rules (permissions.allow)**
 - Stale Read/Edit/Bash: N (to remove)
-- MCP wildcards: N (to reconcile)
-- WebFetch: N (preserved)
+- MCP tools: N (to reconcile)
+- WebFetch/WebSearch: N (preserved)
 - Other: N (preserved)
 
 **Sandbox allowWrite paths**
@@ -54,13 +54,19 @@ Categorize current `sandbox.filesystem.allowWrite` paths:
 **Sandbox enabled**: yes/no
 ```
 
-**1e.** If user-added paths were detected, warn:
+**1e.** If user-added paths were detected (paths not present in any known project directory, tracking directory, or archive destination), warn:
 
 ```
-These sandbox paths are not managed by proj and will be preserved:
+⚠️  These sandbox paths are not managed by proj:
 - /path/one
 - /path/two
+
+These paths will be preserved during migration. Please confirm:
+- Keep all listed paths? (y)
+- Review and remove specific paths? (r)
 ```
+
+If user picks `r`: display each path individually and ask `keep / remove` for each. Remove any paths the user chooses to drop before proceeding.
 
 **1f.** If `dry_run`: display what WOULD change and **stop here**.
 
@@ -70,9 +76,14 @@ These sandbox paths are not managed by proj and will be preserved:
 These repos are outside projects_root (<root>):
 - <project-name>: <repo-path>
 
-Please move them under the root before migrating, or adjust projects_root to cover them.
+The sandbox will NOT cover these paths — they will not be writable unless
+you add them to sandbox.filesystem.allowWrite manually after migration.
+
+Please move them under the root before migrating, or adjust projects_root
+to cover them.
+
 (1) Continue anyway (repos outside root will need manual sandbox paths)
-(2) Stop - I'll move them first
+(2) Stop — I'll move them first
 ```
 
 If user picks 2: **stop migration**.
@@ -93,6 +104,10 @@ On failure: display error and **stop**.
 
 - `sandbox_paths` = `[projects_root, tracking_root]`
 - If `archive_dest` is NOT a sub-path of `projects_root` (containment check): append `archive_dest` to `sandbox_paths`
+- Call `mcp__plugin_worktree_worktree__wt_config_get` to get the worktree configuration.
+  - If the call returns null or an error: display "Error: Worktree config not found. Ensure `/worktree:setup` has been run before migrating." and **stop migration**.
+  - For each configured worktree base path in the worktree config: check if `archive_dest` is contained within that base path.
+  - If `archive_dest` is within a worktree base path: append `archive_dest` to `sandbox_paths` (if not already added above).
 - Derive expected MCP servers from config:
   - Always: `plugin_proj_proj`, `claude_ai_Excalidraw`, `claude_ai_Mermaid_Chart`
   - If `perms_integration: true`: `plugin_perms_perms`
@@ -133,15 +148,22 @@ On failure: display "Migration failed at step 6. Restore with: `perms_restore('<
 
 **7a.** Call `perms_set_deny` with the DEFAULT_DENY_RULES. This writes deny rules to settings.local.json.
 
-**7b.** If `permissions.deny` already exists in `settings.json`, warn:
+**7b.** If `permissions.deny` already exists in `settings.json`, warn (the user may have intentionally placed deny rules there):
 
 ```
-settings.json has existing deny rules. These may conflict with the new deny rules in settings.local.json.
-Clear deny rules from settings.json? (y/n)
+settings.json has existing deny rules. These may conflict with the new
+deny rules in settings.local.json.
+
+(1) Clear deny rules from settings.json (recommended — consolidate in settings.local.json)
+(2) Keep deny rules in settings.json (both files will have deny rules)
+(3) Skip deny rule installation entirely
+(4) Abort migration
 ```
 
-If user confirms: clear `permissions.deny` from `settings.json` via `perms_set_deny` targeting that file.
-If user declines: leave them in place and note in the summary.
+If user picks 1: clear `permissions.deny` from `settings.json` via `perms_set_deny` targeting that file.
+If user picks 2: leave them in place and note the conflict in the final summary.
+If user picks 3: skip this step entirely (no deny rules installed), note in summary.
+If user picks 4: display "Migration aborted at step 7. Restore with: `perms_restore('<timestamp>')`" and **stop**.
 
 On failure: display "Migration failed at step 7. Restore with: `perms_restore('<timestamp>')`" and **stop**.
 
@@ -216,7 +238,7 @@ The following are explicitly **preserved as-is** during migration:
 - `sandbox.allowUnsandboxedCommands`
 - `sandbox.filesystem.denyRead`, `sandbox.filesystem.denyWrite`, `sandbox.filesystem.allowRead`
 - `permissions.additionalDirectories`
-- WebFetch rules in `permissions.allow`
+- WebFetch/WebSearch rules in `permissions.allow`
 - Non-stale MCP rules from non-proj servers (user-managed)
 
 ## Output
