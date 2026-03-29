@@ -72,9 +72,9 @@ def load_local(scope: str = "user", project_dir: Path | None = None) -> Settings
 
 
 def is_sandbox_enabled(scope: str = "user", project_dir: Path | None = None) -> bool:
-    """Check if sandbox mode is enabled by reading settings.local.json."""
-    local = load_local(scope, project_dir)
-    return local.sandbox.enabled
+    """Check if sandbox mode is enabled by reading settings.json."""
+    settings = load(scope, project_dir)
+    return settings.sandbox.enabled
 
 
 def resolve_target(target: str, scope: str = "user", project_dir: Path | None = None) -> str:
