@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_perms_perms__perms_sandbox_init, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_perms_perms__perms_sandbox_init, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -34,7 +34,42 @@ Detected plugins: perms, worktree, hooks, todoist, zoxide
 Not found: trello, jira
 ```
 
-## Step 3: Collect configuration (grouped)
+## Step 3: Plugin Credential Setup
+
+For each detected plugin that requires credentials, check whether credentials are already configured. If not, prompt the user and call the init tool. This phase is non-blocking — if a plugin is not detected or the user skips it, continue to the next.
+
+### Trello (only if trello detected in Step 2)
+1. Read `~/.claude/trello.yaml` (via Bash: `cat ~/.claude/trello.yaml 2>/dev/null`)
+2. If the file exists and contains both `api_key` and `token` fields with non-empty values → show "Trello: ✓ credentials configured" and skip
+3. If not configured → prompt the user:
+   - "Trello API key?" (required)
+   - "Trello API token?" (required)
+4. Call `mcp__plugin_trello_trello__trello_init` with the provided `api_key` and `token`
+5. If the init call returns an error → show the error and continue (do not block setup)
+6. If successful → show "Trello: ✓ credentials saved to ~/.claude/trello.yaml"
+
+### Jira (only if jira detected in Step 2)
+1. Read `~/.claude/jira.yaml` (via Bash: `cat ~/.claude/jira.yaml 2>/dev/null`)
+2. If the file exists and contains both `base_url` and `personal_access_token` fields with non-empty values → show "Jira: ✓ credentials configured" and skip
+3. If not configured → prompt the user:
+   - "Jira base URL? (e.g. https://yourcompany.atlassian.net)" (required)
+   - "Jira personal access token?" (required)
+4. Call `mcp__plugin_jira_jira__jira_init` with the provided `base_url` and `personal_access_token`
+5. If the init call returns an error → show the error and continue (do not block setup)
+6. If successful → show "Jira: ✓ credentials saved to ~/.claude/jira.yaml"
+
+### Todoist (only if todoist detected in Step 2)
+1. Read `~/.claude/todoist.yaml` (via Bash: `cat ~/.claude/todoist.yaml 2>/dev/null`)
+2. If the file exists and contains an `api_token` field with a non-empty value → show "Todoist: ✓ credentials configured" and skip
+3. If not configured → prompt the user:
+   - "Todoist API token?" (required)
+4. Call `mcp__plugin_todoist_todoist__todoist_init` with the provided `api_token`
+5. If the init call returns an error → show the error and continue (do not block setup)
+6. If successful → show "Todoist: ✓ credentials saved to ~/.claude/todoist.yaml"
+
+If no sync plugins were detected, skip this step entirely.
+
+## Step 4: Collect configuration (grouped)
 
 Present questions in logical groups. Within each group, show all questions together and collect answers as a batch. When reconfiguring, show the current value in brackets.
 
@@ -94,7 +129,7 @@ Skip sync sections entirely for plugins that are not detected.
 - **Archive purge** — "Days after archiving before purgeable projects are eligible for purge? Leave empty for never. [none]"
   - Store as `archive_purge_after_days` (None if blank, integer if provided)
 
-## Step 4: Show summary before applying
+## Step 5: Show summary before applying
 
 Before calling config_init, display a summary of all settings that will be applied:
 
@@ -125,9 +160,9 @@ Configuration summary:
 Apply this configuration? [yes]
 ```
 
-If the user declines, return to step 3.
+If the user declines, return to step 4.
 
-## Step 5: Apply configuration
+## Step 6: Apply configuration
 
 Call `mcp__proj__config_init` with all collected values including:
 - Core paths: `tracking_dir`, `projects_base_dir`
@@ -139,9 +174,9 @@ Call `mcp__proj__config_init` with all collected values including:
 
 Omit `todoist_mcp_server` when `todoist_enabled: false`.
 
-## Step 6: Permission setup (if perms plugin detected)
+## Step 7: Permission setup (if perms plugin detected)
 
-### 6a. MCP auto-allow
+### 7a. MCP auto-allow
 Build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
 - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
 - If `auto_allow_mcps: true`, also include: `"plugin_proj_proj"`, `"plugin_perms_perms"`
@@ -154,36 +189,36 @@ Build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_all
 - Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
 - If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"`.
 
-### 6b. Verify MCP rules
+### 7b. Verify MCP rules
 Call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"`.
 Parse `permissions_allow` from the result.
 - If `perms_integration: true`: check for `mcp__plugin_perms_perms__*` — warn if missing
 - If `worktree_integration: true`: check for `mcp__plugin_worktree_worktree__*` — warn if missing
 
-### 6c. Sandbox setup
+### 7c. Sandbox setup
 - Compute `projects_root` from `projects_base_dir`
 - Compute `tracking_root` from `tracking_dir`
 - Compute `archive_destination` from archive config
 - Call `perms_set_sandbox_paths` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`
 
-### 6d. Default deny rules
+### 7d. Default deny rules
 - Call `perms_set_deny` with the default deny rules list (from `DEFAULT_DENY_RULES` constant)
 
-### 6e. Persist root paths
+### 7e. Persist root paths
 - Call `config_update` with `permissions_projects_root=<projects_root>` and `permissions_tracking_root=<tracking_root>`
 
-If perms plugin is not detected, skip all of step 6 with: "Perms plugin not detected — skipping permission and sandbox setup."
+If perms plugin is not detected, skip all of step 7 with: "Perms plugin not detected — skipping permission and sandbox setup."
 
-## Step 7: Hook setup (if hooks plugin detected)
+## Step 8: Hook setup (if hooks plugin detected)
 
-### 7a. Verify hooks server connectivity
+### 8a. Verify hooks server connectivity
 Call `mcp__plugin_hooks_hooks__hooks_list_tool` to check reachability.
 - If unreachable: warn "Hooks server not reachable. You can check manually with `GET http://127.0.0.1:19100/health`."
   Offer: (1) Continue without hooks (2) Stop and fix.
-  If user continues, skip to step 8.
+  If user continues, skip to step 9.
 - If reachable: proceed.
 
-### 7b. Check and register default hooks
+### 8b. Check and register default hooks
 Inspect the hooks list result.
 - If no hooks registered: warn "No hooks registered. Will attempt to register default hooks for detected plugins."
 
@@ -197,7 +232,7 @@ For each detected and enabled plugin, register its default hooks by calling `mcp
 
 Report how many hooks were registered: "Registered N default hooks for: proj, todoist, zoxide"
 
-### 7c. Validate hook condition paths
+### 8c. Validate hook condition paths
 Inspect the `condition` field of each registered hook. Known fixes:
 - `todoist.enabled` should be `sync.todoist.enabled`
 - `todoist.auto_sync` should be `sync.todoist.auto_sync`
@@ -207,9 +242,9 @@ Inspect the `condition` field of each registered hook. Known fixes:
 
 If mismatches found, list them and offer to fix by editing `~/.claude/hooks.yaml`.
 
-If hooks plugin is not detected, skip all of step 7 with: "Hooks plugin not detected — skipping hook registration. Hooks enable automatic sync between plugins."
+If hooks plugin is not detected, skip all of step 8 with: "Hooks plugin not detected — skipping hook registration. Hooks enable automatic sync between plugins."
 
-## Step 8: Confirmation
+## Step 9: Confirmation
 
 Display: "proj plugin configured! Configuration saved to `~/.claude/proj.yaml`"
 
@@ -223,7 +258,7 @@ Setup complete:
   Hooks: 12 registered
 ```
 
-## Step 9: Next steps
+## Step 10: Next steps
 
 "Run `/proj:init` to start tracking your first project."
 
@@ -238,6 +273,7 @@ Suggested next: `1. /proj:init` -- create your first project | `2. /proj:load` -
 - **Already configured**: shows current values, asks to reconfigure. If declined, stops.
 - **Config init failure**: displays error from `config_init` and stops.
 - **Plugin detection failure**: treats plugin as not installed, continues with others.
+- **Credential init failure**: displays error from the init tool and continues to the next plugin (non-blocking).
 - **Perms plugin not detected**: skips all permission/sandbox setup with a note.
 - **Hooks plugin not detected**: skips hook registration with a note.
 - **Hooks server unreachable**: warns user with options to continue or stop.
