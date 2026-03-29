@@ -285,7 +285,8 @@ def test_serialize_content_block_multiple():
 
 
 @pytest.mark.anyio
-async def test_dispatch_payload_format(mock_mcp):
+async def test_dispatch_payload_format_unix(mock_mcp):
+    """Default Unix socket dispatch sends correct payload."""
     enable_hook_dispatch(mock_mcp, hooks_port=19100)
 
     @mock_mcp.tool()
@@ -303,9 +304,32 @@ async def test_dispatch_payload_format(mock_mcp):
 
     mock_client.post.assert_awaited_once()
     url, kwargs = mock_client.post.call_args[0][0], mock_client.post.call_args[1]
-    assert url == "http://127.0.0.1:19100/hook"
+    assert url == "http://localhost/hook"
     payload = kwargs["json"]
     assert payload["tool"] == "hooks_fire_tool"
     assert payload["params"]["trigger_tool"] == "payload_tool"
     assert payload["params"]["depth"] == 0
     assert json.loads(payload["params"]["source_result"]) == {"status": "ok"}
+
+
+@pytest.mark.anyio
+async def test_dispatch_payload_format_tcp(mock_mcp, monkeypatch):
+    """TCP fallback dispatch sends to http://127.0.0.1:{port}/hook."""
+    monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+    enable_hook_dispatch(mock_mcp, hooks_port=19100)
+
+    @mock_mcp.tool()
+    async def tcp_tool() -> dict:
+        return {"val": 1}
+
+    with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await mock_mcp._registered_tools["tcp_tool"]()
+
+    url = mock_client.post.call_args[0][0]
+    assert url == "http://127.0.0.1:19100/hook"

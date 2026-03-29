@@ -12,7 +12,7 @@ zoxide_tools.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, 19107)
+    run_dual(mcp, "zoxide", default_port=19107)
 
 
 if __name__ == "__main__":

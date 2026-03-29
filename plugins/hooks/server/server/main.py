@@ -49,7 +49,7 @@ _run_startup_discovery()
 
 
 def main() -> None:
-    run_dual(mcp, 19100)
+    run_dual(mcp, "hooks", default_port=19100)
 
 
 if __name__ == "__main__":

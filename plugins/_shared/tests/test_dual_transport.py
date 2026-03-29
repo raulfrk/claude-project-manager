@@ -3,37 +3,44 @@
 from __future__ import annotations
 
 import os
+import socket
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import pytest
 
-from hook_transport.dual_transport import _run_dual_async, _start_http
+from hook_transport.dual_transport import (
+    _cleanup_stale_socket,
+    _run_dual_async,
+    _socket_path,
+    _start_http,
+)
 
 
 # ── _start_http tests ────────────────────────────────────────────────────────
 
 
 @pytest.mark.anyio
-async def test_start_http_port_bind_failure(capsys):
-    """Port bind failure logs to stderr and returns cleanly (no crash)."""
+async def test_start_http_socket_bind_failure(capsys):
+    """Socket bind failure logs to stderr and returns cleanly (no crash)."""
     server = AsyncMock()
     server.serve = AsyncMock(side_effect=OSError("Address already in use"))
-    await _start_http(server, 19999)
+    await _start_http(server, "unix:///tmp/test.sock")
     captured = capsys.readouterr()
-    assert "19999" in captured.err
-    assert "failed to start" in captured.err
+    assert "test.sock" in captured.err
+    assert "unavailable" in captured.err
 
 
 @pytest.mark.anyio
-async def test_start_http_port_bind_system_exit(capsys):
-    """uvicorn calls sys.exit(1) on port bind failure — caught as SystemExit."""
+async def test_start_http_system_exit(capsys):
+    """uvicorn calls sys.exit(1) on bind failure — caught as SystemExit."""
     server = AsyncMock()
     server.serve = AsyncMock(side_effect=SystemExit(1))
-    await _start_http(server, 19999)
+    await _start_http(server, "unix:///tmp/test.sock")
     captured = capsys.readouterr()
-    assert "19999" in captured.err
-    assert "failed to start" in captured.err
+    assert "test.sock" in captured.err
+    assert "unavailable" in captured.err
 
 
 @pytest.mark.anyio
@@ -41,8 +48,64 @@ async def test_start_http_calls_serve():
     """Normal case: server.serve() is awaited."""
     server = AsyncMock()
     server.serve = AsyncMock(return_value=None)
-    await _start_http(server, 19100)
+    await _start_http(server, "unix:///tmp/test.sock")
     server.serve.assert_awaited_once()
+
+
+# ── _socket_path tests ──────────────────────────────────────────────────────
+
+
+def test_socket_path_format():
+    """Socket path follows expected format."""
+    assert _socket_path("hooks") == "/tmp/claude-hooks-hooks.sock"
+    assert _socket_path("todoist") == "/tmp/claude-hooks-todoist.sock"
+
+
+# ── _cleanup_stale_socket tests ─────────────────────────────────────────────
+
+
+def test_cleanup_stale_socket_nonexistent():
+    """No error when socket file doesn't exist."""
+    _cleanup_stale_socket("/tmp/nonexistent-test-socket.sock")
+
+
+def test_cleanup_stale_socket_removes_stale():
+    """Removes a socket file that nobody is listening on."""
+    with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
+        path = f.name
+    try:
+        # Create a socket file but don't listen on it — simulates stale
+        os.unlink(path)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(path)
+        sock.close()  # Close without listening — makes it stale
+        assert os.path.exists(path)
+        _cleanup_stale_socket(path)
+        assert not os.path.exists(path)
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
+def test_cleanup_stale_socket_raises_if_active():
+    """Raises RuntimeError when a process is actively listening."""
+    with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
+        path = f.name
+    os.unlink(path)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(path)
+        sock.listen(1)
+        with pytest.raises(RuntimeError, match="already in use"):
+            _cleanup_stale_socket(path)
+    finally:
+        sock.close()
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
 
 
 # ── _run_dual_async tests ────────────────────────────────────────────────────
@@ -60,6 +123,8 @@ async def test_pre_run_sync_callback_invoked():
         patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
         patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
         patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+        patch("hook_transport.dual_transport._cleanup_stale_socket"),
+        patch("hook_transport.dual_transport._register_socket_cleanup"),
     ):
         mock_create.return_value = MagicMock()
 
@@ -69,7 +134,6 @@ async def test_pre_run_sync_callback_invoked():
         mock_uvicorn.Config.return_value = MagicMock()
         mock_uvicorn.Server.return_value = mock_server
 
-        # Simulate stdio ending immediately
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
         mock_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -79,7 +143,7 @@ async def test_pre_run_sync_callback_invoked():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, 19100, pre_run=my_pre_run)
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=my_pre_run)
 
     assert called == ["sync"]
 
@@ -96,6 +160,8 @@ async def test_pre_run_async_callback_invoked():
         patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
         patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
         patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+        patch("hook_transport.dual_transport._cleanup_stale_socket"),
+        patch("hook_transport.dual_transport._register_socket_cleanup"),
     ):
         mock_create.return_value = MagicMock()
 
@@ -114,7 +180,7 @@ async def test_pre_run_async_callback_invoked():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, 19100, pre_run=my_async_pre_run)
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=my_async_pre_run)
 
     assert called == ["async"]
 
@@ -126,6 +192,8 @@ async def test_pre_run_none_is_noop():
         patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
         patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
         patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+        patch("hook_transport.dual_transport._cleanup_stale_socket"),
+        patch("hook_transport.dual_transport._register_socket_cleanup"),
     ):
         mock_create.return_value = MagicMock()
 
@@ -145,12 +213,88 @@ async def test_pre_run_none_is_noop():
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
         # Should not raise
-        await _run_dual_async(mock_mcp, 19100, pre_run=None)
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=None)
 
 
 @pytest.mark.anyio
-async def test_port_from_env_var(monkeypatch):
-    """HOOK_HTTP_PORT env var overrides default_port."""
+async def test_default_uses_unix_socket():
+    """Default transport mode uses Unix domain socket, not TCP."""
+    env = os.environ.copy()
+    env.pop("HOOK_TRANSPORT", None)
+
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
+        patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
+        patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+        patch("hook_transport.dual_transport._cleanup_stale_socket"),
+        patch("hook_transport.dual_transport._register_socket_cleanup"),
+    ):
+        mock_create.return_value = MagicMock()
+
+        mock_server = AsyncMock()
+        mock_server.serve = AsyncMock(return_value=None)
+        mock_server.should_exit = False
+        mock_uvicorn.Config.return_value = MagicMock()
+        mock_uvicorn.Server.return_value = mock_server
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_stdio.return_value = mock_ctx
+
+        mock_mcp = MagicMock()
+        mock_mcp._mcp_server.run = AsyncMock(return_value=None)
+        mock_mcp._mcp_server.create_initialization_options.return_value = {}
+
+        await _run_dual_async(mock_mcp, "todoist", default_port=19106)
+
+    mock_uvicorn.Config.assert_called_once()
+    call_kwargs = mock_uvicorn.Config.call_args
+    assert call_kwargs.kwargs.get("uds") == "/tmp/claude-hooks-todoist.sock"
+    assert "host" not in call_kwargs.kwargs
+    assert "port" not in call_kwargs.kwargs
+
+
+@pytest.mark.anyio
+async def test_tcp_fallback_via_env(monkeypatch):
+    """HOOK_TRANSPORT=tcp uses port-based transport."""
+    monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
+
+    with (
+        patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
+        patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
+        patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+    ):
+        mock_create.return_value = MagicMock()
+
+        mock_server = AsyncMock()
+        mock_server.serve = AsyncMock(return_value=None)
+        mock_server.should_exit = False
+        mock_uvicorn.Config.return_value = MagicMock()
+        mock_uvicorn.Server.return_value = mock_server
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_stdio.return_value = mock_ctx
+
+        mock_mcp = MagicMock()
+        mock_mcp._mcp_server.run = AsyncMock(return_value=None)
+        mock_mcp._mcp_server.create_initialization_options.return_value = {}
+
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+
+    mock_uvicorn.Config.assert_called_once()
+    call_kwargs = mock_uvicorn.Config.call_args
+    assert call_kwargs.kwargs.get("host") == "127.0.0.1"
+    assert call_kwargs.kwargs.get("port") == 19100
+
+
+@pytest.mark.anyio
+async def test_tcp_port_from_env_var(monkeypatch):
+    """HOOK_HTTP_PORT env var overrides default_port in TCP mode."""
+    monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
     monkeypatch.setenv("HOOK_HTTP_PORT", "19999")
 
     with (
@@ -175,79 +319,10 @@ async def test_port_from_env_var(monkeypatch):
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, 19100)
-
-    # Verify uvicorn.Config was called with env port
-    mock_uvicorn.Config.assert_called_once()
-    call_kwargs = mock_uvicorn.Config.call_args
-    assert call_kwargs.kwargs.get("port") == 19999 or call_kwargs[1].get("port") == 19999
-
-
-@pytest.mark.anyio
-async def test_port_fallback_to_default():
-    """Without HOOK_HTTP_PORT, uses default_port."""
-    env = os.environ.copy()
-    env.pop("HOOK_HTTP_PORT", None)
-
-    with (
-        patch.dict(os.environ, env, clear=True),
-        patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
-        patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
-        patch("hook_transport.dual_transport.create_hook_app") as mock_create,
-    ):
-        mock_create.return_value = MagicMock()
-
-        mock_server = AsyncMock()
-        mock_server.serve = AsyncMock(return_value=None)
-        mock_server.should_exit = False
-        mock_uvicorn.Config.return_value = MagicMock()
-        mock_uvicorn.Server.return_value = mock_server
-
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_stdio.return_value = mock_ctx
-
-        mock_mcp = MagicMock()
-        mock_mcp._mcp_server.run = AsyncMock(return_value=None)
-        mock_mcp._mcp_server.create_initialization_options.return_value = {}
-
-        await _run_dual_async(mock_mcp, 19101)
-
-    mock_uvicorn.Config.assert_called_once()
-    call_kwargs = mock_uvicorn.Config.call_args
-    assert call_kwargs.kwargs.get("port") == 19101 or call_kwargs[1].get("port") == 19101
-
-
-@pytest.mark.anyio
-async def test_http_binds_localhost_only():
-    """HTTP server binds to 127.0.0.1 only."""
-    with (
-        patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
-        patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
-        patch("hook_transport.dual_transport.create_hook_app") as mock_create,
-    ):
-        mock_create.return_value = MagicMock()
-
-        mock_server = AsyncMock()
-        mock_server.serve = AsyncMock(return_value=None)
-        mock_server.should_exit = False
-        mock_uvicorn.Config.return_value = MagicMock()
-        mock_uvicorn.Server.return_value = mock_server
-
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_stdio.return_value = mock_ctx
-
-        mock_mcp = MagicMock()
-        mock_mcp._mcp_server.run = AsyncMock(return_value=None)
-        mock_mcp._mcp_server.create_initialization_options.return_value = {}
-
-        await _run_dual_async(mock_mcp, 19100)
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
 
     call_kwargs = mock_uvicorn.Config.call_args
-    assert call_kwargs.kwargs.get("host") == "127.0.0.1" or call_kwargs[1].get("host") == "127.0.0.1"
+    assert call_kwargs.kwargs.get("port") == 19999
 
 
 @pytest.mark.anyio
@@ -257,6 +332,8 @@ async def test_stdio_shutdown_sets_should_exit():
         patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
         patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
         patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+        patch("hook_transport.dual_transport._cleanup_stale_socket"),
+        patch("hook_transport.dual_transport._register_socket_cleanup"),
     ):
         mock_create.return_value = MagicMock()
 
@@ -275,6 +352,6 @@ async def test_stdio_shutdown_sets_should_exit():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, 19100)
+        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
 
     assert mock_server.should_exit is True

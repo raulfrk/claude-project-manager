@@ -47,9 +47,16 @@ async def post_hook(
     """
     payload = {"tool": target_tool, "params": params}
     try:
-        transport = httpx.AsyncHTTPTransport(proxy=None)
+        if url.startswith("unix://"):
+            # Unix domain socket: unix:///tmp/claude-hooks-plugin.sock
+            socket_path = url[len("unix://"):]
+            transport = httpx.AsyncHTTPTransport(uds=socket_path)
+            effective_url = "http://localhost/hook"
+        else:
+            transport = httpx.AsyncHTTPTransport(proxy=None)
+            effective_url = url
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(effective_url, json=payload)
             body_text = resp.text
             # Handle empty response
             if not body_text or not body_text.strip():

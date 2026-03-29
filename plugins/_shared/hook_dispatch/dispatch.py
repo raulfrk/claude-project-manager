@@ -56,10 +56,27 @@ def _serialize_result(result: Any) -> str:
     return serialized
 
 
+def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTransport | None]:
+    """Return (url, transport) for the hooks server based on HOOK_TRANSPORT env.
+
+    - Default (unix): connect via Unix domain socket at /tmp/claude-hooks-hooks.sock
+    - HOOK_TRANSPORT=tcp: connect via TCP to 127.0.0.1:{hooks_port}
+    """
+    import os
+
+    transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
+    if transport_mode == "tcp":
+        return f"http://127.0.0.1:{hooks_port}/hook", httpx.AsyncHTTPTransport(proxy=None)
+    # Unix domain socket
+    sock_path = "/tmp/claude-hooks-hooks.sock"
+    return "http://localhost/hook", httpx.AsyncHTTPTransport(uds=sock_path)
+
+
 async def _dispatch_hook(
     tool_name: str,
     result: Any,
     hooks_url: str,
+    hooks_transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
     """POST hook dispatch to the hooks server. Swallows connection/timeout errors."""
     serialized = _serialize_result(result)
@@ -72,7 +89,7 @@ async def _dispatch_hook(
         },
     }
     try:
-        transport = httpx.AsyncHTTPTransport(proxy=None)
+        transport = hooks_transport or httpx.AsyncHTTPTransport(proxy=None)
         async with httpx.AsyncClient(timeout=30.0, transport=transport) as client:
             await client.post(hooks_url, json=payload)
     except (httpx.ConnectError, httpx.TimeoutException):
@@ -90,10 +107,10 @@ def enable_hook_dispatch(
 
     Args:
         mcp: The FastMCP instance to patch.
-        hooks_port: Port of the hooks server (default 19100).
+        hooks_port: Port of the hooks server (default 19100). Only used with HOOK_TRANSPORT=tcp.
         exclude: Tool names to skip dispatch for.
     """
-    hooks_url = f"http://127.0.0.1:{hooks_port}/hook"
+    hooks_url, hooks_transport = _resolve_hooks_transport(hooks_port)
     excluded: set[str] = set(exclude) if exclude else set()
     original_tool = mcp.tool
 
@@ -109,7 +126,7 @@ def enable_hook_dispatch(
             tool_name = fn.__name__
             if tool_name in excluded:
                 return original_tool(fn)
-            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url)
+            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url, hooks_transport)
             return original_tool(wrapped)
 
         # @mcp.tool() or @mcp.tool(name="custom", ...) — returns a decorator
@@ -121,7 +138,7 @@ def enable_hook_dispatch(
             tool_name = custom_name or fn.__name__
             if tool_name in excluded:
                 return decorator(fn)
-            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url)
+            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url, hooks_transport)
             return decorator(wrapped)
 
         return wrapper
@@ -129,7 +146,12 @@ def enable_hook_dispatch(
     mcp.tool = patched_tool  # type: ignore[method-assign]
 
 
-def _wrap_tool_fn(fn: Any, tool_name: str, hooks_url: str) -> Any:
+def _wrap_tool_fn(
+    fn: Any,
+    tool_name: str,
+    hooks_url: str,
+    hooks_transport: httpx.AsyncBaseTransport | None = None,
+) -> Any:
     """Wrap a tool function to dispatch hooks after successful execution.
 
     Both sync and async tools get an async wrapper. FastMCP's call_fn_with_arg_validation
@@ -145,7 +167,7 @@ def _wrap_tool_fn(fn: Any, tool_name: str, hooks_url: str) -> Any:
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             result = await fn(*args, **kwargs)
-            await _dispatch_hook(tool_name, result, hooks_url)
+            await _dispatch_hook(tool_name, result, hooks_url, hooks_transport)
             return result
 
         return async_wrapper
@@ -154,7 +176,7 @@ def _wrap_tool_fn(fn: Any, tool_name: str, hooks_url: str) -> Any:
     # Copy signature from original fn so FastMCP argument validation works.
     async def sync_to_async_wrapper(*args: Any, **kwargs: Any) -> Any:
         result = fn(*args, **kwargs)
-        await _dispatch_hook(tool_name, result, hooks_url)
+        await _dispatch_hook(tool_name, result, hooks_url, hooks_transport)
         return result
 
     sync_to_async_wrapper.__name__ = fn.__name__

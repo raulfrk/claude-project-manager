@@ -13,7 +13,7 @@ tasks.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, 19106)
+    run_dual(mcp, "todoist", default_port=19106)
 
 
 if __name__ == "__main__":

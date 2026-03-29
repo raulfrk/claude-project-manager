@@ -2,13 +2,18 @@
 
 The HTTP endpoint enables inter-server hook communication — other MCP servers
 can POST tool calls to ``/hook`` via the hooks plugin's fire mechanism.
+
+By default, uses Unix domain sockets for transport (sandbox-friendly).
+Set ``HOOK_TRANSPORT=tcp`` to fall back to TCP on 127.0.0.1.
 """
 
 from __future__ import annotations
 
+import atexit
 import inspect
 import logging
 import os
+import socket
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -24,8 +29,48 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hook_transport.dual")
 
+SOCKET_DIR = "/tmp"
+SOCKET_PREFIX = "claude-hooks-"
 
-async def _start_http(server: Any, port: int) -> None:
+
+def _socket_path(plugin_name: str) -> str:
+    """Return the Unix domain socket path for a plugin."""
+    return f"{SOCKET_DIR}/{SOCKET_PREFIX}{plugin_name}.sock"
+
+
+def _cleanup_stale_socket(path: str) -> None:
+    """Remove a stale socket file if it exists and nothing is listening on it."""
+    if not os.path.exists(path):
+        return
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.connect(path)
+        # Connected successfully — something is actively listening, don't remove
+        sock.close()
+        raise RuntimeError(f"Socket {path} is already in use by another process")
+    except ConnectionRefusedError:
+        # Nobody listening — stale socket, safe to remove
+        logger.info("Removing stale socket: %s", path)
+        os.unlink(path)
+    except FileNotFoundError:
+        pass  # Race condition: file disappeared between exists() and connect()
+    finally:
+        sock.close()
+
+
+def _register_socket_cleanup(path: str) -> None:
+    """Register atexit handler to remove the socket file on shutdown."""
+
+    def _cleanup() -> None:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+    atexit.register(_cleanup)
+
+
+async def _start_http(server: Any, label: str) -> None:
     """Start the uvicorn HTTP server, catching all failures gracefully.
 
     The HTTP endpoint is optional — if it fails to start (port conflict,
@@ -41,28 +86,23 @@ async def _start_http(server: Any, port: int) -> None:
     except KeyboardInterrupt:
         raise
     except BaseException as exc:
-        # Determine a helpful hint for the operator
         exc_name = type(exc).__name__
         if isinstance(exc, PermissionError):
-            hint = (
-                " (sandbox may be blocking network bind — "
-                "allowlist 127.0.0.1:{port} or disable sandbox to "
-                "restore hook HTTP endpoints)"
-            ).format(port=port)
+            hint = " (sandbox may be blocking socket/network bind)"
         elif isinstance(exc, OSError):
-            hint = " (port may already be in use)"
+            hint = " (socket/port may already be in use)"
         else:
             hint = ""
         logger.warning(
-            "HTTP hook server on port %d failed to start (%s: %s)%s "
+            "HTTP hook server %s failed to start (%s: %s)%s "
             "— falling back to stdio-only transport",
-            port,
+            label,
             exc_name,
             exc,
             hint,
         )
         print(
-            f"[hook_transport] HTTP hook server on port {port} unavailable "
+            f"[hook_transport] HTTP hook server {label} unavailable "
             f"({exc_name}){hint} — stdio transport continues normally",
             file=sys.stderr,
         )
@@ -70,7 +110,8 @@ async def _start_http(server: Any, port: int) -> None:
 
 async def _run_dual_async(
     mcp_instance: FastMCP,
-    default_port: int,
+    plugin_name: str,
+    default_port: int | None = None,
     pre_run: Callable[..., Any] | None = None,
 ) -> None:
     """Internal async implementation of dual-transport startup."""
@@ -81,20 +122,36 @@ async def _run_dual_async(
         else:
             pre_run()
 
-    port = int(os.environ.get("HOOK_HTTP_PORT", str(default_port)))
+    transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
     hook_app = create_hook_app(mcp_instance)
 
-    config = uvicorn.Config(
-        hook_app,
-        host="127.0.0.1",
-        port=port,
-        log_level="warning",
-    )
+    if transport_mode == "tcp":
+        # Legacy TCP fallback
+        port = int(os.environ.get("HOOK_HTTP_PORT", str(default_port or 19100)))
+        config = uvicorn.Config(
+            hook_app,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+        )
+        label = f"tcp://127.0.0.1:{port}"
+    else:
+        # Unix domain socket (default)
+        sock_path = _socket_path(plugin_name)
+        _cleanup_stale_socket(sock_path)
+        _register_socket_cleanup(sock_path)
+        config = uvicorn.Config(
+            hook_app,
+            uds=sock_path,
+            log_level="warning",
+        )
+        label = f"unix://{sock_path}"
+
     server = uvicorn.Server(config)
 
     async with anyio.create_task_group() as tg:
         # Start HTTP server in background task
-        tg.start_soon(_start_http, server, port)
+        tg.start_soon(_start_http, server, label)
 
         # Run stdio transport (blocks until stdin closes)
         async with stdio_server() as (read_stream, write_stream):
@@ -110,7 +167,8 @@ async def _run_dual_async(
 
 def run_dual(
     mcp_instance: FastMCP,
-    default_port: int,
+    plugin_name: str,
+    default_port: int | None = None,
     pre_run: Callable[..., Any] | None = None,
 ) -> None:
     """Run a FastMCP server with both stdio and HTTP transports.
@@ -120,8 +178,11 @@ def run_dual(
 
     Args:
         mcp_instance: The FastMCP server instance with tools registered.
-        default_port: Default HTTP port (overridable via ``HOOK_HTTP_PORT`` env var).
+        plugin_name: Plugin identifier used for the Unix socket filename.
+        default_port: Default HTTP port for TCP fallback (overridable via
+                      ``HOOK_HTTP_PORT`` env var). Only used when
+                      ``HOOK_TRANSPORT=tcp``.
         pre_run: Optional callback invoked before transports start. Supports both
                  sync and async callables.
     """
-    anyio.run(_run_dual_async, mcp_instance, default_port, pre_run)
+    anyio.run(_run_dual_async, mcp_instance, plugin_name, default_port, pre_run)
