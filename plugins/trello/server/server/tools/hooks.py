@@ -108,6 +108,36 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Hook-friendly batch checklist item creation for batch child todo sync. "
+            "Creates multiple checklist items on the given checklist. "
+            "Returns a warning (not an error) if checklist_id is null/empty. "
+            "Items is a list of item name strings."
+        ),
+    )
+    def trello_batch_add_checklist_items_hook(
+        checklist_id: str | None,
+        items: list[str],
+    ) -> str:
+        if not checklist_id:
+            return json.dumps({
+                "warning": "trello_checklist_id is null — skipping batch Trello sync",
+            })
+        client = get_client()
+        successes: list[dict] = []
+        failures: list[dict] = []
+        for idx, name in enumerate(items):
+            try:
+                created = client.post(
+                    f"/checklists/{checklist_id}/checkItems",
+                    params={"name": name},
+                )
+                successes.append(created)
+            except Exception as exc:  # noqa: BLE001
+                failures.append({"index": idx, "name": name, "error": str(exc)})
+        return json.dumps({"successes": successes, "failures": failures})
+
+    @app.tool(
+        description=(
             "Hook-friendly checklist item creation for child todo sync. "
             "Creates a checklist item on the given checklist. "
             "Returns a warning (not an error) if checklist_id is null/empty — "

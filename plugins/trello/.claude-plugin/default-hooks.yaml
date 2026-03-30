@@ -91,3 +91,16 @@ hooks:
     feedback_tool: todo_update
     feedback_mapping:
       result.id: trello_checklist_item_id
+
+  - id: trello-on-todo-batch-add-children
+    trigger_tool: todo_batch_add_children
+    target_tool: trello_batch_add_checklist_items_hook
+    server: trello
+    param_mapping:
+      checklist_id: "${trello_checklist_id}"
+      items: "${children[*].title}"
+    feedback_tool: todo_update
+    feedback_mapping:
+      "children[*].id": "trello_checklist_item_id"
+    blocking: true
+    condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
