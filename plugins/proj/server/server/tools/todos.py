@@ -389,6 +389,28 @@ def register(app: FastMCP) -> None:
         result_data.update(_todo_hook_fields(todo, meta, name))
         return json.dumps(result_data)
 
+    @app.tool(description="Revert a completed todo back to pending.")
+    def todo_uncomplete(todo_id: str, project_name: str | None = None) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        todos = storage.load_todos(cfg, name)
+        todo = next((t for t in todos if t.id == todo_id), None)
+        if not todo:
+            # Check if it's archived
+            archived = storage.load_archived_todos(cfg, name)
+            if any(t.id == todo_id for t in archived):
+                return json.dumps({"error": f"todo {todo_id} is archived — cannot uncomplete"})
+            return json.dumps({"error": f"todo {todo_id} not found"})
+        if todo.status != TodoStatus.DONE:
+            return json.dumps({"error": f"todo {todo_id} is not completed (status: {todo.status.value})"})
+        todo.status = TodoStatus.PENDING
+        todo.updated = _now()
+        meta = storage.load_meta(cfg, name)
+        storage.save_todos(cfg, name, todos)
+        return json.dumps({"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name)})
+
     @app.tool(
         description=(
             "Check if a todo is executable (not tagged `manual`). "
