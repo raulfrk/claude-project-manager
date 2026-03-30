@@ -362,12 +362,12 @@ def register(app: FastMCP) -> None:
                     "error": f"Failed to create Trello card: {e}",
                 })
 
-        # 6. Check for pull_delete candidates (future-proofing for 378)
-        pull_delete = getattr(plan, "pull_delete", None)
-        if pull_delete:
+        # 6. Check for pull_delete candidates requiring user confirmation
+        if plan.pull_delete:
             return json.dumps({
                 "status": "needs_confirmation",
-                "pull_delete_pending": pull_delete,
+                "requires_confirmation": True,
+                "pull_delete_pending": plan.pull_delete,
             })
 
         # 7. Empty diff -> up to date
