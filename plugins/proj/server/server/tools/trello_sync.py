@@ -135,6 +135,7 @@ class TrelloApplyInput:
     updated_locally: list[dict[str, Any]] = field(default_factory=list)
     completed_locally: list[str] = field(default_factory=list)
     reopened_locally: list[str] = field(default_factory=list)
+    pull_delete: list[str] = field(default_factory=list)
     link_trello_ids: list[dict[str, str]] = field(default_factory=list)
     link_trello_card_id: str | None = None
 
@@ -782,6 +783,7 @@ def apply_changes(
         "updated": 0,
         "completed": 0,
         "reopened": 0,
+        "pull_deleted": 0,
         "linked": 0,
     }
 
@@ -950,6 +952,26 @@ def apply_changes(
         todo.updated = now
         counts["reopened"] += 1
 
+    # 7b. Delete user-confirmed todos (pull_delete)
+    for raw_todo_id in data.pull_delete:
+        todo = todo_map.get(str(raw_todo_id))
+        if not todo:
+            continue  # already deleted or non-existent — skip gracefully
+        # Clean up references
+        for t in todos:
+            if todo.id in t.blocks:
+                t.blocks.remove(todo.id)
+                t.updated = now
+            if todo.id in t.blocked_by:
+                t.blocked_by.remove(todo.id)
+                t.updated = now
+            if todo.id in t.children:
+                t.children.remove(todo.id)
+                t.updated = now
+        todos = [t for t in todos if t.id != todo.id]
+        todo_map.pop(todo.id, None)
+        counts["pull_deleted"] += 1
+
     # 8. Record trello_sync_state on all synced todos (232.7)
     # Only update sync state when push operations have been confirmed complete,
     # so the snapshot reflects what Trello actually has.
@@ -1048,7 +1070,7 @@ def register(app: FastMCP) -> None:
         else:
             response["auto_applied"] = {
                 "created": 0, "created_root": 0, "updated": 0,
-                "completed": 0, "reopened": 0, "linked": 0,
+                "completed": 0, "reopened": 0, "pull_deleted": 0, "linked": 0,
             }
 
         return json.dumps(response, indent=2)
@@ -1057,7 +1079,8 @@ def register(app: FastMCP) -> None:
         description=(
             "Apply Trello sync results to local todos in bulk. Takes a JSON "
             "object with: created_locally, created_root_locally, updated_locally, "
-            "completed_locally, reopened_locally, link_trello_ids, "
+            "completed_locally, reopened_locally, pull_delete (list of todo_ids "
+            "confirmed for deletion), link_trello_ids, "
             "link_trello_card_id. All changes are applied atomically. "
             "Records trello_sync_state on each synced todo after apply."
         )
@@ -1083,6 +1106,7 @@ def register(app: FastMCP) -> None:
             updated_locally=raw.get("updated_locally", []),
             completed_locally=raw.get("completed_locally", []),
             reopened_locally=raw.get("reopened_locally", []),
+            pull_delete=raw.get("pull_delete", []),
             link_trello_ids=raw.get("link_trello_ids", []),
             link_trello_card_id=raw.get("link_trello_card_id"),
         )
