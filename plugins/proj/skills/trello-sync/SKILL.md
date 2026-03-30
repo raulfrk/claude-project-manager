@@ -169,6 +169,21 @@ Do not proceed with any further sync steps.
   - `project_info` -- board_id, trello_card_id, default_list
   - `auto_applied` -- counts of pull operations already applied locally
 
+**5b.** Handle pull_delete entries
+
+If the diff contains `pull_delete` entries, these are todos whose linked Trello checklist items have been deleted. For each entry, display:
+
+```
+Todo "<title>" (id: <todo_id>) was deleted on Trello. Delete locally? [Y/n]
+```
+
+- **Y** (default): include the `todo_id` in the `pull_delete` list passed to `mcp__proj__proj_trello_apply`.
+- **n**: skip — the local todo is preserved.
+
+**Important**: Auto-sync setting does NOT bypass this confirmation. The `auto_apply=True` path in `proj_trello_diff` explicitly excludes `pull_delete` entries. They always require user confirmation.
+
+If there are warnings about missing checklists, display them to the user but take no action (these indicate the entire checklist was removed, not individual items).
+
 **6.** Execute push operations
 
 Process each push operation from the plan by calling the appropriate Trello MCP tools.
@@ -224,7 +239,7 @@ Display only if changes occurred:
 
 ```
 Trello sync complete.
-<- Pulled from Trello: {created} created, {updated} updated, {completed} completed, {reopened} reopened
+<- Pulled from Trello: {created} created, {updated} updated, {completed} completed, {reopened} reopened, {pull_deleted} deleted
 -> Pushed to Trello:   {checklists_created} checklists, {items_created} items created, {items_updated} updated, {items_completed} completed
 ```
 
