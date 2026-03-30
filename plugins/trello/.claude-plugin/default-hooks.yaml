@@ -21,6 +21,16 @@ hooks:
     blocking: false
     condition: "sync.trello.enabled and project.trello_card_id"
 
+  - id: trello-on-proj-archive
+    trigger_tool: proj_archive
+    target_tool: move_card
+    server: trello
+    param_mapping:
+      card_id: "${trello_card_id}"
+      list_id: "${sync.trello.list_mappings.archived}"
+    blocking: false
+    condition: "sync.trello.enabled and project.trello_card_id and sync.trello.list_mappings.archived"
+
   - id: trello-on-todo-add
     trigger_tool: todo_add
     target_tool: add_checklist_item
