@@ -676,6 +676,39 @@ class TestTodosMCPTools:
 
 
 @pytest.mark.asyncio
+class TestTodoUncomplete:
+    async def test_uncomplete_done_todo(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+        cfg, name = project
+        # Add a parent so completing child keeps it in active (not archived)
+        await call_tool(mcp_app, "todo_add", title="Parent")
+        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_complete", todo_id="1.1")
+        # Now uncomplete it
+        result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1.1")
+        data = _json.loads(result)
+        assert data["id"] == "1.1"
+        assert data["status"] == "pending"
+        # Verify in storage
+        todos = storage.load_todos(cfg, name)
+        child = next(t for t in todos if t.id == "1.1")
+        status = child.status.value if hasattr(child.status, "value") else child.status
+        assert status == "pending"
+
+    async def test_uncomplete_pending_todo_returns_error(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+        await call_tool(mcp_app, "todo_add", title="Pending task")
+        result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1")
+        data = _json.loads(result)
+        assert "error" in data
+        assert "not completed" in data["error"]
+
+    async def test_uncomplete_nonexistent_todo_returns_error(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+        result = await call_tool(mcp_app, "todo_uncomplete", todo_id="999")
+        data = _json.loads(result)
+        assert "error" in data
+        assert "not found" in data["error"]
+
+
+@pytest.mark.asyncio
 class TestNotFoundResponses:
     async def test_todo_update_not_found(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "todo_update", todo_id="nonexistent-999")

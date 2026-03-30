@@ -403,8 +403,9 @@ def register(app: FastMCP) -> None:
             if any(t.id == todo_id for t in archived):
                 return json.dumps({"error": f"todo {todo_id} is archived — cannot uncomplete"})
             return json.dumps({"error": f"todo {todo_id} not found"})
-        if todo.status != TodoStatus.DONE:
-            return json.dumps({"error": f"todo {todo_id} is not completed (status: {todo.status.value})"})
+        status_val = todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
+        if status_val != TodoStatus.DONE.value:
+            return json.dumps({"error": f"todo {todo_id} is not completed (status: {status_val})"})
         todo.status = TodoStatus.PENDING
         todo.updated = _now()
         meta = storage.load_meta(cfg, name)
