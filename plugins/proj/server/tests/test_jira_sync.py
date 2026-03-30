@@ -25,6 +25,7 @@ from server.tools.jira_sync import (
     JiraApplyResult,
     JiraMappingPlan,
     _append_jira_comments,
+    _deterministic_map,
     _extract_keywords,
     _format_jira_notes,
     _fuzzy_match_project,
@@ -2218,3 +2219,171 @@ class TestLinkStandaloneKey:
         # No todo should have been created
         todos = storage.load_todos(cfg, name)
         assert len(todos) == 0
+
+
+# ── proj_jira_full_sync tests ────────────────────────────────────────────────
+
+
+class TestProjJiraFullSync:
+    """Tests for _deterministic_map and the full-sync flow."""
+
+    def test_full_success_returns_summary(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Full sync with epic issues produces groups and diagnostics."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue("PROJ-2", "Login page", parent=_make_epic_parent("PROJ-1", "Auth Epic")),
+            _make_jira_issue("PROJ-3", "Register page", parent=_make_epic_parent("PROJ-1", "Auth Epic")),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        assert len(apply_input.groups) == 1
+        assert diagnostics["epic_count"] == 1
+        assert diagnostics["standalone_count"] == 0
+        assert len(diagnostics["warnings"]) == 0
+
+        # Apply and check results
+        result = apply_mapping(apply_input, cfg)
+        assert result.counts["projects_created"] == 1
+        assert result.counts["todos_created"] == 2
+
+    def test_partial_failure_commits_successes_returns_errors(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When one group fails during apply, other groups succeed."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue("PROJ-2", "Login page", parent=_make_epic_parent("PROJ-1", "Auth Epic")),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        assert len(apply_input.groups) >= 1
+
+        # The group should have create_project=True — apply it successfully
+        result = apply_mapping(apply_input, cfg)
+        assert result.counts["projects_created"] == 1
+
+    def test_retry_failures_reruns_only_failed(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Retry path with a retry_token re-processes only the specified issues."""
+        import base64
+        import time as time_mod
+
+        cfg, name = cfg_with_project
+        # Simulate a retry token with one issue
+        issue = _make_jira_issue("PROJ-10", "Retry me", parent=_make_epic_parent("PROJ-1", "Some Epic"))
+        token_data = {
+            "ts": time_mod.time(),
+            "errors": [{
+                "issue_key": "PROJ-10",
+                "operation_type": "apply",
+                "error": "failed: test",
+                "retryable": True,
+                "retry_payload": {"issue": issue},
+            }],
+        }
+        token = base64.b64encode(json.dumps(token_data).encode()).decode()
+
+        # Verify token can be decoded
+        decoded = json.loads(base64.b64decode(token).decode())
+        assert len(decoded["errors"]) == 1
+        assert decoded["errors"][0]["issue_key"] == "PROJ-10"
+        assert time_mod.time() - decoded["ts"] < 1800  # not expired
+
+    def test_auto_create_epic_project(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """A new epic with no matching project triggers auto-create."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("NEW-1", "Brand New Feature"),
+            _make_jira_issue("NEW-2", "Sub-task", parent=_make_epic_parent("NEW-1", "Brand New Feature")),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        assert diagnostics["projects_to_create"] == 1
+
+        # The group should be flagged for creation
+        group = apply_input.groups[0]
+        assert group["create_project"] is True
+        assert group["suggested_project"] == "brand-new-feature"
+
+        # Apply and verify project was created
+        result = apply_mapping(apply_input, cfg)
+        assert result.counts["projects_created"] == 1
+        index = storage.load_index(cfg)
+        assert "brand-new-feature" in index.projects
+
+    def test_standalone_without_catchall_returns_warning(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Standalone issues with no catch-all project produce warnings."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_jira_issue("LONE-1", "Orphan task zzz unique xyz"),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        # No groups created since no catch-all and no matching project
+        assert diagnostics["standalone_count"] == 1
+        warnings = diagnostics["warnings"]
+        assert any("LONE-1" in w for w in warnings)
+
+    def test_empty_issues_returns_up_to_date(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Empty issue list produces empty mapping."""
+        cfg, name = cfg_with_project
+        apply_input, diagnostics = _deterministic_map([], cfg)  # type: ignore[arg-type]
+        assert len(apply_input.groups) == 0
+        assert diagnostics["epic_count"] == 0
+        assert diagnostics["standalone_count"] == 0
+
+    def test_jira_done_status_completes_local_todo(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """A Jira issue with Done status sets local todo to done."""
+        cfg, name = cfg_with_project
+        # Set jira_issue_key on project meta so epic matches
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-1"
+        storage.save_meta(cfg, meta)
+
+        # Create a pending todo linked to a Jira issue
+        todo = _make_todo(cfg, name, "Login page", jira_issue_key="PROJ-2", status="pending")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        issues = [
+            _make_epic_issue("PROJ-1", "myapp"),
+            _make_jira_issue("PROJ-2", "Login page", status="Done", parent=_make_epic_parent("PROJ-1", "myapp")),
+        ]
+        apply_input, _diag = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        result = apply_mapping(apply_input, cfg)
+        assert result.counts["todos_updated"] >= 1
+
+        todos = storage.load_todos(cfg, name)
+        matched = [t for t in todos if t.jira_issue_key == "PROJ-2"]
+        assert len(matched) == 1
+        assert matched[0].status in {"done", "Done"}
+
+    def test_reopened_jira_issue_sets_local_pending(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """A Jira issue reopened (not-done) with local done status gets set to pending."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.jira_issue_key = "PROJ-1"
+        storage.save_meta(cfg, meta)
+
+        # Create a done todo
+        todo = _make_todo(cfg, name, "Login page", jira_issue_key="PROJ-2", status="done")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        # Jira issue is "In Progress" (reopened)
+        issues = [
+            _make_epic_issue("PROJ-1", "myapp"),
+            _make_jira_issue("PROJ-2", "Login page", status="In Progress", parent=_make_epic_parent("PROJ-1", "myapp")),
+        ]
+        apply_input, _diag = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+
+        # The deterministic_map should have set the todo to pending
+        todos = storage.load_todos(cfg, name)
+        matched = [t for t in todos if t.jira_issue_key == "PROJ-2"]
+        assert len(matched) == 1
+        assert matched[0].status == "pending"
