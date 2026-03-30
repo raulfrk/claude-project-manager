@@ -132,7 +132,7 @@ def register(app: FastMCP) -> None:
                     params={"name": name},
                 )
                 successes.append(created)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failures.append({"index": idx, "name": name, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
 
@@ -148,7 +148,9 @@ def register(app: FastMCP) -> None:
     def trello_add_checklist_item_hook(checklist_id: str | None, name: str) -> str:
         if not checklist_id:
             return json.dumps({
-                "warning": "parent_trello_checklist_id is null — skipping Trello sync for child todo",
+                "warning": (
+                    "parent_trello_checklist_id is null — skipping Trello sync for child todo"
+                ),
             })
         client = get_client()
         try:

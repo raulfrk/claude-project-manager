@@ -9,7 +9,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, date, timezone
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.lib import storage
@@ -35,7 +35,7 @@ _JIRA_TO_LOCAL: dict[str, str] = {
 }
 
 
-_UTC = timezone.utc
+_UTC = UTC
 
 
 def _now() -> str:
@@ -133,7 +133,8 @@ def _fuzzy_match_project(name: str, project_names: list[str], threshold: float =
         if _slugify(pn) == slug:
             return pn
     # Fuzzy match
-    matches = difflib.get_close_matches(name.lower(), [p.lower() for p in project_names], n=1, cutoff=threshold)
+    lower_names = [p.lower() for p in project_names]
+    matches = difflib.get_close_matches(name.lower(), lower_names, n=1, cutoff=threshold)
     if matches:
         # Find the original-case name
         for pn in project_names:
@@ -268,7 +269,10 @@ def _append_jira_comments(
     # otherwise add the header first.
     comments_header = "### Comments"
     if comments_header not in todo.notes:
-        todo.notes = todo.notes.rstrip() + "\n" + comments_header if todo.notes.strip() else comments_header
+        if todo.notes.strip():
+            todo.notes = todo.notes.rstrip() + "\n" + comments_header
+        else:
+            todo.notes = comments_header
     todo.notes = todo.notes.rstrip() + "\n" + "\n".join(new_parts)
     todo.jira_synced_comment_ids.extend(new_ids)
 
@@ -362,8 +366,12 @@ def _build_issue_entry(issue: dict[str, Any]) -> dict[str, object]:
             if isinstance(st, dict):
                 subtasks.append({
                     "key": str(st.get("key", "")),
-                    "summary": str(st.get("summary", "") or str(st.get("fields", {}).get("summary", ""))),
-                    "status": _parse_jira_status(st.get("fields", st) if isinstance(st.get("fields"), dict) else st),
+                    "summary": str(
+                        st.get("summary", "") or st.get("fields", {}).get("summary", "")
+                    ),
+                    "status": _parse_jira_status(
+                        st.get("fields", st) if isinstance(st.get("fields"), dict) else st
+                    ),
                 })
 
     entry: dict[str, object] = {
@@ -402,7 +410,9 @@ def _detect_epic_key(issue: dict[str, Any]) -> tuple[str | None, str | None]:
         if isinstance(parent_fields, dict):
             pt = parent_fields.get("issuetype", {})
             if isinstance(pt, dict) and str(pt.get("name", "")).lower() == "epic":
-                return str(parent.get("key", "")), str(parent_fields.get("summary", parent.get("key", "")))
+                epic_key_str = str(parent.get("key", ""))
+                epic_summary = str(parent_fields.get("summary", epic_key_str))
+                return epic_key_str, epic_summary
 
     return None, None
 
@@ -460,7 +470,7 @@ def _match_standalone(
 
     # 3. tag-based match (Jira labels vs project tags, case-insensitive)
     if labels:
-        label_set = {l.lower() for l in labels}
+        label_set = {lbl.lower() for lbl in labels}
         tag_matches: list[str] = []
         for name in existing_names:
             try:
@@ -775,14 +785,19 @@ def apply_mapping(
                     epic_desc = str(group.get("description", "") or "")
                     note_parts: list[str] = []
                     if epic_desc:
-                        note_parts.append(f"## Jira: {jira_key}\n### Description\n{epic_desc.strip()}")
+                        note_parts.append(
+                            f"## Jira: {jira_key}\n### Description\n{epic_desc.strip()}"
+                        )
                     epic_comments = comments_by_key.get(jira_key, [])
                     if epic_comments:
                         comment_lines: list[str] = []
                         for ec in epic_comments:
                             ec_author_raw = ec.get("author")
                             if isinstance(ec_author_raw, dict):
-                                ec_author = str(ec_author_raw.get("displayName", "") or ec_author_raw.get("name", ""))
+                                ec_author = str(
+                                    ec_author_raw.get("displayName", "")
+                                    or ec_author_raw.get("name", "")
+                                )
                             elif isinstance(ec_author_raw, str):
                                 ec_author = ec_author_raw
                             else:
@@ -794,7 +809,9 @@ def apply_mapping(
                     if note_parts:
                         storage.append_note(cfg, project_name, "\n".join(note_parts))
                     if epic_comments:
-                        meta.jira_synced_comment_ids = [str(ec.get("id", "")) for ec in epic_comments if ec.get("id")]
+                        meta.jira_synced_comment_ids = [
+                            str(ec.get("id", "")) for ec in epic_comments if ec.get("id")
+                        ]
                         storage.save_meta(cfg, meta)
             except Exception as exc:
                 # Project creation failed — mark all issues in group as failed
@@ -845,7 +862,9 @@ def apply_mapping(
             try:
                 if issue_key == meta.jira_issue_key:
                     # Root issue -> NOTES.md, not a todo
-                    _sync_root_issue_to_notes(cfg, project_name, meta, issue, comments_by_key.get(issue_key, []))
+                    _sync_root_issue_to_notes(
+                        cfg, project_name, meta, issue, comments_by_key.get(issue_key, [])
+                    )
                     result.per_issue[issue_key] = "skipped"
                     storage.save_meta(cfg, meta)
                     continue
@@ -916,7 +935,8 @@ def apply_mapping(
                         st_key = str(st.get("key", ""))
                         st_summary = str(st.get("summary", ""))
                         st_status = str(st.get("status", ""))
-                        st_resolved = st_status.lower() in {"done", "resolved", "closed", "cancelled", "canceled"}
+                        resolved_statuses = {"done", "resolved", "closed", "cancelled", "canceled"}
+                        st_resolved = st_status.lower() in resolved_statuses
                         if not st_key:
                             continue
 
@@ -1025,7 +1045,11 @@ def _deterministic_map(
                     parent_fields = parent.get("fields", {}) if isinstance(parent, dict) else {}
                     epic_issues[epic_key] = {
                         "key": epic_key,
-                        "summary": str(parent_fields.get("summary", epic_key)) if isinstance(parent_fields, dict) else epic_key,
+                        "summary": (
+                            str(parent_fields.get("summary", epic_key))
+                            if isinstance(parent_fields, dict)
+                            else epic_key
+                        ),
                         "description": "",
                         "issuetype": {"name": "Epic"},
                     }
@@ -1070,12 +1094,14 @@ def _deterministic_map(
                     for en in existing_names:
                         if _title_similarity(epic_name, en) > 0.8:
                             warnings.append(
-                                f"New project '{slug}' from epic {epic_key} is >80% similar to existing '{en}' — potential duplicate"
+                                f"New project '{slug}' from epic {epic_key} is >80% similar"
+                                f" to existing '{en}' — potential duplicate"
                             )
                             break
                 else:
                     warnings.append(
-                        f"Auto-create cap ({_MAX_PROJECTS_CREATED}) reached; epic {epic_key} ({epic_name}) skipped"
+                        f"Auto-create cap ({_MAX_PROJECTS_CREATED}) reached;"
+                        f" epic {epic_key} ({epic_name}) skipped"
                     )
                     continue
 
@@ -1133,7 +1159,8 @@ def _deterministic_map(
                 })
             else:
                 warnings.append(
-                    f"Standalone issue {issue_key} ({issue.get('summary', '')}) has no epic and no catch-all project — skipped"
+                    f"Standalone issue {issue_key} ({issue.get('summary', '')})"
+                    " has no epic and no catch-all project — skipped"
                 )
 
     # Phase 4: handle status reopened -> pending
@@ -1326,7 +1353,10 @@ def register(app: FastMCP) -> None:
                     retry_issues.append(issue)
 
             if not retry_issues:
-                return json.dumps({"status": "success", "summary": {"message": "No retryable issues found"}})
+                return json.dumps({
+                    "status": "success",
+                    "summary": {"message": "No retryable issues found"},
+                })
 
             # Re-map and apply only retry issues
             try:
@@ -1341,7 +1371,10 @@ def register(app: FastMCP) -> None:
                 return json.dumps({"status": "error", "error": f"Invalid JSON: {e}"})
 
         if not jira_issues_parsed:
-            return json.dumps({"status": "success", "summary": {"message": "Everything up to date"}})
+            return json.dumps({
+                "status": "success",
+                "summary": {"message": "Everything up to date"},
+            })
 
         # Deterministic mapping
         try:
@@ -1354,7 +1387,10 @@ def register(app: FastMCP) -> None:
         if not apply_input.groups:
             return json.dumps({
                 "status": "success",
-                "summary": {"message": "No mappable issues", "warnings": diagnostics.get("warnings", [])},
+                "summary": {
+                    "message": "No mappable issues",
+                    "warnings": diagnostics.get("warnings", []),
+                },
             })
 
         # Apply with per-issue error tracking
