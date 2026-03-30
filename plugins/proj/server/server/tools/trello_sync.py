@@ -63,6 +63,7 @@ class TrelloSyncPlan:
     pull_update: list[dict[str, object]] = field(default_factory=list)
     pull_complete: list[str] = field(default_factory=list)
     pull_reopen: list[str] = field(default_factory=list)
+    pull_delete: list[dict[str, Any]] = field(default_factory=list)
     pull_create_root: list[dict[str, object]] = field(default_factory=list)
     push_create_checklist: list[dict[str, object]] = field(default_factory=list)
     push_create_item: list[dict[str, object]] = field(default_factory=list)
@@ -71,6 +72,7 @@ class TrelloSyncPlan:
     push_delete_item: list[dict[str, object]] = field(default_factory=list)
     push_rename_checklist: list[dict[str, object]] = field(default_factory=list)
     conflicts: list[dict[str, object]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     card_create: bool = False
     label_create: bool = False
     list_mismatches: list[dict[str, object]] = field(default_factory=list)
@@ -78,7 +80,7 @@ class TrelloSyncPlan:
     def is_empty(self) -> bool:
         return not any([
             self.pull_create, self.pull_update, self.pull_complete,
-            self.pull_reopen, self.pull_create_root,
+            self.pull_reopen, self.pull_delete, self.pull_create_root,
             self.push_create_checklist, self.push_create_item,
             self.push_update_item, self.push_complete_item,
             self.push_delete_item, self.push_rename_checklist,
@@ -92,6 +94,7 @@ class TrelloSyncPlan:
             "pull_update": self.pull_update,
             "pull_complete": self.pull_complete,
             "pull_reopen": self.pull_reopen,
+            "pull_delete": self.pull_delete,
             "pull_create_root": self.pull_create_root,
             "push_create_checklist": self.push_create_checklist,
             "push_create_item": self.push_create_item,
@@ -100,6 +103,7 @@ class TrelloSyncPlan:
             "push_delete_item": self.push_delete_item,
             "push_rename_checklist": self.push_rename_checklist,
             "conflicts": self.conflicts,
+            "warnings": self.warnings,
             "card_create": self.card_create,
             "label_create": self.label_create,
             "list_mismatches": self.list_mismatches,
@@ -108,6 +112,7 @@ class TrelloSyncPlan:
                 "pull_update_count": len(self.pull_update),
                 "pull_complete_count": len(self.pull_complete),
                 "pull_reopen_count": len(self.pull_reopen),
+                "pull_delete_count": len(self.pull_delete),
                 "pull_create_root_count": len(self.pull_create_root),
                 "push_create_checklist_count": len(self.push_create_checklist),
                 "push_create_item_count": len(self.push_create_item),
@@ -411,18 +416,45 @@ def compute_diff(
                 "trello_checklist_id": cl_id,
             })
 
-    # ── Closure propagation (Bug 4 fix) ──────────────────────────────
-    # Like Todoist sync: if a linked todo's Trello item was deleted, close it.
+    # ── Pull-delete detection (replaces Bug 4 closure propagation) ───
+    # When a linked todo's Trello checklist item is missing, surface it as
+    # a pull_delete candidate requiring user confirmation instead of
+    # auto-completing.
     stale_links: set[str] = set()
     if valid_card:
+        # Build set of checklist IDs present on the Trello card
+        present_checklist_ids = set(trello_checklists_by_id.keys())
         for todo in todos:
             if (
                 todo.trello_checklist_item_id
                 and todo.trello_checklist_item_id not in trello_items_by_id
                 and todo.status not in TERMINAL_STATUSES
             ):
+                # Checklist-level guard: if the entire checklist is missing
+                # from the card, emit a warning instead of individual
+                # pull_delete entries (the checklist may have been renamed
+                # or the card data may be stale).
+                parent_cl_id = todo.trello_checklist_id
+                if not parent_cl_id and todo.parent:
+                    parent_todo = todo_map.get(todo.parent)
+                    if parent_todo:
+                        parent_cl_id = parent_todo.trello_checklist_id
+                if parent_cl_id and parent_cl_id not in present_checklist_ids:
+                    # Entire checklist missing — warn, don't generate
+                    # individual pull_delete entries.
+                    warn_msg = (
+                        f"Checklist {parent_cl_id} missing from Trello card; "
+                        f"skipping pull_delete for todo {todo.id} ({todo.title!r})"
+                    )
+                    if warn_msg not in plan.warnings:
+                        plan.warnings.append(warn_msg)
+                    continue
                 stale_links.add(todo.trello_checklist_item_id)
-                plan.pull_complete.append(todo.id)
+                plan.pull_delete.append({
+                    "todo_id": todo.id,
+                    "title": todo.title,
+                    "trello_checklist_item_id": todo.trello_checklist_item_id,
+                })
 
     # ── Push phase: Local -> Trello (unlinked items) ─────────────────
 
@@ -502,7 +534,7 @@ def compute_diff(
                     continue
                 # Only push-create for items not yet linked; linked items
                 # are handled by the last-changed-wins loop above.
-                # Bug 5 fix: skip items with stale links (handled by closure propagation)
+                # Bug 5 fix: skip items with stale links (handled by pull_delete detection)
                 if not item_todo.trello_checklist_item_id:
                     plan.push_create_item.append({
                         "todo_id": item_todo.id,
@@ -510,8 +542,8 @@ def compute_diff(
                         "checklist_id": root_todo.trello_checklist_id,
                         "checked": bool(item_spec.get("checked", False)),  # type: ignore[union-attr]
                     })
-                # Stale links (item deleted in Trello) are handled by closure
-                # propagation above — no re-creation.
+                # Stale links (item deleted in Trello) are handled by pull_delete
+                # detection above — no re-creation.
 
     # Push items for the "Tasks" catch-all checklist
     # Find Tasks checklist: prefer stored ID, fall back to name-based scan
