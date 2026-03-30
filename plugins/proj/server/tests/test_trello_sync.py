@@ -2011,12 +2011,12 @@ class TestNewChecklistItemsGetParent:
 
 
 class TestClosurePropagation:
-    """Bug 4: Deleted Trello items should close local todos."""
+    """Bug 4 → 378: Deleted Trello items generate pull_delete (not pull_complete)."""
 
-    def test_deleted_trello_item_closes_local_todo(
+    def test_deleted_trello_item_generates_pull_delete(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """When a Trello item is deleted, the linked local todo should be completed."""
+        """When a Trello item is deleted, generate pull_delete (not pull_complete)."""
         cfg, name = cfg_with_project
         todo = _make_todo(cfg, name, "Task", trello_checklist_item_id="item1")
         storage.save_todos(cfg, name, [todo])
@@ -2026,7 +2026,8 @@ class TestClosurePropagation:
             _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
         ])
         plan = compute_diff(card_json, cfg, name)
-        assert todo.id in plan.pull_complete
+        assert todo.id not in plan.pull_complete
+        assert any(e["todo_id"] == todo.id for e in plan.pull_delete)
 
     def test_deleted_trello_item_not_recreated(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -2045,10 +2046,10 @@ class TestClosurePropagation:
             pi.get("todo_id") == todo.id for pi in plan.push_create_item
         )
 
-    def test_closure_skips_already_done(
+    def test_pull_delete_skips_already_done(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Already-done todos with stale links should not generate operations."""
+        """Already-done todos with stale links should not generate pull_delete."""
         cfg, name = cfg_with_project
         todo = _make_todo(cfg, name, "Done", status="done", trello_checklist_item_id="item1")
         storage.save_todos(cfg, name, [todo])
@@ -2058,17 +2059,115 @@ class TestClosurePropagation:
         ])
         plan = compute_diff(card_json, cfg, name)
         assert todo.id not in plan.pull_complete
+        assert not any(e["todo_id"] == todo.id for e in plan.pull_delete)
 
-    def test_closure_skips_invalid_card(
+    def test_pull_delete_skips_invalid_card(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Closure propagation should not fire on invalid/empty card JSON."""
+        """Pull-delete detection should not fire on invalid/empty card JSON."""
         cfg, name = cfg_with_project
         todo = _make_todo(cfg, name, "Task", trello_checklist_item_id="item1")
         storage.save_todos(cfg, name, [todo])
 
         plan = compute_diff("", cfg, name)
         assert todo.id not in plan.pull_complete
+        assert not plan.pull_delete
+
+
+class TestPullDelete:
+    """378: pull_delete detection and apply."""
+
+    def test_compute_diff_generates_pull_delete_for_missing_item(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Todo with trello_checklist_item_id but item missing from Trello -> pull_delete."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Linked task", trello_checklist_item_id="item_x")
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert any(e["todo_id"] == todo.id for e in plan.pull_delete)
+        assert todo.id not in plan.pull_complete
+        # Verify entry structure
+        entry = next(e for e in plan.pull_delete if e["todo_id"] == todo.id)
+        assert entry["title"] == "Linked task"
+        assert entry["trello_checklist_item_id"] == "item_x"
+
+    def test_apply_changes_does_not_delete_without_confirmation(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """apply_changes with empty pull_delete does nothing."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Keep me")
+        storage.save_todos(cfg, name, [todo])
+
+        data = TrelloApplyInput(pull_delete=[])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 0
+        todos = storage.load_todos(cfg, name)
+        assert any(t.id == todo.id for t in todos)
+
+    def test_apply_changes_deletes_confirmed_todo(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """apply_changes with pull_delete=[todo_id] removes the todo."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Delete me", trello_checklist_item_id="item_y")
+        storage.save_todos(cfg, name, [todo])
+
+        data = TrelloApplyInput(pull_delete=[todo.id])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 1
+        todos = storage.load_todos(cfg, name)
+        assert not any(t.id == todo.id for t in todos)
+
+    def test_unlinked_todo_not_in_pull_delete(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Todo with no trello_checklist_item_id is never in pull_delete."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Unlinked task")
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, []),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert not any(e["todo_id"] == todo.id for e in plan.pull_delete)
+
+    def test_already_deleted_todo_skipped_gracefully(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """pull_delete with non-existent todo_id -> no error, skipped."""
+        cfg, name = cfg_with_project
+        data = TrelloApplyInput(pull_delete=["999"])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 0
+
+    def test_missing_checklist_emits_warning_not_pull_delete(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When entire checklist is missing, emit warning, not individual pull_deletes."""
+        cfg, name = cfg_with_project
+        # Root todo with checklist, child linked to item in that checklist
+        root = _make_todo(cfg, name, "Root", trello_checklist_id="cl_gone")
+        child = _make_todo(
+            cfg, name, "Child", parent=root.id,
+            trello_checklist_item_id="item_in_gone_cl",
+        )
+        root.children = [child.id]
+        storage.save_todos(cfg, name, [root, child])
+
+        # Card has no checklists at all (cl_gone is missing)
+        card_json = _make_trello_card_json([])
+        plan = compute_diff(card_json, cfg, name)
+        # Child should NOT be in pull_delete
+        assert not any(e["todo_id"] == child.id for e in plan.pull_delete)
+        # Should have a warning instead
+        assert any("cl_gone" in w for w in plan.warnings)
 
 
 class TestFirstSyncChecklistId:
