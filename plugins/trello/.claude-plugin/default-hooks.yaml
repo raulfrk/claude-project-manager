@@ -66,6 +66,8 @@ hooks:
     verification: true
     condition: "sync.trello.enabled"
 
+  # Known limitation: only the title (name) syncs to Trello. Priority, due_date,
+  # tags, and notes have no equivalent fields in Trello checklist items.
   - id: trello-on-todo-update
     trigger_tool: todo_update
     target_tool: rename_checklist_item
