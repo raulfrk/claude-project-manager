@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import difflib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, date, timezone
 from typing import TYPE_CHECKING, Any
@@ -956,6 +958,223 @@ def apply_mapping(
     return result
 
 
+# ── Deterministic mapping (full-sync) ────────────────────────────────────────
+
+_DONE_STATUSES = frozenset({"done", "resolved", "closed", "cancelled", "canceled"})
+
+_MAX_PROJECTS_CREATED = 10
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Return SequenceMatcher ratio between two title strings."""
+    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+def _deterministic_map(
+    jira_issues: list[dict[str, Any]],
+    cfg: Any,
+    name: str | None = None,
+) -> tuple[JiraApplyInput, dict[str, Any]]:
+    """Build a deterministic mapping without interactive disambiguation.
+
+    Returns ``(apply_input, diagnostics)`` where *diagnostics* carries
+    warnings and summary counts for the caller.
+
+    Mapping rules:
+    - Epic -> Project: match by ``jira_issue_key`` on project meta; else
+      auto-create (capped at *_MAX_PROJECTS_CREATED*).
+    - Story/Task under Epic -> Todo: match by ``jira_issue_key`` on todo;
+      else auto-create.
+    - Standalone (no epic) -> catch-all project from *name* param; else warning.
+    - Status: Jira "Done"/"Closed"/"Resolved" -> complete; reopened + local
+      done -> set pending.
+    """
+    index = storage.load_index(cfg)
+    existing_names = [n for n, e in index.projects.items() if not e.archived]
+
+    # Pre-load all project metas for jira_issue_key lookup
+    meta_by_jira_key: dict[str, str] = {}  # jira_key -> project_name
+    all_metas: dict[str, Any] = {}
+    for pn in existing_names:
+        try:
+            meta = storage.load_meta(cfg, pn)
+            all_metas[pn] = meta
+            if meta.jira_issue_key:
+                meta_by_jira_key[meta.jira_issue_key] = pn
+        except FileNotFoundError:
+            continue
+
+    # Phase 1: separate epics from non-epics, group children
+    epic_issues: dict[str, dict[str, Any]] = {}  # epic_key -> epic issue
+    children_by_epic: dict[str, list[dict[str, Any]]] = {}
+    standalone: list[dict[str, Any]] = []
+
+    for issue in jira_issues:
+        if _is_epic_issue(issue):
+            ek = str(issue.get("key", ""))
+            if ek:
+                epic_issues[ek] = issue
+                children_by_epic.setdefault(ek, [])
+        else:
+            epic_key, _epic_name = _detect_epic_key(issue)
+            if epic_key:
+                children_by_epic.setdefault(epic_key, []).append(issue)
+                # Ensure epic_issues entry exists even if epic wasn't in our list
+                if epic_key not in epic_issues:
+                    parent = issue.get("parent", {})
+                    parent_fields = parent.get("fields", {}) if isinstance(parent, dict) else {}
+                    epic_issues[epic_key] = {
+                        "key": epic_key,
+                        "summary": str(parent_fields.get("summary", epic_key)) if isinstance(parent_fields, dict) else epic_key,
+                        "description": "",
+                        "issuetype": {"name": "Epic"},
+                    }
+            else:
+                standalone.append(issue)
+
+    groups: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    projects_to_create = 0
+
+    # Phase 2: map epics to projects
+    for epic_key, epic_issue in epic_issues.items():
+        epic_name = str(epic_issue.get("summary", ""))
+        slug = _slugify(epic_name)
+        children = children_by_epic.get(epic_key, [])
+        issue_entries = [_build_issue_entry(c) for c in children]
+
+        matched_project: str | None = None
+        create_project = False
+        project_exists = False
+
+        # Match by jira_issue_key
+        if epic_key in meta_by_jira_key:
+            matched_project = meta_by_jira_key[epic_key]
+            project_exists = True
+        elif name:
+            # Caller-specified project override
+            matched_project = name
+            project_exists = name in existing_names
+        else:
+            # Fuzzy match
+            matched_project = _fuzzy_match_project(epic_name, existing_names)
+            if matched_project:
+                project_exists = True
+            else:
+                # Auto-create
+                if projects_to_create < _MAX_PROJECTS_CREATED:
+                    matched_project = slug
+                    create_project = True
+                    projects_to_create += 1
+                    # Warn if >80% similarity with existing project
+                    for en in existing_names:
+                        if _title_similarity(epic_name, en) > 0.8:
+                            warnings.append(
+                                f"New project '{slug}' from epic {epic_key} is >80% similar to existing '{en}' — potential duplicate"
+                            )
+                            break
+                else:
+                    warnings.append(
+                        f"Auto-create cap ({_MAX_PROJECTS_CREATED}) reached; epic {epic_key} ({epic_name}) skipped"
+                    )
+                    continue
+
+        groups.append({
+            "source": "epic",
+            "jira_key": epic_key,
+            "name": epic_name,
+            "suggested_project": matched_project or "",
+            "is_epic": True,
+            "project_exists": project_exists,
+            "create_project": create_project,
+            "description": str(epic_issue.get("description", "") or ""),
+            "issues": issue_entries,
+        })
+
+    # Phase 3: map standalone issues
+    for issue in standalone:
+        issue_entry = _build_issue_entry(issue)
+        issue_key = str(issue.get("key", ""))
+
+        if name:
+            # Caller provided a catch-all project
+            groups.append({
+                "source": "standalone",
+                "jira_key": issue_key,
+                "name": str(issue.get("summary", "")),
+                "suggested_project": name,
+                "is_epic": False,
+                "project_exists": name in existing_names,
+                "create_project": False,
+                "issues": [issue_entry],
+            })
+        else:
+            # No catch-all — check if todo already linked in some project
+            found_project: str | None = None
+            for pn in existing_names:
+                try:
+                    todos = storage.load_todos(cfg, pn)
+                    if any(t.jira_issue_key == issue_key for t in todos):
+                        found_project = pn
+                        break
+                except FileNotFoundError:
+                    continue
+
+            if found_project:
+                groups.append({
+                    "source": "standalone",
+                    "jira_key": issue_key,
+                    "name": str(issue.get("summary", "")),
+                    "suggested_project": found_project,
+                    "is_epic": False,
+                    "project_exists": True,
+                    "create_project": False,
+                    "issues": [issue_entry],
+                })
+            else:
+                warnings.append(
+                    f"Standalone issue {issue_key} ({issue.get('summary', '')}) has no epic and no catch-all project — skipped"
+                )
+
+    # Phase 4: handle status reopened -> pending
+    for group in groups:
+        project_name = str(group.get("suggested_project", ""))
+        if not project_name or not group.get("project_exists"):
+            continue
+        try:
+            todos = storage.load_todos(cfg, project_name)
+        except FileNotFoundError:
+            continue
+        by_jira_key = {t.jira_issue_key: t for t in todos if t.jira_issue_key}
+        changed = False
+        for ie in group.get("issues", []):
+            if not isinstance(ie, dict):
+                continue
+            ik = str(ie.get("key", ""))
+            status_str = str(ie.get("status", "")).lower()
+            if ik in by_jira_key:
+                todo = by_jira_key[ik]
+                is_jira_done = status_str in _DONE_STATUSES
+                is_local_done = todo.status in TERMINAL_STATUSES
+                # Reopened: Jira not-done but local is done
+                if not is_jira_done and is_local_done:
+                    todo.status = "pending"
+                    todo.updated = _now()
+                    changed = True
+        if changed:
+            storage.save_todos(cfg, project_name, todos)
+
+    diagnostics: dict[str, Any] = {
+        "warnings": warnings,
+        "epic_count": len(epic_issues),
+        "standalone_count": len(standalone),
+        "groups_mapped": len(groups),
+        "projects_to_create": projects_to_create,
+    }
+
+    return JiraApplyInput(groups=groups), diagnostics
+
+
 # ── MCP tool registration ────────────────────────────────────────────────────
 
 
@@ -1048,3 +1267,154 @@ def register(app: FastMCP) -> None:
             response["status"] = "partial"
             response["per_issue"] = apply_result.per_issue
         return json.dumps(response)
+
+    @app.tool(
+        description=(
+            "Full Jira sync: deterministic map + apply in one call. "
+            "Takes a JSON string of Jira issues (from jira_get_user_issues). "
+            "Maps epics to projects and issues to todos using jira_issue_key "
+            "matching (no interactive disambiguation). Auto-creates projects "
+            "for new epics (cap: 10). Optionally accepts pre-fetched comments. "
+            "Returns {status: 'success', summary: {...}} or "
+            "{status: 'partial_success', errors: [...], retry_token: '...'}. "
+            "Pass retry_token back via retry_failures to re-attempt only "
+            "failed issues."
+        )
+    )
+    def proj_jira_full_sync(
+        jira_issues_json: str,
+        project_name: str | None = None,
+        comments_json: str = "{}",
+        retry_failures: str | None = None,
+    ) -> str:
+        # Resolve config
+        try:
+            cfg = require_project(project_name)
+            if isinstance(cfg, str):
+                from server.tools.config import require_config
+                cfg_obj = require_config()
+            else:
+                cfg_obj, project_name = cfg
+        except Exception as e:
+            return json.dumps({"status": "error", "error": f"Config error: {e}"})
+
+        # Parse comments
+        try:
+            comments_by_key: dict[str, list[dict[str, Any]]] = json.loads(comments_json)
+        except json.JSONDecodeError:
+            comments_by_key = {}
+
+        # ── Retry path ───────────────────────────────────────────────
+        if retry_failures:
+            try:
+                token_data = json.loads(base64.b64decode(retry_failures).decode())
+            except Exception:
+                return json.dumps({"status": "error", "error": "Invalid retry_token"})
+
+            ts = token_data.get("ts", 0)
+            if time.time() - ts > 1800:  # 30 minutes
+                return json.dumps({
+                    "status": "error",
+                    "error": "Retry token expired (>30 min). Run a fresh sync.",
+                })
+
+            retry_issues: list[dict[str, Any]] = []
+            for err_entry in token_data.get("errors", []):
+                payload = err_entry.get("retry_payload", {})
+                issue = payload.get("issue")
+                if isinstance(issue, dict):
+                    retry_issues.append(issue)
+
+            if not retry_issues:
+                return json.dumps({"status": "success", "summary": {"message": "No retryable issues found"}})
+
+            # Re-map and apply only retry issues
+            try:
+                jira_issues_parsed = retry_issues
+            except Exception as e:
+                return json.dumps({"status": "error", "error": f"Retry parse error: {e}"})
+        else:
+            # ── Normal path ──────────────────────────────────────────
+            try:
+                jira_issues_parsed = json.loads(jira_issues_json)
+            except json.JSONDecodeError as e:
+                return json.dumps({"status": "error", "error": f"Invalid JSON: {e}"})
+
+        if not jira_issues_parsed:
+            return json.dumps({"status": "success", "summary": {"message": "Everything up to date"}})
+
+        # Deterministic mapping
+        try:
+            apply_input, diagnostics = _deterministic_map(
+                jira_issues_parsed, cfg_obj, project_name,
+            )
+        except Exception as e:
+            return json.dumps({"status": "error", "error": f"Mapping error: {e}"})
+
+        if not apply_input.groups:
+            return json.dumps({
+                "status": "success",
+                "summary": {"message": "No mappable issues", "warnings": diagnostics.get("warnings", [])},
+            })
+
+        # Apply with per-issue error tracking
+        errors: list[dict[str, Any]] = []
+        safe_groups: list[dict[str, Any]] = []
+
+        for group in apply_input.groups:
+            try:
+                single_input = JiraApplyInput(groups=[group])
+                _result = apply_mapping(single_input, cfg_obj, comments_by_key=comments_by_key)
+                # Check per-issue failures
+                for ik, status in _result.per_issue.items():
+                    if status.startswith("failed:"):
+                        # Find the original issue dict for retry
+                        issue_dict = None
+                        for ie in group.get("issues", []):
+                            if isinstance(ie, dict) and str(ie.get("key", "")) == ik:
+                                issue_dict = ie
+                                break
+                        errors.append({
+                            "issue_key": ik,
+                            "operation_type": "apply",
+                            "error": status,
+                            "retryable": True,
+                            "retry_payload": {"issue": issue_dict} if issue_dict else {},
+                        })
+                safe_groups.append(group)
+            except Exception as e:
+                jk = str(group.get("jira_key", ""))
+                for ie in group.get("issues", []):
+                    if isinstance(ie, dict):
+                        errors.append({
+                            "issue_key": str(ie.get("key", jk)),
+                            "operation_type": "apply",
+                            "error": str(e),
+                            "retryable": True,
+                            "retry_payload": {"issue": ie},
+                        })
+
+        # Build summary
+        summary: dict[str, Any] = {
+            "groups_processed": len(safe_groups),
+            "warnings": diagnostics.get("warnings", []),
+            "epic_count": diagnostics.get("epic_count", 0),
+            "standalone_count": diagnostics.get("standalone_count", 0),
+            "projects_to_create": diagnostics.get("projects_to_create", 0),
+            "comments_synced": sum(
+                len(v) for v in comments_by_key.values()
+            ) if comments_by_key else 0,
+        }
+
+        if errors:
+            retry_token = base64.b64encode(
+                json.dumps({"ts": time.time(), "errors": errors}).encode()
+            ).decode()
+            return json.dumps({
+                "status": "partial_success",
+                "summary": summary,
+                "errors": errors,
+                "retry_token": retry_token,
+            })
+
+        return json.dumps({"status": "success", "summary": summary})
