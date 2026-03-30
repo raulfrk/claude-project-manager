@@ -2559,3 +2559,287 @@ class TestSelfRefItem:
         root = next(t for t in todos if t.id == parent.id)
         assert root.trello_checklist_item_id == "item_self_new"
         assert root.trello_checklist_id == "cl1"  # unchanged
+
+
+# ── proj_trello_full_sync tests ─────────────────────────────────────────────
+
+
+from server.tools.trello_full_sync import (
+    _build_push_ops,
+    _execute_push_ops,
+    _retry_failed_ops,
+    _build_summary,
+    _call_trello_tool,
+    register as register_full_sync,
+)
+
+
+class TestProjTrelloFullSync:
+    """Tests for the proj_trello_full_sync tool."""
+
+    def _register_and_call(self, app_mock, **kwargs):
+        """Register the tool and call it via the captured function."""
+        captured = {}
+
+        class FakeApp:
+            def tool(self, **deco_kwargs):
+                def decorator(fn):
+                    captured["fn"] = fn
+                    return fn
+                return decorator
+
+        fake = FakeApp()
+        register_full_sync(fake)
+        return captured["fn"](**kwargs)
+
+    def test_full_success_returns_summary(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Happy path: card exists, diff has push items, all succeed."""
+        cfg, name = cfg_with_project
+
+        # Create a local todo that will push to Trello
+        todo = _make_todo(cfg, name, "Build feature")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        # Mock _call_trello_tool to return checklists then succeed on push
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "get_card_checklists":
+                return []  # empty card
+            if tool_name == "add_checklist_item":
+                return {"id": "item_new_1"}
+            if tool_name == "create_checklist":
+                return {"id": "cl_new_1"}
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        result_str = self._register_and_call(None, project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert "summary" in result
+        assert "pull" in result["summary"]
+        assert "push" in result["summary"]
+
+    def test_partial_failure_collects_errors(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When a push op fails, errors are collected and retry_token is returned."""
+        cfg, name = cfg_with_project
+
+        # Create a root todo with children to trigger checklist + item push
+        parent = _make_todo(cfg, name, "Parent task")
+        child = _make_todo(cfg, name, "Child task", parent=parent.id)
+        parent.children.append(child.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        call_count = {"n": 0}
+
+        def mock_call(tool_name, params):
+            call_count["n"] += 1
+            if tool_name == "get_card_checklists":
+                return []
+            if tool_name == "create_checklist":
+                raise ConnectionError("Trello API timeout")
+            return {"id": "ok"}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        result_str = self._register_and_call(None, project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "partial_success"
+        assert "errors" in result
+        assert "retry_token" in result
+        # At least one error for the checklist create
+        assert any(e["operation_type"] == "push_create_checklist" for e in result["errors"])
+
+    def test_retry_failures_reruns_only_failed(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """retry_failures re-attempts only the provided failed ops."""
+        import base64
+
+        failed_ops = [
+            {
+                "operation_type": "push_create_checklist",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "type": "push_create_checklist",
+                    "tool": "create_checklist",
+                    "params": {"cardId": "card_abc", "name": "My checklist"},
+                },
+            }
+        ]
+        token = base64.b64encode(json.dumps(failed_ops).encode()).decode()
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            return {"id": "cl_retry_1"}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        result_str = self._register_and_call(None, retry_failures=token)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["retried_succeeded"] == 1
+        assert len(call_log) == 1
+        assert call_log[0][0] == "create_checklist"
+
+    def test_empty_diff_returns_up_to_date(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When local and Trello are in sync, returns up_to_date."""
+
+        def mock_call(tool_name, params):
+            if tool_name == "get_card_checklists":
+                return []
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        result_str = self._register_and_call(None, project_name="myapp")
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["up_to_date"] is True
+
+    def test_pull_delete_returns_needs_confirmation(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If pull_delete entries exist on the plan, return needs_confirmation."""
+        from unittest.mock import MagicMock
+
+        def mock_call(tool_name, params):
+            if tool_name == "get_card_checklists":
+                return []
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        # Monkey-patch compute_diff to return a plan with pull_delete
+        original_compute = compute_diff
+
+        def patched_compute(trello_card_json, cfg, name):
+            plan = original_compute(trello_card_json, cfg, name)
+            # Inject pull_delete (future field from 378)
+            plan.pull_delete = [{"todo_id": "1", "title": "Old task"}]
+            return plan
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync.compute_diff", patched_compute
+        )
+
+        result_str = self._register_and_call(None, project_name="myapp")
+        result = json.loads(result_str)
+
+        assert result["status"] == "needs_confirmation"
+        assert len(result["pull_delete_pending"]) == 1
+        assert result["pull_delete_pending"][0]["todo_id"] == "1"
+
+
+class TestBuildPushOps:
+    """Tests for _build_push_ops helper."""
+
+    def test_creates_ops_for_all_plan_fields(self) -> None:
+        plan = TrelloSyncPlan(
+            push_create_checklist=[{"name": "CL1", "todo_id": "1"}],
+            push_create_item=[{"name": "Item1", "todo_id": "1.1", "checklist_id": "cl1"}],
+            push_update_item=[{"name": "Updated", "todo_id": "2", "checklist_id": "cl1", "trello_checklist_item_id": "ti1"}],
+            push_complete_item=[{"checklist_id": "cl1", "trello_checklist_item_id": "ti2", "todo_id": "3"}],
+            push_delete_item=[{"checklist_id": "cl1", "trello_checklist_item_id": "ti3", "todo_id": "4"}],
+            push_rename_checklist=[{"name": "Renamed", "trello_checklist_id": "cl2", "todo_id": "5"}],
+        )
+        ops = _build_push_ops(plan, "card_abc")
+        types = [op["type"] for op in ops]
+        assert "push_create_checklist" in types
+        assert "push_create_item" in types
+        assert "push_update_item" in types
+        assert "push_complete_item" in types
+        assert "push_delete_item" in types
+        assert "push_rename_checklist" in types
+        assert len(ops) == 6
+
+
+class TestExecutePushOps:
+    """Tests for _execute_push_ops with cascading skip."""
+
+    def test_cascading_skip_on_checklist_failure(self, monkeypatch) -> None:
+        ops = [
+            {
+                "type": "push_create_checklist",
+                "tool": "create_checklist",
+                "params": {"cardId": "c1", "name": "CL"},
+                "checklist_key": "todo_1",
+                "todo_id": "1",
+            },
+            {
+                "type": "push_create_item",
+                "tool": "add_checklist_item",
+                "params": {"checklistId": "?", "name": "Item"},
+                "todo_id": "1.1",
+                "parent_checklist_todo_id": "todo_1",
+            },
+        ]
+
+        def mock_call(tool_name, params):
+            raise ConnectionError("fail")
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        succeeded, errors = _execute_push_ops(ops)
+        assert len(succeeded) == 0
+        assert len(errors) == 2
+        # The item was skipped due to cascading, not called
+        assert "Skipped: parent checklist" in errors[1]["error"]
+
+
+class TestRetryFailedOps:
+    """Tests for _retry_failed_ops."""
+
+    def test_successful_retry(self, monkeypatch) -> None:
+        failed = [
+            {
+                "operation_type": "push_create_item",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "type": "push_create_item",
+                    "tool": "add_checklist_item",
+                    "params": {"checklistId": "cl1", "name": "Item"},
+                },
+            }
+        ]
+
+        def mock_call(tool_name, params):
+            return {"id": "new_item"}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        succeeded, still_failed = _retry_failed_ops(failed)
+        assert len(succeeded) == 1
+        assert len(still_failed) == 0
