@@ -1,7 +1,7 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Each project is a single Trello card; root todos with children become checklists, leaf root todos become items in a "Tasks" checklist. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_card_checklists, mcp__trello__create_checklist, mcp__trello__add_checklist_item, mcp__trello__update_checklist_item, mcp__trello__delete_checklist, mcp__trello__rename_checklist_item, mcp__trello__delete_checklist_item, mcp__trello__rename_checklist
 context: fork
 agent: general-purpose
 ---
@@ -98,7 +98,28 @@ If there were failures, list the project name and a brief error description for 
 
 ---
 
-## Single-Project Mode
+## Single-Project Mode (Accelerated Path)
+
+When `proj_trello_full_sync` is available, use this 3-call flow instead of the multi-step flow below:
+
+1. **`mcp__proj__proj_session_context`** -- get project name and config (already called in Mode Detection)
+2. **`mcp__proj__proj_trello_full_sync(project_name=name)`** -- executes the full sync cycle server-side
+3. **`mcp__proj__tracking_git_flush`** -- commit tracking changes
+
+### Response handling
+
+- **`"status": "success"`**: display `summary.pull` and `summary.push` counts, then stop. If `summary.up_to_date` is true, say "Everything up to date."
+- **`"status": "partial_success"`**: display the summary and list each error. Offer one retry: call `proj_trello_full_sync(retry_failures=response.retry_token)`. If retry also returns partial_success, report remaining errors and stop.
+- **`"status": "needs_confirmation"`**: for each entry in `pull_delete_pending`, prompt "Delete local todo X? [Y/n]". Then call `todo_delete` for confirmed entries and re-run `proj_trello_full_sync`.
+- **`"status": "error"`**: display the error message and stop.
+
+### Fallback
+
+If `proj_trello_full_sync` is not available (tool-not-found error), fall back to the **Legacy Multi-Step Flow** below.
+
+---
+
+## Single-Project Mode (Legacy Multi-Step Flow)
 
 **Sub-skill chain**: This skill chains five sub-skills in sequence:
 1. `/proj:trello-setup` -- ensure proj label and project card exist on the board
