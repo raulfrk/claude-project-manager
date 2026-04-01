@@ -165,6 +165,13 @@ async def _fire_verification(
             )
         else:
             status, details = _parse_verification_response(result.result)
+            storage.log_invocation(
+                hook_id=hook.id,
+                trigger_tool=hook.trigger_tool,
+                target_tool=hook.target_tool,
+                server=hook.server,
+                source_result=raw_source_result,
+            )
 
         storage.store_verification_result(
             trigger_tool=trigger_tool,
@@ -299,6 +306,13 @@ async def hooks_fire(
                 )
             else:
                 results_by_id[hook.id] = result.result
+                storage.log_invocation(
+                    hook_id=hook.id,
+                    trigger_tool=hook.trigger_tool,
+                    target_tool=hook.target_tool,
+                    server=hook.server,
+                    source_result=source_result,
+                )
 
     # Phase 1.5: Feedback writeback for blocking hooks
     feedback_results: list[dict[str, Any]] = []

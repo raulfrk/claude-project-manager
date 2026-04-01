@@ -12,6 +12,7 @@ from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from server.lib.discovery import run_discovery
 from server.tools import fire as fire_tools
+from server.tools import invocations as invocations_tools
 from server.tools import recovery as recovery_tools
 from server.tools import registry as registry_tools
 from server.tools import sync as sync_tools
@@ -20,12 +21,13 @@ from server.tools import verify as verify_tools
 logger = logging.getLogger("hooks")
 
 mcp = FastMCP("hooks")
-enable_hook_dispatch(mcp, exclude=["hooks_fire_tool", "hooks_list_tool", "hooks_recover_tool", "hooks_sync_tool"])
+enable_hook_dispatch(mcp, exclude=["hooks_fire_tool", "hooks_list_tool", "hooks_recover_tool", "hooks_sync_tool", "hooks_invocations_tool"])
 registry_tools.register(mcp)
 fire_tools.register(mcp)
 recovery_tools.register(mcp)
 sync_tools.register(mcp)
 verify_tools.register(mcp)
+invocations_tools.register(mcp)
 
 
 def _run_startup_discovery() -> None:

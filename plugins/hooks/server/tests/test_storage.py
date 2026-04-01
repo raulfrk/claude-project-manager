@@ -11,8 +11,10 @@ from server.lib.storage import (
     clear_failures,
     load,
     load_failures,
+    load_invocations,
     load_verification_results,
     log_failure,
+    log_invocation,
     save,
     save_failures,
     store_verification_result,
@@ -346,3 +348,92 @@ class TestLoadVerificationResults:
             )
         result = load_verification_results(limit=0, path=verifications_yaml)
         assert len(result) == 5
+
+
+# ── Invocation logging ───────────────────────────────────────────────────────
+
+
+class TestLogInvocation:
+    def test_creates_file(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        result = log_invocation(
+            hook_id="h-001", trigger_tool="t", target_tool="u", server="s", path=p,
+        )
+        assert result == p
+        assert p.exists()
+
+    def test_appends_entries(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        for i in range(3):
+            log_invocation(hook_id=f"h-{i}", trigger_tool="t", target_tool="u", server="s", path=p)
+        assert len(load_invocations(limit=0, path=p)) == 3
+
+    def test_includes_timestamp(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        log_invocation(hook_id="h-001", trigger_tool="t", target_tool="u", server="s", path=p)
+        entries = load_invocations(path=p)
+        assert "timestamp" in entries[0]
+
+    def test_includes_all_core_fields(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        log_invocation(
+            hook_id="h-001", trigger_tool="trig", target_tool="tgt", server="svc", path=p,
+        )
+        entry = load_invocations(path=p)[0]
+        assert entry["hook_id"] == "h-001"
+        assert entry["trigger_tool"] == "trig"
+        assert entry["target_tool"] == "tgt"
+        assert entry["server"] == "svc"
+
+    def test_source_result_truncated_at_500(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        long_val = "x" * 1000
+        log_invocation(
+            hook_id="h-001", trigger_tool="t", target_tool="u", server="s",
+            source_result=long_val, path=p,
+        )
+        entries = load_invocations(path=p)
+        assert len(entries[0]["source_result"]) == 500
+
+    def test_payload_truncated_at_500(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        big_payload = {"key": "v" * 1000}
+        log_invocation(
+            hook_id="h-001", trigger_tool="t", target_tool="u", server="s",
+            payload=big_payload, path=p,
+        )
+        entries = load_invocations(path=p)
+        assert len(entries[0]["payload"]) <= 500
+
+    def test_rolling_cap_at_2000(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        entries = [
+            {"hook_id": f"h-{i}", "trigger_tool": "t", "target_tool": "u", "server": "s"}
+            for i in range(2000)
+        ]
+        p.write_text(yaml.dump(entries, default_flow_style=False))
+        log_invocation(hook_id="h-new", trigger_tool="t", target_tool="u", server="s", path=p)
+        result = load_invocations(limit=0, path=p)
+        assert len(result) == 2000
+        assert result[-1]["hook_id"] == "h-new"
+
+
+class TestLoadInvocations:
+    def test_missing_file_returns_empty(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        assert load_invocations(path=p) == []
+
+    def test_default_limit_50(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        for i in range(80):
+            log_invocation(hook_id=f"h-{i}", trigger_tool="t", target_tool="u", server="s", path=p)
+        result = load_invocations(path=p)
+        assert len(result) == 50
+        # Should be the 50 most recent
+        assert result[-1]["hook_id"] == "h-79"
+
+    def test_limit_zero_returns_all(self, tmp_path: Path):
+        p = tmp_path / "inv.yaml"
+        for i in range(5):
+            log_invocation(hook_id=f"h-{i}", trigger_tool="t", target_tool="u", server="s", path=p)
+        assert len(load_invocations(limit=0, path=p)) == 5
