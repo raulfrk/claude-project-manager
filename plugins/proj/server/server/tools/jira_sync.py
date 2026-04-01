@@ -1367,6 +1367,9 @@ def register(app: FastMCP) -> None:
             # ── Normal path ──────────────────────────────────────────
             try:
                 jira_issues_parsed = json.loads(jira_issues_json)
+                # Unwrap Jira search response envelope: {"issues": [...], "total": ...}
+                if isinstance(jira_issues_parsed, dict) and "issues" in jira_issues_parsed:
+                    jira_issues_parsed = jira_issues_parsed["issues"]
             except json.JSONDecodeError as e:
                 return json.dumps({"status": "error", "error": f"Invalid JSON: {e}"})
 
