@@ -52,7 +52,7 @@ def _call_trello_tool(tool_name: str, params: dict[str, Any]) -> Any:
     transport = httpx.HTTPTransport(uds=sock_path)
     with httpx.Client(transport=transport, timeout=30.0) as client:
         resp = client.post(
-            "http://localhost/call",
+            "http://localhost/hook",
             json={"tool": tool_name, "params": params},
         )
         resp.raise_for_status()
