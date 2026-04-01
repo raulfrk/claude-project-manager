@@ -39,7 +39,7 @@ Extract from $ARGUMENTS:
 
 Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
 
-Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
+Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quality flag is passed, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--balanced` if not set or unrecognized.
 
 **Quality Level Parameter Mapping:**
 
@@ -54,7 +54,7 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | preflight | skip | enabled | enabled | enabled |
 | refine | skip | if --refine set | auto-enabled | auto-enabled |
-| worktree | off unless explicit | off unless explicit | off unless explicit | off (max_parallel=1) |
+| worktree | from config (`worktree_isolation`) | from config (`worktree_isolation`) | from config (`worktree_isolation`) | off (max_parallel=1) |
 | overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
