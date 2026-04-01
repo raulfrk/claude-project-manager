@@ -92,34 +92,6 @@ async def _fire_single(hook: Hook, source: dict[str, Any]) -> FireResult:
     )
 
 
-def _fire_background(hook: Hook, source: dict[str, Any]) -> None:
-    """Launch a fire-and-forget task for *hook* in a background thread."""
-
-    async def _run() -> None:
-        result = await _fire_single(hook, source)
-        if not result.ok:
-            storage.log_failure(
-                hook_id=hook.id,
-                trigger_tool=hook.trigger_tool,
-                target_tool=hook.target_tool,
-                server=hook.server,
-                error=result.error or f"HTTP {result.status_code}",
-                source_result=json.dumps(source),
-            )
-
-    def _thread_target() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run())
-        finally:
-            loop.close()
-
-    import threading
-
-    t = threading.Thread(target=_thread_target, daemon=True)
-    t.start()
-
-
 # ── Verification helpers ─────────────────────────────────────────────────────
 
 
@@ -227,9 +199,8 @@ async def hooks_fire(
     (default 3, configurable via ``settings.max_depth`` in hooks.yaml) the call
     is skipped with a warning to prevent runaway cascading.
 
-    Hooks with ``blocking=False`` (default) are dispatched in background threads
-    and the tool returns immediately.  Hooks with ``blocking=True`` are awaited
-    and their results are included in the response.
+    All matched hooks are awaited concurrently and their results are included
+    in the response.
     """
     # Runtime depth limit
     max_depth = _get_max_depth()
@@ -288,24 +259,15 @@ async def hooks_fire(
     skipped = 0
     errors: list[dict[str, str]] = []
     blocking_hooks: list[Hook] = []
-    background_hooks: list[Hook] = []
 
     for hook in primary_matched:
         if not evaluate_condition(hook.condition, config=base_config):
             skipped += 1
             continue
-        if hook.blocking:
-            blocking_hooks.append(hook)
-        else:
-            background_hooks.append(hook)
-
-    # Phase 1: Fire-and-forget hooks
-    for hook in background_hooks:
-        _fire_background(hook, source)
-        fired += 1
+        blocking_hooks.append(hook)
 
     # Phase 1: Blocking hooks — await all concurrently
-    blocking_results: list[dict[str, str | None]] = []
+    results_by_id: dict[str, str | None] = {}
     if blocking_hooks:
         results = await asyncio.gather(
             *[_fire_single(h, source) for h in blocking_hooks],
@@ -315,7 +277,7 @@ async def hooks_fire(
             fired += 1
             if isinstance(result, BaseException):
                 err_msg = f"Exception: {result}"
-                errors.append({"hook_id": hook.id, "error": err_msg})
+                errors.append({"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool})
                 storage.log_failure(
                     hook_id=hook.id,
                     trigger_tool=hook.trigger_tool,
@@ -326,7 +288,7 @@ async def hooks_fire(
                 )
             elif not result.ok:
                 err_msg = result.error or f"HTTP {result.status_code}"
-                errors.append({"hook_id": hook.id, "error": err_msg})
+                errors.append({"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool})
                 storage.log_failure(
                     hook_id=hook.id,
                     trigger_tool=hook.trigger_tool,
@@ -336,15 +298,15 @@ async def hooks_fire(
                     source_result=source_result,
                 )
             else:
-                blocking_results.append({"hook_id": hook.id, "result": result.result})
+                results_by_id[hook.id] = result.result
 
     # Phase 1.5: Feedback writeback for blocking hooks
     feedback_results: list[dict[str, Any]] = []
-    if blocking_hooks and blocking_results:
-        for hook, br in zip(blocking_hooks, blocking_results):
+    if blocking_hooks and results_by_id:
+        for hook in blocking_hooks:
             if not hook.feedback_mapping or not hook.feedback_tool:
                 continue
-            raw_result = br.get("result")
+            raw_result = results_by_id.get(hook.id)
             if not raw_result:
                 continue
             try:
@@ -387,22 +349,25 @@ async def hooks_fire(
     verification_results: list[dict[str, Any]] = []
     if verification_matched:
         # Build hook_results dict from Phase 1 blocking results
-        hook_results: dict[str, Any] = {}
-        for br in blocking_results:
-            hook_results[br["hook_id"]] = br["result"]  # type: ignore[index]
+        hook_results: dict[str, Any] = dict(results_by_id)
 
         enriched = {**source, "hook_results": hook_results}
         verification_results = await _fire_verification(
             verification_matched, enriched, trigger_tool, source_result, base_config,
         )
 
+    target_tool_by_id = {hook.id: hook.target_tool for hook in blocking_hooks}
     summary: dict[str, Any] = {
         "hooks_fired": fired,
         "skipped": skipped,
         "errors": errors,
-        "results": blocking_results,
+        "results": [
+            {"hook_id": k, "result": v, "target_tool": target_tool_by_id.get(k)}
+            for k, v in results_by_id.items()
+        ],
         "depth": depth,
         "max_depth": max_depth,
+        "top_level": depth == 0,
     }
     if verification_results:
         summary["verification"] = verification_results

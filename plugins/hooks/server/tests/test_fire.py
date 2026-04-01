@@ -104,23 +104,24 @@ class TestHooksFire:
         assert data["errors"] == []
 
     @pytest.mark.asyncio
-    async def test_fire_background_hook(self, hooks_yaml: Path):
-        """Non-blocking hook fires in background; fire returns immediately."""
+    async def test_fire_nonblocking_hook_awaited(self, hooks_yaml: Path):
+        """Non-blocking hook is now awaited (no background dispatch)."""
         reg = _make_registry([
             _hook("hook-001", "trigger_a", "target_b", blocking=False),
         ])
         save(reg, hooks_yaml)
+        mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result),
         ):
             result = await hooks_fire("trigger_a", source_result='{"key": "val"}')
 
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["skipped"] == 0
-        mock_bg.assert_called_once()
+        assert data["results"] == [{"hook_id": "hook-001", "result": None, "target_tool": "target_b"}]
 
     @pytest.mark.asyncio
     async def test_fire_blocking_hook_success(self, hooks_yaml: Path):
@@ -140,7 +141,7 @@ class TestHooksFire:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["errors"] == []
-        assert data["results"] == [{"hook_id": "hook-001", "result": None}]
+        assert data["results"] == [{"hook_id": "hook-001", "result": None, "target_tool": "target_b"}]
 
     @pytest.mark.asyncio
     async def test_fire_blocking_hook_success_with_result(self, hooks_yaml: Path):
@@ -160,7 +161,7 @@ class TestHooksFire:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["errors"] == []
-        assert data["results"] == [{"hook_id": "hook-001", "result": "created"}]
+        assert data["results"] == [{"hook_id": "hook-001", "result": "created", "target_tool": "target_b"}]
 
     @pytest.mark.asyncio
     async def test_fire_blocking_hook_http_error(self, hooks_yaml: Path, failures_yaml: Path):
@@ -274,24 +275,25 @@ class TestHooksFire:
 
     @pytest.mark.asyncio
     async def test_fire_multiple_hooks_mixed(self, hooks_yaml: Path):
-        """Mix of blocking and non-blocking hooks fires correctly."""
+        """Mix of blocking and non-blocking hooks all go through blocking path."""
         reg = _make_registry([
             _hook("hook-001", "trigger_a", "target_b", blocking=False),
             _hook("hook-002", "trigger_a", "target_c", blocking=True),
         ])
         save(reg, hooks_yaml)
-        mock_result = FireResult(hook_id="hook-002", status_code=200, body="ok")
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=200, body="ok")
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
-            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
         ):
             result = await hooks_fire("trigger_a")
 
         data = json.loads(result)
         assert data["hooks_fired"] == 2
-        mock_bg.assert_called_once()
+        assert len(data["results"]) == 2
 
     @pytest.mark.asyncio
     async def test_fire_resolves_param_mapping(self, hooks_yaml: Path):
@@ -407,7 +409,7 @@ class TestVerificationFiring:
         # Primary fired first, then verification
         assert call_order == ["primary-001", "verify-001"]
         assert data["hooks_fired"] == 1  # Only primary counted
-        assert data["results"] == [{"hook_id": "primary-001", "result": "primary_done"}]
+        assert data["results"] == [{"hook_id": "primary-001", "result": "primary_done", "target_tool": "target_b"}]
         assert len(data["verification"]) == 1
         assert data["verification"][0]["hook_id"] == "verify-001"
         assert data["verification"][0]["status"] == "pass"
@@ -633,7 +635,7 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             # source_result contains todoist_task_id
             source = json.dumps({"todoist_task_id": "abc123"})
@@ -642,7 +644,6 @@ class TestConditionMerge:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["skipped"] == 0
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_todo_condition_skips_without_task_id(self, hooks_yaml: Path, proj_yaml: Path):
@@ -677,7 +678,7 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             source = json.dumps({"todoist_project_id": "proj456"})
             result = await hooks_fire("trigger_a", source_result=source)
@@ -685,7 +686,6 @@ class TestConditionMerge:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["skipped"] == 0
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_project_condition_skips_without_project_id(self, hooks_yaml: Path, proj_yaml: Path):
@@ -725,7 +725,7 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             # source_result provides the project_id
             source = json.dumps({"todoist_project_id": "proj789"})
@@ -734,7 +734,6 @@ class TestConditionMerge:
         data = json.loads(result)
         assert data["hooks_fired"] == 1
         assert data["skipped"] == 0
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_trello_card_id_merges_to_project(self, hooks_yaml: Path, proj_yaml: Path):
@@ -748,14 +747,13 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             source = json.dumps({"trello_card_id": "cardABC"})
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
         assert data["hooks_fired"] == 1
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_trello_checklist_id_merges_to_both(self, hooks_yaml: Path, proj_yaml: Path):
@@ -774,14 +772,13 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             source = json.dumps({"trello_checklist_id": "check123"})
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
         assert data["hooks_fired"] == 1
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_jira_issue_key_merges_to_todo(self, hooks_yaml: Path, proj_yaml: Path):
@@ -795,14 +792,13 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             source = json.dumps({"jira_issue_key": "PROJ-123"})
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
         assert data["hooks_fired"] == 1
-        mock_bg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_base_config_overrides_source_result(self, hooks_yaml: Path, proj_yaml: Path):
@@ -817,7 +813,7 @@ class TestConditionMerge:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_background") as mock_bg,
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=FireResult(hook_id="hook-001", status_code=200, body="ok")),
         ):
             # source_result also has it, but base config wins
             source = json.dumps({"todoist_task_id": "source_value"})
@@ -826,4 +822,175 @@ class TestConditionMerge:
         data = json.loads(result)
         # Should fire because base config has it
         assert data["hooks_fired"] == 1
-        mock_bg.assert_called_once()
+
+
+class TestBlockingAll:
+    """Tests for 389.1 — all hooks now blocking, top_level field, feedback_mapping fix."""
+
+    @pytest.mark.anyio
+    async def test_formerly_nonblocking_hook_is_awaited(
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
+        proj_yaml: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A hook with blocking=False now goes through the blocking path (asyncio.gather)."""
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-nonblock",
+                    "trigger_tool": "test_trigger",
+                    "target_tool": "test_target",
+                    "server": "proj",
+                    "blocking": False,  # formerly background — now blocking
+                    "param_mapping": {},
+                }
+            ]
+        }
+        hooks_yaml.write_text(__import__("yaml").dump(hook_data))
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._resolve_server_url", return_value="unix:///tmp/test.sock"),
+            patch("server.tools.fire.post_hook", new_callable=AsyncMock) as mock_post,
+        ):
+            mock_post.return_value = __import__("server.lib.http_client", fromlist=["FireResult"]).FireResult(
+                hook_id="h-nonblock", status_code=200, body='{"ok": true}', result='{"ok": true}'
+            )
+            result_json = await hooks_fire("test_trigger", source_result="{}", depth=0)
+
+        result = __import__("json").loads(result_json)
+        assert result["hooks_fired"] == 1
+        mock_post.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_top_level_true_at_depth_zero(
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
+        proj_yaml: Path,
+    ) -> None:
+        """Response includes top_level=True when depth=0."""
+        # Need at least one hook so we reach the summary code path (which adds top_level)
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-tl",
+                    "trigger_tool": "some_tool",
+                    "target_tool": "some_target",
+                    "server": "proj",
+                    "blocking": True,
+                    "param_mapping": {},
+                }
+            ]
+        }
+        hooks_yaml.write_text(__import__("yaml").dump(hook_data))
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            mock_fire.return_value = FireResult(hook_id="h-tl", status_code=200, body="ok")
+            result_json = await hooks_fire("some_tool", source_result="{}", depth=0)
+        result = __import__("json").loads(result_json)
+        assert result.get("top_level") is True
+
+    @pytest.mark.anyio
+    async def test_top_level_absent_at_depth_one(
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
+        proj_yaml: Path,
+    ) -> None:
+        """Response does NOT include top_level=True when depth > 0 (or depth limit hit)."""
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-tl2",
+                    "trigger_tool": "some_tool",
+                    "target_tool": "some_target",
+                    "server": "proj",
+                    "blocking": True,
+                    "param_mapping": {},
+                }
+            ]
+        }
+        hooks_yaml.write_text(__import__("yaml").dump(hook_data))
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            mock_fire.return_value = FireResult(hook_id="h-tl2", status_code=200, body="ok")
+            result_json = await hooks_fire("some_tool", source_result="{}", depth=1)
+        result = __import__("json").loads(result_json)
+        assert result.get("top_level") is not True
+
+    @pytest.mark.anyio
+    async def test_feedback_mapping_correct_when_hook_fails(
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
+        proj_yaml: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When hook 1 fails and hook 2 succeeds, feedback applies to hook 2's result only."""
+        import yaml
+        from server.lib.http_client import FireResult
+
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-fail",
+                    "trigger_tool": "test_trigger",
+                    "target_tool": "target_fail",
+                    "server": "proj",
+                    "blocking": True,
+                    "param_mapping": {},
+                },
+                {
+                    "id": "h-ok",
+                    "trigger_tool": "test_trigger",
+                    "target_tool": "target_ok",
+                    "server": "proj",
+                    "blocking": True,
+                    "param_mapping": {},
+                    "feedback_mapping": {"todoist_task_id": "todoist_task_id"},
+                    "feedback_tool": "todo_update",
+                },
+            ]
+        }
+        hooks_yaml.write_text(yaml.dump(hook_data))
+
+        call_count = 0
+
+        async def mock_post_hook(hook_id, url, target_tool, params):
+            nonlocal call_count
+            call_count += 1
+            if target_tool == "target_fail":
+                return FireResult(hook_id=hook_id, status_code=500, body="error", error="internal error")
+            return FireResult(
+                hook_id=hook_id, status_code=200, body='{"todoist_task_id": "t123"}',
+                result='{"todoist_task_id": "t123"}'
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._resolve_server_url", return_value="unix:///tmp/test.sock"),
+            patch("server.tools.fire.post_hook", side_effect=mock_post_hook),
+        ):
+            result_json = await hooks_fire("test_trigger", source_result='{"todo_id": "1"}', depth=0)
+
+        result = __import__("json").loads(result_json)
+        assert result["hooks_fired"] == 2
+        # h-fail should be in errors, not in results
+        assert any(e.get("hook_id") == "h-fail" for e in result["errors"])
+        # h-ok should be in results
+        assert any(r.get("hook_id") == "h-ok" for r in result["results"])
