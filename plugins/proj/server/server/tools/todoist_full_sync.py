@@ -1,14 +1,23 @@
-"""MCP tools for batched Todoist sync — diff and apply."""
+"""
+proj_todoist_full_sync -- full-cycle Todoist sync executed within the MCP layer.
+
+Reduces model-side orchestration from ~10 tool calls to 1 by handling:
+fetch -> diff -> execute push ops -> apply pull ops -> return summary.
+"""
 
 from __future__ import annotations
 
+import base64
 import difflib
 import json
 import logging
 import warnings
 from dataclasses import dataclass, field
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
@@ -17,16 +26,16 @@ from server.lib.models import Todo
 from server.lib.retry import retry_link
 from server.tools.config import require_project
 
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
+
 
 # ── Priority mapping ─────────────────────────────────────────────────────────
 
 _TODOIST_TO_LOCAL: dict[str, str] = {"p1": "high", "p2": "high", "p3": "medium", "p4": "low"}
 _LOCAL_TO_TODOIST: dict[str, str] = {"high": "p2", "medium": "p3", "low": "p4"}
-
 
 _UTC = timezone.utc
 
@@ -85,14 +94,14 @@ def _parse_todoist_priority(task: dict[str, Any]) -> str:
 def _parse_todoist_labels(task: dict[str, Any]) -> list[str]:
     """Extract labels list from task."""
     labels = task.get("labels")
-    return [str(x) for x in labels] if isinstance(labels, list) else []  # type: ignore[union-attr]  # list[object] from JSON; items are str at runtime
+    return [str(x) for x in labels] if isinstance(labels, list) else []  # type: ignore[union-attr]
 
 
 def _parse_todoist_due(task: dict[str, Any]) -> str | None:
     """Extract due date from task."""
     due_raw = task.get("due")
-    if isinstance(due_raw, dict) and "date" in due_raw:  # type: ignore[operator]  # dict from JSON
-        return str(due_raw["date"])  # type: ignore[index]  # dict access valid at runtime
+    if isinstance(due_raw, dict) and "date" in due_raw:  # type: ignore[operator]
+        return str(due_raw["date"])  # type: ignore[index]
     return None
 
 
@@ -172,7 +181,8 @@ def _find_link_candidate(
     local_todo: dict, todoist_tasks: list[dict], threshold: float = 0.7
 ) -> dict | None:
     """Find a Todoist task that likely matches an unlinked local todo by title similarity."""
-    import unicodedata, re
+    import re
+    import unicodedata
 
     def normalize(s: str) -> str:
         s = unicodedata.normalize("NFKD", s).lower()
@@ -204,12 +214,9 @@ def _find_link_candidate(
 def _find_link_candidate_reverse(
     todoist_task: dict, local_todos: list[Todo], threshold: float = 0.7
 ) -> dict | None:
-    """Find a local todo that likely matches an unlinked Todoist task by title similarity.
-
-    Reverse direction of _find_link_candidate: given a Todoist task, find the
-    best-matching local Todo object.
-    """
-    import unicodedata, re
+    """Find a local todo that likely matches an unlinked Todoist task by title similarity."""
+    import re
+    import unicodedata
 
     def normalize(s: str) -> str:
         s = unicodedata.normalize("NFKD", s).lower()
@@ -501,7 +508,7 @@ def apply_changes(
             id=next_todo_id(meta, parent=parent_todo),
             title=str(item.get("title", "")),
             priority=str(item.get("priority", cfg.default_priority)),
-            tags=list(item["tags"]) if isinstance(item.get("tags"), list) else [],  # type: ignore[arg-type]  # list[object] from JSON; list[str] at runtime
+            tags=list(item["tags"]) if isinstance(item.get("tags"), list) else [],  # type: ignore[arg-type]
             notes=str(item.get("notes", "")),
             due_date=str(item["due_date"]) if item.get("due_date") else None,
             todoist_task_id=str(item["todoist_task_id"]) if item.get("todoist_task_id") else None,
@@ -529,7 +536,7 @@ def apply_changes(
         if "priority" in item and item["priority"] is not None:
             todo.priority = str(item["priority"])
         if "tags" in item and isinstance(item["tags"], list):
-            todo.tags = list(item["tags"])  # type: ignore[arg-type]  # list[object] from JSON; list[str] at runtime
+            todo.tags = list(item["tags"])  # type: ignore[arg-type]
         if "notes" in item and item["notes"] is not None:
             todo.notes = str(item["notes"])
         if "due_date" in item:
@@ -621,59 +628,461 @@ def apply_changes(
     return counts
 
 
-# ── MCP tool registration ────────────────────────────────────────────────────
+# -- Inter-plugin call helpers ------------------------------------------------
+
+
+def _resolve_todoist_socket() -> str:
+    """Read Todoist plugin socket path from registry, fall back to legacy."""
+    registry_file = Path.home() / ".claude" / "sockets" / "todoist"
+    try:
+        path = registry_file.read_text().strip()
+        if path:
+            return path
+    except (FileNotFoundError, OSError):
+        pass
+    return "/tmp/claude-hooks-todoist.sock"
+
+
+def _call_todoist_tool(tool_name: str, params: dict[str, Any]) -> Any:
+    """Call a Todoist MCP tool via inter-plugin Unix domain socket."""
+    sock_path = _resolve_todoist_socket()
+    transport = httpx.HTTPTransport(uds=sock_path)
+    with httpx.Client(transport=transport, timeout=30.0) as client:
+        resp = client.post(
+            "http://localhost/call",
+            json={"tool": tool_name, "params": params},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+# -- Push operation helpers ---------------------------------------------------
+
+
+def _execute_push_creates(
+    tasks: list[dict[str, Any]],
+    project_todoist_id: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+    """Execute phase-1 push_create operations via todoist_add_tasks.
+
+    Returns (succeeded, errors, id_map) where id_map maps local todo_id
+    to the newly created Todoist task ID.
+    """
+    if not tasks:
+        return [], [], {}
+
+    succeeded: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    id_map: dict[str, str] = {}
+
+    # Build payloads for batch create
+    add_payloads: list[dict[str, Any]] = []
+    for task in tasks:
+        payload: dict[str, Any] = {
+            "content": task.get("content", ""),
+            "priority": task.get("priority", "p4"),
+        }
+        if task.get("description"):
+            payload["description"] = task["description"]
+        if task.get("labels"):
+            payload["labels"] = task["labels"]
+        if task.get("dueString"):
+            payload["dueString"] = task["dueString"]
+        if task.get("parentId"):
+            payload["parentId"] = task["parentId"]
+        if task.get("project_id"):
+            payload["project_id"] = task["project_id"]
+        add_payloads.append(payload)
+
+    try:
+        result = _call_todoist_tool("todoist_add_tasks", {"tasks": add_payloads})
+        # Result should be a list of created tasks with IDs
+        created_tasks = result if isinstance(result, list) else result.get("tasks", []) if isinstance(result, dict) else []
+        for i, task in enumerate(tasks):
+            todo_id = str(task.get("todo_id", ""))
+            if i < len(created_tasks):
+                todoist_id = str(created_tasks[i].get("id", ""))
+                if todoist_id:
+                    id_map[todo_id] = todoist_id
+                    task["result_todoist_id"] = todoist_id
+                    succeeded.append(task)
+                else:
+                    errors.append({
+                        "operation_type": "push_create",
+                        "error": "No ID returned for created task",
+                        "retryable": True,
+                        "retry_payload": task,
+                    })
+            else:
+                errors.append({
+                    "operation_type": "push_create",
+                    "error": "Task not in response",
+                    "retryable": True,
+                    "retry_payload": task,
+                })
+    except Exception as e:
+        # All tasks in this batch failed
+        for task in tasks:
+            errors.append({
+                "operation_type": "push_create",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": task,
+            })
+
+    # Handle complete_after_create for successfully created tasks
+    complete_ids = [
+        id_map[str(t.get("todo_id", ""))]
+        for t in tasks
+        if t.get("complete_after_create") and str(t.get("todo_id", "")) in id_map
+    ]
+    if complete_ids:
+        try:
+            _call_todoist_tool("todoist_complete_tasks", {"ids": complete_ids})
+        except Exception as e:
+            logger.warning("Failed to complete newly created tasks: %s", e)
+
+    return succeeded, errors, id_map
+
+
+def _execute_push_creates_phase2(
+    tasks: list[dict[str, Any]],
+    phase1_id_map: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+    """Execute phase-2 push_create for children whose parents were just created.
+
+    Resolves _parent_local_id to the Todoist ID from phase 1.
+    """
+    if not tasks:
+        return [], [], {}
+
+    resolved: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for task in tasks:
+        parent_local_id = str(task.get("_parent_local_id", ""))
+        if parent_local_id in phase1_id_map:
+            task_copy = dict(task)
+            task_copy["parentId"] = phase1_id_map[parent_local_id]
+            # Remove internal field
+            task_copy.pop("_parent_local_id", None)
+            resolved.append(task_copy)
+        else:
+            errors.append({
+                "operation_type": "push_create_phase2",
+                "error": f"Parent {parent_local_id} not in phase-1 ID map",
+                "retryable": True,
+                "retry_payload": task,
+            })
+
+    if not resolved:
+        return [], errors, {}
+
+    succeeded, create_errors, id_map = _execute_push_creates(resolved, None)
+    errors.extend(create_errors)
+    return succeeded, errors, id_map
+
+
+def _execute_push_updates(
+    tasks: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Execute push_update operations via todoist_update_tasks."""
+    if not tasks:
+        return [], []
+
+    try:
+        _call_todoist_tool("todoist_update_tasks", {"tasks": tasks})
+        return tasks, []
+    except Exception as e:
+        errors = [{
+            "operation_type": "push_update",
+            "error": str(e),
+            "retryable": True,
+            "retry_payload": task,
+        } for task in tasks]
+        return [], errors
+
+
+def _execute_push_completes(
+    task_ids: list[str],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Execute push_complete operations via todoist_complete_tasks."""
+    if not task_ids:
+        return [], []
+
+    try:
+        _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
+        return task_ids, []
+    except Exception as e:
+        errors = [{
+            "operation_type": "push_complete",
+            "error": str(e),
+            "retryable": True,
+            "retry_payload": {"ids": task_ids},
+        }]
+        return [], errors
+
+
+def _execute_ghost_close(
+    task_ids: list[str],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Complete ghost tasks on Todoist."""
+    if not task_ids:
+        return [], []
+
+    try:
+        _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
+        return task_ids, []
+    except Exception as e:
+        errors = [{
+            "operation_type": "ghost_close",
+            "error": str(e),
+            "retryable": True,
+            "retry_payload": {"ids": task_ids},
+        }]
+        return [], errors
+
+
+def _execute_root_only_cleanup(
+    cleanup_entries: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    """Delete child tasks from Todoist for root_only mode."""
+    if not cleanup_entries:
+        return [], []
+
+    succeeded: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
+
+    for entry in cleanup_entries:
+        todoist_task_id = entry.get("todoist_task_id", "")
+        try:
+            _call_todoist_tool("todoist_delete", {"id": todoist_task_id})
+            succeeded.append(entry)
+        except Exception as e:
+            errors.append({
+                "operation_type": "root_only_cleanup",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": entry,
+            })
+
+    return succeeded, errors
+
+
+# -- Retry handling -----------------------------------------------------------
+
+
+def _retry_failed_ops(
+    failed_ops: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Re-attempt previously failed operations.
+
+    Returns (succeeded, still_failed).
+    """
+    succeeded: list[dict[str, Any]] = []
+    still_failed: list[dict[str, Any]] = []
+
+    for entry in failed_ops:
+        op_type = entry.get("operation_type", "unknown")
+        payload = entry.get("retry_payload", {})
+
+        try:
+            if op_type == "push_create" or op_type == "push_create_phase2":
+                add_payload = {
+                    k: v for k, v in payload.items()
+                    if k in ("content", "priority", "description", "labels", "dueString", "parentId", "project_id")
+                }
+                result = _call_todoist_tool("todoist_add_tasks", {"tasks": [add_payload]})
+                payload["result"] = result
+                succeeded.append(payload)
+            elif op_type == "push_update":
+                _call_todoist_tool("todoist_update_tasks", {"tasks": [payload]})
+                succeeded.append(payload)
+            elif op_type in ("push_complete", "ghost_close"):
+                ids = payload.get("ids", [])
+                if ids:
+                    _call_todoist_tool("todoist_complete_tasks", {"ids": ids})
+                succeeded.append(payload)
+            elif op_type == "root_only_cleanup":
+                todoist_id = payload.get("todoist_task_id", "")
+                if todoist_id:
+                    _call_todoist_tool("todoist_delete", {"id": todoist_id})
+                succeeded.append(payload)
+            else:
+                still_failed.append(entry)
+                continue
+        except Exception as e:
+            still_failed.append({
+                "operation_type": op_type,
+                "error": str(e),
+                "retryable": False,
+                "retry_payload": payload,
+            })
+
+    return succeeded, still_failed
+
+
+# -- Summary builder ----------------------------------------------------------
+
+
+def _build_summary(
+    plan: SyncPlan,
+    pull_counts: dict[str, Any],
+    push_created: int,
+    push_created_phase2: int,
+    push_updated: int,
+    push_completed: int,
+    ghost_closed: int,
+    root_cleaned: int,
+) -> dict[str, Any]:
+    """Build a human-readable summary of what was synced."""
+    return {
+        "pull": {
+            "created": pull_counts.get("created", 0),
+            "updated": pull_counts.get("updated", 0),
+            "completed": pull_counts.get("completed", 0),
+            "linked": pull_counts.get("linked", 0),
+            "cleared": pull_counts.get("cleared", 0),
+        },
+        "push": {
+            "tasks_created": push_created,
+            "tasks_created_phase2": push_created_phase2,
+            "tasks_updated": push_updated,
+            "tasks_completed": push_completed,
+            "ghost_closed": ghost_closed,
+            "root_only_cleaned": root_cleaned,
+        },
+    }
+
+
+# -- MCP tool registration ---------------------------------------------------
 
 
 def register(app: FastMCP) -> None:
-    """Register todoist sync tools."""
+    """Register proj_todoist_full_sync tool."""
 
     @app.tool(
         description=(
-            "Compare Todoist tasks with local todos and produce a sync plan. "
-            "Takes Todoist task data as JSON (from find-tasks). Returns a JSON "
-            "sync plan with batched operations for both sides. "
-            "When auto_apply=True, pull operations (pull_create, pull_update, "
-            "pull_complete) are applied locally immediately and the response "
-            "includes project_info (mcp_server, todoist_project_id) so the "
-            "caller can skip separate config_load/proj_get_active calls. "
-            "Set summary_only=True to return only summary counts, not full plan arrays."
+            "Execute a full Todoist sync cycle for the active project: "
+            "fetch tasks -> diff -> execute push ops -> apply pull ops -> return summary. "
+            "Reduces the sync flow from ~10 tool calls to 1. "
+            "On success: {\"status\": \"success\", \"summary\": {...}}. "
+            "On partial failure: {\"status\": \"partial_success\", \"errors\": [...], \"retry_token\": \"...\"}. "
+            "If potential_links exist: {\"status\": \"needs_confirmation\", \"potential_links\": [...]}. "
+            "Pass confirmed_links (JSON list of {todo_id, todoist_task_id}) to confirm links. "
+            "Pass retry_failures (base64-encoded JSON) to re-attempt only previously failed ops."
         )
     )
-    def proj_todoist_diff(
-        todoist_tasks_json: str,
-        auto_apply: bool = False,
-        summary_only: bool = False,
+    def proj_todoist_full_sync(
         project_name: str | None = None,
+        confirmed_links: str | None = None,
+        retry_failures: str | None = None,
     ) -> str:
+        # -- Retry mode: re-attempt only failed ops --
+        if retry_failures:
+            try:
+                failed_ops = json.loads(base64.b64decode(retry_failures))
+            except (json.JSONDecodeError, Exception) as e:
+                return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
+
+            succeeded, still_failed = _retry_failed_ops(failed_ops)
+            if still_failed:
+                token = base64.b64encode(json.dumps(still_failed).encode()).decode()
+                return json.dumps({
+                    "status": "partial_success",
+                    "retried_succeeded": len(succeeded),
+                    "errors": still_failed,
+                    "retry_token": token,
+                })
+            return json.dumps({
+                "status": "success",
+                "retried_succeeded": len(succeeded),
+                "summary": {"retry": True, "succeeded": len(succeeded)},
+            })
+
+        # -- Normal mode: full sync cycle --
+
+        # 1. Load config + resolve project
         result = require_project(project_name)
         if isinstance(result, str):
-            return result
+            return json.dumps({"status": "error", "error": result})
         cfg, name = result
 
-        try:
-            todoist_tasks: list[dict[str, Any]] = json.loads(todoist_tasks_json)
-        except json.JSONDecodeError as e:
-            return f"Invalid JSON: {e}"
+        # 2. Load project meta
+        meta = storage.load_meta(cfg, name)
+        project_todoist_id = meta.todoist_project_id
 
+        # 3. Empty project → up_to_date without socket calls
+        todos = storage.load_todos(cfg, name)
+        has_local_todos = bool(todos)
+        has_todoist_project = bool(project_todoist_id)
+
+        if not has_local_todos and not has_todoist_project:
+            return json.dumps({
+                "status": "success",
+                "summary": {"up_to_date": True},
+            })
+
+        # 4. Fetch tasks from Todoist via socket
+        todoist_tasks: list[dict[str, Any]] = []
+        if project_todoist_id:
+            try:
+                fetch_result = _call_todoist_tool(
+                    "todoist_find_tasks",
+                    {"project_id": project_todoist_id},
+                )
+                if isinstance(fetch_result, list):
+                    todoist_tasks = fetch_result
+                elif isinstance(fetch_result, dict):
+                    todoist_tasks = fetch_result.get("tasks", [])
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+                return json.dumps({
+                    "status": "error",
+                    "error": f"Todoist plugin unavailable: {e}",
+                })
+            except Exception as e:
+                return json.dumps({
+                    "status": "error",
+                    "error": f"Failed to fetch Todoist tasks: {e}",
+                })
+
+        # 5. Compute diff
         plan = compute_diff(todoist_tasks, cfg, name)
 
-        if not auto_apply:
-            plan_dict = plan.to_dict()
-            if summary_only:
-                return json.dumps({"summary": plan_dict["summary"]}, indent=2)
-            return json.dumps(plan_dict, indent=2)
+        # 6. Handle confirmed_links: apply link mappings before continuing
+        parsed_links: list[dict[str, str]] = []
+        if confirmed_links:
+            try:
+                parsed_links = json.loads(confirmed_links)
+            except json.JSONDecodeError as e:
+                return json.dumps({"status": "error", "error": f"Invalid confirmed_links: {e}"})
 
-        # auto_apply mode: apply pull operations server-side
-        meta = storage.load_meta(cfg, name)
-        plan_dict = plan.to_dict()
-        response: dict[str, object] = {
-            "plan": {"summary": plan_dict["summary"]} if summary_only else plan_dict,
-            "project_info": {
-                "mcp_server": "todoist",  # Deprecated: config field ignored; local plugin uses fixed "todoist" prefix
-                "todoist_project_id": meta.todoist_project_id or "",
-            },
-        }
+            # Apply confirmed links
+            if parsed_links:
+                link_data = ApplyInput(
+                    link_todoist_ids=parsed_links,
+                )
+                apply_changes(link_data, cfg, name, push_confirmed=True)
+                # Clear potential_links since they've been confirmed
+                plan.potential_links = []
+                # Recompute diff after linking
+                plan = compute_diff(todoist_tasks, cfg, name)
 
+        # 7. Check for potential_links requiring user confirmation
+        if plan.potential_links and not confirmed_links:
+            return json.dumps({
+                "status": "needs_confirmation",
+                "potential_links": plan.potential_links,
+            })
+
+        # 8. Empty diff -> up to date
+        if plan.is_empty():
+            return json.dumps({
+                "status": "success",
+                "summary": {"up_to_date": True},
+            })
+
+        # 9. Phase A: Apply pull operations locally (push_confirmed=False)
         has_pulls = bool(plan.pull_create or plan.pull_update or plan.pull_complete)
         if has_pulls:
             pull_data = ApplyInput(
@@ -681,45 +1090,106 @@ def register(app: FastMCP) -> None:
                 updated_locally=plan.pull_update,  # type: ignore[arg-type]
                 completed_locally=plan.pull_complete,
             )
-            counts = apply_changes(pull_data, cfg, name)
-            response["auto_applied"] = counts
+            pull_counts = apply_changes(pull_data, cfg, name, push_confirmed=False)
         else:
-            response["auto_applied"] = {
+            pull_counts = {
                 "created": 0, "updated": 0, "completed": 0,
                 "linked": 0, "cleared": 0,
+                "staged_description_synced": {},
             }
 
-        return json.dumps(response, indent=2)
+        staged_desc = pull_counts.get("staged_description_synced", {})
 
-    @app.tool(
-        description=(
-            "Apply sync results to local todos in bulk. Takes a JSON "
-            "object with: created_locally, updated_locally, "
-            "completed_locally, link_todoist_ids, cleared_todoist_ids. "
-            "All changes are applied atomically in a single save."
+        # 10. Execute push operations
+        all_errors: list[dict[str, Any]] = []
+        total_push_created = 0
+        total_push_created_p2 = 0
+        total_push_updated = 0
+        total_push_completed = 0
+        total_ghost_closed = 0
+        total_root_cleaned = 0
+
+        # 10a. Ghost close
+        ghost_succeeded, ghost_errors = _execute_ghost_close(plan.ghost_close)
+        total_ghost_closed = len(ghost_succeeded)
+        all_errors.extend(ghost_errors)
+
+        # 10b. Root-only cleanup
+        cleanup_succeeded, cleanup_errors = _execute_root_only_cleanup(plan.root_only_cleanup)
+        total_root_cleaned = len(cleanup_succeeded)
+        all_errors.extend(cleanup_errors)
+
+        # 10c. Push creates (phase 1)
+        p1_succeeded, p1_errors, phase1_id_map = _execute_push_creates(
+            plan.push_create, project_todoist_id,  # type: ignore[arg-type]
         )
-    )
-    def proj_todoist_apply(
-        apply_json: str,
-        push_confirmed: bool = False,
-        project_name: str | None = None,
-    ) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
+        total_push_created = len(p1_succeeded)
+        all_errors.extend(p1_errors)
 
-        try:
-            raw: dict[str, Any] = json.loads(apply_json)
-        except json.JSONDecodeError as e:
-            return f"Invalid JSON: {e}"
-
-        data = ApplyInput(
-            created_locally=raw.get("created_locally", []),
-            updated_locally=raw.get("updated_locally", []),
-            completed_locally=raw.get("completed_locally", []),
-            link_todoist_ids=raw.get("link_todoist_ids", []),
-            cleared_todoist_ids=raw.get("cleared_todoist_ids", []),
+        # 10d. Push creates (phase 2) — children needing phase-1 parent IDs
+        p2_succeeded, p2_errors, phase2_id_map = _execute_push_creates_phase2(
+            plan.push_create_phase2, phase1_id_map,  # type: ignore[arg-type]
         )
-        counts = apply_changes(data, cfg, name, push_confirmed=push_confirmed)
-        return json.dumps({"status": "ok", "counts": counts})
+        total_push_created_p2 = len(p2_succeeded)
+        all_errors.extend(p2_errors)
+
+        # 10e. Push updates
+        update_succeeded, update_errors = _execute_push_updates(plan.push_update)  # type: ignore[arg-type]
+        total_push_updated = len(update_succeeded)
+        all_errors.extend(update_errors)
+
+        # 10f. Push completes
+        complete_succeeded, complete_errors = _execute_push_completes(plan.push_complete)
+        total_push_completed = len(complete_succeeded)
+        all_errors.extend(complete_errors)
+
+        # 11. Phase B: Link newly created Todoist IDs and apply staged values
+        combined_id_map = {**phase1_id_map, **phase2_id_map}
+        link_ops: list[dict[str, str]] = []
+        for task in p1_succeeded + p2_succeeded:
+            todo_id = str(task.get("todo_id", ""))
+            todoist_id = str(task.get("result_todoist_id", ""))
+            if todo_id and todoist_id:
+                link_ops.append({"todo_id": todo_id, "todoist_task_id": todoist_id})
+
+        # Clear todoist IDs for root_only cleanup
+        cleared_ids = [str(entry.get("todo_id", "")) for entry in cleanup_succeeded]
+
+        # Build staged description_synced updates
+        staged_updates: list[dict[str, Any]] = []
+        if staged_desc:
+            for todo_id, desc_val in staged_desc.items():
+                staged_updates.append({
+                    "todo_id": todo_id,
+                    "todoist_description_synced": desc_val,
+                })
+
+        if link_ops or cleared_ids or staged_updates:
+            link_data = ApplyInput(
+                link_todoist_ids=link_ops,
+                cleared_todoist_ids=cleared_ids,
+                updated_locally=staged_updates,
+            )
+            apply_changes(link_data, cfg, name, push_confirmed=True)
+
+        # 12. Build response
+        summary = _build_summary(
+            plan, pull_counts,
+            total_push_created, total_push_created_p2,
+            total_push_updated, total_push_completed,
+            total_ghost_closed, total_root_cleaned,
+        )
+
+        if all_errors:
+            token = base64.b64encode(json.dumps(all_errors).encode()).decode()
+            return json.dumps({
+                "status": "partial_success",
+                "summary": summary,
+                "errors": all_errors,
+                "retry_token": token,
+            })
+
+        return json.dumps({
+            "status": "success",
+            "summary": summary,
+        })
