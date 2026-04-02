@@ -561,21 +561,28 @@ def apply_changes(
         counts["created"] += 1
 
     # 2. Update existing todos
+    _CONTENT_FIELDS = {"title", "priority", "tags", "notes", "due_date"}
     for item in data.updated_locally:
         todo_id = str(item.get("todo_id", ""))
         todo = todo_map.get(todo_id)
         if not todo:
             continue
+        content_changed = False
         if "title" in item and item["title"] is not None:
             todo.title = str(item["title"])
+            content_changed = True
         if "priority" in item and item["priority"] is not None:
             todo.priority = str(item["priority"])
+            content_changed = True
         if "tags" in item and isinstance(item["tags"], list):
             todo.tags = list(item["tags"])  # type: ignore[arg-type]
+            content_changed = True
         if "notes" in item and item["notes"] is not None:
             todo.notes = str(item["notes"])
+            content_changed = True
         if "due_date" in item:
             todo.due_date = str(item["due_date"]) if item["due_date"] else None
+            content_changed = True
         if "todoist_task_id" in item:
             todo.todoist_task_id = str(item["todoist_task_id"]) if item["todoist_task_id"] else None
         if "todoist_description_synced" in item:
@@ -584,10 +591,14 @@ def apply_changes(
                 todo.todoist_description_synced = desc_synced_value
             else:
                 staged_description_synced[todo_id] = desc_synced_value
-        # Use the Todoist timestamp if provided (pull updates) so local
-        # updated matches Todoist's updatedAt, preventing a push on the next sync.
-        todoist_ts = str(item.get("todoist_updated_at", ""))
-        todo.updated = todoist_ts if todoist_ts else today
+        # Only update the timestamp when content actually changed.
+        # Use the Todoist timestamp if provided (pull updates) so local updated
+        # matches Todoist's updatedAt and doesn't immediately trigger a push back.
+        # Metadata-only writes (todoist_description_synced, todoist_task_id) must
+        # NOT bump updated — they would make the todo look locally newer next sync.
+        if content_changed:
+            todoist_ts = str(item.get("todoist_updated_at", ""))
+            todo.updated = todoist_ts if todoist_ts else today
         counts["updated"] += 1
 
     # 3. Link todoist IDs (after push_create returns Todoist task IDs)
