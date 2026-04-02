@@ -269,6 +269,7 @@ def compute_diff(
     local_by_todoist_id: dict[str, Todo] = {}
     local_unlinked: list[Todo] = []
     local_open_with_todoist_id: list[Todo] = []
+    archived_by_todoist_id: dict[str, Todo] = {}
 
     for todo in todos:
         if todo.todoist_task_id:
@@ -277,6 +278,12 @@ def compute_diff(
                 local_open_with_todoist_id.append(todo)
         elif todo.status not in TERMINAL_STATUSES:
             local_unlinked.append(todo)
+
+    # Archived todos with a known Todoist ID: if the Todoist task is still open
+    # we should push_complete it rather than rely on title fuzzy-matching.
+    for todo in archived:
+        if todo.todoist_task_id:
+            archived_by_todoist_id[todo.todoist_task_id] = todo
 
     plan = SyncPlan()
 
@@ -294,7 +301,14 @@ def compute_diff(
         todoist_updated = _parse_todoist_updated(task)
 
         if todoist_id not in local_by_todoist_id:
-            # New task from Todoist — ghost check
+            # Archived todo with a known Todoist ID: push_complete it directly
+            # rather than relying on title fuzzy-matching (ghost_check).
+            if todoist_id in archived_by_todoist_id:
+                if not (task.get("isCompleted") or task.get("checked")):
+                    plan.push_complete.append(todoist_id)
+                continue
+            # New task from Todoist — ghost check (title-based fallback for
+            # todos that were archived before their Todoist ID was saved)
             if _ghost_check(content, archived):
                 plan.ghost_close.append(todoist_id)
                 continue
