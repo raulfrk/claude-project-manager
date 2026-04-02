@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from server.lib.template import resolve_mapping, resolve_template
+from server.lib.template import resolve_mapping, resolve_template, resolve_value
 
 
 # ── resolve_template ─────────────────────────────────────────────────────────
@@ -42,24 +42,23 @@ class TestResolveTemplate:
         source = {"items": ["zero"]}
         assert resolve_template("${items.abc}", source) == ""
 
-    def test_integer_value_json_encoded(self):
+    def test_integer_value_native(self):
         source = {"count": 42}
-        assert resolve_template("${count}", source) == "42"
+        assert resolve_template("${count}", source) == 42
 
-    def test_dict_value_json_encoded(self):
+    def test_dict_value_native(self):
         source = {"data": {"key": "val"}}
         result = resolve_template("${data}", source)
-        assert '"key"' in result
-        assert '"val"' in result
+        assert result == {"key": "val"}
 
-    def test_list_value_json_encoded(self):
+    def test_list_value_native(self):
         source = {"arr": [1, 2, 3]}
         result = resolve_template("${arr}", source)
-        assert result == "[1, 2, 3]"
+        assert result == [1, 2, 3]
 
-    def test_bool_value_json_encoded(self):
+    def test_bool_value_native(self):
         source = {"flag": True}
-        assert resolve_template("${flag}", source) == "true"
+        assert resolve_template("${flag}", source) is True
 
     def test_multiple_placeholders(self):
         source = {"a": "hello", "b": "world"}
@@ -121,3 +120,87 @@ class TestResolveMapping:
             source,
         )
         assert result == {"greeting": "hello world", "literal": "constant"}
+
+    def test_nested_mapping(self):
+        mapping = {"tasks": [{"content": "${title}"}]}
+        result = resolve_mapping(mapping, {"title": "hello"})
+        assert result == {"tasks": [{"content": "hello"}]}
+
+    def test_mixed_nested_and_flat(self):
+        mapping = {
+            "name": "${title}",
+            "tasks": [{"content": "${title}", "projectId": "${pid}"}],
+        }
+        source = {"title": "My Task", "pid": "proj123"}
+        result = resolve_mapping(mapping, source)
+        assert result == {
+            "name": "My Task",
+            "tasks": [{"content": "My Task", "projectId": "proj123"}],
+        }
+
+    def test_nested_dict_with_templates(self):
+        mapping = {"tasks": [{"content": "${title}", "projectId": "${pid}"}]}
+        source = {"title": "My Task", "pid": "proj123"}
+        result = resolve_mapping(mapping, source)
+        assert result == {"tasks": [{"content": "My Task", "projectId": "proj123"}]}
+
+
+# ── resolve_value ───────────────────────────────────────────────────────────
+
+
+class TestResolveValue:
+    def test_nested_dict(self):
+        mapping = {"tasks": [{"content": "${title}", "projectId": "${project_id}"}]}
+        source = {"title": "My Task", "project_id": "proj123"}
+        result = resolve_value(mapping["tasks"], source)
+        assert result == [{"content": "My Task", "projectId": "proj123"}]
+
+    def test_passthrough_int(self):
+        assert resolve_value(42, {}) == 42
+
+    def test_passthrough_none(self):
+        assert resolve_value(None, {}) is None
+
+    def test_passthrough_bool(self):
+        assert resolve_value(True, {}) is True
+
+    def test_passthrough_float(self):
+        assert resolve_value(3.14, {}) == 3.14
+
+    def test_string_template(self):
+        assert resolve_value("${name}", {"name": "Alice"}) == "Alice"
+
+    def test_nested_list_of_strings(self):
+        result = resolve_value(["${a}", "${b}"], {"a": "x", "b": "y"})
+        assert result == ["x", "y"]
+
+    def test_list_of_dicts(self):
+        value = [
+            {"content": "${title}", "pid": "${pid}"},
+            {"content": "${subtitle}", "pid": "${pid}"},
+        ]
+        source = {"title": "A", "subtitle": "B", "pid": "p1"}
+        result = resolve_value(value, source)
+        assert result == [
+            {"content": "A", "pid": "p1"},
+            {"content": "B", "pid": "p1"},
+        ]
+
+    def test_two_levels_deep(self):
+        value = {"outer": {"inner": "${value}"}}
+        result = resolve_value(value, {"value": "deep"})
+        assert result == {"outer": {"inner": "deep"}}
+
+    def test_missing_key_in_nested_dict(self):
+        value = {"tasks": [{"content": "${missing.key}"}]}
+        result = resolve_value(value, {"other": "val"})
+        assert result == {"tasks": [{"content": ""}]}
+
+    def test_empty_list(self):
+        result = resolve_value([], {"key": "val"})
+        assert result == []
+
+    def test_passthrough_int_bool_in_nested(self):
+        value = {"count": 5, "enabled": True, "name": "${name}"}
+        result = resolve_value(value, {"name": "test"})
+        assert result == {"count": 5, "enabled": True, "name": "test"}

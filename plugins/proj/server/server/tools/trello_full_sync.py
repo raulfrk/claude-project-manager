@@ -149,6 +149,7 @@ def _build_push_ops(plan: TrelloSyncPlan, card_id: str) -> list[dict[str, Any]]:
 
 def _execute_push_ops(
     ops: list[dict[str, Any]],
+    card_id: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Execute push operations, accumulating errors.
 
@@ -158,6 +159,15 @@ def _execute_push_ops(
     errors: list[dict[str, Any]] = []
     succeeded: list[dict[str, Any]] = []
     skipped_checklists: set[str] = set()
+
+    # Pre-fetch existing checklists for dedup on create operations
+    existing_checklists: list[dict[str, Any]] | None = None
+    if card_id and any(op["type"] in ("push_create_checklist", "push_create_item") for op in ops):
+        try:
+            data = _call_trello_tool("get_card_checklists", {"cardId": card_id})
+            existing_checklists = data if isinstance(data, list) else data.get("checklists", []) if isinstance(data, dict) else []
+        except Exception:
+            existing_checklists = None  # If fetch fails, skip dedup and proceed normally
 
     for op in ops:
         # Cascading skip: if parent checklist creation failed, skip its items
@@ -170,6 +180,47 @@ def _execute_push_ops(
                 "retry_payload": op,
             })
             continue
+
+        # Dedup guard: skip checklist creation if one with same name exists
+        if op["type"] == "push_create_checklist" and existing_checklists is not None:
+            cl_name = op["params"].get("name", "").strip().lower()
+            match = next(
+                (cl for cl in existing_checklists
+                 if isinstance(cl, dict) and cl.get("name", "").strip().lower() == cl_name),
+                None,
+            )
+            if match:
+                logger.warning(
+                    "Skipping duplicate checklist creation: '%s' already exists on card (id=%s)",
+                    op["params"].get("name", ""), match.get("id", ""),
+                )
+                op["result"] = match
+                succeeded.append(op)
+                continue
+
+        # Dedup guard: skip checklist item creation if one with same name exists
+        if op["type"] == "push_create_item" and existing_checklists is not None:
+            checklist_id = op["params"].get("checklistId", "")
+            item_name = op["params"].get("name", "").strip().lower()
+            dedup_match = None
+            for cl in existing_checklists:
+                if not isinstance(cl, dict) or cl.get("id") != checklist_id:
+                    continue
+                items = cl.get("checkItems", [])
+                dedup_match = next(
+                    (it for it in items
+                     if isinstance(it, dict) and it.get("name", "").strip().lower() == item_name),
+                    None,
+                )
+                break
+            if dedup_match:
+                logger.warning(
+                    "Skipping duplicate checklist item creation: '%s' already exists (id=%s)",
+                    op["params"].get("name", ""), dedup_match.get("id", ""),
+                )
+                op["result"] = dedup_match
+                succeeded.append(op)
+                continue
 
         try:
             result = _call_trello_tool(op["tool"], op["params"])
@@ -194,9 +245,23 @@ def _retry_failed_ops(
     """Re-attempt only previously failed operations.
 
     Returns (succeeded, still_failed).
+    Performs dedup checks before retrying create operations to avoid duplicates
+    when the original create succeeded but the response was lost.
     """
     succeeded: list[dict[str, Any]] = []
     still_failed: list[dict[str, Any]] = []
+
+    # Pre-fetch checklists for dedup on create retries
+    _checklist_cache: dict[str, list[dict[str, Any]]] = {}
+
+    def _get_checklists_for_card(cid: str) -> list[dict[str, Any]]:
+        if cid not in _checklist_cache:
+            try:
+                data = _call_trello_tool("get_card_checklists", {"cardId": cid})
+                _checklist_cache[cid] = data if isinstance(data, list) else data.get("checklists", []) if isinstance(data, dict) else []
+            except Exception:
+                _checklist_cache[cid] = []
+        return _checklist_cache[cid]
 
     for entry in failed_ops:
         payload = entry.get("retry_payload", {})
@@ -205,6 +270,62 @@ def _retry_failed_ops(
         if not tool or not params:
             still_failed.append(entry)
             continue
+
+        op_type = payload.get("type", entry.get("operation_type", ""))
+
+        # Dedup guard for checklist creation retries
+        if op_type == "push_create_checklist" and params.get("cardId"):
+            checklists = _get_checklists_for_card(params["cardId"])
+            cl_name = params.get("name", "").strip().lower()
+            match = next(
+                (cl for cl in checklists
+                 if isinstance(cl, dict) and cl.get("name", "").strip().lower() == cl_name),
+                None,
+            )
+            if match:
+                logger.warning(
+                    "Skipping duplicate checklist creation on retry: '%s' already exists (id=%s)",
+                    params.get("name", ""), match.get("id", ""),
+                )
+                payload["result"] = match
+                succeeded.append(payload)
+                continue
+
+        # Dedup guard for checklist item creation retries
+        if op_type == "push_create_item" and params.get("checklistId"):
+            # Find the card_id from the checklist cache or retry payload
+            card_id_for_lookup = params.get("cardId", "")
+            if not card_id_for_lookup:
+                # Try to find card_id from any cached data
+                for cid, cls in _checklist_cache.items():
+                    if any(isinstance(cl, dict) and cl.get("id") == params["checklistId"] for cl in cls):
+                        card_id_for_lookup = cid
+                        break
+            if card_id_for_lookup:
+                checklists = _get_checklists_for_card(card_id_for_lookup)
+                for cl in checklists:
+                    if not isinstance(cl, dict) or cl.get("id") != params["checklistId"]:
+                        continue
+                    item_name = params.get("name", "").strip().lower()
+                    match = next(
+                        (it for it in cl.get("checkItems", [])
+                         if isinstance(it, dict) and it.get("name", "").strip().lower() == item_name),
+                        None,
+                    )
+                    if match:
+                        logger.warning(
+                            "Skipping duplicate checklist item on retry: '%s' already exists (id=%s)",
+                            params.get("name", ""), match.get("id", ""),
+                        )
+                        payload["result"] = match
+                        succeeded.append(payload)
+                        break
+                else:
+                    # Checklist not found in cache or no match — proceed with retry
+                    pass
+                if match:
+                    continue
+
         try:
             result = _call_trello_tool(tool, params)
             payload["result"] = result
@@ -343,10 +464,26 @@ def register(app: FastMCP) -> None:
                         "error": "No lists found on the Trello board.",
                     })
 
-                card_result = _call_trello_tool("add_card_to_list", {
-                    "listId": target_list_id,
-                    "name": name,
-                })
+                # Dedup guard: check if a card with matching name already exists
+                existing_card_id = None
+                try:
+                    existing_cards = _call_trello_tool("get_cards_by_list_id", {"listId": target_list_id})
+                    if isinstance(existing_cards, list):
+                        for ec in existing_cards:
+                            if isinstance(ec, dict) and ec.get("name", "").strip().lower() == name.strip().lower():
+                                existing_card_id = ec.get("id")
+                                break
+                except Exception:
+                    pass  # If lookup fails, proceed with creation
+
+                if existing_card_id:
+                    logger.warning("Skipping duplicate card creation: card '%s' already exists on list (id=%s)", name, existing_card_id)
+                    card_result = {"id": existing_card_id}
+                else:
+                    card_result = _call_trello_tool("add_card_to_list", {
+                        "listId": target_list_id,
+                        "name": name,
+                    })
                 new_card_id = card_result.get("id", "") if isinstance(card_result, dict) else ""
                 if new_card_id:
                     # Link the card locally
@@ -404,7 +541,7 @@ def register(app: FastMCP) -> None:
         # 9. Execute push operations
         if card_id:
             ops = _build_push_ops(plan, card_id)
-            succeeded, errors = _execute_push_ops(ops)
+            succeeded, errors = _execute_push_ops(ops, card_id=card_id)
         else:
             succeeded, errors = [], []
 

@@ -7,11 +7,11 @@ argument-hint: "<issues-json>"
 
 Compute the Jira-to-local project/todo mapping using epic-first logic. This is a sub-skill used by `/proj:jira-sync`.
 
-Accepts the issues data produced by `/proj:jira-fetch`.
+Accepts the issues data produced by the Jira fetch step in `/proj:jira-sync`.
 
 **1.** Accept issues data
 
-- Receive the fetched Jira issues JSON (output from jira-fetch).
+- Receive the fetched Jira issues JSON.
 
 **2.** Compute mapping
 
@@ -52,7 +52,7 @@ Return the mapping plan for use by downstream sub-skills (jira-apply).
 ## Prerequisites
 
 - Jira MCP server is running and reachable.
-- Issues data from `/proj:jira-fetch` must be provided as input.
+- Issues data must be provided as input.
 
 ## Error Handling
 

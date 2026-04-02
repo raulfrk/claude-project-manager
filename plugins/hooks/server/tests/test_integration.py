@@ -10,8 +10,9 @@ import pytest
 import yaml
 
 from server.lib.http_client import FireResult
-from server.lib.models import HookRegistry
+from server.lib.models import Hook, HookRegistry
 from server.lib.storage import load, load_failures, save
+from server.lib.template import resolve_mapping
 from server.tools.fire import hooks_fire
 from server.tools.recovery import hooks_recover
 from server.tools.registry import hooks_list, hooks_register, hooks_unregister
@@ -348,3 +349,43 @@ class TestServerEndpointResolution:
             await hooks_fire("t")
 
         assert captured_url[0] == "raw-server-name"
+
+
+class TestNestedParamMappingPipeline:
+    """YAML → Hook.from_dict → resolve_mapping end-to-end for nested param_mapping."""
+
+    def test_yaml_to_hook_to_resolve(self, tmp_path: Path):
+        """Load a hook with nested param_mapping from YAML, resolve against source."""
+        hooks_content = {
+            "hooks": [
+                {
+                    "id": "test-nested-hook",
+                    "trigger_tool": "some_tool",
+                    "target_tool": "target_tool",
+                    "server": "test",
+                    "param_mapping": {
+                        "tasks": [
+                            {"content": "${title}", "projectId": "${project_id}"},
+                        ],
+                    },
+                }
+            ]
+        }
+        hooks_file = tmp_path / "hooks.yaml"
+        hooks_file.write_text(yaml.dump(hooks_content, default_flow_style=False))
+
+        # Load via HookRegistry.from_dict (same path as storage.load)
+        raw = yaml.safe_load(hooks_file.read_text())
+        registry = HookRegistry.from_dict(raw)
+        hook = registry.hooks[0]
+
+        assert hook.id == "test-nested-hook"
+        assert isinstance(hook.param_mapping["tasks"], list)
+
+        # Resolve the nested param_mapping
+        source = {"title": "My Task", "project_id": "proj123"}
+        result = resolve_mapping(hook.param_mapping, source)
+
+        assert result == {
+            "tasks": [{"content": "My Task", "projectId": "proj123"}],
+        }

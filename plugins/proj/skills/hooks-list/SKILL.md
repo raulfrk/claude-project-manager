@@ -1,7 +1,7 @@
 ---
 name: hooks-list
 description: List all registered MCP-to-MCP hooks, grouped by trigger tool, showing status and routing info.
-allowed-tools: mcp__hooks__hooks_list_tool
+allowed-tools: mcp__plugin_hooks_hooks__hooks_list_tool
 argument-hint: "[trigger_tool]"
 context: fork
 agent: general-purpose
@@ -13,7 +13,7 @@ List all registered hooks from the hooks registry.
 - If a trigger tool name is provided, pass it as `trigger_tool` to filter results.
 - If empty, list all hooks.
 
-**1.** Call `mcp__hooks__hooks_list_tool` with optional `trigger_tool` filter.
+**1.** Call `mcp__plugin_hooks_hooks__hooks_list_tool` with optional `trigger_tool` filter.
 
 **2.** Parse the JSON response. If `hooks` array is empty:
 - Output: "No hooks registered. Run `/proj:hooks-add` to create one."
@@ -31,7 +31,7 @@ List all registered hooks from the hooks registry.
 
 - **Blocking**: "yes" if `blocking` is true, "no" otherwise.
 - **Condition**: the `condition` string, or "—" if null.
-- **Status**: use the `condition_status` field from the response ("always", "active", or "inactive").
+- **Status**: use the `condition_status` field from the response ("always", "active", "inactive", or "runtime").
 
 **4.** Check for `verification_hooks` array in the response. If present and non-empty, display a separate section:
 

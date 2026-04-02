@@ -155,7 +155,7 @@ Do not proceed with any further sync steps.
 
 **2.** Ensure `proj` label exists
 
-- Call `mcp__trello__get_board_labels` with `boardId` set to the effective board ID.
+- Call `mcp__trello__get_labels` with `boardId` set to the effective board ID.
 - If no label named `proj` exists, call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`.
 - Record the label ID for use in card creation.
 
@@ -166,7 +166,7 @@ Do not proceed with any further sync steps.
   - If the card exists and is valid, skip to step 4.
 - If no card exists:
   - Resolve the target list: call `mcp__trello__get_lists` with `boardId` and find the list matching `trello.default_list` (default: "Active") by name (case-insensitive). If not found, use the first list on the board.
-  - Call `mcp__trello__create_card` (or `mcp__trello__add_card_to_list`) with:
+  - Call `mcp__trello__add_card_to_list` with:
     - `listId` = resolved list ID
     - `name` = project name
     - `idLabels` = the `proj` label ID
@@ -175,7 +175,7 @@ Do not proceed with any further sync steps.
 
 **4.** Fetch card state
 
-- Call `mcp__trello__get_card_checklists` (or `mcp__trello__get_checklists` or similar) with `cardId` = the project's `trello_card_id`.
+- Call `mcp__trello__get_card_checklists` with `cardId` = the project's `trello_card_id`.
 - The result should be a JSON array of checklists, each with `id`, `name`, and `checkItems` array (each item has `id`, `name`, `state`).
 - Format this as: `{"checklists": [<the array>]}`
 

@@ -35,6 +35,9 @@ _DEFAULT_SERVER_PORTS: dict[str, int] = {
 
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
 
+# Keep references to non-blocking background tasks to prevent GC
+_background_tasks: set[asyncio.Task] = set()
+
 
 def _resolve_server_url(server_name: str, hooks_port: int) -> str | None:
     """Resolve the URL for a plugin server.
@@ -188,6 +191,39 @@ async def _fire_verification(
     return results
 
 
+async def _launch_nonblocking(hook: Hook, source: dict[str, Any], source_result: str) -> None:
+    """Fire a non-blocking hook and log the result without awaiting."""
+    try:
+        result = await _fire_single(hook, source)
+        if result.ok:
+            storage.log_invocation(
+                hook_id=hook.id,
+                trigger_tool=hook.trigger_tool,
+                target_tool=hook.target_tool,
+                server=hook.server,
+                source_result=source_result,
+            )
+        else:
+            err_msg = result.error or f"HTTP {result.status_code}"
+            storage.log_failure(
+                hook_id=hook.id,
+                trigger_tool=hook.trigger_tool,
+                target_tool=hook.target_tool,
+                server=hook.server,
+                error=err_msg,
+                source_result=source_result,
+            )
+    except Exception as exc:
+        storage.log_failure(
+            hook_id=hook.id,
+            trigger_tool=hook.trigger_tool,
+            target_tool=hook.target_tool,
+            server=hook.server,
+            error=str(exc),
+            source_result=source_result,
+        )
+
+
 # ── Tool function ────────────────────────────────────────────────────────────
 
 
@@ -242,6 +278,7 @@ async def hooks_fire(
         todo_fields = {k: v for k, v in source.items() if k in (
             "todoist_task_id", "trello_card_id", "trello_checklist_id",
             "trello_checklist_item_id", "jira_issue_key",
+            "parent_todoist_task_id",
         )}
         if todo_fields:
             base_config.setdefault("todo", {}).update(todo_fields)
@@ -267,11 +304,16 @@ async def hooks_fire(
     errors: list[dict[str, str]] = []
     blocking_hooks: list[Hook] = []
 
+    non_blocking_hooks: list[Hook] = []
+
     for hook in primary_matched:
         if not evaluate_condition(hook.condition, config=base_config):
             skipped += 1
             continue
-        blocking_hooks.append(hook)
+        if hook.blocking:
+            blocking_hooks.append(hook)
+        else:
+            non_blocking_hooks.append(hook)
 
     # Phase 1: Blocking hooks — await all concurrently
     results_by_id: dict[str, str | None] = {}
@@ -360,6 +402,12 @@ async def hooks_fire(
                     "error": fb_result.error,
                 })
 
+    # Schedule non-blocking hooks (fire-and-forget)
+    for hook in non_blocking_hooks:
+        task = asyncio.create_task(_launch_nonblocking(hook, source, source_result))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
     # Phase 2: Fire verification hooks with enriched source_result
     verification_results: list[dict[str, Any]] = []
     if verification_matched:
@@ -382,6 +430,7 @@ async def hooks_fire(
         ],
         "depth": depth,
         "max_depth": max_depth,
+        "non_blocking_dispatched": len(non_blocking_hooks),
         "top_level": depth == 0,
     }
     if verification_results:
@@ -405,8 +454,9 @@ def register(app: FastMCP) -> None:
             "depth tracks the current cascade level (default 0); calls are "
             "skipped when depth >= max_depth (default 3, configurable in "
             "hooks.yaml settings.max_depth). "
-            "Fire-and-forget hooks return immediately; blocking hooks are awaited. "
-            "Returns JSON summary: {hooks_fired, skipped, errors, depth, max_depth}."
+            "Blocking hooks are awaited concurrently; non-blocking hooks are "
+            "dispatched as background tasks and do not delay the response. "
+            "Returns JSON summary: {hooks_fired, skipped, errors, non_blocking_dispatched, depth, max_depth}."
         )
     )
     async def hooks_fire_tool(

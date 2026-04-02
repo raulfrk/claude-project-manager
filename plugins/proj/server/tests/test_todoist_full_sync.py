@@ -23,7 +23,10 @@ from server.lib.models import (
     Todo,
     TodoistSync,
 )
-from server.tools.todoist_full_sync import register as register_full_sync
+from server.tools.todoist_full_sync import (
+    _migrate_parent_links,
+    register as register_full_sync,
+)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -405,3 +408,348 @@ class TestProjTodoistFullSync:
         delete_calls = [(t, p) for t, p in call_log if t == "todoist_delete"]
         assert len(delete_calls) == 1
         assert delete_calls[0][1]["id"] == "tc"
+
+    # 9. test_dedup_successful_create_no_dup ───────────────────────────────
+
+    def test_dedup_successful_create_no_dup(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task created normally; retry is a no-op because dedup finds existing ID."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(cfg, name, "Dedup task", todoist_task_id="")
+        storage.save_todos(cfg, name, [todo])
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "todoist_find_tasks":
+                if any(c[0] == "todoist_add_tasks" for c in call_log):
+                    # After the first create, return the task as existing
+                    return [{"id": "created_1", "content": "Dedup task"}]
+                return []
+            if tool_name == "todoist_add_tasks":
+                return [{"id": "created_1"}]
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
+        )
+
+        # First call creates the task
+        result_str = self._register_and_call(project_name=name)
+        result = json.loads(result_str)
+        assert result["status"] == "success"
+
+        # Now simulate a retry where the dedup guard finds the task
+        failed_ops = [
+            {
+                "operation_type": "push_create",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "content": "Dedup task",
+                    "project_id": "abc123",
+                    "todo_id": todo.id,
+                },
+            }
+        ]
+        token = base64.b64encode(json.dumps(failed_ops).encode()).decode()
+
+        result_str = self._register_and_call(retry_failures=token)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["retried_succeeded"] == 1
+        # todoist_find_tasks was called for dedup lookup, NOT todoist_add_tasks again
+        retry_calls = [(t, p) for t, p in call_log if t == "todoist_add_tasks"]
+        # Only the first create call, no second add_tasks during retry
+        assert len(retry_calls) == 1
+
+    # 10. test_dedup_truncated_response_finds_existing ─────────────────────
+
+    def test_dedup_truncated_response_finds_existing(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """todoist_add_tasks returns empty ID; _find_existing_todoist_task returns a match; result is success."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(cfg, name, "Truncated task")
+        storage.save_todos(cfg, name, [todo])
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "todoist_find_tasks":
+                # If this is a dedup lookup (not the initial fetch), return the task
+                if any(c[0] == "todoist_add_tasks" for c in call_log):
+                    return [{"id": "recovered_1", "content": "Truncated task"}]
+                return []  # initial fetch: no remote tasks
+            if tool_name == "todoist_add_tasks":
+                # Return empty ID — simulates truncated response
+                return [{"id": ""}]
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
+        )
+
+        result_str = self._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        # The task was recovered via dedup lookup, not an error
+        assert result["summary"]["push"]["tasks_created"] == 1
+        # Verify _find_existing_todoist_task was called (a second todoist_find_tasks call)
+        find_calls = [(t, p) for t, p in call_log if t == "todoist_find_tasks"]
+        assert len(find_calls) >= 2  # initial fetch + dedup lookup
+
+    # 11. test_dedup_genuine_failure_retries_correctly ─────────────────────
+
+    def test_dedup_genuine_failure_retries_correctly(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task not found via dedup; retry creates correctly."""
+        failed_ops = [
+            {
+                "operation_type": "push_create",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "content": "Genuinely new",
+                    "project_id": "abc123",
+                    "todo_id": "t1",
+                },
+            }
+        ]
+        token = base64.b64encode(json.dumps(failed_ops).encode()).decode()
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "todoist_find_tasks":
+                return []  # dedup finds nothing
+            if tool_name == "todoist_add_tasks":
+                return [{"id": "new_created_1"}]
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
+        )
+
+        result_str = self._register_and_call(retry_failures=token)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["retried_succeeded"] == 1
+        # Dedup lookup called, then add_tasks called because nothing found
+        find_calls = [t for t, _ in call_log if t == "todoist_find_tasks"]
+        add_calls = [t for t, _ in call_log if t == "todoist_add_tasks"]
+        assert len(find_calls) == 1
+        assert len(add_calls) == 1
+
+
+# ── Migration tests (399.3) ──────────────────────────────────────────────────
+
+
+class TestMigrateParentLinks:
+    """Tests for _migrate_parent_links() idempotency and correctness."""
+
+    def _make_local_todo(self, todo_id: str, parent: str | None = None, todoist_task_id: str | None = None) -> Todo:
+        return Todo(
+            id=todo_id,
+            title=f"Todo {todo_id}",
+            parent=parent,
+            todoist_task_id=todoist_task_id,
+        )
+
+    def test_migrates_missing_parent_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Child with todoist_task_id, parent with todoist_task_id, Todoist task has no parentId → update called."""
+        parent = self._make_local_todo("100", todoist_task_id="tid_parent")
+        child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
+
+        todoist_tasks = [
+            {"id": "tid_parent", "parentId": None},
+            {"id": "tid_child", "parentId": None},  # Missing parent link
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result = _migrate_parent_links([parent, child], todoist_tasks)
+
+        assert result["migrated"] == 1
+        assert result["already_correct"] == 0
+        assert result["skipped_unlinked"] == 0
+        # Verify the update was called with correct parentId
+        assert len(call_log) == 1
+        assert call_log[0][0] == "todoist_update_tasks"
+        tasks_arg = call_log[0][1]["tasks"]
+        assert isinstance(tasks_arg, str)  # JSON-encoded
+        import json as _json
+        updates = _json.loads(tasks_arg)
+        assert updates == [{"id": "tid_child", "parentId": "tid_parent"}]
+
+    def test_already_correct_no_update(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Child already has correct parentId in Todoist → no update call."""
+        parent = self._make_local_todo("100", todoist_task_id="tid_parent")
+        child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
+
+        todoist_tasks = [
+            {"id": "tid_parent", "parentId": None},
+            {"id": "tid_child", "parentId": "tid_parent"},  # Already correct
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result = _migrate_parent_links([parent, child], todoist_tasks)
+
+        assert result["migrated"] == 0
+        assert result["already_correct"] == 1
+        assert result["skipped_unlinked"] == 0
+        assert len(call_log) == 0  # No update call
+
+    def test_skips_unlinked_parent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Parent has no todoist_task_id → skipped_unlinked."""
+        parent = self._make_local_todo("100", todoist_task_id=None)  # No Todoist link
+        child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
+
+        todoist_tasks = [
+            {"id": "tid_child", "parentId": None},
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result = _migrate_parent_links([parent, child], todoist_tasks)
+
+        assert result["migrated"] == 0
+        assert result["already_correct"] == 0
+        assert result["skipped_unlinked"] == 1
+        assert len(call_log) == 0
+
+    def test_idempotency_second_run_no_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Run twice: first migrates, second finds already_correct."""
+        parent = self._make_local_todo("100", todoist_task_id="tid_parent")
+        child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
+
+        # First run: parentId missing
+        todoist_tasks_run1 = [
+            {"id": "tid_parent", "parentId": None},
+            {"id": "tid_child", "parentId": None},
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result1 = _migrate_parent_links([parent, child], todoist_tasks_run1)
+        assert result1["migrated"] == 1
+
+        # Second run: parentId now correct (simulating Todoist applied the update)
+        call_log.clear()
+        todoist_tasks_run2 = [
+            {"id": "tid_parent", "parentId": None},
+            {"id": "tid_child", "parentId": "tid_parent"},
+        ]
+
+        result2 = _migrate_parent_links([parent, child], todoist_tasks_run2)
+        assert result2["migrated"] == 0
+        assert result2["already_correct"] == 1
+        assert len(call_log) == 0  # No update call on second run
+
+    def test_skips_root_todos(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Todos without a parent are silently skipped."""
+        root = self._make_local_todo("100", todoist_task_id="tid_root")
+
+        todoist_tasks = [{"id": "tid_root", "parentId": None}]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result = _migrate_parent_links([root], todoist_tasks)
+
+        assert result == {"migrated": 0, "already_correct": 0, "skipped_unlinked": 0}
+        assert len(call_log) == 0
+
+
+# ── Post-execution linkage fix tests (399.2) ─────────────────────────────────
+
+
+class TestPostExecutionLinkageFix:
+    """Tests for the post-execution re-parenting pass after combined_id_map is built."""
+
+    def test_reparents_child_after_parent_created_in_sync(
+        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pre-existing child gets re-parented when parent was just created in the same sync."""
+        cfg, name = cfg_with_project
+
+        # Parent todo (unlinked — will be created in this sync)
+        parent_todo = _make_todo(cfg, name, "Parent task")
+        # Child todo (already linked to Todoist, but Todoist task has no parentId)
+        child_todo = _make_todo(cfg, name, "Child task", parent=parent_todo.id, todoist_task_id="existing_child_tid")
+        storage.save_todos(cfg, name, [parent_todo, child_todo])
+
+        # Todoist state: only the child exists (parent not yet created)
+        todoist_tasks = [
+            _make_todoist_task("existing_child_tid", "Child task", parentId=None),
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            if tool_name == "todoist_add_tasks":
+                # Parent gets created → returns new ID
+                return [{"id": "new_parent_tid"}]
+            if tool_name == "todoist_update_tasks":
+                return {}
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] in ("success", "partial_success")
+
+        # Verify that an update call was made to set parentId on the child
+        update_calls = [(t, p) for t, p in call_log if t == "todoist_update_tasks"]
+        reparent_found = False
+        for _, params in update_calls:
+            tasks = params.get("tasks", [])
+            if isinstance(tasks, str):
+                tasks = json.loads(tasks)
+            for task in tasks:
+                if task.get("id") == "existing_child_tid" and task.get("parentId") == "new_parent_tid":
+                    reparent_found = True
+        assert reparent_found, (
+            f"Expected re-parent update for existing_child_tid → new_parent_tid. "
+            f"Update calls: {update_calls}"
+        )

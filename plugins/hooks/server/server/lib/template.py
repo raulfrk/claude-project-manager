@@ -31,13 +31,13 @@ def _resolve_path(obj: Any, path: str) -> Any:
     return current
 
 
-def resolve_template(template: str, source: dict[str, Any]) -> str:
+def resolve_template(template: str, source: dict[str, Any]) -> Any:
     """Replace every ``${...}`` placeholder in *template* with the value looked up in *source*.
 
     If the **entire** template is a single ``${path}`` and the resolved value is
-    not a string, the JSON representation is returned so that objects/arrays are
-    preserved.  When the template contains literal text around the placeholder the
-    resolved value is stringified.
+    not a string, the native Python value is returned so that objects/arrays/ints
+    are preserved.  When the template contains literal text around the placeholder
+    the resolved value is stringified.
     """
     # Fast path: whole string is one placeholder
     m = _TEMPLATE_RE.fullmatch(template)
@@ -45,9 +45,7 @@ def resolve_template(template: str, source: dict[str, Any]) -> str:
         val = _resolve_path(source, m.group(1))
         if val is None:
             return ""
-        if isinstance(val, str):
-            return val
-        return json.dumps(val)
+        return val
 
     def _replacer(match: re.Match[str]) -> str:
         val = _resolve_path(source, match.group(1))
@@ -60,15 +58,25 @@ def resolve_template(template: str, source: dict[str, Any]) -> str:
     return _TEMPLATE_RE.sub(_replacer, template)
 
 
+def resolve_value(value: Any, context: dict[str, Any]) -> Any:
+    """Resolve a value that may be a string template, nested dict, or list."""
+    if isinstance(value, str):
+        return resolve_template(value, context)
+    elif isinstance(value, dict):
+        return {k: resolve_value(v, context) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [resolve_value(item, context) for item in value]
+    else:
+        # int, bool, None, float — pass through unchanged
+        return value
+
+
 def resolve_mapping(
-    param_mapping: dict[str, str],
+    param_mapping: dict[str, Any],
     source: dict[str, Any],
 ) -> dict[str, Any]:
     """Resolve every value in *param_mapping* against *source*.
 
-    Returns a new dict with the same keys and resolved string values.
+    Returns a new dict with the same keys and resolved values.
     """
-    resolved: dict[str, Any] = {}
-    for key, tmpl in param_mapping.items():
-        resolved[key] = resolve_template(tmpl, source)
-    return resolved
+    return {key: resolve_value(value, source) for key, value in param_mapping.items()}

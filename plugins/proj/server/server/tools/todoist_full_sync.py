@@ -838,12 +838,24 @@ def _execute_push_creates(
                     task["result_todoist_id"] = todoist_id
                     succeeded.append(task)
                 else:
-                    errors.append({
-                        "operation_type": "push_create",
-                        "error": "No ID returned for created task",
-                        "retryable": True,
-                        "retry_payload": task,
-                    })
+                    # Dedup guard: the task may have been created despite
+                    # an empty ID in the response.  Look it up before erroring.
+                    recovered_id = _find_existing_todoist_task(
+                        task.get("project_id", "") or (project_todoist_id or ""),
+                        task.get("content", ""),
+                        parent_id=task.get("parentId"),
+                    )
+                    if recovered_id:
+                        id_map[todo_id] = recovered_id
+                        task["result_todoist_id"] = recovered_id
+                        succeeded.append(task)
+                    else:
+                        errors.append({
+                            "operation_type": "push_create",
+                            "error": "No ID returned for created task",
+                            "retryable": True,
+                            "retry_payload": task,
+                        })
             else:
                 # Response was truncated — the task may have been created anyway.
                 # Look it up by content+project before marking as an error so we
@@ -851,6 +863,7 @@ def _execute_push_creates(
                 recovered_id = _find_existing_todoist_task(
                     task.get("project_id", "") or (project_todoist_id or ""),
                     task.get("content", ""),
+                    parent_id=task.get("parentId"),
                 )
                 if recovered_id:
                     id_map[todo_id] = recovered_id
@@ -1015,12 +1028,19 @@ def _execute_root_only_cleanup(
 # -- Retry handling -----------------------------------------------------------
 
 
-def _find_existing_todoist_task(project_id: str, content: str) -> str | None:
+def _find_existing_todoist_task(
+    project_id: str,
+    content: str,
+    parent_id: str | None = None,
+) -> str | None:
     """Return the Todoist task ID of an exact content match in *project_id*, or None.
 
     Used as a dedup guard before retrying a push_create: if the first attempt
     created the task but the response was truncated, retrying without this check
     would create a duplicate.
+
+    When *parent_id* is provided, only tasks with that parentId are considered.
+    This prevents false positives when multiple tasks share the same title.
     """
     if not project_id or not content:
         return None
@@ -1034,11 +1054,22 @@ def _find_existing_todoist_task(project_id: str, content: str) -> str | None:
             tasks = []
         needle = content.strip()
         for t in tasks:
-            if isinstance(t, dict) and t.get("content", "").strip() == needle:
-                task_id = str(t.get("id", ""))
-                return task_id if task_id else None
-    except Exception:
-        pass
+            if not isinstance(t, dict):
+                continue
+            if t.get("content", "").strip() != needle:
+                continue
+            # Narrow by parentId when available
+            if parent_id:
+                task_parent = str(t.get("parentId", "") or "")
+                if task_parent != parent_id:
+                    continue
+            task_id = str(t.get("id", ""))
+            return task_id if task_id else None
+    except Exception as exc:
+        logger.warning(
+            "Dedup lookup failed for project=%s content=%r parent=%s: %s",
+            project_id, content, parent_id, exc,
+        )
     return None
 
 
@@ -1066,7 +1097,10 @@ def _retry_failed_ops(
                 # to avoid creating a duplicate on retry.
                 project_id = payload.get("project_id", "")
                 content = payload.get("content", "")
-                existing_id = _find_existing_todoist_task(project_id, content)
+                parent_id = payload.get("parentId", "") or ""
+                existing_id = _find_existing_todoist_task(
+                    project_id, content, parent_id=parent_id or None,
+                )
 
                 if existing_id:
                     payload["result_todoist_id"] = existing_id
@@ -1156,6 +1190,43 @@ def _build_summary(
     }
 
 
+def _migrate_parent_links(todos: list, todoist_tasks: list[dict]) -> dict:
+    """One-time migration to fix child todos that exist in Todoist as root tasks
+    but should be sub-tasks of their parent. Idempotent — safe to run multiple times.
+
+    Returns: {"migrated": N, "already_correct": M, "skipped_unlinked": K}
+    """
+    todoist_by_id = {t["id"]: t for t in todoist_tasks}
+    todo_map = {t.id: t for t in todos}
+    counts = {"migrated": 0, "already_correct": 0, "skipped_unlinked": 0}
+    updates: list[dict[str, str]] = []
+
+    for todo in todos:
+        if not todo.todoist_task_id or not todo.parent:
+            continue
+        parent = todo_map.get(todo.parent)
+        if not parent or not parent.todoist_task_id:
+            counts["skipped_unlinked"] += 1
+            continue
+        task = todoist_by_id.get(todo.todoist_task_id)
+        if not task:
+            logger.warning(
+                "Migration: Todoist task %s not found for todo %s",
+                todo.todoist_task_id, todo.id,
+            )
+            continue
+        if task.get("parentId") == parent.todoist_task_id:
+            counts["already_correct"] += 1
+            continue
+        updates.append({"id": todo.todoist_task_id, "parentId": parent.todoist_task_id})
+        counts["migrated"] += 1
+
+    if updates:
+        _call_todoist_tool("todoist_update_tasks", {"tasks": json.dumps(updates)})
+
+    return counts
+
+
 # -- MCP tool registration ---------------------------------------------------
 
 
@@ -1178,6 +1249,7 @@ def register(app: FastMCP) -> None:
         project_name: str | None = None,
         confirmed_links: str | None = None,
         retry_failures: str | None = None,
+        migrate: bool = False,
     ) -> str:
         # -- Retry mode: re-attempt only failed ops --
         if retry_failures:
@@ -1372,6 +1444,33 @@ def register(app: FastMCP) -> None:
 
         # 11. Phase B: Link newly created Todoist IDs and apply staged values
         combined_id_map = {**phase1_id_map, **phase2_id_map}
+
+        # Post-execution linkage fix: re-parent pre-existing children whose
+        # parent was created in this sync run (phase 1/2).
+        if combined_id_map and todoist_tasks:
+            post_link_updates: list[dict[str, str]] = []
+            _post_todoist_by_id = {str(t["id"]): t for t in todoist_tasks}
+            _post_local_by_tid: dict[str, Todo] = {}
+            _post_todos = storage.load_todos(cfg, name)
+            _post_todo_map = {t.id: t for t in _post_todos}
+            for t in _post_todos:
+                if t.todoist_task_id:
+                    _post_local_by_tid[t.todoist_task_id] = t
+            for tid, task in _post_todoist_by_id.items():
+                if task.get("parentId"):
+                    continue
+                local_todo = _post_local_by_tid.get(tid)
+                if not local_todo or not local_todo.parent:
+                    continue
+                parent_todo = _post_todo_map.get(local_todo.parent)
+                if not parent_todo:
+                    continue
+                parent_tid = combined_id_map.get(local_todo.parent) or parent_todo.todoist_task_id
+                if parent_tid:
+                    post_link_updates.append({"id": tid, "parentId": parent_tid})
+            if post_link_updates:
+                _execute_push_updates(post_link_updates)
+
         link_ops: list[dict[str, str]] = []
         for task in p1_succeeded + p2_succeeded:
             todo_id = str(task.get("todo_id", ""))
@@ -1399,6 +1498,16 @@ def register(app: FastMCP) -> None:
             )
             apply_changes(link_data, cfg, name, push_confirmed=True)
 
+        # 11b. Optional parent-link migration
+        migrate_result = None
+        if migrate:
+            migration_todos = storage.load_todos(cfg, name)
+            migration_tasks_raw = _call_todoist_tool(
+                "todoist_find_tasks", {"project_id": project_todoist_id},
+            )
+            if isinstance(migration_tasks_raw, list):
+                migrate_result = _migrate_parent_links(migration_todos, migration_tasks_raw)
+
         # 12. Build response
         summary = _build_summary(
             plan, pull_counts,
@@ -1406,6 +1515,9 @@ def register(app: FastMCP) -> None:
             total_push_updated, total_push_completed,
             total_ghost_closed, total_root_cleaned,
         )
+
+        if migrate_result:
+            summary["migration"] = migrate_result
 
         if all_errors:
             # Embed project name so the retry path can persist IDs without

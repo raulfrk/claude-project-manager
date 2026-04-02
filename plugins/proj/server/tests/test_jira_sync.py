@@ -630,8 +630,8 @@ class TestApplyMapping:
         meta = storage.load_meta(cfg, "myapp")
         assert meta.jira_issue_key == "PROJ-5"
 
-    def test_standalone_non_epic_does_not_set_jira_key(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        """Non-epic groups do NOT set jira_issue_key on project meta."""
+    def test_standalone_sets_jira_key_on_project(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """All groups (including non-epic) set jira_issue_key on project meta."""
         cfg, name = cfg_with_project
         data = JiraApplyInput(groups=[{
             "suggested_project": "myapp",
@@ -647,7 +647,7 @@ class TestApplyMapping:
         apply_mapping(data, cfg)
 
         meta = storage.load_meta(cfg, "myapp")
-        assert meta.jira_issue_key is None  # not set for non-epic
+        assert meta.jira_issue_key == "PROJ-99"
 
     def test_rerun_idempotent_full_cycle(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """Full cycle: create project from epic, add todos, re-run -- no duplicates."""
@@ -2309,19 +2309,23 @@ class TestProjJiraFullSync:
         index = storage.load_index(cfg)
         assert "brand-new-feature" in index.projects
 
-    def test_standalone_without_catchall_returns_warning(
+    def test_standalone_without_catchall_creates_standalone_project(
         self, cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Standalone issues with no catch-all project produce warnings."""
+        """Standalone issues with no catch-all get their own project."""
         cfg, name = cfg_with_project
         issues = [
             _make_jira_issue("LONE-1", "Orphan task zzz unique xyz"),
         ]
         apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
-        # No groups created since no catch-all and no matching project
         assert diagnostics["standalone_count"] == 1
-        warnings = diagnostics["warnings"]
-        assert any("LONE-1" in w for w in warnings)
+        # A standalone project group should be created
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+        assert group["create_project"] is True
+        assert group["jira_key"] == "LONE-1"
+        assert "jira-standalone" in group.get("labels", [])
 
     def test_empty_issues_returns_up_to_date(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """Empty issue list produces empty mapping."""
@@ -2387,3 +2391,399 @@ class TestProjJiraFullSync:
         matched = [t for t in todos if t.jira_issue_key == "PROJ-2"]
         assert len(matched) == 1
         assert matched[0].status == "pending"
+
+
+# ── Self-fetch path tests for proj_jira_full_sync ────────────────────────────
+
+
+class TestSelfFetchFullSync:
+    """Tests for the self-fetch (jira_issues_json=None) path in proj_jira_full_sync."""
+
+    def _get_full_sync_fn(self):
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools["proj_jira_full_sync"]
+
+    def test_self_fetch_successful(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When jira_issues_json=None, _fetch_jira_issues is called and sync proceeds."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        monkeypatch.setattr(
+            "server.tools.jira_full_sync._fetch_jira_issues",
+            lambda: (issues, len(issues)),
+        )
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+    def test_self_fetch_socket_unreachable(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When the Jira socket is unreachable, returns error with guidance."""
+        import httpx
+
+        cfg, name = cfg_with_project
+
+        def _raise_connect_error():
+            raise httpx.ConnectError("Connection refused")
+
+        monkeypatch.setattr(
+            "server.tools.jira_full_sync._fetch_jira_issues",
+            _raise_connect_error,
+        )
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name=name))
+        assert result["status"] == "error"
+        assert "guidance" in result
+
+    def test_self_fetch_config_missing_jira(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When there is no project config, returns error."""
+        config_path = tmp_path / "proj.yaml"
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
+        monkeypatch.delenv("PROJ_CONFIG", raising=False)
+
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name="nonexistent"))
+        assert result["status"] == "error"
+
+    def test_self_fetch_envelope_unwrapping(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_fetch_jira_issues unwraps the envelope; verify issues list is used."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        # _fetch_jira_issues already returns unwrapped (issues, total)
+        monkeypatch.setattr(
+            "server.tools.jira_full_sync._fetch_jira_issues",
+            lambda: (issues, len(issues)),
+        )
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name=name))
+        assert result["status"] == "success"
+        # Verify that the sync actually processed the issues (not a raw dict)
+        assert result["summary"]["groups_processed"] >= 1
+        assert result["summary"]["epic_count"] >= 1
+
+    def test_self_fetch_zero_issues(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Self-fetch returns empty list — sync returns success without error."""
+        cfg, name = cfg_with_project
+        monkeypatch.setattr(
+            "server.tools.jira_full_sync._fetch_jira_issues",
+            lambda: ([], 0),
+        )
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name=name))
+        assert result["status"] == "success"
+        assert "up to date" in result["summary"].get("message", "").lower() or result["summary"].get("message") == "Everything up to date"
+
+    def test_self_fetch_backward_compat_legacy_json(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Passing jira_issues_json='[...]' still works (legacy path unchanged)."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+    def test_self_fetch_backward_compat_envelope_json(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Legacy path unwraps {"issues": [...]} envelope from jira_issues_json."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        envelope = {"issues": issues, "total": len(issues)}
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(envelope), project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+
+class TestDedupGuards:
+    """Tests for dedup guards in apply_mapping."""
+
+    def test_dedup_project_creation_skipped_when_meta_exists(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """meta.yaml already exists; project creation skipped; warning logged."""
+        cfg, name = cfg_with_project
+
+        # Create a project directory with meta.yaml already present (simulating partial prior run)
+        new_project_name = "auth-epic"
+        proj_dir = storage.tracking_dir(cfg, new_project_name)
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        meta = ProjectMeta(
+            name=new_project_name,
+            description="Auth Epic",
+            dates=ProjectDates(created=str(date.today()), last_updated=str(date.today())),
+            jira_issue_key="PROJ-1",
+        )
+        storage.save_meta(cfg, meta)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+
+        # Now try to apply a mapping that would create this project
+        apply_input = JiraApplyInput(groups=[
+            {
+                "suggested_project": new_project_name,
+                "create_project": True,
+                "project_exists": False,
+                "is_epic": True,
+                "jira_key": "PROJ-1",
+                "name": "Auth Epic",
+                "issues": [
+                    _make_jira_issue("PROJ-2", "Login page"),
+                ],
+            }
+        ])
+
+        result = apply_mapping(apply_input, cfg)
+        # Project was not recreated but the index was repaired
+        assert result.counts["projects_created"] == 1  # index repair counts as create
+        # The todo from the issue was still created
+        assert result.counts["todos_created"] == 1
+
+    def test_dedup_retry_issue_filter_skips_existing_jira_key(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Issue already has jira_issue_key in existing todos; filtered out from retry batch."""
+        cfg, name = cfg_with_project
+
+        # Create a second project where the jira key is already linked
+        new_proj = "other-project"
+        new_proj_dir = storage.tracking_dir(cfg, new_proj)
+        new_proj_dir.mkdir(parents=True, exist_ok=True)
+        new_meta = ProjectMeta(
+            name=new_proj,
+            description="Other",
+            dates=ProjectDates(created=str(date.today()), last_updated=str(date.today())),
+        )
+        storage.save_meta(cfg, new_meta)
+        (new_proj_dir / "todos.yaml").write_text("todos: []\n")
+        (new_proj_dir / "archive.yaml").write_text("todos: []\n")
+        new_index = storage.load_index(cfg)
+        new_index.projects[new_proj] = ProjectEntry(
+            name=new_proj, tracking_dir=str(new_proj_dir), created=str(date.today()),
+        )
+        storage.save_index(cfg, new_index)
+
+        other_todo = _make_todo(cfg, new_proj, "Login page", jira_issue_key="PROJ-2")
+        storage.save_todos(cfg, new_proj, [other_todo])
+
+        # Build cross-project index pointing to other-project
+        cross_index = {"PROJ-2": (new_proj, other_todo.id)}
+
+        apply_input = JiraApplyInput(groups=[
+            {
+                "suggested_project": name,
+                "create_project": False,
+                "project_exists": True,
+                "is_epic": False,
+                "jira_key": "",
+                "name": "Standalone",
+                "issues": [
+                    _make_jira_issue("PROJ-2", "Login page"),
+                    _make_jira_issue("PROJ-3", "Register page"),
+                ],
+            }
+        ])
+
+        result = apply_mapping(apply_input, cfg, todo_key_index=cross_index)
+        # PROJ-2 was skipped due to cross-project dedup
+        assert result.counts.get("skipped_dedup", 0) == 1
+        # PROJ-3 was created normally
+        assert result.counts["todos_created"] == 1
+
+
+# ── Routing, dedup, and counts tests ───────────────────────────────────────
+
+
+class TestJiraRouting:
+    """Tests for epic routing, dedup idempotency, and sync counts."""
+
+    def _get_full_sync_fn(self):
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools["proj_jira_full_sync"]
+
+    def test_epic_routing_maps_to_project(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Epic issue routes to a project (not a todo). Verify epics_mapped >= 1."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("EPIC-1", "Platform Overhaul"),
+            _make_jira_issue(
+                "TASK-1", "Migrate DB",
+                parent=_make_epic_parent("EPIC-1", "Platform Overhaul"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert result["status"] == "success"
+        assert result["counts"]["epics_mapped"] >= 1
+        # Epic itself should NOT appear as a todo
+        todos = storage.load_todos(cfg, name)
+        epic_todos = [t for t in todos if t.jira_issue_key == "EPIC-1"]
+        assert len(epic_todos) == 0
+
+    def test_epic_child_routing_same_user(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Issue with epic link where epic is in same user's issues -> todo inside epic's project."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("EPIC-1", "Platform Overhaul"),
+            _make_jira_issue(
+                "TASK-1", "Migrate DB",
+                parent=_make_epic_parent("EPIC-1", "Platform Overhaul"),
+            ),
+            _make_jira_issue(
+                "TASK-2", "Update API",
+                parent=_make_epic_parent("EPIC-1", "Platform Overhaul"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert result["status"] == "success"
+        assert result["counts"]["todos_created"] >= 2
+        # Both children should be todos in the project
+        todos = storage.load_todos(cfg, name)
+        jira_keys = {t.jira_issue_key for t in todos if t.jira_issue_key}
+        assert "TASK-1" in jira_keys
+        assert "TASK-2" in jira_keys
+
+    def test_epic_child_routing_foreign_epic(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Issue linked to an epic NOT in the user's issues -> standalone project."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_jira_issue(
+                "TASK-1", "Orphan with foreign epic zzzunique",
+                parent=_make_epic_parent("FOREIGN-1", "Someone Elses Epic"),
+            ),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        assert diagnostics["standalone_count"] == 1
+        # The issue should route as standalone (not under an epic project)
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+
+    def test_dedup_idempotency(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Run sync twice with same issues -> second run shows duplicates_skipped or no new items."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("EPIC-1", "Auth"),
+            _make_jira_issue(
+                "TASK-1", "Login page",
+                parent=_make_epic_parent("EPIC-1", "Auth"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        # First sync
+        r1 = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert r1["status"] == "success"
+        todos_after_first = storage.load_todos(cfg, name)
+        count_first = len(todos_after_first)
+
+        # Second sync (same issues)
+        r2 = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert r2["status"] == "success"
+        todos_after_second = storage.load_todos(cfg, name)
+        count_second = len(todos_after_second)
+        # No new todos created on second run
+        assert count_second == count_first
+        # Second run should show updates (not creates) or skips
+        assert r2["counts"]["todos_created"] == 0
+
+    def test_deleted_epic_routes_to_standalone(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Issue references epic key not in the issues list -> routes to standalone."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_jira_issue(
+                "TASK-1", "Task referencing deleted epic zzunique",
+                parent=_make_epic_parent("DELETED-1", "Deleted Epic"),
+            ),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        assert diagnostics["standalone_count"] == 1
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+
+    def test_legacy_name_fallback(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Todo exists without jira_issue_key but matching title -> matched by title (not duplicated)."""
+        cfg, name = cfg_with_project
+        # Create a todo without jira_issue_key but with a title that matches
+        todo = _make_todo(cfg, name, "Login page redesign")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        issues = [
+            _make_jira_issue("TASK-1", "Login page redesign"),
+        ]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        # Should find the existing project via legacy title match
+        matched_group = apply_input.groups[0]
+        assert matched_group["project_exists"] is True
+        assert matched_group["create_project"] is False
+
+    def test_sync_summary_counts(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """After a sync with 1 epic + 2 children, verify todos_created >= 2, epics_mapped >= 1."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("EPIC-1", "Auth"),
+            _make_jira_issue(
+                "TASK-1", "Login",
+                parent=_make_epic_parent("EPIC-1", "Auth"),
+            ),
+            _make_jira_issue(
+                "TASK-2", "Register",
+                parent=_make_epic_parent("EPIC-1", "Auth"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert result["status"] == "success"
+        assert result["counts"]["todos_created"] >= 2
+        assert result["counts"]["epics_mapped"] >= 1
+        assert result["counts"]["total_issues"] == 3

@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__config_load, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_batch_add_children, mcp__proj__tracking_git_flush, Skill, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_batch_add_children, mcp__proj__tracking_git_flush, Skill, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -24,6 +24,8 @@ Decompose todo $ARGUMENTS into sub-todos.
    **When in doubt, do not auto-skip.** If borderline, proceed to step 4 and let the user decide via the normal confirmation prompt.
 
    If atomic: print `↩ Skipping decompose for <id> — already atomic.` and stop — do not proceed to steps 5–13.
+
+**4b.** Search prior decisions: Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>`. If results are found, include them as context when proposing the breakdown structure — prior decisions may constrain decomposition choices.
 
 **5.** Analyze the todo and propose a **multi-level** breakdown:
    - Identify sub-tasks based on the natural problem structure — no hard cap on count.

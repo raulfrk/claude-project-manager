@@ -101,7 +101,7 @@ def _make_todoist_task(
 
 class TestHelpers:
     def test_todoist_date_full_datetime(self) -> None:
-        assert _todoist_date("2026-03-07T12:34:56Z") == "2026-03-07"
+        assert _todoist_date("2026-03-07T12:34:56Z") == "2026-03-07T12:34:56"
 
     def test_todoist_date_empty(self) -> None:
         assert _todoist_date("") == ""

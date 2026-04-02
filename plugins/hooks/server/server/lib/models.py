@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -13,12 +14,12 @@ class Hook:
     trigger_tool: str
     target_tool: str
     server: str
-    param_mapping: dict[str, str] = field(default_factory=dict)
+    param_mapping: dict[str, Any] = field(default_factory=dict)
     blocking: bool = False
     condition: str | None = None
     source: str | None = None
     verification: bool = False
-    feedback_mapping: dict[str, str] = field(default_factory=dict)
+    feedback_mapping: dict[str, Any] = field(default_factory=dict)
     feedback_tool: str | None = None
 
     def __post_init__(self) -> None:
@@ -49,13 +50,13 @@ class Hook:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Hook:
         pm_raw = data.get("param_mapping", {})
-        param_mapping: dict[str, str] = {}
+        param_mapping: dict[str, Any] = {}
         if isinstance(pm_raw, dict):
-            param_mapping = {str(k): str(v) for k, v in pm_raw.items()}
+            param_mapping = {str(k): v for k, v in pm_raw.items()}
         fm_raw = data.get("feedback_mapping", {})
-        feedback_mapping: dict[str, str] = {}
+        feedback_mapping: dict[str, Any] = {}
         if isinstance(fm_raw, dict):
-            feedback_mapping = {str(k): str(v) for k, v in fm_raw.items()}
+            feedback_mapping = {str(k): v for k, v in fm_raw.items()}
         return cls(
             id=str(data.get("id", "")),
             trigger_tool=str(data.get("trigger_tool", "")),
@@ -77,11 +78,11 @@ class Hook:
         if "condition" in new_def:
             self.condition = str(new_def["condition"]) if new_def["condition"] is not None else None
         if "param_mapping" in new_def:
-            self.param_mapping = {str(k): str(v) for k, v in (new_def["param_mapping"] or {}).items()}
+            self.param_mapping = {str(k): v for k, v in (new_def["param_mapping"] or {}).items()}
         if "feedback_tool" in new_def:
             self.feedback_tool = str(new_def["feedback_tool"]) if new_def["feedback_tool"] is not None else None
         if "feedback_mapping" in new_def:
-            self.feedback_mapping = {str(k): str(v) for k, v in (new_def["feedback_mapping"] or {}).items()}
+            self.feedback_mapping = {str(k): v for k, v in (new_def["feedback_mapping"] or {}).items()}
         if "verification" in new_def:
             self.verification = bool(new_def["verification"])
         # Enforce invariant: verification implies blocking

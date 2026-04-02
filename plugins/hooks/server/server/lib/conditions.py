@@ -33,7 +33,7 @@ def _load_proj_config(path: Path | None = None) -> dict[str, Any]:
         if isinstance(raw, dict):
             return raw
     except Exception:  # noqa: BLE001
-        logger.debug("Could not read %s for condition evaluation", target)
+        logger.warning("Could not read %s for condition evaluation", target)
     return {}
 
 
@@ -92,7 +92,7 @@ def evaluate_condition(
     * Missing config / missing key / unparseable file — treated as ``False``
       (hook is silently skipped, never an error).
     """
-    if not condition:
+    if not condition or not condition.strip():
         return True
 
     if config is not None:
@@ -107,6 +107,37 @@ def evaluate_condition(
         if all(_evaluate_single(term, _config) for term in and_terms):
             return True
     return False
+
+
+def validate_condition_syntax(condition: str) -> tuple[bool, str | None]:
+    """Check if a condition string is syntactically valid.
+
+    Returns ``(True, None)`` if valid, ``(False, error_message)`` if invalid.
+    """
+    stripped = condition.strip()
+    if not stripped:
+        return False, "Condition is empty or whitespace-only"
+
+    # Reject parentheses outright — evaluate_condition ignores them,
+    # so allowing them would silently produce wrong results.
+    if "(" in stripped or ")" in stripped:
+        return False, "Parentheses are not supported in conditions; use 'and'/'or' precedence directly"
+
+    # Split into tokens by 'or' then 'and' and check for empty terms
+    or_groups = [g.strip() for g in stripped.split(" or ")]
+    for or_group in or_groups:
+        if not or_group:
+            return False, "Empty operand around 'or'"
+        and_terms = [t.strip() for t in or_group.split(" and ")]
+        for term in and_terms:
+            if not term:
+                return False, "Empty operand around 'and'"
+            # Strip leading '!' for the path check
+            path = term.lstrip("!").strip()
+            if not path:
+                return False, "Negation '!' without operand"
+
+    return True, None
 
 
 _RUNTIME_PREFIXES = ("project.", "todo.")
@@ -136,7 +167,7 @@ def resolve_condition_status(
     * ``"inactive"``     — condition evaluates to False right now
     * ``"runtime"``      — config terms pass but runtime terms are unevaluable
     """
-    if not condition:
+    if not condition or not condition.strip():
         return "always"
 
     if config is not None:

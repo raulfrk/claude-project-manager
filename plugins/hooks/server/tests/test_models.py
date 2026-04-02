@@ -83,7 +83,7 @@ class TestHook:
         assert h.source is None
         assert h.verification is False
 
-    def test_from_dict_coerces_param_mapping_values_to_str(self):
+    def test_from_dict_preserves_param_mapping_values(self):
         h = Hook.from_dict({
             "id": "hook-001",
             "trigger_tool": "a",
@@ -91,7 +91,7 @@ class TestHook:
             "server": "s",
             "param_mapping": {"num": 42, "flag": True},
         })
-        assert h.param_mapping == {"num": "42", "flag": "True"}
+        assert h.param_mapping == {"num": 42, "flag": True}
 
     def test_from_dict_ignores_non_dict_param_mapping(self):
         h = Hook.from_dict({

@@ -1,7 +1,7 @@
 ---
 name: jira-sync
 description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__proj_jira_full_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_get_epic_issues, mcp__jira__jira_get_user_issues, mcp__jira__jira_init
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__proj_jira_full_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 context: fork
 agent: general-purpose
@@ -49,23 +49,17 @@ with:
 
 Do not proceed with any further sync steps.
 
-**2.** Fetch issues from Jira
+**2.** Pre-fetch comments (optional)
 
-- Call `mcp__jira__jira_get_user_issues` with the resolved username and project keys (if provided).
-- If no issues are returned: "No open issues found." Stop.
-
-**3.** Pre-fetch comments (optional)
-
-- For each issue key returned, call `mcp__jira__jira_get_issue_comments` to get comments.
+- Call `mcp__jira__jira_get_issue_comments` for known issue keys (if any are already available from prior context).
 - Build a `comments_by_key` dict mapping issue keys to comment lists.
 - This step is best-effort -- if comment fetching fails for an issue, skip it.
 
-**4.** Call `proj_jira_full_sync`
+**3.** Call `proj_jira_full_sync`
 
 - Call `mcp__proj__proj_jira_full_sync` with:
-  - `jira_issues_json`: the fetched issues JSON
   - `project_name`: optional, to scope sync to one project
-  - `comments_json`: JSON of the `comments_by_key` dict from step 3
+  - `comments_json`: JSON of the `comments_by_key` dict from step 2 (if available)
 - Handle the response:
   - `"success"` -- display the summary counts
   - `"partial_success"` -- display errors table, offer one retry:
@@ -74,11 +68,11 @@ Do not proceed with any further sync steps.
     - If no, continue to summary
   - `"error"` -- display the error and stop
 
-**5.** Git tracking flush
+**4.** Git tracking flush
 
 - Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Jira"`.
 
-**6.** Summary
+**5.** Summary
 
 Display a final summary with counts. If nothing changed: "Jira sync complete. Everything up to date."
 

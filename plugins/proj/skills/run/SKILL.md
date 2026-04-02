@@ -1,7 +1,7 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, mcp__proj__proj_decision_log
 argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
 ---
 
@@ -21,7 +21,7 @@ Extract from $ARGUMENTS:
 - **`--full-context`**: when using team mode, include CLAUDE.md and NOTES.md in each agent's context
 - **`--trust N`** (N = 0-3): override trust level for execution phases. If not specified, use `team_mode.trust_level` from config (default 1 if unset). Trust levels:
   - **Trust 0 (supervised)**: per-todo approval — each plan presented individually, user approves one at a time.
-  - **Trust 1 (guided)**: bulk approval + parallel execution — all plans presented, user approves in bulk. Default.
+  - **Trust 1 (guided)**: bulk approval + parallel execution — all plans presented sequentially, user approves each, then bulk confirmation before execution. Default.
   - **Trust 2 (autonomous)**: auto-approve plans — skip `ExitPlanMode` user review. Plans created and automatically approved.
   - **Trust 3 (full-auto)**: no plan phase — skip planning entirely. Agents execute with context only (requirements + research + parent context).
 - **`--resume`**: resume execution from the most recent checkpoint. See **Resume checkpoint** sections below.
@@ -89,8 +89,6 @@ Apply `--steps` or `--from` to filter/slice. Error if any step name is invalid.
 For **single ID**: call `mcp__proj__todo_get` to confirm it exists. Continue to step 2.
 For **range or comma list**: parse into a deduplicated list. Skip to **"Batch mode"** below.
 
-> **Read failure policy**: Any `Read` call on a sibling SKILL.md file that fails must be treated as a hard stop.
-
 ---
 
 ## Single-ID mode
@@ -111,8 +109,6 @@ If N > 1, announce: `Iteration <i>/<N>`
 Build descendant list: call `mcp__proj__todo_tree`, flatten depth-first.
 
 **For each prep step:**
-
-Read the sibling `<step>/SKILL.md` file. Extract instructions after the second `---`.
 
 **If `define`** — sequential, interactive:
 - For each todo in descendant list (in dependency order via `mcp__proj__proj_identify_batches`):
@@ -239,8 +235,7 @@ When the user picks option 3: prompt for todo IDs, run interactive define on eac
 IF quality_level == fast: skip refine entirely, proceed to next step.
 IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
-Read the sibling `refine/SKILL.md` file. For each todo in descendant list:
-  Execute the refine sub-skill with the todo's ID.
+Execute the refine sub-skill for each todo in the descendant list:
   The sub-skill spawns 3 review agents (Skeptic, Edge-Case Finder, Architecture Reviewer), synthesizes a Refinement Report, and prompts Apply/Edit/Skip/Stop.
   If Apply: requirements/research are updated and preflight re-runs automatically.
 
@@ -272,15 +267,13 @@ IF quality_level == fast:
   - Security-tagged todos (security/breaking-change/migration) that received FULL REVIEW under --fast also get STANDARD verification before completion.
 
 1. Call `mcp__proj__todo_check_executable` — if manual-tagged: display warning and stop.
-2. Read `execute/SKILL.md`.
-3. Execute the step (plan mode is built into the execute skill — it calls EnterPlanMode/ExitPlanMode).
+2. Execute the step (plan mode is built into the execute skill — it calls EnterPlanMode/ExitPlanMode).
 
 IF quality_level == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 **5ii. Execute-all (parent + descendants):**
 
-Read `execute/SKILL.md` instructions once.
 Build full list: `[todo_id] + all_descendants` (from todo_tree, flattened depth-first).
 Call `mcp__proj__proj_identify_batches` for dependency order.
 
@@ -438,7 +431,7 @@ Check `git status --porcelain` on main. If dirty (uncommitted changes):
   If `--no-interactive`: auto-stash.
 
 For each todo in current batch:
-1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
 3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
@@ -577,7 +570,7 @@ Check `git status --porcelain` on main. If dirty (uncommitted changes):
   If `--no-interactive`: auto-stash.
 
 For each todo in current batch:
-1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
 3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
@@ -687,7 +680,7 @@ Satisfaction mode is determined by `quality_level.satisfaction`:
 For per-todo and per-todo + re-verify modes, for each completed todo in the batch, run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
       1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
-      2. **Not satisfied** — fix in scope: ask what's missing, create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
+      2. **Not satisfied** — fix in scope: ask what's missing. Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `context="run:satisfaction:<todo_id>"`, `tags="correction,quality"`, `todo_id=<todo_id>`. Then create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
       3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
    When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
@@ -732,8 +725,6 @@ Suggested next: `1. /proj:status` -- see updated project overview
 - `run_define_interactive` = `define` in steps (always interactive — define requires user input even in batch mode)
 - `has_execute` = `execute` in steps
 - `agent_steps` = steps excluding `define` (if interactive) and `execute`
-- Read SKILL.md for each step in `agent_steps`. Store as `step_instructions[step]`.
-- If `run_define_interactive`: also read `define/SKILL.md` once.
 
 **b.** Dependency order
 Call `mcp__proj__proj_identify_batches` with all todo IDs. Error on cycles.
@@ -843,7 +834,7 @@ Then show the between-iteration prompt (same 4 options as single-ID mode).
 IF quality_level == fast: skip refine entirely, proceed to Phase C.
 IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
-Read the sibling `refine/SKILL.md` file. For each todo in dependency order:
+Execute the refine sub-skill for each todo in dependency order:
   Execute the refine sub-skill per-todo (3 agents each, 3*N total for N todos). Subject to `max_parallel` throttling from quality_level.
   Present per-todo refinement reports sequentially.
   If Apply on any todo: requirements/research updated, preflight re-runs on that todo.
@@ -859,8 +850,6 @@ If NOT `--no-interactive`, prompt:
 1. **Execute all** — Plan and execute all todos
 2. **Stop** — Exit (prep saved)
 ```
-
-Read `execute/SKILL.md` instructions once.
 
 IF quality_level == fast:
   Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
@@ -1030,7 +1019,7 @@ Check `git status --porcelain` on main. If dirty (uncommitted changes):
   If `--no-interactive`: auto-stash.
 
 For each todo in current batch:
-1. Call `wt_create` with project repo path and branch name `todo-{id}`.
+1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
 3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
@@ -1197,7 +1186,7 @@ Satisfaction mode is determined by `quality_level.satisfaction`:
 For per-todo and per-todo + re-verify modes, for each completed todo (excluding `manual_skipped_ids`), run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
       1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
-      2. **Not satisfied** — fix in scope: ask what's missing, fix, re-ask
+      2. **Not satisfied** — fix in scope: ask what's missing. Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `context="run:satisfaction:<todo_id>"`, `tags="correction,quality"`, `todo_id=<todo_id>`. Then fix, re-ask
       3. **Redefine** — refine requirements and re-run workflow
 
    When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
@@ -1236,7 +1225,6 @@ Display per-batch breakdown and overall count. Call `mcp__proj__notes_append`.
 - **Quality gate failure (define phase)**: presents low-confidence definitions and offers Continue/Re-define/Stop.
 - **Verification failures (execute phase)**: presents combined report with Fix/Proceed/Skip options.
 - **Agent failures (team/task mode)**: reports failed agents. Logged to `failed-teams.yaml`.
-- **Read failure on sibling SKILL.md**: treated as a hard stop.
 - **Stale checkpoint (--resume)**: asks user whether to restart or use stale data.
 
 ## Output

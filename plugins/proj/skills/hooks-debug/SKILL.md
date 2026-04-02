@@ -1,14 +1,14 @@
 ---
 name: hooks-debug
 description: Debug hook execution by listing recent failures with error details.
-allowed-tools: mcp__hooks__hooks_recover_tool
+allowed-tools: mcp__plugin_hooks_hooks__hooks_recover_tool
 context: fork
 agent: general-purpose
 ---
 
 List recent hook failures to help debug execution issues.
 
-**1.** Call `mcp__hooks__hooks_recover_tool` with no arguments (lists all failures as a JSON array).
+**1.** Call `mcp__plugin_hooks_hooks__hooks_recover_tool` with no arguments (lists all failures as a JSON array).
 
 **2.** Parse the JSON response. If the array is empty:
 - Output: "No hook failures recorded. All hooks are healthy."

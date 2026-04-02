@@ -54,7 +54,7 @@ hooks:
       item_id: "${trello_checklist_item_id}"
       state: "complete"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
 
   - id: trello-on-todo-uncomplete
     trigger_tool: todo_uncomplete
@@ -90,7 +90,7 @@ hooks:
       item_id: "${trello_checklist_item_id}"
       name: "${title}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
 
   - id: trello-on-todo-delete
     trigger_tool: todo_delete
@@ -101,11 +101,11 @@ hooks:
       checklist_id: "${trello_checklist_id}"
       item_id: "${trello_checklist_item_id}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
 
   - id: trello-on-todo-add-child
     trigger_tool: todo_add_child
-    target_tool: trello_add_checklist_item_hook
+    target_tool: add_checklist_item
     server: trello
     param_mapping:
       checklist_id: "${parent_trello_checklist_id}"

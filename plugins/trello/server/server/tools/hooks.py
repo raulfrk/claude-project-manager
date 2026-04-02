@@ -136,28 +136,3 @@ def register(app: FastMCP) -> None:
                 failures.append({"index": idx, "name": name, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
 
-    @app.tool(
-        description=(
-            "Hook-friendly checklist item creation for child todo sync. "
-            "Creates a checklist item on the given checklist. "
-            "Returns a warning (not an error) if checklist_id is null/empty — "
-            "this happens when the parent todo has no Trello checklist linked. "
-            "Returns the Trello API checklist item JSON on success."
-        ),
-    )
-    def trello_add_checklist_item_hook(checklist_id: str | None, name: str) -> str:
-        if not checklist_id:
-            return json.dumps({
-                "warning": (
-                    "parent_trello_checklist_id is null — skipping Trello sync for child todo"
-                ),
-            })
-        client = get_client()
-        try:
-            item = client.post(
-                f"/checklists/{checklist_id}/checkItems",
-                params={"name": name},
-            )
-        except Exception as exc:
-            return json.dumps({"error": f"Failed to create checklist item: {exc}"})
-        return json.dumps(item)

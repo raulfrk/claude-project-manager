@@ -43,7 +43,7 @@ def _hook_content_differs(existing: Hook, new_def: dict[str, object]) -> bool:
             continue
         # Normalize dict comparisons (stringify keys/values)
         if isinstance(old_val, dict) and isinstance(new_val, dict):
-            if old_val != {str(k): str(v) for k, v in new_val.items()}:
+            if old_val != {str(k): v for k, v in new_val.items()}:
                 return True
             continue
         if old_val != new_val:

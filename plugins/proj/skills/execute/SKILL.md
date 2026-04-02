@@ -29,7 +29,7 @@ Execute todo(s): $ARGUMENTS
 Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 
-**Note**: Worktree lifecycle (Phase 1.5 setup, Phase 2.5 merge, Phase 5 cleanup) is orchestrated by `run/SKILL.md`. When execute is called directly with `--worktree`, worktree context is passed to agents but the full lifecycle (create/merge/cleanup) must be managed by the caller. For standalone execution, use `/proj:run` instead.
+**Note**: Worktree lifecycle (Phase 1.5 setup, Phase 2.5 merge, Phase 5 cleanup) is orchestrated by `/proj:run`. When execute is called directly with `--worktree`, worktree context is passed to agents but the full lifecycle (create/merge/cleanup) must be managed by the caller. For standalone execution, use `/proj:run` instead.
 
 **Quality Level Parameter Mapping:**
 
@@ -41,8 +41,10 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 | verification_mode | skip | standard | enhanced | full |
 | max_parallel | 20 | 6 | 3 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
+| preflight | N/A (run-only) | N/A (run-only) | N/A (run-only) | N/A (run-only) |
+| refine | N/A (run-only) | N/A (run-only) | N/A (run-only) | N/A (run-only) |
 | pattern_detection | auto-approve | enabled | disabled | disabled |
-| worktree | off unless explicit | off unless explicit | off unless explicit | off (max_parallel=1) |
+| worktree | from config (worktree_isolation) | from config (worktree_isolation) | from config (worktree_isolation) | off (max_parallel=1) |
 | overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
@@ -115,6 +117,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
    If `--force-plan`: always route to FULL REVIEW.
 
 **3b.** **Plan creation** (respects trust level, skipped if gate routed to AUTO-EXECUTE):
+   - Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
    - **Trust 0-2**: Call `EnterPlanMode`. Read all loaded context (requirements.md, research.md, notes, and any Related Context from step 3) and explore the relevant source files. Create an implementation plan covering:
      - Files to modify/create
      - Key changes per file
@@ -122,6 +125,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
      - Testing approach
    - **Trust 0-1**: Call `ExitPlanMode` to present the plan for user review. The user will approve or request changes before you proceed.
    - **Trust 2**: Skip `ExitPlanMode` user review. The plan is automatically approved and stored. Display a brief summary: `Plan auto-approved (trust 2): <1-line summary>`.
+   - After plan approval (trust 0-2): call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
    - **Trust 3**: Skip step 3b entirely — no plan is created. Proceed directly to step 4 with context only.
 **4.** Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions) — it should inform your implementation approach.
 **4a.** **Verification** (skip entirely if `--no-verify` was passed in $ARGUMENTS):
@@ -182,6 +186,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
       3. **Redefine** — refine requirements and re-run workflow
    b. If not satisfied:
       - Ask what's missing, fix issues in current scope
+      - Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `tags="correction,quality"`, `context="execute:satisfaction:{todo_id}"`, `todo_id=<todo_id>`.
       - Re-ask satisfaction (go back to step 5a)
    c. If redefine:
       - Invoke `/proj:define <id>` via Skill tool (existing requirements/research kept as context — non-destructive)
@@ -252,11 +257,13 @@ For each todo in the range:
 
    If `--force-plan`: always route to FULL REVIEW.
 
-**3b.** Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3. (Skipped if gate routed to AUTO-EXECUTE.)
+**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
+Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
 **4.** Plan approval (respects trust level):
    - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
@@ -422,11 +429,13 @@ For each todo in the range:
 
    If `--force-plan`: always route to FULL REVIEW.
 
-**3b.** Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3. (Skipped if gate routed to AUTO-EXECUTE.)
+**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
+Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
 **4.** Plan approval (respects trust level):
    - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
@@ -545,11 +554,13 @@ Group todos into dependency batches (topological order). Todos within the same b
 
    If `--force-plan`: always route to FULL REVIEW.
 
-**3b.** Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3. (Skipped if gate routed to AUTO-EXECUTE.)
+**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
+Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
 **4.** Plan approval (respects trust level):
    - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
@@ -713,11 +724,13 @@ Execute in topological order (respect blocked_by chains). For each todo:
 
    If `--force-plan`: always route to FULL REVIEW.
 
-**3b.** Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3. (Skipped if gate routed to AUTO-EXECUTE.)
+**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
+Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
 **4.** Plan approval (respects trust level):
    - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
    - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo.
    - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
+**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.

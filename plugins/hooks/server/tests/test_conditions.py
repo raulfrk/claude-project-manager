@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from server.lib.conditions import evaluate_condition, resolve_condition_status
+from server.lib.conditions import evaluate_condition, resolve_condition_status, validate_condition_syntax
 
 
 # ── evaluate_condition ────────────────────────────────────────────────────────
@@ -19,10 +19,9 @@ class TestEvaluateCondition:
     def test_empty_string_always_true(self):
         assert evaluate_condition("") is True
 
-    def test_whitespace_only_is_false(self):
-        """Whitespace-only string passes the 'if not condition' check but resolves
-        to an empty key path, which evaluates to False (missing key)."""
-        assert evaluate_condition("   ") is False
+    def test_whitespace_only_always_fires(self):
+        """Whitespace-only string is treated as no condition — always fires."""
+        assert evaluate_condition("   ") is True
 
     def test_truthy_config_value(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
@@ -55,6 +54,10 @@ class TestEvaluateCondition:
     def test_negation_with_spaces(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"flag": True}))
         assert evaluate_condition("  ! flag  ", config_path=proj_yaml) is False
+
+    def test_null_value_is_false(self, proj_yaml: Path):
+        proj_yaml.write_text(yaml.dump({"key": None}))
+        assert evaluate_condition("key", config_path=proj_yaml) is False
 
     def test_truthy_string(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"key": "non-empty"}))
@@ -138,6 +141,19 @@ class TestEvaluateCondition:
     def test_or_with_and_precedence_all_false(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": False}))
         assert evaluate_condition("a and b or c", config_path=proj_yaml) is False
+
+    def test_or_with_and_precedence_reverse(self, proj_yaml: Path):
+        """'a or b and c' means 'a or (b and c)', not '(a or b) and c'."""
+        # a=False, b=True, c=True → b and c = True → False or True = True
+        proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": True}))
+        assert evaluate_condition("a or b and c", config_path=proj_yaml) is True
+        # a=False, b=True, c=False → b and c = False → False or False = False
+        proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": False}))
+        assert evaluate_condition("a or b and c", config_path=proj_yaml) is False
+        # a=True, b=False, c=False → a=True short-circuits → True
+        # If incorrectly parsed as (a or b) and c, this would be False
+        proj_yaml.write_text(yaml.dump({"a": True, "b": False, "c": False}))
+        assert evaluate_condition("a or b and c", config_path=proj_yaml) is True
 
     def test_negation_in_compound(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"a": True, "b": False}))
@@ -326,3 +342,48 @@ class TestRuntimeConfig:
     def test_negation_with_config(self):
         assert evaluate_condition("!todo.todoist_task_id", config={"todo": {"todoist_task_id": "abc"}}) is False
         assert evaluate_condition("!todo.todoist_task_id", config={"todo": {}}) is True
+
+
+# ── validate_condition_syntax ───────────────────────────────────────────────
+
+
+class TestValidateConditionSyntax:
+    def test_valid_simple_condition(self):
+        valid, err = validate_condition_syntax("sync.todoist.enabled")
+        assert valid is True
+        assert err is None
+
+    def test_valid_compound_condition(self):
+        valid, err = validate_condition_syntax("sync.todoist.enabled and sync.todoist.auto_sync or perms_integration")
+        assert valid is True
+        assert err is None
+
+    def test_valid_negation(self):
+        valid, err = validate_condition_syntax("!sync.todoist.enabled")
+        assert valid is True
+        assert err is None
+
+    def test_empty_string_invalid(self):
+        valid, err = validate_condition_syntax("")
+        assert valid is False
+        assert err is not None
+
+    def test_whitespace_only_invalid(self):
+        valid, err = validate_condition_syntax("   ")
+        assert valid is False
+        assert "empty" in err.lower()
+
+    def test_bare_or_without_operand(self):
+        valid, err = validate_condition_syntax("a or  or b")
+        assert valid is False
+        assert "operand" in err.lower()
+
+    def test_bare_and_without_operand(self):
+        valid, err = validate_condition_syntax("a and  and b")
+        assert valid is False
+        assert "operand" in err.lower()
+
+    def test_unbalanced_parens(self):
+        valid, err = validate_condition_syntax("(a and b")
+        assert valid is False
+        assert "parenthes" in err.lower()

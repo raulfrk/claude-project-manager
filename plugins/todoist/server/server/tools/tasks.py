@@ -91,77 +91,8 @@ def register(app: FastMCP) -> None:  # noqa: C901
 
     @app.tool(
         description=(
-            "Hook-friendly single task creation. Accepts flat params: "
-            "content (required), description, priority, labels, dueString, "
-            "projectId, parentId. Calls the Todoist API directly (inlined)."
-        ),
-    )
-    def todoist_add_task_hook(
-        content: str,
-        projectId: str | None = None,
-        priority: str | int | None = None,
-        labels: list[str] | None = None,
-        description: str | None = None,
-        dueString: str | None = None,
-        parentId: str | None = None,
-    ) -> str:
-        task: dict[str, Any] = {"content": content}
-        if projectId:
-            task["projectId"] = projectId
-        if priority:
-            task["priority"] = priority
-        if labels:
-            task["labels"] = labels
-        if description:
-            task["description"] = description
-        if dueString:
-            task["dueString"] = dueString
-        if parentId:
-            task["parentId"] = parentId
-        client = get_client()
-        try:
-            payload = _build_task_payload(task)
-            result = client.post("/tasks", json=payload)
-            return json.dumps({"successes": [TodoistTask.from_api(result).to_dict()], "failures": []})
-        except Exception as exc:  # noqa: BLE001
-            return json.dumps({"successes": [], "failures": [{"content": content, "error": str(exc)}]})
-
-    @app.tool(
-        description=(
-            "Hook-friendly child task creation. Requires parentId — returns a warning "
-            "(not an error) if parentId is null/empty, which happens when the parent "
-            "todo has no Todoist task linked. "
-            "On success, delegates to todoist_add_task_hook with parentId set. "
-            "Returns {successes: [...], failures: [...]}."
-        ),
-    )
-    def todoist_add_child_task_hook(
-        content: str,
-        projectId: str | None = None,
-        priority: str | int | None = None,
-        labels: list[str] | None = None,
-        description: str | None = None,
-        dueString: str | None = None,
-        parentId: str | None = None,
-    ) -> str:
-        if not parentId:
-            return json.dumps({
-                "warning": "parent_todoist_task_id is null — skipping Todoist sync for child todo",
-            })
-        return todoist_add_task_hook(
-            content=content,
-            projectId=projectId,
-            priority=priority,
-            labels=labels,
-            description=description,
-            dueString=dueString,
-            parentId=parentId,
-        )
-
-    @app.tool(
-        description=(
             "Hook-friendly single task completion. Accepts a single task ID "
-            "and closes it via the Todoist API directly."
+            "and closes it via the Todoist API."
         ),
     )
     def todoist_complete_task_hook(id: str) -> str:

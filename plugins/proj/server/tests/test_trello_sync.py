@@ -2699,8 +2699,10 @@ class TestProjTrelloFullSync:
 
         assert result["status"] == "success"
         assert result["retried_succeeded"] == 1
-        assert len(call_log) == 1
-        assert call_log[0][0] == "create_checklist"
+        # Dedup guard fetches checklists before retrying create
+        assert len(call_log) == 2
+        assert call_log[0][0] == "get_card_checklists"
+        assert call_log[1][0] == "create_checklist"
 
     def test_empty_diff_returns_up_to_date(
         self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
@@ -2843,3 +2845,161 @@ class TestRetryFailedOps:
         succeeded, still_failed = _retry_failed_ops(failed)
         assert len(succeeded) == 1
         assert len(still_failed) == 0
+
+
+class TestDedupGuards:
+    """Tests for dedup guards in _execute_push_ops and _retry_failed_ops."""
+
+    def test_dedup_card_already_exists_skips_creation(self, monkeypatch) -> None:
+        """Card already exists in list by name; add_card_to_list NOT called; existing ID reused."""
+        # We test the card-level dedup in the full sync tool (proj_trello_full_sync).
+        # The dedup is in the register() function — card creation checks for existing cards.
+        captured = {}
+
+        class FakeApp:
+            def tool(self, **deco_kwargs):
+                def decorator(fn):
+                    captured["fn"] = fn
+                    return fn
+                return decorator
+
+        fake = FakeApp()
+        register_full_sync(fake)
+
+        # We need a project with no card_id so the tool tries to create one
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "get_card_checklists":
+                return []
+            if tool_name == "get_lists":
+                return [{"id": "list1", "name": "Active"}]
+            if tool_name == "get_cards_by_list_id":
+                # Card already exists with matching name
+                return [{"id": "existing_card_1", "name": "myapp"}]
+            if tool_name == "add_card_to_list":
+                raise AssertionError("add_card_to_list should not be called")
+            return {}
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+        # Mock require_project and storage to provide a project without a card_id
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync.require_project",
+            lambda name: (
+                type("Cfg", (), {
+                    "tracking_dir": "/tmp/fake",
+                    "trello": type("T", (), {"default_board_id": "board1", "default_list": "Active"})(),
+                })(),
+                "myapp",
+            ),
+        )
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync.storage.load_meta",
+            lambda cfg, name: type("Meta", (), {
+                "trello_card_id": "",
+                "trello": type("TC", (), {"board_id": ""})(),
+            })(),
+        )
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync.compute_diff",
+            lambda *a, **kw: type("Plan", (), {
+                "card_create": True,
+                "is_empty": lambda self: True,
+                "push_create_checklist": [],
+                "push_create_item": [],
+                "push_update_item": [],
+                "push_complete_item": [],
+                "push_delete_item": [],
+                "push_rename_checklist": [],
+                "pull_create": [],
+                "pull_create_root": [],
+                "pull_update": [],
+                "pull_complete": [],
+                "pull_reopen": [],
+                "pull_delete": [],
+            })(),
+        )
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync.apply_changes",
+            lambda *a, **kw: {},
+        )
+
+        import json as _json
+        result = _json.loads(captured["fn"](project_name="myapp"))
+        assert result["status"] == "success"
+        # add_card_to_list should NOT have been called
+        add_calls = [t for t, _ in call_log if t == "add_card_to_list"]
+        assert len(add_calls) == 0
+        # get_cards_by_list_id was called for dedup check
+        dedup_calls = [t for t, _ in call_log if t == "get_cards_by_list_id"]
+        assert len(dedup_calls) == 1
+
+    def test_dedup_checklist_already_exists_skips_creation(self, monkeypatch) -> None:
+        """Checklist already exists on card; create_checklist NOT called; existing ID reused."""
+        ops = [
+            {
+                "type": "push_create_checklist",
+                "tool": "create_checklist",
+                "params": {"cardId": "c1", "name": "Tasks"},
+                "checklist_key": "todo_1",
+                "todo_id": "1",
+            },
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append((tool_name, params))
+            if tool_name == "get_card_checklists":
+                # Checklist with same name already exists
+                return [{"id": "existing_cl_1", "name": "Tasks", "checkItems": []}]
+            raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        succeeded, errors = _execute_push_ops(ops, card_id="c1")
+        assert len(succeeded) == 1
+        assert len(errors) == 0
+        # create_checklist was NOT called
+        create_calls = [t for t, _ in call_log if t == "create_checklist"]
+        assert len(create_calls) == 0
+        # The existing checklist was reused
+        assert succeeded[0]["result"]["id"] == "existing_cl_1"
+
+    def test_dedup_checklist_item_already_exists_skips_creation(self, monkeypatch) -> None:
+        """Item already exists on checklist; add_checklist_item NOT called; existing ID reused."""
+        ops = [
+            {
+                "type": "push_create_item",
+                "tool": "add_checklist_item",
+                "params": {"checklistId": "cl1", "name": "Build feature"},
+                "todo_id": "1.1",
+            },
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "get_card_checklists":
+                return [
+                    {
+                        "id": "cl1",
+                        "name": "Tasks",
+                        "checkItems": [
+                            {"id": "existing_item_1", "name": "Build feature", "state": "incomplete"},
+                        ],
+                    }
+                ]
+            raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        succeeded, errors = _execute_push_ops(ops, card_id="c1")
+        assert len(succeeded) == 1
+        assert len(errors) == 0
+        assert succeeded[0]["result"]["id"] == "existing_item_1"

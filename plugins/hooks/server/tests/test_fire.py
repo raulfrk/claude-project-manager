@@ -104,8 +104,8 @@ class TestHooksFire:
         assert data["errors"] == []
 
     @pytest.mark.asyncio
-    async def test_fire_nonblocking_hook_awaited(self, hooks_yaml: Path):
-        """Non-blocking hook is now awaited (no background dispatch)."""
+    async def test_fire_nonblocking_hook_dispatched(self, hooks_yaml: Path):
+        """Non-blocking hook is dispatched as a background task."""
         reg = _make_registry([
             _hook("hook-001", "trigger_a", "target_b", blocking=False),
         ])
@@ -119,9 +119,10 @@ class TestHooksFire:
             result = await hooks_fire("trigger_a", source_result='{"key": "val"}')
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["hooks_fired"] == 0
+        assert data["non_blocking_dispatched"] == 1
         assert data["skipped"] == 0
-        assert data["results"] == [{"hook_id": "hook-001", "result": None, "target_tool": "target_b"}]
+        assert data["results"] == []
 
     @pytest.mark.asyncio
     async def test_fire_blocking_hook_success(self, hooks_yaml: Path):
@@ -275,7 +276,7 @@ class TestHooksFire:
 
     @pytest.mark.asyncio
     async def test_fire_multiple_hooks_mixed(self, hooks_yaml: Path):
-        """Mix of blocking and non-blocking hooks all go through blocking path."""
+        """Mix of blocking and non-blocking hooks: blocking awaited, non-blocking dispatched."""
         reg = _make_registry([
             _hook("hook-001", "trigger_a", "target_b", blocking=False),
             _hook("hook-002", "trigger_a", "target_c", blocking=True),
@@ -292,8 +293,50 @@ class TestHooksFire:
             result = await hooks_fire("trigger_a")
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 2
-        assert len(data["results"]) == 2
+        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["hook_id"] == "hook-002"
+
+    @pytest.mark.asyncio
+    async def test_fire_inactive_condition_skips_hook_e2e(self, hooks_yaml: Path, proj_yaml: Path):
+        """E2E: hook with inactive condition (sync.todoist.enabled: false) is skipped entirely.
+
+        Verifies:
+        1. Target tool is never called (_fire_single not invoked)
+        2. Hook is absent from results
+        3. skipped count reflects the inactive hook
+        """
+        reg = _make_registry([
+            _hook(
+                "hook-todoist",
+                "todo_complete",
+                "todoist_complete_task_hook",
+                server="todoist",
+                blocking=True,
+                condition="sync.todoist.enabled",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        # Explicitly set the condition to false (not missing — actively disabled)
+        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": False}}}))
+
+        mock_fire_single = AsyncMock()
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._fire_single", mock_fire_single),
+        ):
+            result = await hooks_fire("todo_complete", source_result='{"todo_id": "123"}')
+
+        data = json.loads(result)
+        # Hook must not have been executed
+        mock_fire_single.assert_not_called()
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1
+        assert data["results"] == []
+        assert data["errors"] == []
 
     @pytest.mark.asyncio
     async def test_fire_resolves_param_mapping(self, hooks_yaml: Path):
@@ -642,7 +685,8 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        # Default blocking=False, so hook is dispatched as non-blocking
+        assert data["non_blocking_dispatched"] == 1
         assert data["skipped"] == 0
 
     @pytest.mark.asyncio
@@ -684,7 +728,7 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
         assert data["skipped"] == 0
 
     @pytest.mark.asyncio
@@ -732,7 +776,7 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
         assert data["skipped"] == 0
 
     @pytest.mark.asyncio
@@ -753,7 +797,7 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
 
     @pytest.mark.asyncio
     async def test_trello_checklist_id_merges_to_both(self, hooks_yaml: Path, proj_yaml: Path):
@@ -778,7 +822,7 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
 
     @pytest.mark.asyncio
     async def test_jira_issue_key_merges_to_todo(self, hooks_yaml: Path, proj_yaml: Path):
@@ -798,7 +842,7 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        assert data["hooks_fired"] == 1
+        assert data["non_blocking_dispatched"] == 1
 
     @pytest.mark.asyncio
     async def test_base_config_overrides_source_result(self, hooks_yaml: Path, proj_yaml: Path):
@@ -820,15 +864,15 @@ class TestConditionMerge:
             result = await hooks_fire("trigger_a", source_result=source)
 
         data = json.loads(result)
-        # Should fire because base config has it
-        assert data["hooks_fired"] == 1
+        # Should fire because base config has it (non-blocking by default)
+        assert data["non_blocking_dispatched"] == 1
 
 
 class TestBlockingAll:
     """Tests for 389.1 — all hooks now blocking, top_level field, feedback_mapping fix."""
 
     @pytest.mark.anyio
-    async def test_formerly_nonblocking_hook_is_awaited(
+    async def test_nonblocking_hook_dispatched_as_background_task(
         self,
         hooks_yaml: Path,
         failures_yaml: Path,
@@ -836,7 +880,7 @@ class TestBlockingAll:
         proj_yaml: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A hook with blocking=False now goes through the blocking path (asyncio.gather)."""
+        """A hook with blocking=False is dispatched as a background task."""
         hook_data = {
             "hooks": [
                 {
@@ -844,7 +888,7 @@ class TestBlockingAll:
                     "trigger_tool": "test_trigger",
                     "target_tool": "test_target",
                     "server": "proj",
-                    "blocking": False,  # formerly background — now blocking
+                    "blocking": False,
                     "param_mapping": {},
                 }
             ]
@@ -863,8 +907,8 @@ class TestBlockingAll:
             result_json = await hooks_fire("test_trigger", source_result="{}", depth=0)
 
         result = __import__("json").loads(result_json)
-        assert result["hooks_fired"] == 1
-        mock_post.assert_awaited_once()
+        assert result["hooks_fired"] == 0
+        assert result["non_blocking_dispatched"] == 1
 
     @pytest.mark.anyio
     async def test_top_level_true_at_depth_zero(
@@ -994,3 +1038,309 @@ class TestBlockingAll:
         assert any(e.get("hook_id") == "h-fail" for e in result["errors"])
         # h-ok should be in results
         assert any(r.get("hook_id") == "h-ok" for r in result["results"])
+
+
+# ── Blocking vs non-blocking dispatch ─────────────────────────────────────────
+
+
+class TestBlockingVsNonBlockingDispatch:
+    """Comprehensive tests for blocking vs non-blocking hook dispatch behavior."""
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_two_blocking_one_nonblocking(self, hooks_yaml: Path):
+        """2 blocking + 1 non-blocking: blocking results in results, non-blocking only in count."""
+        reg = _make_registry([
+            _hook("b1", "trigger_a", "target_1", blocking=True),
+            _hook("b2", "trigger_a", "target_2", blocking=True),
+            _hook("nb1", "trigger_a", "target_3", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=200, body="ok", result=f"res_{hook.id}")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 2
+        assert data["non_blocking_dispatched"] == 1
+        assert data["skipped"] == 0
+        assert len(data["results"]) == 2
+        result_ids = {r["hook_id"] for r in data["results"]}
+        assert result_ids == {"b1", "b2"}
+        # Non-blocking hook should NOT appear in results
+        assert "nb1" not in result_ids
+
+    @pytest.mark.asyncio
+    async def test_nonblocking_failure_does_not_propagate(
+        self, hooks_yaml: Path, failures_yaml: Path,
+    ):
+        """Non-blocking hook failure is logged but fire still returns success."""
+        reg = _make_registry([
+            _hook("nb-fail", "trigger_a", "target_b", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=500, body="error", error="internal error")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # Fire returns success — no errors in the response
+        assert data["errors"] == []
+        assert data["hooks_fired"] == 0
+        assert data["non_blocking_dispatched"] == 1
+
+    @pytest.mark.asyncio
+    async def test_nonblocking_exception_does_not_propagate(
+        self, hooks_yaml: Path, failures_yaml: Path,
+    ):
+        """Non-blocking hook raising an exception does not crash fire."""
+        reg = _make_registry([
+            _hook("nb-exc", "trigger_a", "target_b", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch(
+                "server.tools.fire._fire_single",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError("refused"),
+            ),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # Fire returns success — exception is caught inside _launch_nonblocking
+        assert data["errors"] == []
+        assert data["non_blocking_dispatched"] == 1
+
+    @pytest.mark.asyncio
+    async def test_background_tasks_set_lifecycle(self, hooks_yaml: Path):
+        """Background task is added to _background_tasks and removed after completion."""
+        import asyncio
+        from server.tools.fire import _background_tasks
+
+        reg = _make_registry([
+            _hook("nb-lc", "trigger_a", "target_b", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+            # Let the event loop process the background task and its done callback
+            await asyncio.sleep(0.05)
+
+        data = json.loads(result)
+        assert data["non_blocking_dispatched"] == 1
+        # After completion, the done_callback should have removed the task
+        # (no tasks with our hook id should remain)
+        assert all("nb-lc" not in str(t) for t in _background_tasks)
+
+    def test_hook_default_blocking_is_false(self):
+        """Hook model defaults blocking=False — most hooks are non-blocking unless set."""
+        hook = Hook(
+            id="test",
+            trigger_tool="t",
+            target_tool="tt",
+            server="s",
+        )
+        assert hook.blocking is False
+
+    @pytest.mark.asyncio
+    async def test_nonblocking_logs_success(self, hooks_yaml: Path):
+        """Non-blocking hook success is logged via storage.log_invocation."""
+        reg = _make_registry([
+            _hook("nb-log", "trigger_a", "target_b", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=200, body="ok")
+
+        import asyncio
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+            patch("server.tools.fire.storage") as mock_storage,
+        ):
+            mock_storage.load.return_value = reg
+            mock_storage.log_invocation = lambda **kw: None
+            mock_storage.log_failure = lambda **kw: None
+            result = await hooks_fire("trigger_a")
+            await asyncio.sleep(0.05)
+
+        data = json.loads(result)
+        assert data["non_blocking_dispatched"] == 1
+
+    @pytest.mark.asyncio
+    async def test_nonblocking_logs_failure(self, hooks_yaml: Path, failures_yaml: Path):
+        """Non-blocking hook HTTP failure is logged via storage.log_failure."""
+        import asyncio
+
+        reg = _make_registry([
+            _hook("nb-logf", "trigger_a", "target_b", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        log_failure_calls: list[dict] = []
+        original_log_failure = None
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=500, body="err", error="server error")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+            patch("server.tools.fire.storage.log_failure") as mock_log_failure,
+        ):
+            result = await hooks_fire("trigger_a")
+            await asyncio.sleep(0.05)
+
+        data = json.loads(result)
+        assert data["non_blocking_dispatched"] == 1
+        mock_log_failure.assert_called_once()
+        call_kwargs = mock_log_failure.call_args[1]
+        assert call_kwargs["hook_id"] == "nb-logf"
+        assert "server error" in call_kwargs["error"]
+
+    @pytest.mark.asyncio
+    async def test_all_nonblocking_no_blocking_results(self, hooks_yaml: Path):
+        """When all hooks are non-blocking, hooks_fired=0 and results is empty."""
+        reg = _make_registry([
+            _hook("nb1", "trigger_a", "target_1", blocking=False),
+            _hook("nb2", "trigger_a", "target_2", blocking=False),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(hook_id=hook.id, status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 0
+        assert data["non_blocking_dispatched"] == 2
+        assert data["results"] == []
+        assert data["errors"] == []
+
+
+class TestParentTodoistTaskIdGuard:
+    """Tests for 399.1 — parent_todoist_task_id whitelist injection into base_config."""
+
+    @pytest.mark.asyncio
+    async def test_parent_todoist_task_id_injected_fires_condition(
+        self, hooks_yaml: Path, proj_yaml: Path,
+    ):
+        """Hook with condition 'todo.parent_todoist_task_id' fires when source has it."""
+        reg = _make_registry([
+            _hook(
+                "hook-parent",
+                "todo_add_child",
+                "todoist_add_child_task_hook",
+                condition="sync.todoist.enabled and sync.todoist.auto_sync and todo.parent_todoist_task_id",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text(yaml.dump({
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
+        }))
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch(
+                "server.tools.fire._fire_single",
+                new_callable=AsyncMock,
+                return_value=FireResult(hook_id="hook-parent", status_code=200, body="ok"),
+            ),
+        ):
+            source = json.dumps({"parent_todoist_task_id": "abc123", "todoist_task_id": "child1"})
+            result = await hooks_fire("todo_add_child", source_result=source)
+
+        data = json.loads(result)
+        # Should fire — all conditions met including parent_todoist_task_id
+        assert data["non_blocking_dispatched"] == 1
+        assert data["skipped"] == 0
+
+    @pytest.mark.asyncio
+    async def test_parent_todoist_task_id_absent_skips_condition(
+        self, hooks_yaml: Path, proj_yaml: Path,
+    ):
+        """Hook with condition 'todo.parent_todoist_task_id' skips when source lacks it."""
+        reg = _make_registry([
+            _hook(
+                "hook-parent",
+                "todo_add_child",
+                "todoist_add_child_task_hook",
+                condition="sync.todoist.enabled and sync.todoist.auto_sync and todo.parent_todoist_task_id",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text(yaml.dump({
+            "sync": {"todoist": {"enabled": True, "auto_sync": True}},
+        }))
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+        ):
+            # source_result does NOT contain parent_todoist_task_id
+            source = json.dumps({"todoist_task_id": "child1"})
+            result = await hooks_fire("todo_add_child", source_result=source)
+
+        data = json.loads(result)
+        # Should skip — parent_todoist_task_id missing evaluates to False
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_parent_todoist_task_id_empty_string_skips(
+        self, hooks_yaml: Path, proj_yaml: Path,
+    ):
+        """Empty string for parent_todoist_task_id should evaluate as falsy → skip."""
+        reg = _make_registry([
+            _hook(
+                "hook-parent",
+                "todo_add_child",
+                "todoist_add_child_task_hook",
+                condition="todo.parent_todoist_task_id",
+            ),
+        ])
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+        ):
+            source = json.dumps({"parent_todoist_task_id": ""})
+            result = await hooks_fire("todo_add_child", source_result=source)
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1

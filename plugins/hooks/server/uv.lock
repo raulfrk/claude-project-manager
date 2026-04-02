@@ -237,7 +237,7 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.2.0"
+version = "0.3.0"
 source = { directory = "../../_shared" }
 dependencies = [
     { name = "httpx" },
@@ -478,7 +478,7 @@ wheels = [
 
 [[package]]
 name = "hooks-mcp-server"
-version = "1.0.0"
+version = "1.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "claude-hook-transport" },

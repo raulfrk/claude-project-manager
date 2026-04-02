@@ -34,7 +34,7 @@ Review existing requirements, research, and notes. Store them for later referenc
 
 **2b.** Search prior decisions
 
-Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results found, review them before asking questions.
+Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results are found, **use them as background context during the Q&A in step 5** — not just display them. Reference prior decisions when formulating questions and interpreting answers.
 
 **2c.** Background codebase exploration (skip if `skip_bg_prep` is true)
 
@@ -89,6 +89,8 @@ Drive questions from the gap analysis — do NOT use predefined category lists. 
 - When the user is uncertain about a question, offer 2-3 concrete options with tradeoffs
 - Continue until all CRITICAL gaps are addressed
 - Record every Q&A pair as a transcript
+
+When the user contradicts or corrects a prior assumption during Q&A, immediately call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<the correction>`, `tags="correction"`, `context="define:qa:{todo_id}"`, `todo_id={todo_id}`.
 
 When all CRITICAL gaps are resolved, ask:
 > "All critical gaps are covered. Would you like to:"
@@ -162,6 +164,8 @@ Write `research.md`:
 
 Call `mcp__proj__content_set_requirements` with the requirements content.
 Call `mcp__proj__content_set_research` with the research content.
+
+For each major architectural or design decision made during this session (chosen approach, key constraint, scope boundary), call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<concise decision statement>`, `tags="requirements"`, `todo_id={todo_id}`. Decisions should be self-contained and referenceable in future sessions.
 
 **7.** Quality gate loop (hard block)
 
@@ -254,6 +258,8 @@ Output the confidence table, then list actionable gaps with suggested fixes:
 
 **NI-5. Finalize**
 
+Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the inferred approach>`, `tags="auto"`, `todo_id={todo_id}`.
+
 Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
 
 Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules or standards discovered. Only project-wide rules, not todo-specific details.
@@ -270,7 +276,7 @@ Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
 - **No todo ID**: displays "Todo ID required. Usage: `/proj:define <todo-id>`" and stops.
 - **Todo not found**: displays "Todo `<id>` not found. Run `/proj:todo list` to see available todos." and stops.
 - **Quality gate failure**: presents failing criteria and offers Fix or Restart options. Blocks progress until gate passes.
-- **Read failure on sibling SKILL.md**: treated as a hard stop.
+- **Skill invocation failure**: treated as a hard stop.
 
 ## Output
 

@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from server.lib import storage
-from server.lib.conditions import resolve_condition_status
+from server.lib.conditions import resolve_condition_status, validate_condition_syntax
 from server.lib.dag import find_cycle_path, would_create_cycle
 from server.lib.models import Hook
 
@@ -70,6 +70,12 @@ def hooks_register(
             "result": "Error: feedback_mapping/feedback_tool require blocking=true.",
             "hook_id": None,
         })
+
+    # Validate condition syntax
+    if condition:
+        valid, err = validate_condition_syntax(condition)
+        if not valid:
+            return json.dumps({"error": f"Invalid condition syntax: {err}"})
 
     registry = storage.load()
 

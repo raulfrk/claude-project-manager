@@ -9,8 +9,8 @@ argument-hint: "<todo-id>"
 
 Refine todo: $ARGUMENTS
 
-**Quality level behavior** (controlled by run/SKILL.md, not this skill):
-- `--fast`: refine is skipped entirely (run/SKILL.md guards this before invoking refine)
+**Quality level behavior** (controlled by `/proj:run`, not this skill):
+- `--fast`: refine is skipped entirely (`/proj:run` guards this before invoking refine)
 - `--careful` / `--paranoid`: refine is auto-enabled (run invokes this skill even without `--refine` flag)
 
 **1.** Parse `todo_id` from $ARGUMENTS.
@@ -130,7 +130,7 @@ Auto-continue without prompting.
 3. Call `content_set_requirements` with updated content.
 4. If research amendments: call `content_set_research` with updated content.
 5. Display: "Requirements updated with N amendments."
-6. Re-run the 5 preflight checks (the same structural checks from the preflight block in run/SKILL.md). If any new failures: display and offer (1) Fix (2) Continue (3) Undo amendments.
+6. Re-run the 5 preflight checks (the same structural checks from the preflight block in `/proj:run`). If any new failures: display and offer (1) Fix (2) Continue (3) Undo amendments.
 7. Undo: restore from `pre_refine_requirements` backup via `content_set_requirements`.
 
 **9.** Edit flow:
