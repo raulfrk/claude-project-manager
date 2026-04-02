@@ -75,6 +75,26 @@ def _ts_newer(a: str, b: str) -> bool:
         return a > b
 
 
+def _content_differs(local: "Todo", task: dict[str, Any]) -> bool:
+    """Return True if local todo content differs from the Todoist task.
+
+    Compares the fields that would be pushed: title, priority, labels, due date.
+    Used as a guard before push_update so identical data never triggers a push.
+    """
+    todoist_priority = _parse_todoist_priority(task)
+    if local.title != str(task.get("content", "")):
+        return True
+    if local.priority != todoist_priority:
+        return True
+    todoist_labels = _parse_todoist_labels(task)
+    if sorted(local.tags) != sorted(todoist_labels):
+        return True
+    todoist_due = _parse_todoist_due(task)
+    if (local.due_date or None) != (todoist_due or None):
+        return True
+    return False
+
+
 def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bool:
     """Return True if title matches an archived todo (exact or fuzzy)."""
     if not archived:
@@ -460,7 +480,11 @@ def compute_diff(
         if todoist_id in local_by_todoist_id:
             local_todo = local_by_todoist_id[todoist_id]
             todoist_updated = _parse_todoist_updated(task)
-            if _ts_newer(local_todo.updated, todoist_updated) and local_todo.status not in TERMINAL_STATUSES:
+            if (
+                _ts_newer(local_todo.updated, todoist_updated)
+                and local_todo.status not in TERMINAL_STATUSES
+                and _content_differs(local_todo, task)
+            ):
                 todoist_priority = _LOCAL_TO_TODOIST.get(local_todo.priority, "p4")
                 update_entry_push: dict[str, object] = {
                     "id": todoist_id,
