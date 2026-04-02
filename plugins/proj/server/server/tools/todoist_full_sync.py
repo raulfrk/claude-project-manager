@@ -368,6 +368,9 @@ def compute_diff(
                     "notes": new_notes,
                     "due_date": todoist_due,
                     "todoist_description_synced": new_synced,
+                    # Carry Todoist's timestamp so apply_changes can set local
+                    # updated to match, preventing an immediate push next sync.
+                    "todoist_updated_at": todoist_updated,
                 }
                 # Check if Todoist task is completed
                 if task.get("is_completed") or task.get("isCompleted") or task.get("checked"):
@@ -581,7 +584,10 @@ def apply_changes(
                 todo.todoist_description_synced = desc_synced_value
             else:
                 staged_description_synced[todo_id] = desc_synced_value
-        todo.updated = today
+        # Use the Todoist timestamp if provided (pull updates) so local
+        # updated matches Todoist's updatedAt, preventing a push on the next sync.
+        todoist_ts = str(item.get("todoist_updated_at", ""))
+        todo.updated = todoist_ts if todoist_ts else today
         counts["updated"] += 1
 
     # 3. Link todoist IDs (after push_create returns Todoist task IDs)
