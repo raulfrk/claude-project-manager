@@ -658,7 +658,17 @@ def _resolve_todoist_socket() -> str:
 
 
 def _call_todoist_tool(tool_name: str, params: dict[str, Any]) -> Any:
-    """Call a Todoist MCP tool via inter-plugin Unix domain socket."""
+    """Call a Todoist MCP tool via inter-plugin Unix domain socket.
+
+    The hook transport wraps every response as::
+
+        {"ok": True, "result": <tool_return>}
+
+    where ``<tool_return>`` is whatever the tool function returned — often a
+    JSON-encoded string (because FastMCP tools return ``json.dumps(...)``).
+    This helper unwraps that envelope and parses the inner JSON string so
+    callers always receive the actual tool payload.
+    """
     sock_path = _resolve_todoist_socket()
     transport = httpx.HTTPTransport(uds=sock_path)
     with httpx.Client(transport=transport, timeout=30.0) as client:
@@ -667,7 +677,18 @@ def _call_todoist_tool(tool_name: str, params: dict[str, Any]) -> Any:
             json={"tool": tool_name, "params": params},
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        # Unwrap {"ok": True, "result": ...} envelope
+        if isinstance(data, dict) and "result" in data:
+            result = data["result"]
+            # Tools return json.dumps(...) strings — parse them
+            if isinstance(result, str):
+                try:
+                    return json.loads(result)
+                except (json.JSONDecodeError, ValueError):
+                    return result
+            return result
+        return data
 
 
 # -- Push operation helpers ---------------------------------------------------
