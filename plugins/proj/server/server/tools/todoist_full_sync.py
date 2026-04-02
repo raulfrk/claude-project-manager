@@ -332,9 +332,9 @@ def compute_diff(
                 "todoist_description_synced": new_synced,
             })
         else:
-            # Existing — check timestamps
+            # Existing — check timestamps (both truncated to date for fair comparison)
             local_todo = local_by_todoist_id[todoist_id]
-            if todoist_updated > local_todo.updated:
+            if todoist_updated > local_todo.updated[:10]:
                 # Todoist is newer — prepare update
                 new_notes, new_synced = _apply_description_sync(
                     local_todo.notes, local_todo.todoist_description_synced, todoist_desc
@@ -436,7 +436,7 @@ def compute_diff(
         if todoist_id in local_by_todoist_id:
             local_todo = local_by_todoist_id[todoist_id]
             todoist_updated = _parse_todoist_updated(task)
-            if local_todo.updated > todoist_updated and local_todo.status not in TERMINAL_STATUSES:
+            if local_todo.updated[:10] > todoist_updated and local_todo.status not in TERMINAL_STATUSES:
                 todoist_priority = _LOCAL_TO_TODOIST.get(local_todo.priority, "p4")
                 update_entry_push: dict[str, object] = {
                     "id": todoist_id,
