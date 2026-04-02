@@ -50,8 +50,29 @@ def _today() -> str:
 
 
 def _todoist_date(updated_at: str) -> str:
-    """Extract date portion from Todoist ISO datetime."""
-    return updated_at[:10] if updated_at else ""
+    """Normalise a Todoist ISO datetime to a naive UTC datetime string.
+
+    Strips the trailing 'Z' / '+00:00' offset so the result can be compared
+    directly against local_todo.updated (also a naive UTC string).
+    Returns "" when the input is empty.
+    """
+    if not updated_at:
+        return ""
+    # Strip timezone suffix so both sides are naive ISO strings
+    return updated_at.rstrip("Z").split("+")[0].split("-00:00")[0]
+
+
+def _ts_newer(a: str, b: str) -> bool:
+    """Return True if timestamp *a* is strictly newer than *b*.
+
+    Both are expected to be naive ISO 8601 strings (no timezone).
+    Falls back to string comparison when parsing fails, which is safe
+    for well-formed ISO strings of the same format.
+    """
+    try:
+        return datetime.fromisoformat(a) > datetime.fromisoformat(b)
+    except (ValueError, TypeError):
+        return a > b
 
 
 def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bool:
@@ -332,9 +353,9 @@ def compute_diff(
                 "todoist_description_synced": new_synced,
             })
         else:
-            # Existing — check timestamps (both truncated to date for fair comparison)
+            # Existing — check timestamps
             local_todo = local_by_todoist_id[todoist_id]
-            if todoist_updated > local_todo.updated[:10]:
+            if _ts_newer(todoist_updated, local_todo.updated):
                 # Todoist is newer — prepare update
                 new_notes, new_synced = _apply_description_sync(
                     local_todo.notes, local_todo.todoist_description_synced, todoist_desc
@@ -436,7 +457,7 @@ def compute_diff(
         if todoist_id in local_by_todoist_id:
             local_todo = local_by_todoist_id[todoist_id]
             todoist_updated = _parse_todoist_updated(task)
-            if local_todo.updated[:10] > todoist_updated and local_todo.status not in TERMINAL_STATUSES:
+            if _ts_newer(local_todo.updated, todoist_updated) and local_todo.status not in TERMINAL_STATUSES:
                 todoist_priority = _LOCAL_TO_TODOIST.get(local_todo.priority, "p4")
                 update_entry_push: dict[str, object] = {
                     "id": todoist_id,
