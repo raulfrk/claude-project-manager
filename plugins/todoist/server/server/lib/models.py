@@ -63,6 +63,7 @@ class TodoistTask:
     project_id: str = ""
     parent_id: str | None = None
     is_completed: bool = False
+    updated_at: str = ""
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> Self:
@@ -93,6 +94,7 @@ class TodoistTask:
             project_id=str(data.get("projectId", data.get("project_id", ""))),
             parent_id=data.get("parentId", data.get("parent_id")),
             is_completed=bool(data.get("isCompleted", data.get("is_completed", False))),
+            updated_at=str(data.get("updatedAt", data.get("updated_at", ""))),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,6 +109,7 @@ class TodoistTask:
             "project_id": self.project_id,
             "parent_id": self.parent_id,
             "is_completed": self.is_completed,
+            "updatedAt": self.updated_at,
         }
 
 

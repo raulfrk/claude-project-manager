@@ -140,7 +140,7 @@
       "name": "todoist",
       "source": "./plugins/todoist",
       "description": "Todoist task and project management via REST API \u2014 create, complete, update, find, and delete tasks and projects",
-      "version": "1.4.1",
+      "version": "1.4.2",
       "author": {
         "name": "raulfrk"
       },

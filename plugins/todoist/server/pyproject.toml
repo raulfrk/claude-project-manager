@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "todoist-mcp-server"
-version = "1.0.0"
+version = "1.4.2"
 description = "MCP server for Todoist task and project management"
 requires-python = ">=3.12"
 dependencies = [
