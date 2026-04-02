@@ -714,12 +714,24 @@ def _execute_push_creates(
                         "retry_payload": task,
                     })
             else:
-                errors.append({
-                    "operation_type": "push_create",
-                    "error": "Task not in response",
-                    "retryable": True,
-                    "retry_payload": task,
-                })
+                # Response was truncated — the task may have been created anyway.
+                # Look it up by content+project before marking as an error so we
+                # don't create a duplicate on the next sync or retry.
+                recovered_id = _find_existing_todoist_task(
+                    task.get("project_id", "") or (project_todoist_id or ""),
+                    task.get("content", ""),
+                )
+                if recovered_id:
+                    id_map[todo_id] = recovered_id
+                    task["result_todoist_id"] = recovered_id
+                    succeeded.append(task)
+                else:
+                    errors.append({
+                        "operation_type": "push_create",
+                        "error": "Task not in response",
+                        "retryable": True,
+                        "retry_payload": task,
+                    })
     except Exception as e:
         # All tasks in this batch failed
         for task in tasks:
@@ -1039,16 +1051,27 @@ def register(app: FastMCP) -> None:
         # -- Retry mode: re-attempt only failed ops --
         if retry_failures:
             try:
-                failed_ops = json.loads(base64.b64decode(retry_failures))
+                raw = json.loads(base64.b64decode(retry_failures))
+                # New format: {"project_name": "...", "ops": [...]}
+                # Old format (pre-2.10.4): bare list
+                if isinstance(raw, dict) and "ops" in raw:
+                    failed_ops = raw["ops"]
+                    embedded_project_name = raw.get("project_name")
+                else:
+                    failed_ops = raw
+                    embedded_project_name = None
             except (json.JSONDecodeError, Exception) as e:
                 return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
+
+            # Explicit arg takes priority; fall back to what was baked into the token
+            effective_project_name = project_name or embedded_project_name
 
             succeeded, still_failed, retry_link_ops = _retry_failed_ops(failed_ops)
 
             # Persist any newly linked Todoist IDs back to local todos so future
             # syncs don't try to create the same tasks again.
             if retry_link_ops:
-                proj_result = require_project(project_name)
+                proj_result = require_project(effective_project_name)
                 if not isinstance(proj_result, str):
                     retry_cfg, retry_name = proj_result
                     apply_changes(
@@ -1059,7 +1082,8 @@ def register(app: FastMCP) -> None:
                     )
 
             if still_failed:
-                token = base64.b64encode(json.dumps(still_failed).encode()).decode()
+                token_data = {"project_name": effective_project_name, "ops": still_failed}
+                token = base64.b64encode(json.dumps(token_data).encode()).decode()
                 return json.dumps({
                     "status": "partial_success",
                     "retried_succeeded": len(succeeded),
@@ -1253,7 +1277,10 @@ def register(app: FastMCP) -> None:
         )
 
         if all_errors:
-            token = base64.b64encode(json.dumps(all_errors).encode()).decode()
+            # Embed project name so the retry path can persist IDs without
+            # needing an active session.
+            token_data = {"project_name": name, "ops": all_errors}
+            token = base64.b64encode(json.dumps(token_data).encode()).decode()
             return json.dumps({
                 "status": "partial_success",
                 "summary": summary,
