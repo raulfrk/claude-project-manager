@@ -278,12 +278,12 @@ def compute_diff(
         elif todo.status not in TERMINAL_STATUSES:
             local_unlinked.append(todo)
 
-    # Include archived todos in local_by_todoist_id so their Todoist tasks are
-    # push_completed if still open. Only add if the ID isn't already claimed by
-    # an active todo (active takes priority).
-    for todo in archived:
-        if todo.todoist_task_id and todo.todoist_task_id not in local_by_todoist_id:
-            local_by_todoist_id[todo.todoist_task_id] = todo
+    # Build a set of Todoist IDs claimed by archived todos. These are used only
+    # to suppress re-pulling — we never push_complete based on archived data.
+    archived_todoist_ids: set[str] = {
+        t.todoist_task_id for t in archived if t.todoist_task_id
+        and t.todoist_task_id not in local_by_todoist_id
+    }
 
     plan = SyncPlan()
 
@@ -301,8 +301,11 @@ def compute_diff(
         todoist_updated = _parse_todoist_updated(task)
 
         if todoist_id not in local_by_todoist_id:
-            # New task from Todoist — ghost check (title-based fallback for
-            # todos that were archived before their Todoist ID was saved)
+            # New task from Todoist — skip if it belongs to an archived todo
+            # (was done locally; don't re-pull as a new task)
+            if todoist_id in archived_todoist_ids:
+                continue
+            # Ghost check (title-based fallback for todos archived before ID was saved)
             if _ghost_check(content, archived):
                 plan.ghost_close.append(todoist_id)
                 continue

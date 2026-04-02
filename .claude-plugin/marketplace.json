@@ -54,7 +54,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "2.10.9",
+      "version": "2.10.10",
       "author": {
         "name": "raulfrk"
       },
