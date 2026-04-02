@@ -269,7 +269,6 @@ def compute_diff(
     local_by_todoist_id: dict[str, Todo] = {}
     local_unlinked: list[Todo] = []
     local_open_with_todoist_id: list[Todo] = []
-    archived_by_todoist_id: dict[str, Todo] = {}
 
     for todo in todos:
         if todo.todoist_task_id:
@@ -279,11 +278,12 @@ def compute_diff(
         elif todo.status not in TERMINAL_STATUSES:
             local_unlinked.append(todo)
 
-    # Archived todos with a known Todoist ID: if the Todoist task is still open
-    # we should push_complete it rather than rely on title fuzzy-matching.
+    # Include archived todos in local_by_todoist_id so their Todoist tasks are
+    # push_completed if still open. Only add if the ID isn't already claimed by
+    # an active todo (active takes priority).
     for todo in archived:
-        if todo.todoist_task_id:
-            archived_by_todoist_id[todo.todoist_task_id] = todo
+        if todo.todoist_task_id and todo.todoist_task_id not in local_by_todoist_id:
+            local_by_todoist_id[todo.todoist_task_id] = todo
 
     plan = SyncPlan()
 
@@ -301,12 +301,6 @@ def compute_diff(
         todoist_updated = _parse_todoist_updated(task)
 
         if todoist_id not in local_by_todoist_id:
-            # Archived todo with a known Todoist ID: push_complete it directly
-            # rather than relying on title fuzzy-matching (ghost_check).
-            if todoist_id in archived_by_todoist_id:
-                if not (task.get("isCompleted") or task.get("checked")):
-                    plan.push_complete.append(todoist_id)
-                continue
             # New task from Todoist — ghost check (title-based fallback for
             # todos that were archived before their Todoist ID was saved)
             if _ghost_check(content, archived):
@@ -352,7 +346,7 @@ def compute_diff(
                     "todoist_description_synced": new_synced,
                 }
                 # Check if Todoist task is completed
-                if task.get("isCompleted") or task.get("checked"):
+                if task.get("is_completed") or task.get("isCompleted") or task.get("checked"):
                     update_entry["complete"] = True
                 plan.pull_update.append(update_entry)
 
@@ -453,7 +447,7 @@ def compute_diff(
                 plan.push_update.append(update_entry_push)
             elif local_todo.status in TERMINAL_STATUSES:
                 # Local is done, Todoist still open
-                if not (task.get("isCompleted") or task.get("checked")):
+                if not (task.get("is_completed") or task.get("isCompleted") or task.get("checked")):
                     plan.push_complete.append(todoist_id)
 
     # ── Fix parent linkage for linked todos missing Todoist parentId ──
