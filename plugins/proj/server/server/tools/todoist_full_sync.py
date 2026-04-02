@@ -872,15 +872,45 @@ def _execute_root_only_cleanup(
 # -- Retry handling -----------------------------------------------------------
 
 
+def _find_existing_todoist_task(project_id: str, content: str) -> str | None:
+    """Return the Todoist task ID of an exact content match in *project_id*, or None.
+
+    Used as a dedup guard before retrying a push_create: if the first attempt
+    created the task but the response was truncated, retrying without this check
+    would create a duplicate.
+    """
+    if not project_id or not content:
+        return None
+    try:
+        raw = _call_todoist_tool("todoist_find_tasks", {"project_id": project_id})
+        if isinstance(raw, str):
+            tasks: list[Any] = json.loads(raw) if raw else []
+        elif isinstance(raw, list):
+            tasks = raw
+        else:
+            tasks = []
+        needle = content.strip()
+        for t in tasks:
+            if isinstance(t, dict) and t.get("content", "").strip() == needle:
+                task_id = str(t.get("id", ""))
+                return task_id if task_id else None
+    except Exception:
+        pass
+    return None
+
+
 def _retry_failed_ops(
     failed_ops: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
     """Re-attempt previously failed operations.
 
-    Returns (succeeded, still_failed).
+    Returns (succeeded, still_failed, link_ops) where *link_ops* is a list of
+    ``{todo_id, todoist_task_id}`` dicts for push_create ops that were linked
+    (either found as existing or newly created) and should be persisted locally.
     """
     succeeded: list[dict[str, Any]] = []
     still_failed: list[dict[str, Any]] = []
+    link_ops: list[dict[str, str]] = []
 
     for entry in failed_ops:
         op_type = entry.get("operation_type", "unknown")
@@ -888,12 +918,40 @@ def _retry_failed_ops(
 
         try:
             if op_type == "push_create" or op_type == "push_create_phase2":
-                add_payload = {
-                    k: v for k, v in payload.items()
-                    if k in ("content", "priority", "description", "labels", "dueString", "parentId", "project_id")
-                }
-                result = _call_todoist_tool("todoist_add_tasks", {"tasks": [add_payload]})
-                payload["result"] = result
+                # Dedup guard: the original call may have created the task even though
+                # its ID was missing from the response (batching truncation). Check first
+                # to avoid creating a duplicate on retry.
+                project_id = payload.get("project_id", "")
+                content = payload.get("content", "")
+                existing_id = _find_existing_todoist_task(project_id, content)
+
+                if existing_id:
+                    payload["result_todoist_id"] = existing_id
+                else:
+                    add_payload = {
+                        k: v for k, v in payload.items()
+                        if k in ("content", "priority", "description", "labels", "dueString", "parentId", "project_id")
+                    }
+                    result = _call_todoist_tool("todoist_add_tasks", {"tasks": [add_payload]})
+                    # Extract the new task ID so we can persist it locally
+                    if isinstance(result, list):
+                        created_tasks = result
+                    elif isinstance(result, dict):
+                        created_tasks = result.get("tasks", [])
+                    else:
+                        created_tasks = []
+                    if created_tasks and isinstance(created_tasks[0], dict):
+                        new_id = str(created_tasks[0].get("id", ""))
+                        if new_id:
+                            payload["result_todoist_id"] = new_id
+                    payload["result"] = result
+
+                # Collect link op so caller can persist the ID to the local todo
+                todo_id = str(payload.get("todo_id", ""))
+                todoist_id = str(payload.get("result_todoist_id", ""))
+                if todo_id and todoist_id:
+                    link_ops.append({"todo_id": todo_id, "todoist_task_id": todoist_id})
+
                 succeeded.append(payload)
             elif op_type == "push_update":
                 _call_todoist_tool("todoist_update_tasks", {"tasks": [payload]})
@@ -919,7 +977,7 @@ def _retry_failed_ops(
                 "retry_payload": payload,
             })
 
-    return succeeded, still_failed
+    return succeeded, still_failed, link_ops
 
 
 # -- Summary builder ----------------------------------------------------------
@@ -985,7 +1043,21 @@ def register(app: FastMCP) -> None:
             except (json.JSONDecodeError, Exception) as e:
                 return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
 
-            succeeded, still_failed = _retry_failed_ops(failed_ops)
+            succeeded, still_failed, retry_link_ops = _retry_failed_ops(failed_ops)
+
+            # Persist any newly linked Todoist IDs back to local todos so future
+            # syncs don't try to create the same tasks again.
+            if retry_link_ops:
+                proj_result = require_project(project_name)
+                if not isinstance(proj_result, str):
+                    retry_cfg, retry_name = proj_result
+                    apply_changes(
+                        ApplyInput(link_todoist_ids=retry_link_ops),
+                        retry_cfg,
+                        retry_name,
+                        push_confirmed=True,
+                    )
+
             if still_failed:
                 token = base64.b64encode(json.dumps(still_failed).encode()).decode()
                 return json.dumps({
