@@ -337,10 +337,11 @@ async def hooks_fire(
             if not feedback_params:
                 continue
 
-            # Add source entity ID for writeback context
+            # Add source entity IDs for writeback context — include both so
+            # the feedback tool (e.g. todo_update) has full project context.
             if "todo_id" in source:
                 feedback_params["todo_id"] = source["todo_id"]
-            elif "project_name" in source:
+            if "project_name" in source:
                 feedback_params["project_name"] = source["project_name"]
 
             # Call feedback tool on the trigger's server (proj)
