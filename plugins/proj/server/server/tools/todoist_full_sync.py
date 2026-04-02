@@ -696,8 +696,13 @@ def _execute_push_creates(
 
     try:
         result = _call_todoist_tool("todoist_add_tasks", {"tasks": add_payloads})
-        # Result should be a list of created tasks with IDs
-        created_tasks = result if isinstance(result, list) else result.get("tasks", []) if isinstance(result, dict) else []
+        # todoist_add_tasks returns {"successes": [...], "failures": [...]}
+        if isinstance(result, dict):
+            created_tasks = result.get("successes", result.get("tasks", []))
+        elif isinstance(result, list):
+            created_tasks = result
+        else:
+            created_tasks = []
         for i, task in enumerate(tasks):
             todo_id = str(task.get("todo_id", ""))
             if i < len(created_tasks):
@@ -946,10 +951,10 @@ def _retry_failed_ops(
                     }
                     result = _call_todoist_tool("todoist_add_tasks", {"tasks": [add_payload]})
                     # Extract the new task ID so we can persist it locally
-                    if isinstance(result, list):
+                    if isinstance(result, dict):
+                        created_tasks = result.get("successes", result.get("tasks", []))
+                    elif isinstance(result, list):
                         created_tasks = result
-                    elif isinstance(result, dict):
-                        created_tasks = result.get("tasks", [])
                     else:
                         created_tasks = []
                     if created_tasks and isinstance(created_tasks[0], dict):
