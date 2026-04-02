@@ -83,14 +83,39 @@ def _content_differs(local: "Todo", task: dict[str, Any]) -> bool:
     """
     todoist_priority = _parse_todoist_priority(task)
     if local.title != str(task.get("content", "")):
+        logger.warning(
+            "content_differs[%s]: title %r != %r",
+            task.get("id", "?"),
+            local.title,
+            task.get("content", ""),
+        )
         return True
     if local.priority != todoist_priority:
+        logger.warning(
+            "content_differs[%s]: priority %r != %r (raw=%r)",
+            task.get("id", "?"),
+            local.priority,
+            todoist_priority,
+            task.get("priority"),
+        )
         return True
     todoist_labels = _parse_todoist_labels(task)
     if sorted(local.tags) != sorted(todoist_labels):
+        logger.warning(
+            "content_differs[%s]: labels %r != %r",
+            task.get("id", "?"),
+            local.tags,
+            todoist_labels,
+        )
         return True
     todoist_due = _parse_todoist_due(task)
     if (local.due_date or None) != (todoist_due or None):
+        logger.warning(
+            "content_differs[%s]: due %r != %r",
+            task.get("id", "?"),
+            local.due_date,
+            todoist_due,
+        )
         return True
     return False
 
@@ -123,8 +148,15 @@ def _apply_description_sync(
 
 
 def _parse_todoist_priority(task: dict[str, Any]) -> str:
-    """Map Todoist priority to local priority string."""
+    """Map Todoist priority to local priority string.
+
+    Handles both raw Todoist API values (integers like 4, or p-strings like "p4")
+    and already-converted local strings ("low", "medium", "high") that come back
+    from TodoistTask.to_dict() via todoist_find_tasks.
+    """
     raw = task.get("priority")
+    if raw in ("low", "medium", "high"):
+        return str(raw)
     if isinstance(raw, str) and raw.startswith("p"):
         return _TODOIST_TO_LOCAL.get(raw, "low")
     if isinstance(raw, int):
