@@ -71,6 +71,7 @@ async def test_wraps_sync_function(mock_mcp):
     call_args = mock_dispatch.call_args
     assert call_args[0][0] == "my_sync_tool"
     assert call_args[0][1] == "result-42"
+    assert call_args[0][2] == 19100  # hooks_port passed through
 
 
 # ── Async tool wrapping ──────────────────────────────────────────────────────
@@ -299,24 +300,30 @@ def test_serialize_content_block_multiple():
 
 
 @pytest.mark.anyio
-async def test_dispatch_payload_format_unix(mock_mcp):
+async def test_dispatch_payload_format_unix(mock_mcp, tmp_path, monkeypatch):
     """Default Unix socket dispatch sends correct payload."""
+    monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+    sockets_dir = tmp_path / ".claude" / "sockets"
+    sockets_dir.mkdir(parents=True)
+    (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-99999.sock")
+
     enable_hook_dispatch(mock_mcp, hooks_port=19100)
 
     @mock_mcp.tool()
     async def payload_tool() -> dict:
         return {"status": "ok"}
 
-    with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
 
-        await mock_mcp._registered_tools["payload_tool"]()
+            await mock_mcp._registered_tools["payload_tool"]()
 
     mock_client.post.assert_awaited_once()
     url, kwargs = mock_client.post.call_args[0][0], mock_client.post.call_args[1]
@@ -351,6 +358,53 @@ async def test_dispatch_payload_format_tcp(mock_mcp, monkeypatch):
 
     url = mock_client.post.call_args[0][0]
     assert url == "http://127.0.0.1:19100/hook"
+
+
+@pytest.mark.anyio
+async def test_lazy_resolution_reads_fresh_registry(mock_mcp, tmp_path, monkeypatch):
+    """Transport is re-resolved on every dispatch, so registry changes take effect immediately."""
+    monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+    sockets_dir = tmp_path / ".claude" / "sockets"
+    sockets_dir.mkdir(parents=True)
+    registry_file = sockets_dir / "hooks"
+    registry_file.write_text("/tmp/claude-hooks-hooks-11111.sock")
+
+    enable_hook_dispatch(mock_mcp, hooks_port=19100)
+
+    @mock_mcp.tool()
+    async def refreshable_tool() -> str:
+        return "ok"
+
+    call_count = 0
+    captured_uds: list[str] = []
+
+    def fake_resolve(port):
+        nonlocal call_count
+        call_count += 1
+        path = registry_file.read_text().strip()
+        import httpx as _httpx
+        return "http://localhost/hook", _httpx.AsyncHTTPTransport(uds=path)
+
+    with patch("hook_dispatch.dispatch._resolve_hooks_transport", side_effect=fake_resolve):
+        with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_cls:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            # First call: registry points to 11111
+            await mock_mcp._registered_tools["refreshable_tool"]()
+            assert call_count == 1
+
+            # Simulate hooks server restart — registry now points to 22222
+            registry_file.write_text("/tmp/claude-hooks-hooks-22222.sock")
+
+            # Second call: must re-resolve, picking up the new path
+            await mock_mcp._registered_tools["refreshable_tool"]()
+            assert call_count == 2
 
 
 # ── _resolve_hooks_transport registry tests ─────────────────────────────────
@@ -439,8 +493,9 @@ class TestDispatchHookReturn:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-            result = await _dispatch_hook("my_tool", "result", "http://localhost/hook")
+        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
+            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
+                result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert isinstance(result, dict)
         assert result["hooks_fired"] == 1
@@ -453,8 +508,9 @@ class TestDispatchHookReturn:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-            result = await _dispatch_hook("my_tool", "result", "http://localhost/hook")
+        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
+            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
+                result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert result is not None
         assert "_error" in result
@@ -470,8 +526,9 @@ class TestDispatchHookReturn:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-            result = await _dispatch_hook("my_tool", "result", "http://localhost/hook")
+        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
+            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
+                result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert result is not None
         assert "_error" in result

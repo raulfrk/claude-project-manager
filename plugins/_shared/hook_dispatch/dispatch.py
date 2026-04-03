@@ -89,14 +89,17 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
 async def _dispatch_hook(
     tool_name: str,
     result: Any,
-    hooks_url: str,
-    hooks_transport: httpx.AsyncBaseTransport | None = None,
+    hooks_port: int = 19100,
 ) -> dict | None:
     """POST hook dispatch to the hooks server. Returns the parsed response dict.
+
+    Resolves the hooks server URL from the registry on every call so that a
+    stale cached path (from a server restart) never causes permanent failures.
 
     Returns None if the hooks server is unreachable or an unrecoverable error occurs.
     Returns a dict with '_error' key if the response is malformed.
     """
+    hooks_url, hooks_transport = _resolve_hooks_transport(hooks_port)
     serialized = _serialize_result(result)
     payload = {
         "tool": "hooks_fire_tool",
@@ -107,8 +110,7 @@ async def _dispatch_hook(
         },
     }
     try:
-        transport = hooks_transport or httpx.AsyncHTTPTransport(proxy=None)
-        async with httpx.AsyncClient(timeout=30.0, transport=transport) as client:
+        async with httpx.AsyncClient(timeout=30.0, transport=hooks_transport) as client:
             resp = await client.post(hooks_url, json=payload)
             try:
                 return resp.json()
@@ -226,12 +228,14 @@ def enable_hook_dispatch(
 ) -> None:
     """Patch mcp.tool() so all subsequent registrations dispatch to the hooks server.
 
+    The hooks server URL is resolved lazily on every dispatch call (not at startup),
+    so that server restarts and startup ordering races don't cause permanent failures.
+
     Args:
         mcp: The FastMCP instance to patch.
         hooks_port: Port of the hooks server (default 19100). Only used with HOOK_TRANSPORT=tcp.
         exclude: Tool names to skip dispatch for.
     """
-    hooks_url, hooks_transport = _resolve_hooks_transport(hooks_port)
     excluded: set[str] = set(exclude) if exclude else set()
     original_tool = mcp.tool
 
@@ -247,7 +251,7 @@ def enable_hook_dispatch(
             tool_name = fn.__name__
             if tool_name in excluded:
                 return original_tool(fn)
-            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url, hooks_transport)
+            wrapped = _wrap_tool_fn(fn, tool_name, hooks_port)
             return original_tool(wrapped)
 
         # @mcp.tool() or @mcp.tool(name="custom", ...) — returns a decorator
@@ -259,7 +263,7 @@ def enable_hook_dispatch(
             tool_name = custom_name or fn.__name__
             if tool_name in excluded:
                 return decorator(fn)
-            wrapped = _wrap_tool_fn(fn, tool_name, hooks_url, hooks_transport)
+            wrapped = _wrap_tool_fn(fn, tool_name, hooks_port)
             return decorator(wrapped)
 
         return wrapper
@@ -270,8 +274,7 @@ def enable_hook_dispatch(
 def _wrap_tool_fn(
     fn: Any,
     tool_name: str,
-    hooks_url: str,
-    hooks_transport: httpx.AsyncBaseTransport | None = None,
+    hooks_port: int,
 ) -> Any:
     """Wrap a tool function to dispatch hooks after successful execution.
 
@@ -291,7 +294,7 @@ def _wrap_tool_fn(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             result = await fn(*args, **kwargs)
-            fire_response = await _dispatch_hook(tool_name, result, hooks_url, hooks_transport)
+            fire_response = await _dispatch_hook(tool_name, result, hooks_port)
             hooks_field = _build_hooks_field(fire_response, tool_name)
             if hooks_field is not None:
                 return _inject_hooks(result, hooks_field)
@@ -303,7 +306,7 @@ def _wrap_tool_fn(
     # Copy signature from original fn so FastMCP argument validation works.
     async def sync_to_async_wrapper(*args: Any, **kwargs: Any) -> Any:
         result = fn(*args, **kwargs)
-        fire_response = await _dispatch_hook(tool_name, result, hooks_url, hooks_transport)
+        fire_response = await _dispatch_hook(tool_name, result, hooks_port)
         hooks_field = _build_hooks_field(fire_response, tool_name)
         if hooks_field is not None:
             return _inject_hooks(result, hooks_field)
