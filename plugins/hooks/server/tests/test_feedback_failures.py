@@ -81,6 +81,7 @@ class TestFeedbackWritebackFailure:
                 side_effect=[hook_result, fb_fail],
             ),
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
             patch("server.tools.fire.storage.log_failure") as mock_log_failure,
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))
@@ -127,6 +128,7 @@ class TestFeedbackWritebackFailure:
                 side_effect=[hook_result, fb_fail],
             ),
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
             patch("server.tools.fire.storage.log_failure") as mock_log_failure,
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))
@@ -162,6 +164,7 @@ class TestFeedbackWritebackException:
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.tools.fire.post_hook", new_callable=AsyncMock, side_effect=_side_effect),
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
             patch("server.tools.fire.storage.log_failure") as mock_log_failure,
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))
@@ -208,6 +211,7 @@ class TestFeedbackSuccessUnchanged:
                 side_effect=[hook_result, fb_ok],
             ),
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
             patch("server.tools.fire.storage.log_failure") as mock_log_failure,
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))

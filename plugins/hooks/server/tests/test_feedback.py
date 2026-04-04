@@ -99,6 +99,7 @@ class TestFeedbackOnlyOnSuccess:
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.tools.fire.post_hook", new_callable=AsyncMock, return_value=failed_result) as mock_post,
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))
             result = json.loads(raw)
@@ -141,6 +142,7 @@ class TestFeedbackOnlyOnSuccess:
                 side_effect=[hook_result, feedback_result],
             ) as mock_post,
             patch("server.tools.fire._load_proj_config", return_value={}),
+            patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
         ):
             raw = await hooks_fire("todo_complete", json.dumps({"todo_id": "t-001"}))
             result = json.loads(raw)
