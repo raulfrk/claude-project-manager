@@ -111,6 +111,7 @@ hooks:
       checklist_id: "${parent_trello_checklist_id}"
       card_id: "${project.trello_card_id}"
       item_name: "${todo.title}"
+    feedback_tool: todo_update
     feedback_mapping:
       checklist_id: trello_checklist_id
       id: trello_checklist_item_id
