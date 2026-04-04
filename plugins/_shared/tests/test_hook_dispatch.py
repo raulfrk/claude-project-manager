@@ -590,6 +590,38 @@ class TestBuildHooksField:
         assert field["chain"] == []
         assert field["errors"] == []
 
+    def test_cascade_errors_merged_into_errors(self):
+        """cascade_errors from fire response are merged into _hooks.errors."""
+        response = {
+            "hooks_fired": 1,
+            "errors": [{"hook_id": "h1", "error": "direct fail"}],
+            "results": [],
+            "top_level": True,
+            "cascade_errors": [
+                "[trigger_a \u2192 hook-a \u2192 target_b] target_c failed",
+                "[trigger_a \u2192 hook-a \u2192 target_b \u2192 hook-b \u2192 target_c] deeper error",
+            ],
+        }
+        field = _build_hooks_field(response, "tool")
+        assert field is not None
+        assert len(field["errors"]) == 3
+        assert field["errors"][0] == "direct fail"
+        assert "target_c failed" in field["errors"][1]
+        assert "deeper error" in field["errors"][2]
+
+    def test_cascade_errors_empty_not_merged(self):
+        """Empty cascade_errors list does not add anything to errors."""
+        response = {
+            "hooks_fired": 1,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "ok"}],
+            "top_level": True,
+            "cascade_errors": [],
+        }
+        field = _build_hooks_field(response, "tool")
+        assert field is not None
+        assert field["errors"] == []
+
 
 # ── _inject_hooks ────────────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ import yaml
 from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
 from server.lib.storage import save
-from server.tools.fire import _parse_verification_response, _resolve_server_url, hooks_fire
+from server.tools.fire import _fire_hooks_internal, _parse_verification_response, _resolve_server_url, hooks_fire
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1344,3 +1344,216 @@ class TestParentTodoistTaskIdGuard:
         data = json.loads(result)
         assert data["hooks_fired"] == 0
         assert data["skipped"] == 1
+
+
+# ── Cascade dispatch tests ──────────────────────────────────────────────────
+
+
+class TestCascadeDispatch:
+    """Tests for cascade dispatch: blocking hooks trigger nested hooks on their target_tool."""
+
+    @pytest.mark.asyncio
+    async def test_cascade_b_fails_error_propagates(self, hooks_yaml: Path):
+        """Hook A triggers hook B at depth 1; B fails → error in cascade_errors with chain prefix."""
+        # Hook A: trigger_a → target_b (blocking)
+        # Hook B: target_b → target_c (blocking, will fail)
+        reg = _make_registry([
+            _hook("hook-a", "trigger_a", "target_b", blocking=True),
+            _hook("hook-b", "target_b", "target_c", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+
+        call_count = 0
+
+        async def mock_fire(hook, source):
+            nonlocal call_count
+            call_count += 1
+            if hook.id == "hook-a":
+                return FireResult(
+                    hook_id="hook-a", status_code=200, body="ok",
+                    result=json.dumps({"key": "from_a"}),
+                )
+            # hook-b fails
+            return FireResult(
+                hook_id="hook-b", status_code=500, body="error",
+                error="target_c failed",
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # Primary hook A fired successfully
+        assert data["hooks_fired"] == 1
+        assert data["errors"] == []
+        assert len(data["results"]) == 1
+        # Cascade error from B should be present
+        assert "cascade_errors" in data
+        assert len(data["cascade_errors"]) == 1
+        assert "trigger_a" in data["cascade_errors"][0]
+        assert "hook-a" in data["cascade_errors"][0]
+        assert "target_b" in data["cascade_errors"][0]
+        assert "target_c failed" in data["cascade_errors"][0]
+
+    @pytest.mark.asyncio
+    async def test_three_level_cascade_error_propagates(self, hooks_yaml: Path):
+        """3-level cascade: A → B → C, C fails → error propagates all the way."""
+        reg = _make_registry([
+            _hook("hook-a", "trigger_a", "target_b", blocking=True),
+            _hook("hook-b", "target_b", "target_c", blocking=True),
+            _hook("hook-c", "target_c", "target_d", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            if hook.id == "hook-a":
+                return FireResult(
+                    hook_id="hook-a", status_code=200, body="ok",
+                    result=json.dumps({"key": "from_a"}),
+                )
+            if hook.id == "hook-b":
+                return FireResult(
+                    hook_id="hook-b", status_code=200, body="ok",
+                    result=json.dumps({"key": "from_b"}),
+                )
+            # hook-c fails
+            return FireResult(
+                hook_id="hook-c", status_code=500, body="error",
+                error="target_d exploded",
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        assert data["errors"] == []
+        # The cascade error from C should propagate through B to A
+        assert "cascade_errors" in data
+        assert len(data["cascade_errors"]) >= 1
+        # Should contain the chain path from the deepest level
+        found = any("target_d exploded" in e for e in data["cascade_errors"])
+        assert found, f"Expected 'target_d exploded' in cascade_errors: {data['cascade_errors']}"
+
+    @pytest.mark.asyncio
+    async def test_nonblocking_hooks_do_not_cascade(self, hooks_yaml: Path):
+        """Non-blocking hooks should NOT trigger cascades."""
+        reg = _make_registry([
+            _hook("hook-a", "trigger_a", "target_b", blocking=False),
+            _hook("hook-b", "target_b", "target_c", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+
+        call_ids: list[str] = []
+
+        async def mock_fire(hook, source):
+            call_ids.append(hook.id)
+            return FireResult(hook_id=hook.id, status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # hook-a is non-blocking, dispatched as background task
+        assert data["non_blocking_dispatched"] == 1
+        assert data["hooks_fired"] == 0
+        # No cascade errors since non-blocking hooks don't cascade
+        assert "cascade_errors" not in data
+
+    @pytest.mark.asyncio
+    async def test_cascade_stops_at_depth_limit(self, hooks_yaml: Path):
+        """Cascade stops when depth + 1 >= max_depth."""
+        reg = _make_registry(
+            [
+                _hook("hook-a", "trigger_a", "target_b", blocking=True),
+                _hook("hook-b", "target_b", "target_c", blocking=True),
+            ],
+            settings={"max_depth": 2},
+        )
+        save(reg, hooks_yaml)
+
+        call_ids: list[str] = []
+
+        async def mock_fire(hook, source):
+            call_ids.append(hook.id)
+            return FireResult(
+                hook_id=hook.id, status_code=200, body="ok",
+                result=json.dumps({"key": f"from_{hook.id}"}),
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            # depth=0, max_depth=2 → cascade at depth 1 is allowed, but depth 2 would stop
+            result = await hooks_fire("trigger_a", depth=0)
+
+        data = json.loads(result)
+        # hook-a fires at depth 0, cascade fires hook-b at depth 1
+        # At depth 1, hook-b result triggers cascade check: depth+1=2 >= max_depth=2, so cascade stops
+        assert "hook-a" in call_ids
+        assert "hook-b" in call_ids
+        # No cascade errors since everything succeeded
+        assert data.get("cascade_errors") is None or data.get("cascade_errors") == []
+
+    @pytest.mark.asyncio
+    async def test_cascade_skips_non_dict_result(self, hooks_yaml: Path):
+        """Cascade skips hooks whose result is not a JSON dict."""
+        reg = _make_registry([
+            _hook("hook-a", "trigger_a", "target_b", blocking=True),
+            _hook("hook-b", "target_b", "target_c", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            if hook.id == "hook-a":
+                # Return a non-dict JSON result
+                return FireResult(
+                    hook_id="hook-a", status_code=200, body="ok",
+                    result=json.dumps([1, 2, 3]),
+                )
+            return FireResult(hook_id="hook-b", status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        # No cascade because hook-a's result was a list, not a dict
+        assert "cascade_errors" not in data
+
+    @pytest.mark.asyncio
+    async def test_cascade_errors_not_in_summary_when_empty(self, hooks_yaml: Path):
+        """cascade_errors key should not appear in summary when there are none."""
+        reg = _make_registry([
+            _hook("hook-a", "trigger_a", "target_b", blocking=True),
+        ])
+        save(reg, hooks_yaml)
+
+        async def mock_fire(hook, source):
+            return FireResult(
+                hook_id="hook-a", status_code=200, body="ok",
+                result=json.dumps({"key": "val"}),
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
+        ):
+            result = await hooks_fire("trigger_a")
+
+        data = json.loads(result)
+        # No hooks match target_b, so no cascade fires, no cascade_errors key
+        assert "cascade_errors" not in data

@@ -224,76 +224,26 @@ async def _launch_nonblocking(hook: Hook, source: dict[str, Any], source_result:
         )
 
 
-# ── Tool function ────────────────────────────────────────────────────────────
+# ── Internal fire logic ──────────────────────────────────────────────────────
 
 
-async def hooks_fire(
+async def _fire_hooks_internal(
     trigger_tool: str,
-    source_result: str = "{}",
-    depth: int = 0,
-) -> str:
-    """Fire all hooks registered for *trigger_tool*.
-
-    *source_result* is a JSON string representing the output of the trigger tool.
-    Template ``${}`` placeholders in each hook's ``param_mapping`` are resolved
-    against the parsed *source_result*.
-
-    *depth* tracks the current cascade level.  When it reaches *max_depth*
-    (default 3, configurable via ``settings.max_depth`` in hooks.yaml) the call
-    is skipped with a warning to prevent runaway cascading.
-
-    All matched hooks are awaited concurrently and their results are included
-    in the response.
-    """
-    # Runtime depth limit
-    max_depth = _get_max_depth()
-    if depth >= max_depth:
-        msg = (
-            f"Hook depth limit reached ({depth}/{max_depth}) for trigger "
-            f"'{trigger_tool}'. Skipping to prevent runaway cascade."
-        )
-        logger.warning(msg)
-        return json.dumps({
-            "hooks_fired": 0,
-            "skipped": 0,
-            "errors": [],
-            "depth_limited": True,
-            "depth": depth,
-            "max_depth": max_depth,
-            "message": msg,
-        })
-
-    # Parse source_result
-    try:
-        source: dict[str, Any] = json.loads(source_result)
-        if not isinstance(source, dict):
-            return "Error: source_result must be a JSON object, got " + type(source).__name__
-    except json.JSONDecodeError as e:
-        return f"Error: source_result is not valid JSON: {e}"
-
-    # Build merged config for condition evaluation
-    base_config = _load_proj_config()
-    if source:
-        # Inject todo-level fields
-        todo_fields = {k: v for k, v in source.items() if k in (
-            "todoist_task_id", "trello_card_id", "trello_checklist_id",
-            "trello_checklist_item_id", "jira_issue_key",
-            "parent_todoist_task_id",
-        )}
-        if todo_fields:
-            base_config.setdefault("todo", {}).update(todo_fields)
-        # Inject project-level fields
-        project_fields = {k: v for k, v in source.items() if k in (
-            "todoist_project_id", "trello_card_id", "trello_checklist_id",
-        )}
-        if project_fields:
-            base_config.setdefault("project", {}).update(project_fields)
+    source: dict[str, Any],
+    depth: int,
+    source_result: str,
+    max_depth: int,
+    base_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Core fire logic. Returns a summary dict (not JSON)."""
+    if base_config is None:
+        base_config = {}
 
     registry = storage.load()
     matched = [h for h in registry.hooks if h.trigger_tool == trigger_tool]
 
     if not matched:
-        return json.dumps({"hooks_fired": 0, "skipped": 0, "errors": [], "depth": depth})
+        return {"hooks_fired": 0, "skipped": 0, "errors": [], "depth": depth}
 
     # Split into primary and verification hooks
     primary_matched = [h for h in matched if not h.verification]
@@ -439,6 +389,31 @@ async def hooks_fire(
                         "target_tool": hook.feedback_tool,
                     })
 
+    # Phase 1.6: Cascade dispatch for blocking hooks
+    cascade_errors: list[str] = []
+    for hook in blocking_hooks:
+        raw = results_by_id.get(hook.id)
+        if raw is None:
+            continue
+        if depth + 1 >= max_depth:
+            continue
+        try:
+            nested_source = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(nested_source, dict):
+                continue
+            nested = await _fire_hooks_internal(
+                hook.target_tool, nested_source, depth + 1, raw, max_depth, base_config,
+            )
+            # Collect nested errors with chain path prefix
+            for err in nested.get("errors", []):
+                chain = f"[{trigger_tool} \u2192 {hook.id} \u2192 {hook.target_tool}]"
+                err_msg = err.get("error", str(err)) if isinstance(err, dict) else str(err)
+                cascade_errors.append(f"{chain} {err_msg}")
+            # Propagate deeper cascade errors
+            cascade_errors.extend(nested.get("cascade_errors", []))
+        except Exception:
+            pass  # cascade failure is non-fatal
+
     # Schedule non-blocking hooks (fire-and-forget)
     for hook in non_blocking_hooks:
         task = asyncio.create_task(_launch_nonblocking(hook, source, source_result))
@@ -474,6 +449,79 @@ async def hooks_fire(
         summary["verification"] = verification_results
     if feedback_results:
         summary["feedback"] = feedback_results
+    if cascade_errors:
+        summary["cascade_errors"] = cascade_errors
+    return summary
+
+
+# ── Tool function ────────────────────────────────────────────────────────────
+
+
+async def hooks_fire(
+    trigger_tool: str,
+    source_result: str = "{}",
+    depth: int = 0,
+) -> str:
+    """Fire all hooks registered for *trigger_tool*.
+
+    *source_result* is a JSON string representing the output of the trigger tool.
+    Template ``${}`` placeholders in each hook's ``param_mapping`` are resolved
+    against the parsed *source_result*.
+
+    *depth* tracks the current cascade level.  When it reaches *max_depth*
+    (default 3, configurable via ``settings.max_depth`` in hooks.yaml) the call
+    is skipped with a warning to prevent runaway cascading.
+
+    All matched hooks are awaited concurrently and their results are included
+    in the response.
+    """
+    # Runtime depth limit
+    max_depth = _get_max_depth()
+    if depth >= max_depth:
+        msg = (
+            f"Hook depth limit reached ({depth}/{max_depth}) for trigger "
+            f"'{trigger_tool}'. Skipping to prevent runaway cascade."
+        )
+        logger.warning(msg)
+        return json.dumps({
+            "hooks_fired": 0,
+            "skipped": 0,
+            "errors": [],
+            "depth_limited": True,
+            "depth": depth,
+            "max_depth": max_depth,
+            "message": msg,
+        })
+
+    # Parse source_result
+    try:
+        source: dict[str, Any] = json.loads(source_result)
+        if not isinstance(source, dict):
+            return "Error: source_result must be a JSON object, got " + type(source).__name__
+    except json.JSONDecodeError as e:
+        return f"Error: source_result is not valid JSON: {e}"
+
+    # Build merged config for condition evaluation
+    base_config = _load_proj_config()
+    if source:
+        # Inject todo-level fields
+        todo_fields = {k: v for k, v in source.items() if k in (
+            "todoist_task_id", "trello_card_id", "trello_checklist_id",
+            "trello_checklist_item_id", "jira_issue_key",
+            "parent_todoist_task_id",
+        )}
+        if todo_fields:
+            base_config.setdefault("todo", {}).update(todo_fields)
+        # Inject project-level fields
+        project_fields = {k: v for k, v in source.items() if k in (
+            "todoist_project_id", "trello_card_id", "trello_checklist_id",
+        )}
+        if project_fields:
+            base_config.setdefault("project", {}).update(project_fields)
+
+    summary = await _fire_hooks_internal(
+        trigger_tool, source, depth, source_result, max_depth, base_config,
+    )
     return json.dumps(summary, indent=2)
 
 
