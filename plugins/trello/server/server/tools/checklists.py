@@ -40,7 +40,12 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Delete a checklist.")
     def delete_checklist(checklist_id: str) -> str:
         client = get_client()
-        client.delete(f"/checklists/{checklist_id}")
+        try:
+            client.delete(f"/checklists/{checklist_id}")
+        except Exception as exc:
+            if "404" in str(exc):
+                return json.dumps({"warning": "checklist not found or already deleted", "checklist_id": checklist_id})
+            raise
         return json.dumps({"deleted": True, "checklist_id": checklist_id})
 
     @app.tool(description="Rename a checklist item.")

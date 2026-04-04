@@ -18,7 +18,7 @@ hooks:
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-    blocking: false
+    blocking: true
     condition: "sync.trello.enabled and project.trello_card_id"
 
   - id: trello-on-proj-archive
@@ -28,7 +28,7 @@ hooks:
     param_mapping:
       card_id: "${trello_card_id}"
       list_id: "${sync.trello.list_mappings.archived}"
-    blocking: false
+    blocking: false  # reason: archive is fire-and-forget state update
     condition: "sync.trello.enabled and project.trello_card_id and sync.trello.list_mappings.archived"
 
   - id: trello-on-todo-add
@@ -115,6 +115,15 @@ hooks:
     feedback_tool: todo_update
     feedback_mapping:
       result.id: trello_checklist_item_id
+
+  - id: trello-on-root-todo-delete
+    trigger_tool: todo_delete
+    target_tool: delete_checklist
+    server: trello
+    param_mapping:
+      checklist_id: "${trello_checklist_id}"
+    blocking: true
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_id"
 
   - id: trello-on-todo-batch-add-children
     trigger_tool: todo_batch_add_children

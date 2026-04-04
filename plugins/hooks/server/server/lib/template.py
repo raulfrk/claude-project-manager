@@ -43,8 +43,6 @@ def resolve_template(template: str, source: dict[str, Any]) -> Any:
     m = _TEMPLATE_RE.fullmatch(template)
     if m is not None:
         val = _resolve_path(source, m.group(1))
-        if val is None:
-            return ""
         return val
 
     def _replacer(match: re.Match[str]) -> str:

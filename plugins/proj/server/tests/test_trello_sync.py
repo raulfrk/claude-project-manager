@@ -2846,6 +2846,89 @@ class TestRetryFailedOps:
         assert len(succeeded) == 1
         assert len(still_failed) == 0
 
+    def test_checklist_not_in_cache_proceeds_with_retry(self, monkeypatch) -> None:
+        """When checklistId is not found in any cached card data, dedup_match stays None
+        and the retry proceeds normally (no UnboundLocalError)."""
+        failed = [
+            {
+                "operation_type": "push_create_item",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "type": "push_create_item",
+                    "tool": "add_checklist_item",
+                    # No cardId provided, and checklistId won't match anything in cache
+                    "params": {"checklistId": "cl_unknown", "name": "My Task"},
+                },
+            }
+        ]
+
+        call_log = []
+
+        def mock_call(tool_name, params):
+            call_log.append(tool_name)
+            if tool_name == "get_card_checklists":
+                # Return a checklist that does NOT match cl_unknown
+                return [{"id": "cl_other", "name": "Other", "checkItems": []}]
+            if tool_name == "add_checklist_item":
+                return {"id": "new_item_99"}
+            raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        # Should not raise UnboundLocalError; dedup_match is None so retry proceeds
+        succeeded, still_failed = _retry_failed_ops(failed)
+        assert len(succeeded) == 1
+        assert len(still_failed) == 0
+        assert succeeded[0]["result"]["id"] == "new_item_99"
+        # add_checklist_item was called (retry happened)
+        assert "add_checklist_item" in call_log
+
+    def test_checklist_item_not_in_cache_card_id_found_proceeds_with_retry(
+        self, monkeypatch
+    ) -> None:
+        """When card_id is found via cache scan but the checklist has no matching item,
+        dedup_match stays None and the retry proceeds (no UnboundLocalError)."""
+        failed = [
+            {
+                "operation_type": "push_create_item",
+                "error": "timeout",
+                "retryable": True,
+                "retry_payload": {
+                    "type": "push_create_item",
+                    "tool": "add_checklist_item",
+                    # No cardId — must be resolved via cache scan
+                    "params": {"checklistId": "cl1", "name": "New Task"},
+                },
+            }
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "get_card_checklists":
+                # Checklist cl1 exists but has no item named "New Task"
+                return [{"id": "cl1", "name": "Tasks", "checkItems": [
+                    {"id": "item_existing", "name": "Old Task", "state": "incomplete"},
+                ]}]
+            if tool_name == "add_checklist_item":
+                return {"id": "new_item_created"}
+            raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+        monkeypatch.setattr(
+            "server.tools.trello_full_sync._call_trello_tool", mock_call
+        )
+
+        # Pre-seed the cache so card_id can be found via scan.
+        # We do this by running a preliminary call that populates _checklist_cache,
+        # but since the cache is local to _retry_failed_ops we inject cardId instead.
+        failed[0]["retry_payload"]["params"]["cardId"] = "card1"
+
+        succeeded, still_failed = _retry_failed_ops(failed)
+        assert len(succeeded) == 1
+        assert len(still_failed) == 0
+        assert succeeded[0]["result"]["id"] == "new_item_created"
+
 
 class TestDedupGuards:
     """Tests for dedup guards in _execute_push_ops and _retry_failed_ops."""

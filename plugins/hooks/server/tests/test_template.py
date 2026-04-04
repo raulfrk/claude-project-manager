@@ -24,11 +24,11 @@ class TestResolveTemplate:
         source = {"a": {"b": {"c": {"d": "deep"}}}}
         assert resolve_template("${a.b.c.d}", source) == "deep"
 
-    def test_missing_path_returns_empty(self):
-        assert resolve_template("${missing.key}", {"other": "val"}) == ""
+    def test_missing_path_returns_none(self):
+        assert resolve_template("${missing.key}", {"other": "val"}) is None
 
     def test_missing_path_in_none(self):
-        assert resolve_template("${a.b}", {"a": None}) == ""
+        assert resolve_template("${a.b}", {"a": None}) is None
 
     def test_list_index(self):
         source = {"items": ["zero", "one", "two"]}
@@ -36,11 +36,11 @@ class TestResolveTemplate:
 
     def test_list_index_out_of_range(self):
         source = {"items": ["zero"]}
-        assert resolve_template("${items.5}", source) == ""
+        assert resolve_template("${items.5}", source) is None
 
     def test_list_index_non_numeric(self):
         source = {"items": ["zero"]}
-        assert resolve_template("${items.abc}", source) == ""
+        assert resolve_template("${items.abc}", source) is None
 
     def test_integer_value_native(self):
         source = {"count": 42}
@@ -73,7 +73,7 @@ class TestResolveTemplate:
         assert resolve_template("${a} ${missing}", source) == "found "
 
     def test_empty_source(self):
-        assert resolve_template("${anything}", {}) == ""
+        assert resolve_template("${anything}", {}) is None
 
     def test_empty_template(self):
         assert resolve_template("", {"key": "val"}) == ""
@@ -87,6 +87,30 @@ class TestResolveTemplate:
         source = {"result": {"items": [{"name": "first"}, {"name": "second"}]}}
         assert resolve_template("${result.items.0.name}", source) == "first"
         assert resolve_template("${result.items.1.name}", source) == "second"
+
+    def test_fast_path_missing_key_returns_none(self):
+        """Fast path: single placeholder with missing key returns None, not ''."""
+        assert resolve_template("${x}", {}) is None
+
+    def test_fast_path_list_value_preserved(self):
+        """Fast path: native list is returned as-is without stringification."""
+        assert resolve_template("${x}", {"x": [1, 2, 3]}) == [1, 2, 3]
+
+    def test_fast_path_string_value(self):
+        """Fast path: plain string value is returned directly."""
+        assert resolve_template("${x}", {"x": "hello"}) == "hello"
+
+    def test_embedded_none_in_multi_placeholder(self):
+        """Multi-placeholder path: embedded None resolves to empty string in output."""
+        assert resolve_template("prefix ${x} suffix", {"x": None}) == "prefix  suffix"
+
+    def test_fast_path_dotted_path_int(self):
+        """Fast path: dotted path resolving to an int returns native int."""
+        assert resolve_template("${a.b}", {"a": {"b": 42}}) == 42
+
+    def test_fast_path_explicit_none_value_returns_none(self):
+        """Fast path: key exists but value is None — None is preserved, not coerced to ''."""
+        assert resolve_template("${x}", {"x": None}) is None
 
 
 # ── resolve_mapping ──────────────────────────────────────────────────────────
@@ -194,7 +218,7 @@ class TestResolveValue:
     def test_missing_key_in_nested_dict(self):
         value = {"tasks": [{"content": "${missing.key}"}]}
         result = resolve_value(value, {"other": "val"})
-        assert result == {"tasks": [{"content": ""}]}
+        assert result == {"tasks": [{"content": None}]}
 
     def test_empty_list(self):
         result = resolve_value([], {"key": "val"})

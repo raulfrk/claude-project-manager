@@ -27,10 +27,10 @@ class TestDefaultHooksYaml:
         assert isinstance(data, dict)
         assert "hooks" in data
 
-    def test_has_11_hooks(self) -> None:
+    def test_has_12_hooks(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
-        assert len(data["hooks"]) == 11
+        assert len(data["hooks"]) == 12
 
     def test_all_hooks_have_required_fields(self) -> None:
         with _HOOKS_PATH.open() as f:
@@ -77,6 +77,7 @@ class TestDefaultHooksYaml:
             "trello-on-todo-delete",
             "trello-on-todo-add-child",
             "trello-on-todo-batch-add-children",
+            "trello-on-root-todo-delete",
         }
         assert ids == expected
 
