@@ -3086,3 +3086,162 @@ class TestDedupGuards:
         assert len(succeeded) == 1
         assert len(errors) == 0
         assert succeeded[0]["result"]["id"] == "existing_item_1"
+
+
+class TestPushReopenItem:
+    """Verify that reopening a local todo produces push_reopen_item in the diff."""
+
+    def test_local_incomplete_trello_complete_pushes_reopen(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Local incomplete + Trello complete -> push_reopen_item."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "Reopened task",
+            status="open",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Reopened task",
+                synced_state="complete",
+            ),
+        )
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Reopened task", state="complete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_reopen_item) == 1
+        assert plan.push_reopen_item[0]["trello_checklist_item_id"] == "item1"
+        assert plan.push_reopen_item[0]["state"] == "incomplete"
+        assert plan.push_reopen_item[0]["checklist_id"] == "cl1"
+        # No pull or push_complete operations
+        assert len(plan.pull_complete) == 0
+        assert len(plan.push_complete_item) == 0
+
+    def test_local_complete_trello_incomplete_pushes_complete(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Regression: local complete + Trello incomplete -> push_complete_item (not reopen)."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "Completed task",
+            status="done",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Completed task",
+                synced_state="incomplete",
+            ),
+        )
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Completed task", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_complete_item) == 1
+        assert plan.push_complete_item[0]["item_id"] == "item1"
+        assert len(plan.push_reopen_item) == 0
+
+    def test_matching_states_no_push(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Both sides incomplete -> no state push."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "Same state",
+            status="open",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Old name",
+                synced_state="incomplete",
+            ),
+        )
+        todo.title = "Same state renamed"
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Same state", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_complete_item) == 0
+        assert len(plan.push_reopen_item) == 0
+
+    def test_null_checklist_item_id_no_push(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Null trello_checklist_item_id -> no reopen push (guard)."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "No item id",
+            status="open",
+            trello_checklist_item_id="",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="No item id",
+                synced_state="complete",
+            ),
+        )
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("", "No item id", state="complete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.push_reopen_item) == 0
+
+    def test_name_change_and_reopen_merges_into_update(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Name changed + state reopen -> single merged entry in push_update_item."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "New name",
+            status="open",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Old name",
+                synced_state="complete",
+            ),
+        )
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Old name", state="complete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        # Name change creates push_update_item, state reopen merges into it
+        assert len(plan.push_update_item) == 1
+        assert plan.push_update_item[0]["item_id"] == "item1"
+        assert plan.push_update_item[0]["state"] == "incomplete"
+        # No separate reopen entry
+        assert len(plan.push_reopen_item) == 0

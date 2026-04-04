@@ -148,6 +148,19 @@ def _build_push_ops(plan: TrelloSyncPlan, card_id: str) -> list[dict[str, Any]]:
             "todo_id": entry.get("todo_id"),
         })
 
+    for entry in plan.push_reopen_item:
+        ops.append({
+            "type": "push_reopen_item",
+            "tool": "update_checklist_item",
+            "params": {
+                "cardId": card_id,
+                "checklistId": entry.get("checklist_id", ""),
+                "checkItemId": entry.get("trello_checklist_item_id", ""),
+                "state": "incomplete",
+            },
+            "todo_id": entry.get("todo_id"),
+        })
+
     return ops
 
 
@@ -370,6 +383,7 @@ def _build_summary(
             "items_updated": push_by_type.get("push_update_item", 0),
             "items_completed": push_by_type.get("push_complete_item", 0),
             "items_deleted": push_by_type.get("push_delete_item", 0),
+            "items_reopened": push_by_type.get("push_reopen_item", 0),
             "checklists_renamed": push_by_type.get("push_rename_checklist", 0),
         },
     }
@@ -538,7 +552,7 @@ def register(app: FastMCP) -> None:
                 "status": "success",
                 "summary": {
                     "pull": {"created": 0, "created_root": 0, "updated": 0, "completed": 0, "reopened": 0, "linked": 0},
-                    "push": {"checklists_created": 0, "items_created": 0, "items_updated": 0, "items_completed": 0, "items_deleted": 0, "checklists_renamed": 0},
+                    "push": {"checklists_created": 0, "items_created": 0, "items_updated": 0, "items_completed": 0, "items_deleted": 0, "items_reopened": 0, "checklists_renamed": 0},
                     "up_to_date": True,
                 },
             })

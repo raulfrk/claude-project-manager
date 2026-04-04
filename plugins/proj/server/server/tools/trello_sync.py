@@ -71,6 +71,7 @@ class TrelloSyncPlan:
     push_complete_item: list[dict[str, object]] = field(default_factory=list)
     push_delete_item: list[dict[str, object]] = field(default_factory=list)
     push_rename_checklist: list[dict[str, object]] = field(default_factory=list)
+    push_reopen_item: list[dict[str, object]] = field(default_factory=list)
     conflicts: list[dict[str, object]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     card_create: bool = False
@@ -84,6 +85,7 @@ class TrelloSyncPlan:
             self.push_create_checklist, self.push_create_item,
             self.push_update_item, self.push_complete_item,
             self.push_delete_item, self.push_rename_checklist,
+            self.push_reopen_item,
             self.conflicts, self.list_mismatches,
             self.card_create, self.label_create,
         ])
@@ -102,6 +104,7 @@ class TrelloSyncPlan:
             "push_complete_item": self.push_complete_item,
             "push_delete_item": self.push_delete_item,
             "push_rename_checklist": self.push_rename_checklist,
+            "push_reopen_item": self.push_reopen_item,
             "conflicts": self.conflicts,
             "warnings": self.warnings,
             "card_create": self.card_create,
@@ -120,6 +123,7 @@ class TrelloSyncPlan:
                 "push_complete_item_count": len(self.push_complete_item),
                 "push_delete_item_count": len(self.push_delete_item),
                 "push_rename_checklist_count": len(self.push_rename_checklist),
+                "push_reopen_item_count": len(self.push_reopen_item),
                 "conflict_count": len(self.conflicts),
                 "list_mismatch_count": len(self.list_mismatches),
             },
@@ -697,6 +701,22 @@ def _emit_push_for_linked(
                 "checklist_id": str(trello_item.get("_checklist_id", "")),
                 "state": "complete",
             })
+        else:  # local is "incomplete", trello is "complete" → push reopen
+            if local_todo.trello_checklist_item_id:
+                # Check if push_update_item already has an entry for this item
+                existing = next(
+                    (e for e in plan.push_update_item
+                     if e.get("item_id") == local_todo.trello_checklist_item_id),
+                    None,
+                )
+                if existing is not None:
+                    existing["state"] = "incomplete"
+                else:
+                    plan.push_reopen_item.append({
+                        "trello_checklist_item_id": local_todo.trello_checklist_item_id,
+                        "checklist_id": str(trello_item.get("_checklist_id", "")),
+                        "state": "incomplete",
+                    })
 
 
 def _emit_pull_for_linked(
