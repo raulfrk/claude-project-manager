@@ -723,12 +723,14 @@ class TrelloSyncState:
     last_sync: str = ""       # ISO 8601 datetime of last successful sync
     synced_name: str = ""     # name as it was on Trello after last sync
     synced_state: str = ""    # "complete" or "incomplete" after last sync
+    trello_updated: str = ""  # ISO 8601 datetime of last pull from Trello
 
     def to_dict(self) -> dict[str, object]:
         return {
             "last_sync": self.last_sync,
             "synced_name": self.synced_name,
             "synced_state": self.synced_state,
+            "trello_updated": self.trello_updated,
         }
 
     @classmethod
@@ -737,6 +739,7 @@ class TrelloSyncState:
             last_sync=str(data.get("last_sync", "")),
             synced_name=str(data.get("synced_name", "")),
             synced_state=str(data.get("synced_state", "")),
+            trello_updated=str(data.get("trello_updated", "")),
         )
 
 

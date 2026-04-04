@@ -1360,7 +1360,10 @@ class TestAutoLinkingAutoApply:
         todos = storage.load_todos(cfg, name)
         child = next(t for t in todos if t.title == "Pulled task")
         assert child.trello_checklist_item_id == "item_x"
-        assert child.trello_sync_state is None
+        # trello_updated is set on pull; full sync state deferred until push_confirmed
+        assert child.trello_sync_state is not None
+        assert child.trello_sync_state.trello_updated != ""
+        assert child.trello_sync_state.last_sync == ""
 
     def test_auto_apply_pull_create_checked_records_complete(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -1386,7 +1389,10 @@ class TestAutoLinkingAutoApply:
         child = next(t for t in todos if t.title == "Done in Trello")
         assert child.status == "done"
         assert child.trello_checklist_item_id == "item_done"
-        assert child.trello_sync_state is None
+        # trello_updated is set on pull; full sync state deferred until push_confirmed
+        assert child.trello_sync_state is not None
+        assert child.trello_sync_state.trello_updated != ""
+        assert child.trello_sync_state.last_sync == ""
 
     def test_auto_apply_pull_create_multiple_items_all_linked(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -1418,9 +1424,11 @@ class TestAutoLinkingAutoApply:
         item_ids = {t.trello_checklist_item_id for t in created_items}
         assert item_ids == {"item_a", "item_b", "item_c"}
 
-        # auto_apply is pull-only; sync state is deferred until push_confirmed
+        # trello_updated is set on pull; full sync state deferred until push_confirmed
         for t in created_items:
-            assert t.trello_sync_state is None
+            assert t.trello_sync_state is not None
+            assert t.trello_sync_state.trello_updated != ""
+            assert t.trello_sync_state.last_sync == ""
 
     def test_diff_pull_create_includes_trello_item_id(
         self, cfg_with_project: tuple[ProjConfig, str],
@@ -3320,3 +3328,113 @@ class TestPushReopenItem:
         assert plan.push_update_item[0]["state"] == "incomplete"
         # No separate reopen entry
         assert len(plan.push_reopen_item) == 0
+
+
+# ── Conflict resolution timestamp tests ─────────────────────────────────────
+
+
+class TestConflictResolutionTimestamp:
+    """Tests for true last-changed-wins using trello_updated timestamp."""
+
+    def test_trello_wins_when_trello_updated_newer(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When trello_updated > local_updated, Trello wins the conflict."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t_local = "2026-03-19T11:00:00"
+        t_trello = "2026-03-19T12:00:00"  # newer than local
+        todo = _make_todo(
+            cfg, name, "Local version",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Original",
+                synced_state="incomplete",
+                trello_updated=t_trello,
+            ),
+        )
+        todo.updated = t_local  # local changed after sync
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Trello version", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.conflicts) == 1
+        assert plan.conflicts[0]["resolution"] == "trello"
+        assert plan.conflicts[0]["trello_updated"] == t_trello
+        assert plan.conflicts[0]["local_updated"] == t_local
+        # Trello wins -> pull, not push
+        assert len(plan.pull_update) == 1
+        assert plan.pull_update[0]["title"] == "Trello version"
+        assert len(plan.push_update_item) == 0
+
+    def test_local_wins_when_local_updated_newer(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When local_updated > trello_updated, local wins the conflict."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t_trello = "2026-03-19T11:00:00"
+        t_local = "2026-03-19T12:00:00"  # newer than trello
+        todo = _make_todo(
+            cfg, name, "Local version",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Original",
+                synced_state="incomplete",
+                trello_updated=t_trello,
+            ),
+        )
+        todo.updated = t_local
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Trello version", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.conflicts) == 1
+        assert plan.conflicts[0]["resolution"] == "local"
+        # Local wins -> push, not pull
+        assert len(plan.push_update_item) == 1
+        assert plan.push_update_item[0]["name"] == "Local version"
+        assert len(plan.pull_update) == 0
+
+    def test_empty_trello_updated_defaults_to_local_wins(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """When trello_updated is empty (backward compat), local wins by default."""
+        cfg, name = cfg_with_project
+        t0 = "2026-03-19T10:00:00"
+        t1 = "2026-03-19T11:00:00"
+        todo = _make_todo(
+            cfg, name, "Local version",
+            trello_checklist_item_id="item1",
+            trello_sync_state=TrelloSyncState(
+                last_sync=t0,
+                synced_name="Original",
+                synced_state="incomplete",
+                # trello_updated left empty (default "")
+            ),
+        )
+        todo.updated = t1
+        storage.save_todos(cfg, name, [todo])
+
+        card_json = _make_trello_card_json([
+            _make_checklist("cl1", TASKS_CHECKLIST_NAME, [
+                _make_check_item("item1", "Trello version", state="incomplete"),
+            ]),
+        ])
+        plan = compute_diff(card_json, cfg, name)
+        assert len(plan.conflicts) == 1
+        assert plan.conflicts[0]["resolution"] == "local"
+        assert plan.conflicts[0]["trello_updated"] == ""
+        # Local wins -> push
+        assert len(plan.push_update_item) == 1
+        assert len(plan.pull_update) == 0
