@@ -164,6 +164,11 @@ def _build_hooks_field(fire_response: dict | None, tool_name: str) -> dict | Non
             e.get("error", str(e)) for e in errors_list if isinstance(e, dict)
         ]
 
+    # Merge cascade errors from nested hook dispatch
+    cascade_errors = fire_response.get("cascade_errors", [])
+    for ce in cascade_errors:
+        error_strings.append(ce)
+
     return {
         "_claude_instructions": (
             "Hook chain completed. Check _hooks.errors and chain entries with "
