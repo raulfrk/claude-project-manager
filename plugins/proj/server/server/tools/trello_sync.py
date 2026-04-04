@@ -333,19 +333,35 @@ def compute_diff(
                 )
 
                 if local_changed and trello_changed:
-                    # Conflict — default: prefer local (most recent update)
-                    resolution = "local"
+                    # Conflict — true last-changed-wins using timestamps
+                    trello_ts = ss.trello_updated if ss else ""
+                    local_ts = local_todo.updated or ""
+                    if trello_ts and trello_ts > local_ts:
+                        resolution = "trello"
+                    else:
+                        resolution = "local"
                     plan.conflicts.append({
                         "todo_id": local_todo.id,
                         "local_value": {"name": local_display_name, "state": local_state_str},
                         "trello_value": {"name": item_name, "state": item_state},
+                        "trello_updated": trello_ts,
+                        "local_updated": local_ts,
                         "resolution": resolution,
+                        "resolution_rationale": (
+                            "trello_updated > local_updated" if resolution == "trello"
+                            else "local_updated >= trello_updated (local wins by default)"
+                        ),
                     })
-                    # Apply local-wins: push local state
-                    _emit_push_for_linked(
-                        plan, local_todo, local_display_name, local_state_str,
-                        item_name, item_state, item,
-                    )
+                    if resolution == "trello":
+                        _emit_pull_for_linked(
+                            plan, local_todo, item_name, item_state, is_checked,
+                            local_is_done, expected_checklists, expected_tasks_items,
+                        )
+                    else:
+                        _emit_push_for_linked(
+                            plan, local_todo, local_display_name, local_state_str,
+                            item_name, item_state, item,
+                        )
                 elif local_changed and not trello_changed:
                     # Only local changed -> push
                     _emit_push_for_linked(
@@ -816,6 +832,7 @@ def apply_changes(
             updated=now,
             trello_checklist_id=str(item["trello_checklist_id"]) if item.get("trello_checklist_id") else None,
         )
+        todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         todos.append(todo)
         todo_map[todo.id] = todo
         counts["created_root"] += 1
@@ -842,6 +859,7 @@ def apply_changes(
             trello_checklist_item_id=str(item["trello_checklist_item_id"]) if item.get("trello_checklist_item_id") else None,
             status=TodoStatus.DONE if item.get("checked") else "pending",
         )
+        todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         if parent_todo:
             parent_todo.children.append(todo.id)
             parent_todo.updated = now
@@ -858,6 +876,10 @@ def apply_changes(
         if "title" in item and item["title"] is not None:
             todo.title = str(item["title"])
         todo.updated = now
+        if todo.trello_sync_state:
+            todo.trello_sync_state.trello_updated = now
+        else:
+            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["updated"] += 1
 
     # 4. Link Trello IDs (after push operations return Trello IDs)
@@ -951,6 +973,10 @@ def apply_changes(
             continue
         todo.status = TodoStatus.DONE
         todo.updated = now
+        if todo.trello_sync_state:
+            todo.trello_sync_state.trello_updated = now
+        else:
+            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["completed"] += 1
         # Leaf todos (no parent, no children) get archived
         if not todo.parent and not todo.children:
@@ -970,6 +996,10 @@ def apply_changes(
             continue
         todo.status = "pending"
         todo.updated = now
+        if todo.trello_sync_state:
+            todo.trello_sync_state.trello_updated = now
+        else:
+            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["reopened"] += 1
 
     # 7b. Delete user-confirmed todos (pull_delete)
