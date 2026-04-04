@@ -27,6 +27,7 @@ from server.tools.trello_sync import (
     TASKS_CHECKLIST_NAME,
     TrelloApplyInput,
     TrelloSyncPlan,
+    _collect_descendants,
     _flatten_descendants,
     _ghost_check,
     _strip_id_prefix,
@@ -2146,6 +2147,80 @@ class TestPullDelete:
         data = TrelloApplyInput(pull_delete=["999"])
         counts = apply_changes(data, cfg, name)
         assert counts["pull_deleted"] == 0
+
+    def test_pull_delete_cascades_to_children(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Deleting a root cascades to its 2 children — all 3 removed."""
+        cfg, name = cfg_with_project
+        root = _make_todo(cfg, name, "Root", trello_checklist_item_id="item_r")
+        child1 = _make_todo(cfg, name, "Child 1", parent=root.id, trello_checklist_item_id="item_c1")
+        child2 = _make_todo(cfg, name, "Child 2", parent=root.id, trello_checklist_item_id="item_c2")
+        root.children = [child1.id, child2.id]
+        storage.save_todos(cfg, name, [root, child1, child2])
+
+        data = TrelloApplyInput(pull_delete=[root.id])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 3
+        todos = storage.load_todos(cfg, name)
+        ids = {t.id for t in todos}
+        assert root.id not in ids
+        assert child1.id not in ids
+        assert child2.id not in ids
+
+    def test_pull_delete_cascades_deeply_nested(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """root -> child -> grandchild: full cascade removes all 3."""
+        cfg, name = cfg_with_project
+        root = _make_todo(cfg, name, "Root", trello_checklist_item_id="item_r")
+        child = _make_todo(cfg, name, "Child", parent=root.id, trello_checklist_item_id="item_c")
+        grandchild = _make_todo(cfg, name, "Grandchild", parent=child.id, trello_checklist_item_id="item_gc")
+        root.children = [child.id]
+        child.children = [grandchild.id]
+        storage.save_todos(cfg, name, [root, child, grandchild])
+
+        data = TrelloApplyInput(pull_delete=[root.id])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 3
+        assert storage.load_todos(cfg, name) == []
+
+    def test_pull_delete_child_only_keeps_parent(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Deleting a child cascades to its descendants but keeps the parent."""
+        cfg, name = cfg_with_project
+        root = _make_todo(cfg, name, "Root", trello_checklist_item_id="item_r")
+        child = _make_todo(cfg, name, "Child", parent=root.id, trello_checklist_item_id="item_c")
+        grandchild = _make_todo(cfg, name, "Grandchild", parent=child.id, trello_checklist_item_id="item_gc")
+        root.children = [child.id]
+        child.children = [grandchild.id]
+        storage.save_todos(cfg, name, [root, child, grandchild])
+
+        data = TrelloApplyInput(pull_delete=[child.id])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 2
+        todos = storage.load_todos(cfg, name)
+        assert len(todos) == 1
+        assert todos[0].id == root.id
+        # Parent's children list should be cleaned up
+        assert child.id not in todos[0].children
+
+    def test_pull_delete_cycle_no_infinite_recursion(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Cycle in children graph does not cause infinite recursion."""
+        cfg, name = cfg_with_project
+        a = _make_todo(cfg, name, "A", trello_checklist_item_id="item_a")
+        b = _make_todo(cfg, name, "B", trello_checklist_item_id="item_b")
+        a.children = [b.id]
+        b.children = [a.id]  # cycle
+        storage.save_todos(cfg, name, [a, b])
+
+        data = TrelloApplyInput(pull_delete=[a.id])
+        counts = apply_changes(data, cfg, name)
+        assert counts["pull_deleted"] == 2
+        assert storage.load_todos(cfg, name) == []
 
     def test_missing_checklist_emits_warning_not_pull_delete(
         self, cfg_with_project: tuple[ProjConfig, str],

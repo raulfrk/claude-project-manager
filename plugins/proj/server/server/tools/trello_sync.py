@@ -36,6 +36,23 @@ TASKS_CHECKLIST_NAME = "Tasks"
 _UTC = timezone.utc
 
 
+def _collect_descendants(todo_id: str, todo_map: dict, visited: set[str] | None = None) -> list[str]:
+    """Recursively collect all descendant IDs of a todo (children, grandchildren, etc.)."""
+    if visited is None:
+        visited = set()
+    if todo_id in visited:
+        return []
+    visited.add(todo_id)
+    todo = todo_map.get(todo_id)
+    if not todo:
+        return []
+    result = []
+    for child_id in list(todo.children):
+        result.append(child_id)
+        result.extend(_collect_descendants(child_id, todo_map, visited))
+    return result
+
+
 def _now() -> str:
     """Return current UTC datetime as ISO 8601 string."""
     return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
@@ -972,25 +989,29 @@ def apply_changes(
         todo.updated = now
         counts["reopened"] += 1
 
-    # 7b. Delete user-confirmed todos (pull_delete)
+    # 7b. Delete user-confirmed todos (pull_delete) — cascade to descendants
+    to_delete: set[str] = set()
     for raw_todo_id in data.pull_delete:
-        todo = todo_map.get(str(raw_todo_id))
-        if not todo:
-            continue  # already deleted or non-existent — skip gracefully
-        # Clean up references
-        for t in todos:
-            if todo.id in t.blocks:
-                t.blocks.remove(todo.id)
-                t.updated = now
-            if todo.id in t.blocked_by:
-                t.blocked_by.remove(todo.id)
-                t.updated = now
-            if todo.id in t.children:
-                t.children.remove(todo.id)
-                t.updated = now
-        todos = [t for t in todos if t.id != todo.id]
-        todo_map.pop(todo.id, None)
-        counts["pull_deleted"] += 1
+        tid = str(raw_todo_id)
+        if tid in todo_map:
+            to_delete.add(tid)
+            for desc_id in _collect_descendants(tid, todo_map):
+                to_delete.add(desc_id)
+
+    # Cross-reference cleanup
+    for t in todos:
+        t.blocks = [x for x in t.blocks if x not in to_delete]
+        t.blocked_by = [x for x in t.blocked_by if x not in to_delete]
+        t.children = [x for x in t.children if x not in to_delete]
+
+    # Clear to_archive entries for cascade-deleted IDs
+    to_archive = [t for t in to_archive if t.id not in to_delete]
+
+    # Filter and count
+    todos = [t for t in todos if t.id not in to_delete]
+    counts["pull_deleted"] += len(to_delete)
+    for tid in to_delete:
+        todo_map.pop(tid, None)
 
     # 8. Record trello_sync_state on all synced todos (232.7)
     # Only update sync state when push operations have been confirmed complete,
