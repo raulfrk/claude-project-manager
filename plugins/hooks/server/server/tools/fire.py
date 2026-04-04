@@ -389,18 +389,55 @@ async def hooks_fire(
             # Call feedback tool on the trigger's server (proj)
             trigger_url = _resolve_server_url("proj", registry.settings.get("hooks_port", 19100))
             if trigger_url:
-                fb_result = await post_hook(
-                    hook_id=f"{hook.id}-feedback",
-                    url=trigger_url,
-                    target_tool=hook.feedback_tool,
-                    params=feedback_params,
-                )
-                feedback_results.append({
-                    "hook_id": hook.id,
-                    "feedback_tool": hook.feedback_tool,
-                    "ok": fb_result.ok,
-                    "error": fb_result.error,
-                })
+                try:
+                    fb_result = await post_hook(
+                        hook_id=f"{hook.id}-feedback",
+                        url=trigger_url,
+                        target_tool=hook.feedback_tool,
+                        params=feedback_params,
+                    )
+                    feedback_results.append({
+                        "hook_id": hook.id,
+                        "feedback_tool": hook.feedback_tool,
+                        "ok": fb_result.ok,
+                        "error": fb_result.error,
+                    })
+                    if not fb_result.ok:
+                        err_msg = fb_result.error or f"HTTP {fb_result.status_code}"
+                        storage.log_failure(
+                            hook_id=f"{hook.id}-feedback",
+                            trigger_tool=hook.trigger_tool,
+                            target_tool=hook.feedback_tool,
+                            server=hook.server,
+                            error=err_msg,
+                            source_result=source_result,
+                        )
+                        errors.append({
+                            "hook_id": f"{hook.id}-feedback",
+                            "error": err_msg,
+                            "target_tool": hook.feedback_tool,
+                        })
+                except Exception as exc:
+                    err_msg = f"feedback writeback exception for {hook.id}: {exc}"
+                    feedback_results.append({
+                        "hook_id": hook.id,
+                        "feedback_tool": hook.feedback_tool,
+                        "ok": False,
+                        "error": str(exc),
+                    })
+                    storage.log_failure(
+                        hook_id=f"{hook.id}-feedback",
+                        trigger_tool=hook.trigger_tool,
+                        target_tool=hook.feedback_tool,
+                        server=hook.server,
+                        error=err_msg,
+                        source_result=source_result,
+                    )
+                    errors.append({
+                        "hook_id": f"{hook.id}-feedback",
+                        "error": err_msg,
+                        "target_tool": hook.feedback_tool,
+                    })
 
     # Schedule non-blocking hooks (fire-and-forget)
     for hook in non_blocking_hooks:
