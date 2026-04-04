@@ -105,16 +105,17 @@ hooks:
 
   - id: trello-on-todo-add-child
     trigger_tool: todo_add_child
-    target_tool: add_checklist_item
+    target_tool: trello_add_checklist_item_hook
     server: trello
     param_mapping:
       checklist_id: "${parent_trello_checklist_id}"
-      name: "${title}"
-    blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
-    feedback_tool: todo_update
+      card_id: "${project.trello_card_id}"
+      item_name: "${todo.title}"
     feedback_mapping:
-      result.id: trello_checklist_item_id
+      checklist_id: trello_checklist_id
+      id: trello_checklist_item_id
+    blocking: true
+    condition: "sync.trello.enabled and sync.trello.auto_sync"
 
   - id: trello-on-root-todo-delete
     trigger_tool: todo_delete
@@ -131,6 +132,8 @@ hooks:
     server: trello
     param_mapping:
       checklist_id: "${trello_checklist_id}"
+      card_id: "${project.trello_card_id}"
+      checklist_name: "Tasks"
       items: "${children[*].title}"
     feedback_tool: todo_update
     feedback_mapping:

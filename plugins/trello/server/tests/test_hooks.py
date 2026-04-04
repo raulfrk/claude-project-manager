@@ -94,11 +94,42 @@ class TestBatchAddChecklistItemsHook:
         register(app)
         return app._tool_manager._tools["trello_batch_add_checklist_items_hook"].fn
 
-    def test_null_checklist_id_returns_warning(self) -> None:
+    def test_null_checklist_id_no_card_id_returns_error(self) -> None:
         tool = self._get_tool()
         result = json.loads(tool(checklist_id=None, items=["a", "b"]))
-        assert "warning" in result
-        assert "trello_checklist_id is null" in result["warning"]
+        assert "error" in result
+        assert "card_id is required" in result["error"]
+
+    def test_null_checklist_id_with_card_id_creates_checklist(
+        self, mock_trello_client: MagicMock,
+    ) -> None:
+        mock_trello_client.post.side_effect = [
+            {"id": "new-cl"},  # POST /checklists
+            {"id": "item-1", "name": "a", "state": "incomplete"},
+            {"id": "item-2", "name": "b", "state": "incomplete"},
+        ]
+        tool = self._get_tool()
+        result = json.loads(tool(
+            checklist_id=None, items=["a", "b"], card_id="card-123",
+        ))
+        assert result["checklist_id"] == "new-cl"
+        assert len(result["successes"]) == 2
+        # First call creates checklist, next two create items
+        assert mock_trello_client.post.call_count == 3
+        mock_trello_client.post.assert_any_call(
+            "/checklists", params={"idCard": "card-123", "name": "Tasks"},
+        )
+
+    def test_null_checklist_id_checklist_creation_fails(
+        self, mock_trello_client: MagicMock,
+    ) -> None:
+        mock_trello_client.post.side_effect = Exception("API error")
+        tool = self._get_tool()
+        result = json.loads(tool(
+            checklist_id=None, items=["a"], card_id="card-123",
+        ))
+        assert "error" in result
+        assert "checklist creation failed" in result["error"]
 
     def test_success_calls_batch_create(self, mock_trello_client: MagicMock) -> None:
         mock_trello_client.post.side_effect = [
@@ -107,9 +138,65 @@ class TestBatchAddChecklistItemsHook:
         ]
         tool = self._get_tool()
         result = json.loads(tool(checklist_id="cl-abc", items=["a", "b"]))
+        assert result["checklist_id"] == "cl-abc"
         assert len(result["successes"]) == 2
         assert result["successes"][0]["id"] == "item-1"
         assert mock_trello_client.post.call_count == 2
+
+
+# -- trello_add_checklist_item_hook ------------------------------------------
+
+
+class TestAddChecklistItemHook:
+    def _get_tool(self) -> callable:
+        from mcp.server.fastmcp import FastMCP
+        from server.tools.hooks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["trello_add_checklist_item_hook"].fn
+
+    def test_null_checklist_id_no_card_id_returns_error(self) -> None:
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id=None, item_name="task 1"))
+        assert "error" in result
+        assert "card_id is required" in result["error"]
+
+    def test_null_checklist_id_with_card_id_creates_checklist(
+        self, mock_trello_client: MagicMock,
+    ) -> None:
+        mock_trello_client.post.side_effect = [
+            {"id": "new-cl"},  # POST /checklists
+            {"id": "item-1", "name": "task 1"},  # POST checkItems
+        ]
+        tool = self._get_tool()
+        result = json.loads(tool(
+            checklist_id=None, item_name="task 1", card_id="card-123",
+        ))
+        assert result["checklist_id"] == "new-cl"
+        assert result["id"] == "item-1"
+        assert mock_trello_client.post.call_count == 2
+
+    def test_with_existing_checklist_id(
+        self, mock_trello_client: MagicMock,
+    ) -> None:
+        mock_trello_client.post.return_value = {"id": "item-1", "name": "task 1"}
+        tool = self._get_tool()
+        result = json.loads(tool(checklist_id="cl-abc", item_name="task 1"))
+        assert result["id"] == "item-1"
+        assert result["checklist_id"] == "cl-abc"
+        assert mock_trello_client.post.call_count == 1
+
+    def test_checklist_creation_fails(
+        self, mock_trello_client: MagicMock,
+    ) -> None:
+        mock_trello_client.post.side_effect = Exception("API error")
+        tool = self._get_tool()
+        result = json.loads(tool(
+            checklist_id=None, item_name="task 1", card_id="card-123",
+        ))
+        assert "error" in result
+        assert "checklist creation failed" in result["error"]
 
 
 # -- Hook structure tests for new hooks --------------------------------------

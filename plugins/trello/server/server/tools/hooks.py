@@ -110,18 +110,31 @@ def register(app: FastMCP) -> None:
         description=(
             "Hook-friendly batch checklist item creation for batch child todo sync. "
             "Creates multiple checklist items on the given checklist. "
-            "Returns a warning (not an error) if checklist_id is null/empty. "
+            "Creates the checklist first if checklist_id is null and card_id is provided. "
             "Items is a list of item name strings."
         ),
     )
     def trello_batch_add_checklist_items_hook(
         checklist_id: str | None,
         items: list[str],
+        card_id: str | None = None,
+        checklist_name: str | None = None,
     ) -> str:
         if not checklist_id:
-            return json.dumps({
-                "warning": "trello_checklist_id is null — skipping batch Trello sync",
-            })
+            if not card_id:
+                return json.dumps({"error": "card_id is required to create checklist"})
+            client = get_client()
+            try:
+                new_checklist = client.post(
+                    "/checklists",
+                    params={"idCard": card_id, "name": checklist_name or "Tasks"},
+                )
+                checklist_id = new_checklist["id"]
+            except Exception as exc:
+                return json.dumps({
+                    "error": f"checklist creation failed: {exc}",
+                    "checklist_id": None,
+                })
         client = get_client()
         successes: list[dict] = []
         failures: list[dict] = []
@@ -134,5 +147,44 @@ def register(app: FastMCP) -> None:
                 successes.append(created)
             except Exception as exc:
                 failures.append({"index": idx, "name": name, "error": str(exc)})
-        return json.dumps({"successes": successes, "failures": failures})
+        return json.dumps({
+            "checklist_id": checklist_id,
+            "successes": successes,
+            "failures": failures,
+        })
+
+    @app.tool(
+        description=(
+            "Hook-friendly single checklist item creation. "
+            "Creates the checklist first if checklist_id is null and card_id is provided. "
+            "Returns {id, checklist_id} for feedback writeback."
+        ),
+    )
+    def trello_add_checklist_item_hook(
+        checklist_id: str | None,
+        item_name: str,
+        card_id: str | None = None,
+        checklist_name: str | None = None,
+    ) -> str:
+        if not checklist_id:
+            if not card_id:
+                return json.dumps({"error": "card_id is required to create checklist"})
+            client = get_client()
+            try:
+                new_checklist = client.post(
+                    "/checklists",
+                    params={"idCard": card_id, "name": checklist_name or "Tasks"},
+                )
+                checklist_id = new_checklist["id"]
+            except Exception as exc:
+                return json.dumps({
+                    "error": f"checklist creation failed: {exc}",
+                    "checklist_id": None,
+                })
+        client = get_client()
+        created = client.post(
+            f"/checklists/{checklist_id}/checkItems",
+            params={"name": item_name},
+        )
+        return json.dumps({"id": created["id"], "checklist_id": checklist_id})
 
