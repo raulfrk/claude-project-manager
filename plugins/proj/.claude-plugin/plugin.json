@@ -1,7 +1,9 @@
 {
   "name": "proj",
   "description": "Project lifecycle management for Claude Code.",
-  "version": "2.10.19",
-  "author": { "name": "raulfrk" },
+  "version": "2.10.20",
+  "author": {
+    "name": "raulfrk"
+  },
   "mcpServers": "./.mcp.json"
 }
