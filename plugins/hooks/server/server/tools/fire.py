@@ -85,18 +85,17 @@ async def _fire_single(hook: Hook, source: dict[str, JsonValue]) -> FireResult:
     params = resolve_mapping(hook.param_mapping, source)
 
     registry = storage.load()
-    # Check registry.servers for explicit URL first
-    server_entry = registry.servers.get(hook.server)
-    if isinstance(server_entry, dict):
-        explicit_url = server_entry.get("url")
-        if isinstance(explicit_url, str) and explicit_url:
-            url = explicit_url
-        else:
-            hooks_port = registry.settings.get("hooks_port", 19100)
-            url = _resolve_server_url(hook.server, int(hooks_port) if isinstance(hooks_port, (int, float, str)) else 19100)
-    else:
-        hooks_port = registry.settings.get("hooks_port", 19100)
-        url = _resolve_server_url(hook.server, int(hooks_port) if isinstance(hooks_port, (int, float, str)) else 19100)
+    hooks_port = registry.settings.get("hooks_port", 19100)
+    port_int = int(hooks_port) if isinstance(hooks_port, (int, float, str)) else 19100
+    # Prefer socket registry (PID-tagged, always current) over hooks.yaml servers
+    url = _resolve_server_url(hook.server, port_int)
+    if url == hook.server:
+        # _resolve_server_url fell back to raw name — try hooks.yaml servers
+        server_entry = registry.servers.get(hook.server)
+        if isinstance(server_entry, dict):
+            explicit_url = server_entry.get("url")
+            if isinstance(explicit_url, str) and explicit_url:
+                url = explicit_url
 
     return await post_hook(
         hook_id=hook.id,
@@ -320,6 +319,9 @@ async def _fire_hooks_internal(
     # Phase 1.5: Feedback writeback for blocking hooks
     feedback_results: list[dict[str, JsonValue]] = []
     if blocking_hooks and results_by_id:
+        fb_port = registry.settings.get("hooks_port", 19100)
+        trigger_url = _resolve_server_url("proj", int(fb_port) if isinstance(fb_port, (int, float, str)) else 19100)
+
         for hook in blocking_hooks:
             if not hook.feedback_mapping or not hook.feedback_tool:
                 continue
@@ -331,6 +333,93 @@ async def _fire_hooks_internal(
             except (json.JSONDecodeError, TypeError):
                 continue
 
+            # Detect batch feedback: any key containing [*] triggers per-item iteration
+            batch_keys = {k: v for k, v in hook.feedback_mapping.items()
+                          if isinstance(k, str) and "[*]" in k and isinstance(v, str)}
+
+            if batch_keys and trigger_url:
+                # Batch feedback: iterate over result array and source created array
+                # Key format: "successes[*].id" → array_path="successes", field="id"
+                source_created = source.get("created")
+                if not isinstance(source_created, list):
+                    continue
+                for result_path_pattern, target_param in batch_keys.items():
+                    parts = result_path_pattern.split("[*].")
+                    if len(parts) != 2:
+                        continue
+                    array_path, field = parts
+                    result_array = _resolve_path(result_data, array_path)
+                    if not isinstance(result_array, list):
+                        continue
+                    for i, child_entry in enumerate(source_created):
+                        if i >= len(result_array):
+                            break  # fewer results than children (partial failure)
+                        if not isinstance(child_entry, dict):
+                            continue
+                        child_id = child_entry.get("id")
+                        if not child_id:
+                            continue
+                        value = _resolve_path(result_array[i], field) if isinstance(result_array[i], dict) else result_array[i]
+                        if value is None:
+                            continue
+                        fb_params: dict[str, JsonValue] = {
+                            "todo_id": child_id,
+                            target_param: value,
+                        }
+                        if "project_name" in source:
+                            fb_params["project_name"] = source["project_name"]
+                        try:
+                            fb_result = await post_hook(
+                                hook_id=f"{hook.id}-feedback-{i}",
+                                url=trigger_url,
+                                target_tool=hook.feedback_tool,
+                                params=fb_params,
+                            )
+                            feedback_results.append({
+                                "hook_id": f"{hook.id}-{i}",
+                                "feedback_tool": hook.feedback_tool,
+                                "ok": fb_result.ok,
+                                "error": fb_result.error,
+                            })
+                            if not fb_result.ok:
+                                err_msg = fb_result.error or f"HTTP {fb_result.status_code}"
+                                storage.log_failure(
+                                    hook_id=f"{hook.id}-feedback-{i}",
+                                    trigger_tool=hook.trigger_tool,
+                                    target_tool=hook.feedback_tool,
+                                    server=hook.server,
+                                    error=err_msg,
+                                    source_result=source_result,
+                                )
+                                errors.append({
+                                    "hook_id": f"{hook.id}-feedback-{i}",
+                                    "error": err_msg,
+                                    "target_tool": hook.feedback_tool,
+                                })
+                        except Exception as exc:
+                            err_msg = f"feedback writeback exception for {hook.id}-{i}: {exc}"
+                            feedback_results.append({
+                                "hook_id": f"{hook.id}-{i}",
+                                "feedback_tool": hook.feedback_tool,
+                                "ok": False,
+                                "error": str(exc),
+                            })
+                            storage.log_failure(
+                                hook_id=f"{hook.id}-feedback-{i}",
+                                trigger_tool=hook.trigger_tool,
+                                target_tool=hook.feedback_tool,
+                                server=hook.server,
+                                error=err_msg,
+                                source_result=source_result,
+                            )
+                            errors.append({
+                                "hook_id": f"{hook.id}-feedback-{i}",
+                                "error": err_msg,
+                                "target_tool": hook.feedback_tool,
+                            })
+                continue  # skip single-value path below
+
+            # Single-value feedback (existing behavior)
             feedback_params: dict[str, JsonValue] = {}
             for result_path, target_param in hook.feedback_mapping.items():
                 value = _resolve_path(result_data, result_path)
@@ -340,16 +429,12 @@ async def _fire_hooks_internal(
             if not feedback_params:
                 continue
 
-            # Add source entity IDs for writeback context — include both so
-            # the feedback tool (e.g. todo_update) has full project context.
+            # Add source entity IDs for writeback context
             if "todo_id" in source:
                 feedback_params["todo_id"] = source["todo_id"]
             if "project_name" in source:
                 feedback_params["project_name"] = source["project_name"]
 
-            # Call feedback tool on the trigger's server (proj)
-            fb_port = registry.settings.get("hooks_port", 19100)
-            trigger_url = _resolve_server_url("proj", int(fb_port) if isinstance(fb_port, (int, float, str)) else 19100)
             if trigger_url:
                 try:
                     fb_result = await post_hook(

@@ -717,9 +717,24 @@ def register(app: FastMCP) -> None:
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
 
+        # Pre-build todoist_tasks for hook-053 param mapping (template resolver
+        # doesn't support JMESPath iteration, so we build the array here).
+        todoist_tasks: list[dict[str, JsonValue]] = [
+            {
+                "content": c["title"],
+                "projectId": meta.todoist_project_id,
+                "parentId": parent.todoist_task_id,
+            }
+            for c in created
+        ]
         result_data: dict[str, JsonValue] = {
             "created": created,
             "count": len(created),
+            "project_name": name,
+            "todoist_project_id": meta.todoist_project_id,
+            "trello_card_id": meta.trello_card_id,
+            "parent_todoist_task_id": parent.todoist_task_id,
+            "todoist_tasks": todoist_tasks,
         }
         if pair_errors:
             result_data["blocking_errors"] = pair_errors
