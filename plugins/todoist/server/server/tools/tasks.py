@@ -1,7 +1,5 @@
 """Todoist task MCP tools."""
 
-from __future__ import annotations
-
 import json
 
 from mcp.server.fastmcp import FastMCP
