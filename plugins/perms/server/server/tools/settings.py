@@ -7,9 +7,11 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from server.lib import storage
+from server.lib.models import SettingsFile
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -65,14 +67,14 @@ KNOWN_STALE_MCP_SERVERS: list[str] = [
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-def _load_for_target(resolved: str, scope: str) -> storage.SettingsFile:
+def _load_for_target(resolved: str, scope: str) -> SettingsFile:
     """Load the appropriate settings file based on resolved target."""
     if resolved == "sandbox":
         return storage.load_local(scope)
     return storage.load(scope)
 
 
-def _add_path_sandbox(settings: storage.SettingsFile, abs_path: str) -> list[str]:
+def _add_path_sandbox(settings: SettingsFile, abs_path: str) -> list[str]:
     """Add a path to sandbox.filesystem.allowWrite. Returns list of added entries."""
     clean = abs_path.rstrip("/")
     added: list[str] = []
@@ -82,7 +84,7 @@ def _add_path_sandbox(settings: storage.SettingsFile, abs_path: str) -> list[str
     return added
 
 
-def _remove_path_sandbox(settings: storage.SettingsFile, abs_path: str) -> int:
+def _remove_path_sandbox(settings: SettingsFile, abs_path: str) -> int:
     """Remove a path from sandbox.filesystem.allowWrite. Returns count removed."""
     clean = abs_path.rstrip("/")
     before = len(settings.sandbox.filesystem.allow_write)
@@ -724,8 +726,8 @@ def restore(timestamp: str) -> str:
 
 def cleanup_stale() -> str:
     """Strip Read/Edit/Bash rules from both settings files, keeping only MCP + WebFetch rules."""
-    results = []
-    loaders = [
+    results: list[str] = []
+    loaders: list[tuple[str, Callable[[], SettingsFile]]] = [
         ("settings.json", lambda: storage.load("user")),
         ("settings.local.json", lambda: storage.load_local("user")),
     ]

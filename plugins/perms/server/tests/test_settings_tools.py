@@ -582,8 +582,11 @@ def sandbox_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     local_path = tmp_path / ".claude" / "settings.local.json"
     _write_local_settings(local_path, {"sandbox": {"enabled": True}})
     monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
-    # Also set _USER_SETTINGS to a separate file so standard mode doesn't interfere
-    monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / ".claude" / "settings.json")
+    # Also set _USER_SETTINGS with sandbox enabled so is_sandbox_enabled detects it
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
+    monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
     return local_path
 
 
@@ -814,10 +817,12 @@ class TestBatchAddMcpAllowSandboxMode:
     def test_does_not_write_to_settings_json(
         self, sandbox_settings: Path, tmp_path: Path
     ) -> None:
-        """Sandbox mode must not create or modify settings.json."""
+        """Sandbox mode must not modify settings.json (only settings.local.json)."""
         user_settings = tmp_path / ".claude" / "settings.json"
+        content_before = user_settings.read_text() if user_settings.exists() else None
         batch_add_mcp_allow(["proj"], scope="user", target="sandbox")
-        assert not user_settings.exists()
+        content_after = user_settings.read_text() if user_settings.exists() else None
+        assert content_before == content_after
 
 
 class TestAutoTargetFallsBackToSettings:
@@ -956,25 +961,27 @@ class TestIsSandboxEnabled:
     def test_returns_false_when_sandbox_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {"sandbox": {"enabled": False}})
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"sandbox": {"enabled": False}}))
+        monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
         result = is_sandbox_enabled_tool(scope="user")
         assert result == "sandbox_enabled: false"
 
     def test_returns_false_when_file_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / "nonexistent.json")
         result = is_sandbox_enabled_tool(scope="user")
         assert result == "sandbox_enabled: false"
 
     def test_returns_false_when_no_sandbox_key(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {"permissions": {"allow": []}})
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"permissions": {"allow": []}}))
+        monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
         result = is_sandbox_enabled_tool(scope="user")
         assert result == "sandbox_enabled: false"
 
@@ -984,8 +991,9 @@ class TestIsSandboxEnabled:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         monkeypatch.chdir(project_dir)
-        local_path = project_dir / ".claude" / "settings.local.json"
-        _write_local_settings(local_path, {"sandbox": {"enabled": True}})
+        settings_path = project_dir / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
         result = is_sandbox_enabled_tool(scope="project")
         assert result == "sandbox_enabled: true"
 

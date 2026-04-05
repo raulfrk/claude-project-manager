@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 from mcp.server.fastmcp import FastMCP
-from server.lib.client import get_client
+from server.lib.client import JsonValue, get_client
 
 def register(app: FastMCP) -> None:
     @app.tool(description="Get all cards on a list.")
@@ -77,8 +77,8 @@ def register(app: FastMCP) -> None:
     )
     def batch_create_cards(cards: list[dict[str, str]]) -> str:
         client = get_client()
-        successes: list[dict[str, object]] = []
-        failures: list[dict[str, object]] = []
+        successes: list[JsonValue] = []
+        failures: list[dict[str, JsonValue]] = []
         for idx, card in enumerate(cards):
             try:
                 list_id = card.get("list_id", "")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from server.lib._types import JsonValue
 from server.lib.models import Hook, HookRegistry
 
 logger = logging.getLogger("hooks.discovery")
@@ -19,7 +20,7 @@ _AUTO_SOURCE = "auto"
 _DRIFT_FIELDS = ("blocking", "condition", "param_mapping", "feedback_tool", "feedback_mapping", "verification")
 
 
-_DRIFT_DEFAULTS: dict[str, object] = {
+_DRIFT_DEFAULTS: dict[str, JsonValue] = {
     "blocking": False,
     "condition": None,
     "param_mapping": {},
@@ -29,7 +30,7 @@ _DRIFT_DEFAULTS: dict[str, object] = {
 }
 
 
-def _hook_content_differs(existing: Hook, new_def: dict[str, object]) -> bool:
+def _hook_content_differs(existing: Hook, new_def: dict[str, JsonValue]) -> bool:
     """Check if an existing auto hook has drifted from the new definition.
 
     Compares content fields only (not id, trigger, target, server, source).
@@ -80,7 +81,7 @@ def find_default_hooks_files(
     return found
 
 
-def load_hooks_from_file(path: Path) -> list[dict[str, object]]:
+def load_hooks_from_file(path: Path) -> list[dict[str, JsonValue]]:
     """Load hook definitions from a single default-hooks.yaml file.
 
     Expected format:
@@ -110,7 +111,7 @@ def load_hooks_from_file(path: Path) -> list[dict[str, object]]:
         logger.warning("Invalid format in %s: 'hooks' must be a list", path)
         return []
 
-    result: list[dict[str, object]] = []
+    result: list[dict[str, JsonValue]] = []
     for entry in hooks_raw:
         if isinstance(entry, dict):
             result.append(entry)

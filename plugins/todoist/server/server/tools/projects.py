@@ -7,6 +7,7 @@ import json
 from mcp.server.fastmcp import FastMCP
 
 from server.lib.client import get_client
+from server.lib.models import JsonObject, JsonValue
 
 
 def register(app: FastMCP) -> None:
@@ -16,7 +17,7 @@ def register(app: FastMCP) -> None:
         color: str | None = None,
         is_favorite: bool = False,
     ) -> str:
-        body: dict = {"name": name, "is_favorite": is_favorite}
+        body: JsonObject = {"name": name, "is_favorite": is_favorite}
         if color is not None:
             body["color"] = color
         client = get_client()
@@ -42,13 +43,18 @@ def register(app: FastMCP) -> None:
         client = get_client()
         response = client.get("/projects")
         # API v1 returns {"results": [...]}, API v2 returns bare list
+        projects: list[JsonValue]
         if isinstance(response, dict) and "results" in response:
-            projects = response["results"]
+            results = response["results"]
+            projects = results if isinstance(results, list) else []
         elif isinstance(response, list):
             projects = response
         else:
             projects = []
         if name is not None:
             lower = name.lower()
-            projects = [p for p in projects if lower in p.get("name", "").lower()]
+            projects = [
+                p for p in projects
+                if isinstance(p, dict) and lower in str(p.get("name", "")).lower()
+            ]
         return json.dumps(projects)

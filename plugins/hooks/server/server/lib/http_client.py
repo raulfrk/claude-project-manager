@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 import httpx
+
+from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ async def post_hook(
     hook_id: str,
     url: str,
     target_tool: str,
-    params: dict[str, Any],
+    params: dict[str, JsonValue],
     timeout: float = _DEFAULT_TIMEOUT,
 ) -> FireResult:
     """POST *params* to *url* and return a ``FireResult``.

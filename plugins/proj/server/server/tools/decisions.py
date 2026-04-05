@@ -64,25 +64,25 @@ def register(app: FastMCP) -> None:
             matches = [
                 e
                 for e in entries
-                if pattern.search(e.get("decision", "")) or pattern.search(e.get("context", ""))
+                if pattern.search(str(e.get("decision", ""))) or pattern.search(str(e.get("context", "")))
             ]
             if not matches:
                 return f"No decisions matching '{decision}'."
             matches = matches[:10]
             lines = []
             for e in matches:
-                ts = e.get("timestamp", "")
-                dec = e.get("decision", "")
-                ctx = e.get("context", "")
-                tid = e.get("todo_id", "")
+                ts = str(e.get("timestamp", ""))
+                dec = str(e.get("decision", ""))
+                ctx = str(e.get("context", ""))
+                tid = str(e.get("todo_id", ""))
                 tgs = e.get("tags", [])
                 parts = [f"[{ts}] {dec}"]
                 if ctx:
                     parts.append(f"  context: {ctx}")
                 if tid:
                     parts.append(f"  todo_id: {tid}")
-                if tgs:
-                    parts.append(f"  tags: {', '.join(tgs)}")
+                if isinstance(tgs, list):
+                    parts.append(f"  tags: {', '.join(str(t) for t in tgs)}")
                 lines.append("\n".join(parts))
             return "\n\n".join(lines)
 
@@ -100,7 +100,7 @@ def register(app: FastMCP) -> None:
             if since_days is not None:
                 cutoff = datetime.now(UTC) - timedelta(days=since_days)
                 cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
-                recent = [e for e in entries if e.get("timestamp", "") >= cutoff_str]
+                recent = [e for e in entries if str(e.get("timestamp", "")) >= cutoff_str]
                 recent.reverse()
             else:
                 # decision param can override count
@@ -114,18 +114,18 @@ def register(app: FastMCP) -> None:
                 recent.reverse()
             lines = []
             for e in recent:
-                ts = e.get("timestamp", "")
-                dec = e.get("decision", "")
-                ctx = e.get("context", "")
-                tid = e.get("todo_id", "")
+                ts = str(e.get("timestamp", ""))
+                dec = str(e.get("decision", ""))
+                ctx = str(e.get("context", ""))
+                tid = str(e.get("todo_id", ""))
                 tgs = e.get("tags", [])
                 parts = [f"[{ts}] {dec}"]
                 if ctx:
                     parts.append(f"  context: {ctx}")
                 if tid:
                     parts.append(f"  todo_id: {tid}")
-                if tgs:
-                    parts.append(f"  tags: {', '.join(tgs)}")
+                if isinstance(tgs, list):
+                    parts.append(f"  tags: {', '.join(str(t) for t in tgs)}")
                 lines.append("\n".join(parts))
             return "\n\n".join(lines)
 

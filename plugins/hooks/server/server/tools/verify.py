@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from server.lib._types import JsonValue
 
 from server.lib import storage
 from server.lib.conditions import _load_proj_config
@@ -33,7 +35,7 @@ async def hooks_verify(
     """
     # Parse source_result
     try:
-        source: dict[str, Any] = json.loads(source_result)
+        source: dict[str, JsonValue] = json.loads(source_result)
         if not isinstance(source, dict):
             return "Error: source_result must be a JSON object, got " + type(source).__name__
     except json.JSONDecodeError as e:
@@ -48,13 +50,21 @@ async def hooks_verify(
             "trello_checklist_item_id", "jira_issue_key",
         )}
         if todo_fields:
-            base_config.setdefault("todo", {}).update(todo_fields)
+            todo_section = base_config.get("todo")
+            if not isinstance(todo_section, dict):
+                todo_section = {}
+                base_config["todo"] = todo_section
+            todo_section.update(todo_fields)
         # Inject project-level fields
         project_fields = {k: v for k, v in source.items() if k in (
             "todoist_project_id", "trello_card_id", "trello_checklist_id",
         )}
         if project_fields:
-            base_config.setdefault("project", {}).update(project_fields)
+            project_section = base_config.get("project")
+            if not isinstance(project_section, dict):
+                project_section = {}
+                base_config["project"] = project_section
+            project_section.update(project_fields)
 
     registry = storage.load()
     verification_hooks: list[Hook] = [

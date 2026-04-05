@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Any
+
+from collections.abc import Mapping
 
 import httpx
 
 from server.lib.config import TrelloConfig, load_config
 
 BASE_URL = "https://api.trello.com/1"
+
+# Recursive JSON value type — no Any needed.
+JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
+
+# HTTP query-param values are always flat scalars.
+ParamValue = str | int | float | bool
 
 
 class TrelloClient:
@@ -43,44 +50,48 @@ class TrelloClient:
                 time.sleep(sleep_for)
         self._request_timestamps.append(time.monotonic())
 
-    def _handle_response(self, resp: httpx.Response) -> Any:  # noqa: ANN401
+    def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.is_success:
-            return resp.json()
+            return resp.json()  # type: ignore[no-any-return]
         msg = f"Trello API error {resp.status_code}: {resp.text}"
         raise RuntimeError(msg)
 
-    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:  # noqa: ANN401
+    def get(
+        self, path: str, params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
         """Send a GET request to the Trello API."""
         self._rate_limit()
-        merged = {**self._auth_params(), **(params or {})}
+        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
         return self._handle_response(self._http.get(path, params=merged))
 
-    def post(  # noqa: ANN401
+    def post(
         self,
         path: str,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> Any:
+        params: Mapping[str, ParamValue] | None = None,
+        json: Mapping[str, JsonValue] | None = None,
+    ) -> JsonValue:
         """Send a POST request to the Trello API."""
         self._rate_limit()
-        merged = {**self._auth_params(), **(params or {})}
+        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
         return self._handle_response(self._http.post(path, params=merged, json=json))
 
-    def put(  # noqa: ANN401
+    def put(
         self,
         path: str,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> Any:
+        params: Mapping[str, ParamValue] | None = None,
+        json: Mapping[str, JsonValue] | None = None,
+    ) -> JsonValue:
         """Send a PUT request to the Trello API."""
         self._rate_limit()
-        merged = {**self._auth_params(), **(params or {})}
+        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
         return self._handle_response(self._http.put(path, params=merged, json=json))
 
-    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:  # noqa: ANN401
+    def delete(
+        self, path: str, params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
         """Send a DELETE request to the Trello API."""
         self._rate_limit()
-        merged = {**self._auth_params(), **(params or {})}
+        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
         return self._handle_response(self._http.delete(path, params=merged))
 
 

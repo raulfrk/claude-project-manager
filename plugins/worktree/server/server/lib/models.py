@@ -72,6 +72,6 @@ class WorktreeConfig:
             repos_raw = []
         return cls(
             default_worktree_dir=str(data.get("default_worktree_dir", "~/worktrees")),
-            base_repos=[BaseRepo.from_dict(r) for r in repos_raw],  # type: ignore[arg-type]  # list[object] from YAML; items are dicts at runtime
+            base_repos=[BaseRepo.from_dict(r) for r in repos_raw if isinstance(r, dict)],
             zoxide_integration=bool(data.get("zoxide_integration", False)),
         )

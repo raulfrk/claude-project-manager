@@ -135,7 +135,7 @@ def is_git_repo(path: str) -> bool:
         return False
 
 
-def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dict:
+def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dict[str, str]:
     """Rebase the worktree's branch onto base_branch.
 
     On conflict, aborts the rebase and raises GitConflictError.
@@ -161,7 +161,7 @@ def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dic
     return {"status": "rebased", "base_branch": base_branch}
 
 
-def merge_ff_only(repo_path: str, branch: str) -> dict:
+def merge_ff_only(repo_path: str, branch: str) -> dict[str, str]:
     """Fast-forward merge a branch into the current branch at repo_path."""
     try:
         result = subprocess.run(

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import storage
+from server.lib.models import JsonValue, Todo
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -18,8 +19,8 @@ if TYPE_CHECKING:
 
 
 def _assign_ids(
-    parent_todos: list,
-    all_todos: list,
+    parent_todos: list[Todo],
+    all_todos: list[Todo],
     id_map: dict[str, str],
     prefix: str = "",
 ) -> None:
@@ -35,7 +36,7 @@ def _assign_ids(
         _assign_ids(children, all_todos, id_map, prefix=f"{new_id}.")
 
 
-def _build_id_mapping(todos: list) -> dict[str, str]:
+def _build_id_mapping(todos: list[Todo]) -> dict[str, str]:
     """Build old→new ID mapping for all todos, sorted by creation date."""
     root_todos = sorted(
         [t for t in todos if t.parent is None],
@@ -46,7 +47,7 @@ def _build_id_mapping(todos: list) -> dict[str, str]:
     return id_map
 
 
-def _apply_remap(todos: list, id_map: dict[str, str]) -> None:
+def _apply_remap(todos: list[Todo], id_map: dict[str, str]) -> None:
     """Apply id_map to all todo fields in-place."""
     for todo in todos:
         todo.id = id_map.get(todo.id, todo.id)
@@ -74,12 +75,12 @@ def _restore_backups(backups: dict[Path, Path | None]) -> None:
             shutil.copy2(backup, original)
 
 
-def _migrate_decisions(decisions: list[dict], id_map: dict[str, str]) -> int:
+def _migrate_decisions(decisions: list[dict[str, JsonValue]], id_map: dict[str, str]) -> int:
     """Remap T-prefix IDs in decisions list in-place. Returns count of modified entries."""
     count = 0
     for entry in decisions:
         modified = False
-        old_tid = entry.get("todo_id", "")
+        old_tid = str(entry.get("todo_id", ""))
         if old_tid and old_tid in id_map:
             entry["todo_id"] = id_map[old_tid]
             modified = True
@@ -98,7 +99,7 @@ def _migrate_decisions(decisions: list[dict], id_map: dict[str, str]) -> int:
     return count
 
 
-def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "") -> dict:
+def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "") -> dict[str, JsonValue]:
     """Remove deprecated fields from proj.yaml. Returns result dict."""
     config_path = storage.config_path()
     raw = storage._load_yaml(config_path)
@@ -110,7 +111,8 @@ def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "")
         if not dry_run:
             del perms["investigation_tools"]
 
-    sync_todoist = raw.get("sync", {}).get("todoist", {})
+    sync_raw = raw.get("sync", {})
+    sync_todoist = sync_raw.get("todoist", {}) if isinstance(sync_raw, dict) else {}
     if isinstance(sync_todoist, dict) and "mcp_server" in sync_todoist:
         removed.append("sync.todoist.mcp_server")
         if not dry_run:
@@ -135,7 +137,7 @@ def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "")
     return {"cleaned": True, "removed": removed}
 
 
-def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) -> dict:
+def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) -> dict[str, JsonValue]:
     """Migrate a single project's todo IDs from T-prefix format to numeric dot-notation."""
     todos = storage.load_todos(cfg, project_name)
     meta = storage.load_meta(cfg, project_name)
@@ -255,7 +257,7 @@ def register(app: FastMCP) -> None:
         cfg = require_config()
         index = storage.load_index(cfg)
 
-        results: list[dict] = []
+        results: list[dict[str, JsonValue]] = []
         for project_name in index.projects:
             try:
                 result = _migrate_project(cfg, project_name, dry_run=dry_run)

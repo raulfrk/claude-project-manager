@@ -447,9 +447,11 @@ class TestRunDiscoverySummary:
         # Mock storage (lazy-imported inside run_discovery)
         mock_storage = MagicMock()
         mock_storage.load.return_value = registry
+        mock_storage.save = MagicMock()
 
-        with patch.dict("sys.modules", {"server.lib.storage": mock_storage}):
-            summary = discovery_mod.run_discovery(root=tmp_path)
+        import server.lib as _lib
+        monkeypatch.setattr(_lib, "storage", mock_storage)
+        summary = discovery_mod.run_discovery(root=tmp_path)
         assert "updated" in summary.lower()
         assert "1 updated" in summary
 

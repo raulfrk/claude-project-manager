@@ -8,9 +8,13 @@ def register(app: FastMCP) -> None:
     @app.tool(description="List all boards for the authenticated user.")
     def list_boards() -> str:
         client = get_client()
-        boards = client.get("/members/me/boards")
+        raw = client.get("/members/me/boards")
+        boards = raw if isinstance(raw, list) else []
         if client._config.allowed_board_ids:
-            boards = [b for b in boards if b.get("id") in client._config.allowed_board_ids]
+            boards = [
+                b for b in boards
+                if isinstance(b, dict) and b.get("id") in client._config.allowed_board_ids
+            ]
         return json.dumps(boards)
 
     @app.tool(description="Get a single board by ID.")

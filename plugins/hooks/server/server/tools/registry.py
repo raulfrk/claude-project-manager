@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from server.lib._types import JsonValue
 from server.lib import storage
 from server.lib.conditions import resolve_condition_status, validate_condition_syntax
 from server.lib.dag import find_cycle_path, would_create_cycle
@@ -38,7 +39,7 @@ def hooks_register(
     """
     # Validate param_mapping is valid JSON
     try:
-        mapping: dict[str, str] = json.loads(param_mapping)
+        mapping: dict[str, JsonValue] = json.loads(param_mapping)
         if not isinstance(mapping, dict):
             return json.dumps({
                 "result": f"Error: param_mapping must be a JSON object (dict), got {type(mapping).__name__}",
@@ -52,7 +53,7 @@ def hooks_register(
 
     # Validate feedback_mapping is valid JSON
     try:
-        fb_mapping: dict[str, str] = json.loads(feedback_mapping)
+        fb_mapping: dict[str, JsonValue] = json.loads(feedback_mapping)
         if not isinstance(fb_mapping, dict):
             return json.dumps({
                 "result": f"Error: feedback_mapping must be a JSON object (dict), got {type(fb_mapping).__name__}",
@@ -173,8 +174,8 @@ def hooks_list(trigger_tool: str | None = None) -> str:
     else:
         matched = list(registry.hooks)
 
-    primary_out: list[dict[str, object]] = []
-    verification_out: list[dict[str, object]] = []
+    primary_out: list[dict[str, JsonValue]] = []
+    verification_out: list[dict[str, JsonValue]] = []
     for h in matched:
         entry = h.to_dict()
         entry["condition_status"] = resolve_condition_status(h.condition)
@@ -183,10 +184,10 @@ def hooks_list(trigger_tool: str | None = None) -> str:
         else:
             primary_out.append(entry)
 
-    result: dict[str, object] = {
-        "hooks": primary_out,
-        "verification_hooks": verification_out,
-        "servers": registry.servers,
+    result: dict[str, JsonValue] = {
+        "hooks": primary_out,  # type: ignore[dict-item]
+        "verification_hooks": verification_out,  # type: ignore[dict-item]
+        "servers": registry.servers,  # type: ignore[dict-item]
     }
     return json.dumps(result, indent=2)
 

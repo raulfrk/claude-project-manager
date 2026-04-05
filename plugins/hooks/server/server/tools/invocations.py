@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from server.lib._types import JsonValue
+
 from server.lib import storage
 
 if TYPE_CHECKING:
@@ -27,7 +29,7 @@ def hooks_invocations(
     Results are sorted newest-first and sliced to ``limit`` (clamped to 200).
     """
     limit = min(limit, _MAX_LIMIT)
-    combined: list[dict] = []
+    combined: list[dict[str, JsonValue]] = []
 
     if type in ("invocation", "all"):
         for entry in storage.load_invocations(limit=0):
@@ -46,7 +48,7 @@ def hooks_invocations(
         combined = [e for e in combined if e.get("target_tool") == target_tool]
 
     # Sort newest-first, take limit
-    combined.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    combined.sort(key=lambda e: str(e.get("timestamp", "")), reverse=True)
     combined = combined[:limit]
 
     return json.dumps({

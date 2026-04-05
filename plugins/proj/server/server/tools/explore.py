@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.lib.models import JsonValue
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
@@ -45,7 +47,7 @@ _CONFIG_FILES = {
 }
 
 
-def explore_codebase(path: str, max_files: int = 80) -> dict[str, object]:
+def explore_codebase(path: str, max_files: int = 80) -> dict[str, JsonValue]:
     """Walk a directory and return structured exploration data.
 
     Returns::

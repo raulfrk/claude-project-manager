@@ -174,6 +174,7 @@ class TestTodoistTaskToDict:
             "project_id": "p1",
             "parent_id": "pp1",
             "is_completed": True,
+            "updatedAt": "",
         }
 
 

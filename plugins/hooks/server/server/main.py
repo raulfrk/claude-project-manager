@@ -36,7 +36,7 @@ def _run_startup_discovery() -> None:
     root = Path(root_env) if root_env else None
 
     glob_env = os.environ.get("HOOKS_DISCOVERY_GLOB")
-    kwargs: dict[str, object] = {}
+    kwargs: dict[str, Path | str] = {}
     if root is not None:
         kwargs["root"] = root
     if glob_env:

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Coroutine, Sequence
+from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, runtime_checkable
 
 import httpx
 
@@ -17,8 +17,25 @@ logger = logging.getLogger("hook_dispatch")
 
 _MAX_RESULT_BYTES = 100 * 1024  # 100 KB
 
+JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
+ToolResult = str | dict[str, JsonValue] | list[JsonValue] | None
 
-def _serialize_result(result: Any) -> str:
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+@runtime_checkable
+class _ContentBlock(Protocol):
+    """Duck type for MCP ContentBlock objects that have a .text attribute."""
+
+    @property
+    def text(self) -> str: ...
+
+
+_RawToolOutput = ToolResult | Sequence[_ContentBlock]
+
+
+def _serialize_result(result: _RawToolOutput) -> str:
     """Serialize a tool result to a JSON string, truncating at 100KB."""
     if result is None:
         serialized = "null"
@@ -35,10 +52,9 @@ def _serialize_result(result: Any) -> str:
     elif isinstance(result, (dict, int, float, bool)):
         serialized = json.dumps(result)
     elif isinstance(result, (list, tuple)):
-        # Check for ContentBlock sequences (objects with .text attribute)
         items = list(result)
-        if items and hasattr(items[0], "text"):
-            texts = [item.text for item in items if hasattr(item, "text")]
+        if items and isinstance(items[0], _ContentBlock):
+            texts = [item.text for item in items if isinstance(item, _ContentBlock)]
             serialized = json.dumps(texts[0] if len(texts) == 1 else texts)
         else:
             serialized = json.dumps(items)
@@ -88,9 +104,9 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
 
 async def _dispatch_hook(
     tool_name: str,
-    result: Any,
+    result: _RawToolOutput,
     hooks_port: int = 19100,
-) -> dict | None:
+) -> dict[str, JsonValue] | None:
     """POST hook dispatch to the hooks server. Returns the parsed response dict.
 
     Resolves the hooks server URL from the registry on every call so that a
@@ -113,7 +129,8 @@ async def _dispatch_hook(
         async with httpx.AsyncClient(timeout=30.0, transport=hooks_transport) as client:
             resp = await client.post(hooks_url, json=payload)
             try:
-                return resp.json()
+                data: dict[str, JsonValue] = resp.json()
+                return data
             except Exception:
                 logger.warning("Hook dispatch for %s: malformed JSON response", tool_name)
                 return {"_error": "malformed response", "hooks_fired": 0, "errors": [], "results": []}
@@ -125,7 +142,7 @@ async def _dispatch_hook(
         return None
 
 
-def _build_hooks_field(fire_response: dict | None, tool_name: str) -> dict | None:
+def _build_hooks_field(fire_response: dict[str, JsonValue] | None, tool_name: str) -> dict[str, JsonValue] | None:
     """Map a hooks_fire_tool response to the _hooks injection format.
 
     Returns None when injection should be skipped (zero hooks, nested dispatch).
@@ -136,7 +153,10 @@ def _build_hooks_field(fire_response: dict | None, tool_name: str) -> dict | Non
 
     has_error = "_error" in fire_response
     hooks_fired = fire_response.get("hooks_fired", 0)
-    errors_list = fire_response.get("errors", [])
+    raw_errors = fire_response.get("errors", [])
+    errors_list: list[dict[str, JsonValue]] = [
+        e for e in (raw_errors if isinstance(raw_errors, list) else []) if isinstance(e, dict)
+    ]
 
     # Skip injection for nested dispatches (fire.py sets top_level=True only at depth=0)
     if not has_error and not fire_response.get("top_level"):
@@ -147,25 +167,32 @@ def _build_hooks_field(fire_response: dict | None, tool_name: str) -> dict | Non
         return None
 
     # Build chain from results (ok) + errors
-    chain: list[dict[str, Any]] = [
-        {"hook_id": r["hook_id"], "target_tool": r.get("target_tool"), "status": "ok", "error": None}
-        for r in fire_response.get("results", [])
-    ] + [
-        {"hook_id": e["hook_id"], "target_tool": e.get("target_tool"), "status": "error", "error": e.get("error")}
-        for e in errors_list
-        if isinstance(e, dict)
+    raw_results_val = fire_response.get("results", [])
+    raw_results: list[dict[str, JsonValue]] = [
+        r for r in (raw_results_val if isinstance(raw_results_val, list) else [])
+        if isinstance(r, dict)
     ]
+    chain: list[JsonValue] = []
+    for r in raw_results:
+        entry: dict[str, JsonValue] = {"hook_id": str(r.get("hook_id")), "target_tool": str(r.get("target_tool")) if r.get("target_tool") else None, "status": "ok", "error": None}
+        chain.append(entry)
+    for e in errors_list:
+        entry = {"hook_id": str(e.get("hook_id")), "target_tool": str(e.get("target_tool")) if e.get("target_tool") else None, "status": "error", "error": str(e.get("error")) if e.get("error") else None}
+        chain.append(entry)
 
-    error_strings: list[str] = []
+    error_strings: list[JsonValue] = []
     if has_error:
         error_strings = [str(fire_response["_error"])]
     else:
         error_strings = [
-            e.get("error", str(e)) for e in errors_list if isinstance(e, dict)
+            str(e.get("error", str(e))) for e in errors_list
         ]
 
     # Merge cascade errors from nested hook dispatch
-    cascade_errors = fire_response.get("cascade_errors", [])
+    raw_cascade = fire_response.get("cascade_errors", [])
+    cascade_errors: list[str] = [
+        str(ce) for ce in (raw_cascade if isinstance(raw_cascade, list) else [])
+    ]
     for ce in cascade_errors:
         error_strings.append(ce)
 
@@ -180,21 +207,22 @@ def _build_hooks_field(fire_response: dict | None, tool_name: str) -> dict | Non
     }
 
 
-def _inject_hooks(original: Any, hooks_field: dict) -> Any:
+def _inject_hooks(original: _RawToolOutput, hooks_field: dict[str, JsonValue]) -> str | dict[str, JsonValue]:
     """Inject a _hooks field into a tool result.
 
     Handles all result shapes: JSON object string, JSON non-object, non-JSON string,
     None, dict, ContentBlock list. Truncates chain if post-injection size > 100KB.
     """
 
-    def _build_with_hooks(base: dict) -> str:
+    def _build_with_hooks(base: dict[str, JsonValue]) -> str:
         base["_hooks"] = hooks_field
         result_str = json.dumps(base, ensure_ascii=True)
         if len(result_str.encode()) > _MAX_RESULT_BYTES:
-            truncated_field = {
+            existing_errors = hooks_field.get("errors")
+            truncated_field: dict[str, JsonValue] = {
                 **hooks_field,
                 "chain": [],
-                "errors": hooks_field.get("errors", []) + ["chain truncated: result too large"],
+                "errors": (existing_errors if isinstance(existing_errors, list) else []) + ["chain truncated: result too large"],
             }
             base["_hooks"] = truncated_field
             result_str = json.dumps(base, ensure_ascii=True)
@@ -217,13 +245,18 @@ def _inject_hooks(original: Any, hooks_field: dict) -> Any:
         original["_hooks"] = hooks_field
         return original
 
-    items = list(original) if isinstance(original, (list, tuple)) else None
-    if items and hasattr(items[0], "text"):
-        texts = [item.text for item in items if hasattr(item, "text")]
-        text = texts[0] if len(texts) == 1 else json.dumps(texts)
-        return json.dumps({"result": text, "_hooks": hooks_field})
+    if isinstance(original, (list, tuple)):
+        items = list(original)
+        if items and isinstance(items[0], _ContentBlock):
+            texts = [item.text for item in items if isinstance(item, _ContentBlock)]
+            text: str = texts[0] if len(texts) == 1 else json.dumps(texts)
+            return json.dumps({"result": text, "_hooks": hooks_field})
 
     return json.dumps({"result": str(original), "_hooks": hooks_field})
+
+
+_GenericToolFn = Callable[..., ToolResult]
+_ToolDecorator = Callable[[_GenericToolFn], _GenericToolFn]
 
 
 def enable_hook_dispatch(
@@ -245,47 +278,53 @@ def enable_hook_dispatch(
     original_tool = mcp.tool
 
     def patched_tool(
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
+        name: str | _GenericToolFn | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        **kwargs: JsonValue,
+    ) -> _GenericToolFn | _ToolDecorator:
         # Handle both @mcp.tool and @mcp.tool() and @mcp.tool(name="x")
         # If called with a callable as first arg, it's @mcp.tool without parens
-        if args and callable(args[0]) and not kwargs:
-            # @mcp.tool  (no parens)
-            fn = args[0]
+        if callable(name):
+            fn = name
             tool_name = fn.__name__
             if tool_name in excluded:
-                return original_tool(fn)
+                return original_tool()(fn)
             wrapped = _wrap_tool_fn(fn, tool_name, hooks_port)
-            return original_tool(wrapped)
+            return original_tool()(wrapped)
 
         # @mcp.tool() or @mcp.tool(name="custom", ...) — returns a decorator
-        custom_name = kwargs.get("name")
+        custom_name = name
 
-        decorator = original_tool(*args, **kwargs)
+        decorator: _ToolDecorator = original_tool(
+            name=name if isinstance(name, str) else None,
+            title=title,
+            description=description,
+            **kwargs,  # type: ignore[arg-type]
+        )
 
-        def wrapper(fn: Any) -> Any:
-            tool_name = custom_name or fn.__name__
+        def wrapper(fn: _GenericToolFn) -> _GenericToolFn:
+            tool_name = str(custom_name) if custom_name else fn.__name__
             if tool_name in excluded:
                 return decorator(fn)
             wrapped = _wrap_tool_fn(fn, tool_name, hooks_port)
-            return decorator(wrapped)
+            return decorator(wrapped)  # type: ignore[arg-type]
 
         return wrapper
 
-    mcp.tool = patched_tool  # type: ignore[method-assign]
+    mcp.tool = patched_tool  # type: ignore[assignment,method-assign]
 
 
 def _wrap_tool_fn(
-    fn: Any,
+    fn: Callable[P, R],
     tool_name: str,
     hooks_port: int,
-) -> Any:
+) -> Callable[P, Coroutine[None, None, R | str | dict[str, JsonValue]]]:
     """Wrap a tool function to dispatch hooks after successful execution.
 
     Both sync and async tools get an async wrapper. FastMCP's call_fn_with_arg_validation
     checks is_async on the wrapper (not the original), so async wrappers work for both.
-    The key: we must NOT use functools.wraps for sync→async conversion, because wraps
+    The key: we must NOT use functools.wraps for sync->async conversion, because wraps
     copies __wrapped__ which FastMCP may inspect. Instead we manually copy __name__,
     __doc__, and __module__, and set __signature__ from the original.
 
@@ -296,31 +335,37 @@ def _wrap_tool_fn(
 
     if asyncio.iscoroutinefunction(fn):
 
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            result = await fn(*args, **kwargs)
-            fire_response = await _dispatch_hook(tool_name, result, hooks_port)
+        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R | str | dict[str, JsonValue]:
+            result: R = await fn(*args, **kwargs)
+            fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
             hooks_field = _build_hooks_field(fire_response, tool_name)
             if hooks_field is not None:
-                return _inject_hooks(result, hooks_field)
+                return _inject_hooks(result, hooks_field)  # type: ignore[arg-type]
             return result
+
+        async_wrapper.__name__ = fn.__name__
+        async_wrapper.__doc__ = fn.__doc__
+        async_wrapper.__module__ = fn.__module__
+        setattr(async_wrapper, "__signature__", inspect.signature(fn))  # noqa: B010
+        setattr(async_wrapper, "__wrapped__", fn)  # noqa: B010
+        async_wrapper.__annotations__ = getattr(fn, "__annotations__", {})
 
         return async_wrapper
 
     # Sync tool: wrap as async so dispatch can be awaited.
     # Copy signature from original fn so FastMCP argument validation works.
-    async def sync_to_async_wrapper(*args: Any, **kwargs: Any) -> Any:
-        result = fn(*args, **kwargs)
-        fire_response = await _dispatch_hook(tool_name, result, hooks_port)
+    async def sync_to_async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R | str | dict[str, JsonValue]:
+        result: R = fn(*args, **kwargs)
+        fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
         hooks_field = _build_hooks_field(fire_response, tool_name)
         if hooks_field is not None:
-            return _inject_hooks(result, hooks_field)
+            return _inject_hooks(result, hooks_field)  # type: ignore[arg-type]
         return result
 
     sync_to_async_wrapper.__name__ = fn.__name__
     sync_to_async_wrapper.__doc__ = fn.__doc__
     sync_to_async_wrapper.__module__ = fn.__module__
-    sync_to_async_wrapper.__signature__ = inspect.signature(fn)
+    setattr(sync_to_async_wrapper, "__signature__", inspect.signature(fn))  # noqa: B010
     sync_to_async_wrapper.__annotations__ = getattr(fn, "__annotations__", {})
 
     return sync_to_async_wrapper

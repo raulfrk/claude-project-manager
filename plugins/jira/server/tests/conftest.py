@@ -12,8 +12,20 @@ from server.lib.config import JiraConfig
 # All modules that import get_client and need to be patched.
 _GET_CLIENT_LOCATIONS = [
     "server.lib.client.get_client",
+    "server.tools.attachments.get_client",
+    "server.tools.comments.get_client",
+    "server.tools.components.get_client",
     "server.tools.issues.get_client",
+    "server.tools.labels.get_client",
+    "server.tools.links.get_client",
+    "server.tools.metadata.get_client",
     "server.tools.projects.get_client",
+    "server.tools.sprints.get_client",
+    "server.tools.transitions.get_client",
+    "server.tools.users.get_client",
+    "server.tools.versions.get_client",
+    "server.tools.watchers.get_client",
+    "server.tools.worklogs.get_client",
 ]
 
 

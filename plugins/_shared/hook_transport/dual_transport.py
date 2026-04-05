@@ -15,9 +15,9 @@ import logging
 import os
 import socket
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import uvicorn
@@ -32,6 +32,8 @@ logger = logging.getLogger("hook_transport.dual")
 
 SOCKET_DIR = "/tmp"
 SOCKET_PREFIX = "claude-hooks-"
+
+_PreRunFn = Callable[[], None] | Callable[[], Coroutine[None, None, None]]
 
 
 def _socket_path(plugin_name: str) -> str:
@@ -89,7 +91,7 @@ def _register_socket_cleanup(path: str) -> None:
     atexit.register(_cleanup)
 
 
-async def _start_http(server: Any, label: str) -> None:
+async def _start_http(server: uvicorn.Server, label: str) -> None:
     """Start the uvicorn HTTP server, catching all failures gracefully.
 
     The HTTP endpoint is optional — if it fails to start (port conflict,
@@ -131,7 +133,7 @@ async def _run_dual_async(
     mcp_instance: FastMCP,
     plugin_name: str,
     default_port: int | None = None,
-    pre_run: Callable[..., Any] | None = None,
+    pre_run: _PreRunFn | None = None,
 ) -> None:
     """Internal async implementation of dual-transport startup."""
     # Run optional pre-startup callback (e.g., hooks discovery)
@@ -190,7 +192,7 @@ def run_dual(
     mcp_instance: FastMCP,
     plugin_name: str,
     default_port: int | None = None,
-    pre_run: Callable[..., Any] | None = None,
+    pre_run: _PreRunFn | None = None,
 ) -> None:
     """Run a FastMCP server with both stdio and HTTP transports.
 

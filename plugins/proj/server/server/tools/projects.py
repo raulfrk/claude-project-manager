@@ -10,19 +10,20 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.models import (
+    JsonValue,
+    ProjConfig,
     ProjectEntry,
     ProjectMeta,
     ProjectPermissions,
     RepoEntry,
+    TrelloListMappings,
     validate_project_name,
 )
-from server.lib.models import TrelloListMappings
 from server.tools.config import require_config, require_project
 
 
-def _resolve_list_mappings(cfg: object, meta: ProjectMeta) -> TrelloListMappings:
+def _resolve_list_mappings(cfg: ProjConfig, meta: ProjectMeta) -> TrelloListMappings:
     """Resolve effective Trello list mappings: per-project override falls back to global."""
-    from server.lib.models import ProjConfig  # local import to avoid circularity at module level
 
     assert isinstance(cfg, ProjConfig)
     if meta.trello.list_mappings is not None:
@@ -31,6 +32,7 @@ def _resolve_list_mappings(cfg: object, meta: ProjectMeta) -> TrelloListMappings
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+    from server.lib.models import ProjConfig
 
 
 def _resolve_hooks_socket_path() -> str:
@@ -224,7 +226,7 @@ def register(app: FastMCP) -> None:
             if include_archived or not p.archived
         ]
 
-        projects: list[dict[str, object]] = []
+        projects: list[dict[str, JsonValue]] = []
         warnings: list[str] = []
         for entry in sorted(entries, key=lambda x: x.name):
             try:
@@ -364,7 +366,7 @@ def register(app: FastMCP) -> None:
             except Exception:  # noqa: BLE001
                 pass  # Update succeeds even if hint generation fails
 
-        result_dict = {
+        result_dict: dict[str, JsonValue] = {
             "result": f"Updated project '{project_name}'.",
             "project_name": project_name,
         }
@@ -524,7 +526,7 @@ def register(app: FastMCP) -> None:
 
         index = storage.load_index(cfg)
         today = date.today()
-        candidates = []
+        candidates: list[dict[str, JsonValue]] = []
         for name, entry in list(index.projects.items()):
             if not entry.archived or not entry.purgeable or not entry.archive_date:
                 continue
@@ -554,7 +556,7 @@ def register(app: FastMCP) -> None:
         purged = []
         backup_paths: list[str] = []
         for c in candidates:
-            name = c["name"]
+            name = str(c["name"])
             tracking_path = Path(cfg.tracking_dir).expanduser() / name
             if tracking_path.exists():
                 # Create a tarball backup before purging
@@ -598,11 +600,11 @@ def register(app: FastMCP) -> None:
         if trash_dir.exists():
             grace = cfg.archive.trash_grace_days
             now = datetime.now()
-            for entry in trash_dir.iterdir():
-                if not entry.is_dir():
+            for trash_entry in trash_dir.iterdir():
+                if not trash_entry.is_dir():
                     continue
                 # Parse timestamp from directory name: <name>-<YYYYMMDDTHHmmss>
-                parts = entry.name.rsplit("-", 1)
+                parts = trash_entry.name.rsplit("-", 1)
                 if len(parts) != 2:
                     continue
                 try:
@@ -610,7 +612,7 @@ def register(app: FastMCP) -> None:
                 except ValueError:
                     continue
                 if (now - entry_time).days >= grace:
-                    shutil.rmtree(entry, ignore_errors=True)
+                    shutil.rmtree(trash_entry, ignore_errors=True)
                     swept += 1
 
         sweep_note = f" Swept {swept} expired trash entries." if swept else ""
@@ -750,7 +752,7 @@ def register(app: FastMCP) -> None:
             "trello_card_id": meta.trello_card_id or "",
         })
 
-    def _migrate_single_dir(cfg: object, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict:
+    def _migrate_single_dir(cfg: ProjConfig, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict[str, JsonValue]:
         """Migrate one project from single-path to multi-repo format. Returns result dict."""
         meta_p = storage.meta_path(cfg, project_name)
         if not meta_p.exists():
@@ -771,7 +773,7 @@ def register(app: FastMCP) -> None:
         shutil.copy2(meta_p, backup_path)
 
         try:
-            new_repo = {"label": label, "path": path_val, "claudemd": False, "reference": False}
+            new_repo: dict[str, JsonValue] = {"label": label, "path": path_val, "claudemd": False, "reference": False}
             raw["repos"] = [new_repo]
             del raw["path"]
             storage._write_yaml(meta_p, raw)

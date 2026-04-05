@@ -41,7 +41,7 @@ def _parse_settings_file(path: Path, raw: dict[str, object]) -> SettingsFile:
 
     return SettingsFile(
         path=path,
-        permissions=Permissions.from_dict(perms_raw),  # type: ignore[arg-type]
+        permissions=Permissions.from_dict(perms_raw),
         sandbox=SandboxConfig.from_dict(sandbox_raw),
         raw={k: v for k, v in raw.items() if k not in ("permissions", "sandbox")},
     )

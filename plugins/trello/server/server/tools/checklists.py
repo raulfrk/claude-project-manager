@@ -6,7 +6,7 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from server.lib.client import get_client
+from server.lib.client import JsonValue, get_client
 
 
 def register(app: FastMCP) -> None:
@@ -73,10 +73,10 @@ def register(app: FastMCP) -> None:
             "Returns {successes: [...], failures: [...]}."
         ),
     )
-    def batch_add_checklist_items(checklist_id: str, items: list[dict[str, object]]) -> str:
+    def batch_add_checklist_items(checklist_id: str, items: list[dict[str, str | bool]]) -> str:
         client = get_client()
-        successes: list[dict[str, object]] = []
-        failures: list[dict[str, object]] = []
+        successes: list[JsonValue] = []
+        failures: list[dict[str, JsonValue]] = []
         for idx, item in enumerate(items):
             try:
                 name = str(item.get("name", ""))
@@ -91,7 +91,7 @@ def register(app: FastMCP) -> None:
                 )
                 successes.append(created)
             except Exception as exc:  # noqa: BLE001
-                failures.append({"index": idx, "name": item.get("name", ""), "error": str(exc)})
+                failures.append({"index": idx, "name": str(item.get("name", "")), "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
 
     @app.tool(
@@ -102,9 +102,17 @@ def register(app: FastMCP) -> None:
     )
     def trello_verify_checklist_item(card_id: str, item_id: str) -> str:
         client = get_client()
-        checklists = client.get(f"/cards/{card_id}/checklists")
+        raw_checklists = client.get(f"/cards/{card_id}/checklists")
+        checklists = raw_checklists if isinstance(raw_checklists, list) else []
         for checklist in checklists:
-            for item in checklist.get("checkItems", []):
+            if not isinstance(checklist, dict):
+                continue
+            check_items = checklist.get("checkItems", [])
+            if not isinstance(check_items, list):
+                continue
+            for item in check_items:
+                if not isinstance(item, dict):
+                    continue
                 if item.get("id") == item_id:
                     return json.dumps({
                         "verified": True,
@@ -131,8 +139,8 @@ def register(app: FastMCP) -> None:
         card_id: str, updates: list[dict[str, str]]
     ) -> str:
         client = get_client()
-        successes: list[dict[str, object]] = []
-        failures: list[dict[str, object]] = []
+        successes: list[JsonValue] = []
+        failures: list[dict[str, JsonValue]] = []
         for idx, update in enumerate(updates):
             try:
                 cl_id = update.get("checklist_id", "")

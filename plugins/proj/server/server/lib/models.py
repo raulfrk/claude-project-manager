@@ -2,8 +2,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Recursive type alias for variable JSON/YAML data.
+# Uses Mapping (covariant) instead of dict (invariant) so that dict[str, str] etc.
+# are accepted as JsonValue without casts. Same for Sequence vs list.
+type JsonValue = str | int | float | bool | None | Mapping[str, "JsonValue"] | Sequence["JsonValue"]
+
+# Type alias for deserialized YAML/JSON data (a JSON object / dict).
+type JsonDict = dict[str, JsonValue]
+
+
+def _int(v: JsonValue, default: int = 0) -> int:
+    """Narrow a JsonValue to int for deserialized data."""
+    return int(v) if isinstance(v, (int, float, str)) else default
+
+
+def _str(v: JsonValue, default: str = "") -> str:
+    """Narrow a JsonValue to str for deserialized data."""
+    return str(v) if v is not None else default
+
+
+def _list(v: JsonValue) -> list[JsonValue]:
+    """Narrow a JsonValue to list for deserialized data."""
+    return list(v) if isinstance(v, list) else []
 
 
 class QualityLevel(str, Enum):
@@ -27,7 +51,7 @@ class SmartGateConfig:
         "pyproject.toml", "package.json", "settings.json", "proj.yaml", "*.config.*",
     ])
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "auto_execute_threshold": self.auto_execute_threshold,
@@ -36,12 +60,13 @@ class SmartGateConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "SmartGateConfig":
+    def from_dict(cls, data: JsonDict) -> "SmartGateConfig":
+        raw_patterns = data.get("critical_path_patterns")
         return cls(
             enabled=bool(data.get("enabled", True)),
-            auto_execute_threshold=int(data.get("auto_execute_threshold", 3)),
-            light_review_threshold=int(data.get("light_review_threshold", 7)),
-            critical_path_patterns=list(data.get("critical_path_patterns", cls().critical_path_patterns)),
+            auto_execute_threshold=_int(data.get("auto_execute_threshold"), 3),
+            light_review_threshold=_int(data.get("light_review_threshold"), 7),
+            critical_path_patterns=[str(p) for p in raw_patterns] if isinstance(raw_patterns, list) else cls().critical_path_patterns,
         )
 
 
@@ -55,7 +80,7 @@ class TodoistSync:
     mcp_server: str = "claude_ai_Todoist"  # Deprecated: ignored, local plugin uses fixed "todoist" prefix
     root_only: bool = False
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "auto_sync": self.auto_sync,
@@ -64,7 +89,7 @@ class TodoistSync:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TodoistSync:
+    def from_dict(cls, data: JsonDict) -> TodoistSync:
         return cls(
             enabled=bool(data.get("enabled", False)),
             auto_sync=bool(data.get("auto_sync", True)),
@@ -79,7 +104,7 @@ class GitTracking:
     github_enabled: bool = False
     github_repo_format: str = "tracking"
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "github_enabled": self.github_enabled,
@@ -87,7 +112,7 @@ class GitTracking:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> GitTracking:
+    def from_dict(cls, data: JsonDict) -> GitTracking:
         return cls(
             enabled=bool(data.get("enabled", False)),
             github_enabled=bool(data.get("github_enabled", False)),
@@ -102,7 +127,7 @@ class ArchiveConfig:
     trash_grace_days: int = 7
     backup_retention_days: int = 30
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "destination": self.destination,
             "purge_after_days": self.purge_after_days,
@@ -111,15 +136,15 @@ class ArchiveConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ArchiveConfig:
+    def from_dict(cls, data: JsonDict) -> ArchiveConfig:
         raw = data.get("purge_after_days")
         tgd_raw = data.get("trash_grace_days")
         brd_raw = data.get("backup_retention_days")
         return cls(
             destination=str(data.get("destination", "~/projects/archived")),
-            purge_after_days=int(raw) if raw is not None else None,
-            trash_grace_days=int(tgd_raw) if tgd_raw is not None else 7,
-            backup_retention_days=int(brd_raw) if brd_raw is not None else 30,
+            purge_after_days=_int(raw) if raw is not None else None,
+            trash_grace_days=_int(tgd_raw) if tgd_raw is not None else 7,
+            backup_retention_days=_int(brd_raw) if brd_raw is not None else 30,
         )
 
 
@@ -132,7 +157,7 @@ class TrelloListMappings:
     pending: str = ""         # List name for paused/blocked projects (empty = not configured)
     archived: str = ""        # List name for archived projects (empty = not configured)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "created": self.created,
             "done": self.done,
@@ -142,7 +167,7 @@ class TrelloListMappings:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TrelloListMappings:
+    def from_dict(cls, data: JsonDict) -> TrelloListMappings:
         return cls(
             created=str(data.get("created", "Backlog")),
             done=str(data.get("done", "Done")),
@@ -163,7 +188,7 @@ class TrelloSync:
     list_mappings: TrelloListMappings = field(default_factory=TrelloListMappings)
     on_delete: str = "archive"  # "archive" or "delete"
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "auto_sync": self.auto_sync,
@@ -174,14 +199,14 @@ class TrelloSync:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TrelloSync:
+    def from_dict(cls, data: JsonDict) -> TrelloSync:
         lm_raw = data.get("list_mappings", {})
         return cls(
             enabled=bool(data.get("enabled", False)),
             auto_sync=bool(data.get("auto_sync", True)),
             default_board_id=str(data.get("default_board_id", "")),
             default_list=str(data.get("default_list", "Active")),
-            list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),  # type: ignore[arg-type]
+            list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),
             on_delete=str(data.get("on_delete", "archive")),
         )
 
@@ -193,14 +218,14 @@ class JiraSync:
     enabled: bool = False
     default_user: str = ""
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "default_user": self.default_user,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> JiraSync:
+    def from_dict(cls, data: JsonDict) -> JiraSync:
         return cls(
             enabled=bool(data.get("enabled", False)),
             default_user=str(data.get("default_user", "")),
@@ -214,8 +239,8 @@ class PermissionsConfig:
     projects_root: str | None = None
     tracking_root: str | None = None
 
-    def to_dict(self) -> dict[str, object]:
-        d: dict[str, object] = {
+    def to_dict(self) -> dict[str, JsonValue]:
+        d: dict[str, JsonValue] = {
             "auto_grant": self.auto_grant,
             "auto_allow_mcps": self.auto_allow_mcps,
         }
@@ -226,14 +251,14 @@ class PermissionsConfig:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> PermissionsConfig:
+    def from_dict(cls, data: JsonDict) -> PermissionsConfig:
         # Note: "investigation_tools" was removed in v0.37 (sandbox-primary).
         # Old YAML files may still contain it; it is silently ignored here.
         return cls(
             auto_grant=bool(data.get("auto_grant", True)),
             auto_allow_mcps=bool(data.get("auto_allow_mcps", True)),
-            projects_root=data.get("projects_root") or None,
-            tracking_root=data.get("tracking_root") or None,
+            projects_root=str(data["projects_root"]) if isinstance(data.get("projects_root"), str) else None,
+            tracking_root=str(data["tracking_root"]) if isinstance(data.get("tracking_root"), str) else None,
         )
 
 
@@ -243,15 +268,15 @@ class TeamModeConfig:
     max_agents: int = 4
     trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"enabled": self.enabled, "max_agents": self.max_agents, "trust_level": self.trust_level}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TeamModeConfig:
+    def from_dict(cls, data: JsonDict) -> TeamModeConfig:
         return cls(
             enabled=bool(data.get("enabled", True)),
-            max_agents=int(data.get("max_agents", 4)),
-            trust_level=int(data.get("trust_level", 1)),
+            max_agents=_int(data.get("max_agents"), 4),
+            trust_level=_int(data.get("trust_level"), 1),
         )
 
 
@@ -260,17 +285,17 @@ class ResilienceConfig:
     failure_threshold: int = 3
     recovery_timeout: int = 300
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "failure_threshold": self.failure_threshold,
             "recovery_timeout": self.recovery_timeout,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ResilienceConfig:
+    def from_dict(cls, data: JsonDict) -> ResilienceConfig:
         return cls(
-            failure_threshold=int(data.get("failure_threshold", 3)),
-            recovery_timeout=int(data.get("recovery_timeout", 300)),
+            failure_threshold=_int(data.get("failure_threshold"), 3),
+            recovery_timeout=_int(data.get("recovery_timeout"), 300),
         )
 
 
@@ -297,7 +322,7 @@ class ProjConfig:
     quality_level: str = "balanced"
     worktree_isolation: bool = True  # default-on: isolate parallel agents in git worktrees
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "version": 1,
             "tracking_dir": self.tracking_dir,
@@ -320,7 +345,7 @@ class ProjConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjConfig:
+    def from_dict(cls, data: JsonDict) -> ProjConfig:
         sync = data.get("sync", {})
         if not isinstance(sync, dict):
             sync = {}
@@ -429,7 +454,7 @@ class ProjectEntry:
     archive_date: str | None = None
     purgeable: bool = True
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "name": self.name,
             "tracking_dir": self.tracking_dir,
@@ -441,7 +466,7 @@ class ProjectEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectEntry:
+    def from_dict(cls, data: JsonDict) -> ProjectEntry:
         tags = data.get("tags", [])
         return cls(
             name=str(data["name"]),
@@ -459,22 +484,22 @@ class ProjectIndex:
     version: int = 1
     projects: dict[str, ProjectEntry] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "version": self.version,
             "projects": {k: v.to_dict() for k, v in self.projects.items()},
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectIndex:
+    def from_dict(cls, data: JsonDict) -> ProjectIndex:
         projects_raw = data.get("projects", {})
         if not isinstance(projects_raw, dict):
             projects_raw = {}
         # Note: old YAML files may contain an 'active' field — it is intentionally
         # ignored here (session-only concept now).
         return cls(
-            version=int(data.get("version", 1)),
-            projects={k: ProjectEntry.from_dict(v) for k, v in projects_raw.items()},  # type: ignore[arg-type]  # dict values are object; items are dicts at runtime
+            version=_int(data.get("version"), 1),
+            projects={k: ProjectEntry.from_dict(v) for k, v in projects_raw.items() if isinstance(v, dict)},
         )
 
 
@@ -488,11 +513,11 @@ class RepoEntry:
     claudemd: bool = False
     reference: bool = False  # True = read-only context; no write perms, no git tracking
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"label": self.label, "path": self.path, "claudemd": self.claudemd, "reference": self.reference}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> RepoEntry:
+    def from_dict(cls, data: JsonDict) -> RepoEntry:
         return cls(
             label=str(data["label"]),
             path=str(data["path"]),
@@ -507,15 +532,15 @@ class ProjectDates:
     last_updated: str
     target: str | None = None
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"created": self.created, "last_updated": self.last_updated, "target": self.target}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectDates:
+    def from_dict(cls, data: JsonDict) -> ProjectDates:
         return cls(
             created=str(data.get("created", "")),
             last_updated=str(data.get("last_updated", "")),
-            target=data.get("target") if isinstance(data.get("target"), str) else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            target=str(data["target"]) if isinstance(data.get("target"), str) else None,
         )
 
 
@@ -523,11 +548,11 @@ class ProjectDates:
 class ProjectPermissions:
     auto_grant: bool | None = None  # None = use global config default
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"auto_grant": self.auto_grant}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectPermissions:
+    def from_dict(cls, data: JsonDict) -> ProjectPermissions:
         ag = data.get("auto_grant")
         return cls(auto_grant=bool(ag) if ag is not None else None)
 
@@ -536,11 +561,11 @@ class ProjectPermissions:
 class ProjectTodoistConfig:
     root_only: bool | None = None  # None = use global config default
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"root_only": self.root_only}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectTodoistConfig:
+    def from_dict(cls, data: JsonDict) -> ProjectTodoistConfig:
         ro = data.get("root_only")
         return cls(root_only=bool(ro) if ro is not None else None)
 
@@ -555,7 +580,7 @@ class ProjectTrelloConfig:
     on_delete: str | None = None         # "archive" | "delete" | None = use global default
     trello_tasks_checklist_id: str | None = None  # cached ID of the "Tasks" catch-all checklist
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "board_id": self.board_id,
@@ -565,9 +590,9 @@ class ProjectTrelloConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectTrelloConfig:
+    def from_dict(cls, data: JsonDict) -> ProjectTrelloConfig:
         lm_raw = data.get("list_mappings")
-        lm = TrelloListMappings.from_dict(lm_raw) if isinstance(lm_raw, dict) else None  # type: ignore[arg-type]
+        lm = TrelloListMappings.from_dict(lm_raw) if isinstance(lm_raw, dict) else None
         enabled_raw = data.get("enabled")
         on_delete_raw = data.get("on_delete")
         board_id_raw = data.get("board_id")
@@ -589,7 +614,7 @@ class ProjectGitTrackingConfig:
     github_enabled: bool | None = None
     github_repo_format: str | None = None
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "github_enabled": self.github_enabled,
@@ -597,7 +622,7 @@ class ProjectGitTrackingConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectGitTrackingConfig:
+    def from_dict(cls, data: JsonDict) -> ProjectGitTrackingConfig:
         enabled_raw = data.get("enabled")
         gh_raw = data.get("github_enabled")
         fmt_raw = data.get("github_repo_format")
@@ -631,7 +656,7 @@ class ProjectMeta:
     jira_issue_key: str | None = None  # set when project was created from a Jira epic; stable link
     jira_synced_comment_ids: list[str] = field(default_factory=list)  # Jira comment IDs already synced to NOTES.md
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "version": 1,
             "name": self.name,
@@ -657,7 +682,7 @@ class ProjectMeta:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> ProjectMeta:
+    def from_dict(cls, data: JsonDict) -> ProjectMeta:
         repos_raw = data.get("repos", [])
         # Backward compat: old single-dir projects have a top-level `path` string
         # instead of `repos`. Auto-populate repos from legacy path on read (no disk write).
@@ -679,37 +704,31 @@ class ProjectMeta:
             status=str(data.get("status", "active")),
             priority=str(data.get("priority", "medium")),
             repos=[
-                RepoEntry.from_dict(r) for r in (repos_raw if isinstance(repos_raw, list) else [])
-            ],  # type: ignore[arg-type]  # list[object] from YAML; items are dicts at runtime
-            dates=ProjectDates.from_dict(dates_raw if isinstance(dates_raw, dict) else {}),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
-            tags=list(tags_raw) if isinstance(tags_raw, list) else [],
-            links=list(links_raw) if isinstance(links_raw, list) else [],  # type: ignore[arg-type]  # list[object] expected as list[dict]; safe at runtime
-            next_todo_id=int(data.get("next_todo_id", 1)),
+                RepoEntry.from_dict(r) for r in (repos_raw if isinstance(repos_raw, list) else []) if isinstance(r, dict)
+            ],
+            dates=ProjectDates.from_dict(dates_raw if isinstance(dates_raw, dict) else {}),
+            tags=[str(x) for x in tags_raw] if isinstance(tags_raw, list) else [],
+            links=links_raw if isinstance(links_raw, list) else [],
+            next_todo_id=_int(data.get("next_todo_id"), 1),
             git_enabled=bool(data.get("git_enabled", True)),
-            todoist_project_id=data.get("todoist_project_id")
-            if isinstance(data.get("todoist_project_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            trello_card_id=data.get("trello_card_id")
-            if isinstance(data.get("trello_card_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            todoist_project_id=str(data["todoist_project_id"]) if isinstance(data.get("todoist_project_id"), str) else None,
+            trello_card_id=str(data["trello_card_id"]) if isinstance(data.get("trello_card_id"), str) else None,
             permissions=ProjectPermissions.from_dict(
                 perms_raw if isinstance(perms_raw, dict) else {}
-            ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            ),
             todoist=ProjectTodoistConfig.from_dict(
                 todoist_raw if isinstance(todoist_raw, dict) else {}
-            ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            ),
             trello=ProjectTrelloConfig.from_dict(
                 trello_raw if isinstance(trello_raw, dict) else {}
-            ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            ),
             git_tracking=ProjectGitTrackingConfig.from_dict(
                 git_tracking_raw if isinstance(git_tracking_raw, dict) else {}
-            ),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
+            ),
             zoxide_integration=bool(zi_raw) if (zi_raw := data.get("zoxide_integration")) is not None else None,
             claudemd_management=bool(cm_raw) if (cm_raw := data.get("claudemd_management")) is not None else None,
-            jira_issue_key=data.get("jira_issue_key")
-            if isinstance(data.get("jira_issue_key"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            jira_synced_comment_ids=[str(x) for x in data.get("jira_synced_comment_ids", [])] if isinstance(data.get("jira_synced_comment_ids"), list) else [],
+            jira_issue_key=str(data["jira_issue_key"]) if isinstance(data.get("jira_issue_key"), str) else None,
+            jira_synced_comment_ids=[str(x) for x in jsci] if isinstance((jsci := data.get("jira_synced_comment_ids")), list) else [],
         )
 
 
@@ -725,7 +744,7 @@ class TrelloSyncState:
     synced_state: str = ""    # "complete" or "incomplete" after last sync
     trello_updated: str = ""  # ISO 8601 datetime of last pull from Trello
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "last_sync": self.last_sync,
             "synced_name": self.synced_name,
@@ -734,7 +753,7 @@ class TrelloSyncState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TrelloSyncState:
+    def from_dict(cls, data: JsonDict) -> TrelloSyncState:
         return cls(
             last_sync=str(data.get("last_sync", "")),
             synced_name=str(data.get("synced_name", "")),
@@ -748,14 +767,14 @@ class TodoGit:
     branch: str | None = None
     commits: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {"branch": self.branch, "commits": self.commits}
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TodoGit:
+    def from_dict(cls, data: JsonDict) -> TodoGit:
         commits = data.get("commits", [])
         return cls(
-            branch=data.get("branch") if isinstance(data.get("branch"), str) else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            branch=str(data["branch"]) if isinstance(data.get("branch"), str) else None,
             commits=list(commits) if isinstance(commits, list) else [],
         )
 
@@ -788,7 +807,7 @@ class Todo:
     due_date: str | None = None  # ISO 8601 date string (YYYY-MM-DD) or None
     trello_sync_state: TrelloSyncState | None = None  # last-synced snapshot for Trello
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         return {
             "id": self.id,
             "title": self.title,
@@ -818,7 +837,7 @@ class Todo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> Todo:
+    def from_dict(cls, data: JsonDict) -> Todo:
         git_raw = data.get("git", {})
         return cls(
             id=str(data["id"]),
@@ -827,37 +846,25 @@ class Todo:
             priority=str(data.get("priority", "medium")),
             created=str(data.get("created", "")),
             updated=str(data.get("updated", "")),
-            parent=data.get("parent") if isinstance(data.get("parent"), str) else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            children=list(data.get("children", [])),  # type: ignore[arg-type]  # object from dict.get; list[str] at runtime
-            next_child_id=int(data.get("next_child_id", 1)),
-            tags=list(data.get("tags", [])),  # type: ignore[arg-type]  # object from dict.get; list[str] at runtime
-            git=TodoGit.from_dict(git_raw if isinstance(git_raw, dict) else {}),  # type: ignore[arg-type]  # object narrowed to dict but pyright can't verify
-            blocks=list(data.get("blocks", [])),  # type: ignore[arg-type]  # object from dict.get; list[str] at runtime
-            blocked_by=list(data.get("blocked_by", [])),  # type: ignore[arg-type]  # object from dict.get; list[str] at runtime
+            parent=str(data["parent"]) if isinstance(data.get("parent"), str) else None,
+            children=[str(x) for x in _list(data.get("children"))],
+            next_child_id=_int(data.get("next_child_id"), 1),
+            tags=[str(x) for x in _list(data.get("tags"))],
+            git=TodoGit.from_dict(git_raw if isinstance(git_raw, dict) else {}),
+            blocks=[str(x) for x in _list(data.get("blocks"))],
+            blocked_by=[str(x) for x in _list(data.get("blocked_by"))],
             notes=str(data.get("notes", "")),
             has_requirements=bool(data.get("has_requirements", False)),
             has_research=bool(data.get("has_research", False)),
-            todoist_task_id=data.get("todoist_task_id")
-            if isinstance(data.get("todoist_task_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            todoist_task_id=str(data["todoist_task_id"]) if isinstance(data.get("todoist_task_id"), str) else None,
             todoist_description_synced=str(data.get("todoist_description_synced", "")),
-            trello_card_id=data.get("trello_card_id")
-            if isinstance(data.get("trello_card_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            trello_checklist_id=data.get("trello_checklist_id")
-            if isinstance(data.get("trello_checklist_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            trello_checklist_item_id=data.get("trello_checklist_item_id")
-            if isinstance(data.get("trello_checklist_item_id"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            jira_issue_key=data.get("jira_issue_key")
-            if isinstance(data.get("jira_issue_key"), str)
-            else None,  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
+            trello_card_id=str(data["trello_card_id"]) if isinstance(data.get("trello_card_id"), str) else None,
+            trello_checklist_id=str(data["trello_checklist_id"]) if isinstance(data.get("trello_checklist_id"), str) else None,
+            trello_checklist_item_id=str(data["trello_checklist_item_id"]) if isinstance(data.get("trello_checklist_item_id"), str) else None,
+            jira_issue_key=str(data["jira_issue_key"]) if isinstance(data.get("jira_issue_key"), str) else None,
             jira_synced_comment_ids=[str(x) for x in jsci] if isinstance((jsci := data.get("jira_synced_comment_ids")), list) else [],
-            due_date=data.get("due_date", None)  # type: ignore[arg-type]  # conditional narrows to str|None but pyright sees object
-            if isinstance(data.get("due_date"), str)
-            else None,
-            trello_sync_state=TrelloSyncState.from_dict(tss_raw)  # type: ignore[arg-type]
+            due_date=str(data["due_date"]) if isinstance(data.get("due_date"), str) else None,
+            trello_sync_state=TrelloSyncState.from_dict(tss_raw)
             if isinstance((tss_raw := data.get("trello_sync_state")), dict)
             else None,
         )

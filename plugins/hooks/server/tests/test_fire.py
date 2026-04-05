@@ -62,12 +62,12 @@ class TestResolveServerUrl:
         result = _resolve_server_url("trello", 19100)
         assert result == "unix:///tmp/claude-hooks-trello-99999.sock"
 
-    def test_unix_mode_returns_none_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns None when registry file doesn't exist (server not running)."""
+    def test_unix_mode_falls_back_to_name_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to server name when registry file doesn't exist."""
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
         result = _resolve_server_url("trello", 19100)
-        assert result is None
+        assert result == "trello"
 
     def test_tcp_mode_uses_port_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """In TCP mode, uses the default port for the server."""
@@ -86,7 +86,7 @@ class TestResolveServerUrl:
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
         result = _resolve_server_url("proj", 19100)
-        assert result is None  # registry file doesn't exist in tmp_path
+        assert result == "proj"  # falls back to server name
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────

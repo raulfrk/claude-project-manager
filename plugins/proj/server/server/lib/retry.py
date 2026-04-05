@@ -4,7 +4,7 @@ import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Callable, TypeVar
 
 import yaml
 
@@ -27,7 +27,7 @@ def retry_link(
     *,
     max_retries: int = 3,
     backoff: float = 0.5,
-    orphan_context: dict[str, Any] | None = None,
+    orphan_context: dict[str, str] | None = None,
     circuit_breaker_manager: CircuitBreakerManager | None = None,
     service: str | None = None,
 ) -> T:
@@ -69,12 +69,13 @@ def retry_link(
         f"retry_link exhausted {max_retries} retries: {last_exc}",
         stacklevel=2,
     )
-    raise last_exc  # type: ignore[misc]
+    assert last_exc is not None  # guaranteed: loop ran at least once
+    raise last_exc
 
 
-def log_orphaned_resource(tracking_dir: str, context: dict[str, Any]) -> None:
+def log_orphaned_resource(tracking_dir: str, context: dict[str, str]) -> None:
     path = Path(tracking_dir).expanduser() / ".orphaned-resources.yaml"
-    entries: list[dict[str, Any]] = []
+    entries: list[dict[str, str]] = []
     if path.exists():
         try:
             raw = yaml.safe_load(path.read_text()) or []

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -16,8 +16,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hook_transport.handler")
 
+JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
 
-def _serialize_result(result: Any) -> Any:
+
+@runtime_checkable
+class _ContentBlock(Protocol):
+    """Duck type for MCP ContentBlock objects that have a .text attribute."""
+
+    @property
+    def text(self) -> str: ...
+
+
+def _serialize_result(result: JsonValue) -> JsonValue:
     """Serialize a tool result for JSON response.
 
     Handles raw Python values (strings, dicts, lists) and ContentBlock
@@ -31,8 +41,8 @@ def _serialize_result(result: Any) -> Any:
         return result
     # Check for ContentBlock sequences before plain lists
     if isinstance(result, (list, tuple)):
-        if result and hasattr(result[0], "text"):
-            texts = [item.text for item in result if hasattr(item, "text")]
+        if result and isinstance(result[0], _ContentBlock):
+            texts: list[str] = [item.text for item in result if isinstance(item, _ContentBlock)]
             return texts[0] if len(texts) == 1 else texts
         return list(result)
     # Fallback: stringify

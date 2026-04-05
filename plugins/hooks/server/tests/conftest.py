@@ -11,6 +11,11 @@ import yaml
 from server.lib.models import Hook, HookRegistry
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 # ── YAML file fixtures ───────────────────────────────────────────────────────
 
 

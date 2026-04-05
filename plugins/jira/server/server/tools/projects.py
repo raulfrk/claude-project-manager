@@ -14,10 +14,14 @@ def register(app: FastMCP) -> None:
     def jira_list_projects() -> str:
         client = get_client()
         cfg = client._config
-        all_projects = client.get("/rest/api/2/project")
+        raw = client.get("/rest/api/2/project")
+        all_projects = raw if isinstance(raw, list) else []
         if cfg.allowed_project_keys:
             allowed = set(cfg.allowed_project_keys)
-            all_projects = [p for p in all_projects if p.get("key") in allowed]
+            all_projects = [
+                p for p in all_projects
+                if isinstance(p, dict) and p.get("key") in allowed
+            ]
         else:
             return json.dumps({
                 "error": "No projects in whitelist. Run jira_init to configure allowed project keys.",

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from server.lib import storage
 from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import ProjectMeta, ProjConfig, Todo
+from server.lib.models import JsonValue, ProjectMeta, ProjConfig, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 _UTC = timezone.utc
 
 
-def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None) -> dict:
+def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None) -> dict[str, JsonValue]:
     """Return enriched fields for hook dispatch from a todo and its project metadata."""
-    fields: dict = {
+    fields: dict[str, JsonValue] = {
         "title": todo.title,
         "priority": todo.priority,
         "tags": todo.tags,
@@ -629,7 +629,7 @@ def register(app: FastMCP) -> None:
 
         # --- Parse JSON inputs ---
         try:
-            child_specs: list[dict[str, object]] = json.loads(children)
+            child_specs: list[dict[str, JsonValue]] = json.loads(children)
         except json.JSONDecodeError as exc:
             return json.dumps({"error": f"Invalid JSON for children: {exc}"})
         if not isinstance(child_specs, list) or not child_specs:
@@ -646,7 +646,7 @@ def register(app: FastMCP) -> None:
         created: list[dict[str, str]] = []  # {id, title, parent}
 
         def _flatten(
-            specs: list[dict[str, object]],
+            specs: list[dict[str, JsonValue]],
             parent_todo: Todo,
         ) -> None:
             """Depth-first walk: create Todo for each spec, recurse into nested children."""
@@ -717,7 +717,7 @@ def register(app: FastMCP) -> None:
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
 
-        result_data: dict[str, object] = {
+        result_data: dict[str, JsonValue] = {
             "created": created,
             "count": len(created),
         }
@@ -725,29 +725,34 @@ def register(app: FastMCP) -> None:
             result_data["blocking_errors"] = pair_errors
         return json.dumps(result_data)
 
-    def _has_active_descendant(todo_dict: dict[str, object]) -> bool:
+    def _has_active_descendant(todo_dict: dict[str, JsonValue]) -> bool:
         """Return True if this node or any descendant has a status other than 'done'."""
         if todo_dict.get("status") != "done":
             return True
-        for child in todo_dict.get("_children", []):  # type: ignore[union-attr]  # dict.get returns object; _children is always list
-            if _has_active_descendant(child):  # type: ignore[arg-type]  # child is object; dict[str,object] at runtime
-                return True
+        children_raw = todo_dict.get("_children", [])
+        if isinstance(children_raw, list):
+            for child in children_raw:
+                if isinstance(child, dict) and _has_active_descendant(child):
+                    return True
         return False
 
-    def _filter_tree_node(todo_dict: dict[str, object]) -> dict[str, object] | None:
+    def _filter_tree_node(todo_dict: dict[str, JsonValue]) -> dict[str, JsonValue] | None:
         """Recursively prune done nodes with no active descendants.
 
         Returns None if the node should be excluded entirely.
         """
         if todo_dict.get("status") == "done" and not _has_active_descendant(todo_dict):
             return None
-        filtered: list[dict[str, object]] = []
-        for child in todo_dict.get("_children", []):  # type: ignore[union-attr]  # dict.get returns object; _children is always list
-            result = _filter_tree_node(child)  # type: ignore[arg-type]  # child is object; dict[str,object] at runtime
-            if result is not None:
-                filtered.append(result)
+        filtered: list[dict[str, JsonValue]] = []
+        children_raw = todo_dict.get("_children", [])
+        if isinstance(children_raw, list):
+            for child in children_raw:
+                if isinstance(child, dict):
+                    result = _filter_tree_node(child)
+                    if result is not None:
+                        filtered.append(result)
         out = dict(todo_dict)
-        out["_children"] = filtered  # type: ignore[assignment]  # filtered is list[dict]; value slot is object
+        out["_children"] = filtered
         return out
 
     _STATUS_EMOJI: dict[str, str] = {
@@ -756,7 +761,7 @@ def register(app: FastMCP) -> None:
         "done": "\u2705",             # ✅
     }
 
-    def _compact_tree_line(node: dict[str, object], depth: int = 0) -> list[str]:
+    def _compact_tree_line(node: dict[str, JsonValue], depth: int = 0) -> list[str]:
         """Render a tree node as compact indented lines."""
         indent = "  " * depth
         status = str(node.get("status", "pending"))
@@ -777,14 +782,14 @@ def register(app: FastMCP) -> None:
                     lines.extend(_compact_tree_line(child, depth + 1))
         return lines
 
-    def _count_tree_nodes(roots: list[dict[str, object]]) -> int:
+    def _count_tree_nodes(roots: list[dict[str, JsonValue]]) -> int:
         """Count total nodes in a tree structure."""
         count = 0
         for node in roots:
             count += 1
             children = node.get("_children", [])
             if isinstance(children, list):
-                count += _count_tree_nodes(children)  # type: ignore[arg-type]
+                count += _count_tree_nodes(children)
         return count
 
     @app.tool(
@@ -816,7 +821,9 @@ def register(app: FastMCP) -> None:
             todo_map[t.id]["_children"] = []
         for t in todos:
             if t.parent and t.parent in todo_map:
-                todo_map[t.parent]["_children"].append(todo_map[t.id])
+                children_list = todo_map[t.parent]["_children"]
+                if isinstance(children_list, list):
+                    children_list.append(todo_map[t.id])
         roots = [todo_map[t.id] for t in todos if t.parent is None]
         if not include_done:
             roots = [r for r in (_filter_tree_node(root) for root in roots) if r is not None]
@@ -1006,10 +1013,10 @@ def register(app: FastMCP) -> None:
         # 2. Fuzzy match
         titles = [t.title for t in archived]
         close = difflib.get_close_matches(title, titles, n=5, cutoff=threshold)
-        fuzzy = []
+        fuzzy: list[dict[str, JsonValue]] = []
         for match_title in close:
             todo = next(t for t in archived if t.title == match_title)
             ratio = difflib.SequenceMatcher(None, title.lower(), match_title.lower()).ratio()
             fuzzy.append({"id": todo.id, "title": todo.title, "ratio": round(ratio, 3)})
-        fuzzy.sort(key=lambda x: x["ratio"], reverse=True)
+        fuzzy.sort(key=lambda x: float(x["ratio"]) if isinstance(x["ratio"], (int, float)) else 0.0, reverse=True)
         return json.dumps({"exact_match": None, "fuzzy_matches": fuzzy, "count": len(fuzzy)})

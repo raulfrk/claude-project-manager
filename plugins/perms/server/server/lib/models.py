@@ -55,8 +55,9 @@ class SandboxFilesystem:
     def from_dict(cls, data: dict[str, object]) -> SandboxFilesystem:
         known_keys = {"allowWrite"}
         raw = {k: v for k, v in data.items() if k not in known_keys}
+        raw_aw = data.get("allowWrite", [])
         return cls(
-            allow_write=list(data.get("allowWrite", [])),  # type: ignore[arg-type]
+            allow_write=list(raw_aw) if isinstance(raw_aw, list) else [],
             raw=raw,
         )
 
@@ -96,18 +97,21 @@ class SandboxNetwork:
         raw_sockets = data.get("allowUnixSockets", [])
         if isinstance(raw_sockets, bool):
             sockets: list[str] = []
+        elif isinstance(raw_sockets, list):
+            sockets = [str(s) for s in raw_sockets]
         else:
-            sockets = [str(s) for s in raw_sockets]  # type: ignore[union-attr]
+            sockets = []
         http_port = data.get("httpProxyPort")
         socks_port = data.get("socksProxyPort")
+        raw_domains = data.get("allowedDomains", [])
         return cls(
-            allowed_domains=list(data.get("allowedDomains", [])),  # type: ignore[arg-type]
+            allowed_domains=list(raw_domains) if isinstance(raw_domains, list) else [],
             allow_unix_sockets=sockets,
             allow_all_unix_sockets=bool(data.get("allowAllUnixSockets", False)),
             allow_local_binding=bool(data.get("allowLocalBinding", False)),
             allow_managed_domains_only=bool(data.get("allowManagedDomainsOnly", False)),
-            http_proxy_port=int(http_port) if http_port is not None else None,  # type: ignore[arg-type]
-            socks_proxy_port=int(socks_port) if socks_port is not None else None,  # type: ignore[arg-type]
+            http_proxy_port=int(http_port) if isinstance(http_port, (int, float, str)) else None,
+            socks_proxy_port=int(socks_port) if isinstance(socks_port, (int, float, str)) else None,
         )
 
 
@@ -161,7 +165,7 @@ class SandboxConfig:
             enabled=bool(data.get("enabled", False)),
             auto_allow_bash_if_sandboxed=bool(data.get("autoAllowBashIfSandboxed", False)),
             allow_unsandboxed_commands=bool(data["allowUnsandboxedCommands"]) if "allowUnsandboxedCommands" in data else None,
-            excluded_commands=list(data.get("excludedCommands", [])),  # type: ignore[arg-type]
+            excluded_commands=list(raw_exc) if isinstance((raw_exc := data.get("excludedCommands", [])), list) else [],
             enable_weaker_nested_sandbox=bool(data.get("enableWeakerNestedSandbox", False)),
             enable_weaker_network_isolation=bool(data.get("enableWeakerNetworkIsolation", False)),
             filesystem=SandboxFilesystem.from_dict(fs_raw if isinstance(fs_raw, dict) else {}),

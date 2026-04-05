@@ -9,16 +9,17 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import yaml
+
+from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
 _PROJ_CONFIG_PATH = Path.home() / ".claude" / "proj.yaml"
 
 
-def _load_proj_config(path: Path | None = None) -> dict[str, Any]:
+def _load_proj_config(path: Path | None = None) -> dict[str, JsonValue]:
     """Load ``~/.claude/proj.yaml`` as a raw dict.
 
     Returns an empty dict when the file is missing or unparseable — condition
@@ -37,13 +38,13 @@ def _load_proj_config(path: Path | None = None) -> dict[str, Any]:
     return {}
 
 
-def _walk_dot_path(obj: Any, path: str) -> Any:
+def _walk_dot_path(obj: JsonValue, path: str) -> JsonValue:
     """Walk a dotted key path into *obj*.
 
     Supports nested dict keys and integer list indices.  Returns ``None``
     when any segment is missing — callers interpret that as falsy.
     """
-    current: Any = obj
+    current: JsonValue = obj
     for segment in path.split("."):
         if current is None:
             return None
@@ -59,7 +60,7 @@ def _walk_dot_path(obj: Any, path: str) -> Any:
     return current
 
 
-def _evaluate_single(expr: str, config: dict[str, Any]) -> bool:
+def _evaluate_single(expr: str, config: dict[str, JsonValue]) -> bool:
     """Evaluate a single dot-path expression against config.
 
     A leading ``!`` inverts the result.
@@ -79,7 +80,7 @@ def evaluate_condition(
     condition: str | None,
     *,
     config_path: Path | None = None,
-    config: dict[str, Any] | None = None,
+    config: dict[str, JsonValue] | None = None,
 ) -> bool:
     """Return ``True`` when the hook should fire based on proj config.
 
@@ -157,7 +158,7 @@ def resolve_condition_status(
     condition: str | None,
     *,
     config_path: Path | None = None,
-    config: dict[str, Any] | None = None,
+    config: dict[str, JsonValue] | None = None,
 ) -> str:
     """Human-readable status string for ``hooks_list`` display.
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from server.lib._types import JsonValue
 
 from server.lib import storage
 from server.lib.http_client import post_hook
@@ -20,19 +22,19 @@ logger = logging.getLogger(__name__)
 # ── Core logic ───────────────────────────────────────────────────────────────
 
 
-async def _retry_entry(entry: dict[str, Any]) -> bool:
+async def _retry_entry(entry: dict[str, JsonValue]) -> bool:
     """Re-fire a single failure entry using its stored source_result.
 
     Returns ``True`` on success, ``False`` on failure.
     """
-    hook_id: str = entry.get("hook_id", "")
-    target_tool: str = entry.get("target_tool", "")
-    server: str = entry.get("server", "")
-    source_result_raw: str = entry.get("source_result", "{}")
+    hook_id = str(entry.get("hook_id", ""))
+    target_tool = str(entry.get("target_tool", ""))
+    server = str(entry.get("server", ""))
+    source_result_raw = str(entry.get("source_result", "{}"))
 
     # Parse source_result to resolve param_mapping
     try:
-        source: dict[str, Any] = json.loads(source_result_raw)
+        source: dict[str, JsonValue] = json.loads(source_result_raw)
         if not isinstance(source, dict):
             source = {}
     except (json.JSONDecodeError, TypeError):
@@ -104,7 +106,7 @@ async def hooks_recover(
 
     retried = 0
     succeeded = 0
-    still_failed_entries: list[dict[str, Any]] = []
+    still_failed_entries: list[dict[str, JsonValue]] = []
 
     for entry in target_entries:
         retried += 1
@@ -113,7 +115,8 @@ async def hooks_recover(
             succeeded += 1
         else:
             # Increment retry_count and update timestamp
-            entry["retry_count"] = entry.get("retry_count", 0) + 1
+            rc = entry.get("retry_count", 0)
+            entry["retry_count"] = (rc if isinstance(rc, int) else 0) + 1
             entry["timestamp"] = datetime.now(tz=timezone.utc).isoformat()
             still_failed_entries.append(entry)
 

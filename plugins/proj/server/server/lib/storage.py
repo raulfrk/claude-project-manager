@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from server.lib.models import (
+    JsonValue,
     ProjConfig,
     ProjectIndex,
     ProjectMeta,
@@ -21,7 +22,7 @@ from server.lib.models import (
 _DEFAULT_CONFIG_PATH = Path.home() / ".claude" / "proj.yaml"
 
 
-def _load_yaml(path: Path) -> dict[str, object]:
+def _load_yaml(path: Path) -> dict[str, JsonValue]:
     """Load a YAML file, returning an empty dict if the file doesn't exist or is corrupt."""
     try:
         with path.open() as f:
@@ -110,7 +111,7 @@ def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
     todos_raw = data.get("todos", [])
     if not isinstance(todos_raw, list):
         return []
-    return [Todo.from_dict(t) for t in todos_raw]  # type: ignore[arg-type]  # list[object] from YAML; items are dicts at runtime
+    return [Todo.from_dict(t) for t in todos_raw]
 
 
 def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
@@ -130,7 +131,7 @@ def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
     todos_raw = data.get("todos", [])
     if not isinstance(todos_raw, list):
         return []
-    return [Todo.from_dict(t) for t in todos_raw]  # type: ignore[arg-type]  # list[object] from YAML; items are dicts at runtime
+    return [Todo.from_dict(t) for t in todos_raw]
 
 
 def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[Todo]) -> None:
@@ -198,19 +199,19 @@ def decisions_path(cfg: ProjConfig, project_name: str) -> Path:
     return tracking_dir(cfg, project_name) / "decisions.yaml"
 
 
-def _load_yaml_list(path: Path) -> list[dict[str, object]]:
+def _load_yaml_list(path: Path) -> list[dict[str, JsonValue]]:
     """Load a YAML file that contains a top-level list, returning [] if missing or corrupt."""
     try:
         with path.open() as f:
             data = yaml.safe_load(f)
             if not isinstance(data, list):
                 return []
-            return data  # type: ignore[return-value]
+            return data
     except (FileNotFoundError, yaml.YAMLError):
         return []
 
 
-def _write_yaml_list(path: Path, data: list[dict[str, object]]) -> None:
+def _write_yaml_list(path: Path, data: list[dict[str, JsonValue]]) -> None:
     """Atomically write a YAML file containing a top-level list."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -224,12 +225,12 @@ def _write_yaml_list(path: Path, data: list[dict[str, object]]) -> None:
         raise
 
 
-def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, object]]:
+def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, JsonValue]]:
     """Read decisions.yaml, returning a list of decision dicts or empty list."""
     return _load_yaml_list(decisions_path(cfg, project_name))
 
 
-def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, object]) -> None:
+def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, JsonValue]) -> None:
     """Atomic read + append + write for a single decision entry."""
     existing = load_decisions(cfg, project_name)
     existing.append(entry)
@@ -241,7 +242,7 @@ def build_decision_entry(
     context: str = "",
     todo_id: str = "",
     tags: list[str] | None = None,
-) -> dict[str, object]:
+) -> dict[str, JsonValue]:
     """Build a decision entry dict with a UTC timestamp."""
     return {
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
@@ -345,7 +346,7 @@ def read_claudemd(repo_path: str) -> str | None:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-def _write_yaml(path: Path, data: dict[str, object]) -> None:
+def _write_yaml(path: Path, data: dict[str, JsonValue]) -> None:
     """Atomically write a YAML file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -373,7 +374,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
         raise
 
 
-def atomic_write_json(path: Path, data: dict[str, object]) -> None:
+def atomic_write_json(path: Path, data: dict[str, JsonValue]) -> None:
     """Atomically write a JSON file via a temp file in the same directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(data, indent=2) + "\n"

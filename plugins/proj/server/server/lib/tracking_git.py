@@ -5,18 +5,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from server.lib.models import ProjConfig, ProjectMeta
+
 
 def resolve_config(
-    cfg: object, meta: object,
+    cfg: ProjConfig, meta: ProjectMeta,
 ) -> tuple[bool, bool, str]:
     """Resolve effective (enabled, github_enabled, github_repo_format) from global + per-project.
 
     Per-project values of None fall through to global defaults.
     """
-    from server.lib.models import ProjConfig, ProjectMeta
-
-    assert isinstance(cfg, ProjConfig)
-    assert isinstance(meta, ProjectMeta)
     enabled = meta.git_tracking.enabled if meta.git_tracking.enabled is not None else cfg.git_tracking.enabled
     github = meta.git_tracking.github_enabled if meta.git_tracking.github_enabled is not None else cfg.git_tracking.github_enabled
     fmt = meta.git_tracking.github_repo_format if meta.git_tracking.github_repo_format is not None else cfg.git_tracking.github_repo_format

@@ -9,9 +9,10 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import yaml
+
+from server.lib._types import JsonValue
 
 from server.lib.models import HookRegistry
 
@@ -96,7 +97,7 @@ def save(registry: HookRegistry, path: Path | None = None) -> Path:
 # ── Failure logging ──────────────────────────────────────────────────────────
 
 
-def _load_failures(path: Path | None = None) -> list[dict[str, Any]]:
+def _load_failures(path: Path | None = None) -> list[dict[str, JsonValue]]:
     """Load existing failure entries from YAML. Returns empty list on any error."""
     target = path or _FAILURES_FILE
     if not target.exists():
@@ -105,7 +106,7 @@ def _load_failures(path: Path | None = None) -> list[dict[str, Any]]:
         with target.open() as f:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
-            return raw  # type: ignore[return-value]
+            return raw
     except Exception:  # noqa: BLE001
         logger.warning("Could not read %s — starting fresh", target)
     return []
@@ -130,7 +131,7 @@ def log_failure(
     target = path or _FAILURES_FILE
     entries = _load_failures(target)
 
-    entry: dict[str, Any] = {
+    entry: dict[str, JsonValue] = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "hook_id": hook_id,
         "trigger_tool": trigger_tool,
@@ -152,12 +153,12 @@ def log_failure(
     return target
 
 
-def load_failures(path: Path | None = None) -> list[dict[str, Any]]:
+def load_failures(path: Path | None = None) -> list[dict[str, JsonValue]]:
     """Public accessor for failure entries."""
     return _load_failures(path)
 
 
-def save_failures(entries: list[dict[str, Any]], path: Path | None = None) -> Path:
+def save_failures(entries: list[dict[str, JsonValue]], path: Path | None = None) -> Path:
     """Atomically write failure entries to ``~/.claude/hooks-failures.yaml``.
 
     Returns the path written to.
@@ -181,7 +182,7 @@ def clear_failures(path: Path | None = None) -> int:
 # ── Verification results ─────────────────────────────────────────────────────
 
 
-def _load_verifications(path: Path | None = None) -> list[dict[str, Any]]:
+def _load_verifications(path: Path | None = None) -> list[dict[str, JsonValue]]:
     """Load existing verification entries from YAML. Returns empty list on any error."""
     target = path or _VERIFICATIONS_FILE
     if not target.exists():
@@ -190,7 +191,7 @@ def _load_verifications(path: Path | None = None) -> list[dict[str, Any]]:
         with target.open() as f:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
-            return raw  # type: ignore[return-value]
+            return raw
     except Exception:  # noqa: BLE001
         logger.warning("Could not read %s — starting fresh", target)
     return []
@@ -212,7 +213,7 @@ def store_verification_result(
     target = path or _VERIFICATIONS_FILE
     entries = _load_verifications(target)
 
-    entry: dict[str, Any] = {
+    entry: dict[str, JsonValue] = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "trigger_tool": trigger_tool,
         "hook_id": hook_id,
@@ -233,7 +234,7 @@ def store_verification_result(
 def load_verification_results(
     limit: int = 50,
     path: Path | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, JsonValue]]:
     """Load recent verification results. Returns up to *limit* most recent entries."""
     entries = _load_verifications(path)
     if limit and len(entries) > limit:
@@ -244,7 +245,7 @@ def load_verification_results(
 # ── Invocation logging ───────────────────────────────────────────────────────
 
 
-def _load_invocations(path: Path | None = None) -> list[dict[str, Any]]:
+def _load_invocations(path: Path | None = None) -> list[dict[str, JsonValue]]:
     """Load existing invocation entries from YAML. Returns empty list on any error."""
     target = path or _INVOCATIONS_FILE
     if not target.exists():
@@ -253,7 +254,7 @@ def _load_invocations(path: Path | None = None) -> list[dict[str, Any]]:
         with target.open() as f:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
-            return raw  # type: ignore[return-value]
+            return raw
     except Exception:  # noqa: BLE001
         logger.warning("Could not read %s — starting fresh", target)
     return []
@@ -266,7 +267,7 @@ def log_invocation(
     target_tool: str,
     server: str,
     source_result: str | None = None,
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, JsonValue] | None = None,
     path: Path | None = None,
 ) -> Path:
     """Append a success invocation entry to ``~/.claude/hooks-invocations.yaml``.
@@ -278,7 +279,7 @@ def log_invocation(
     target = path or _INVOCATIONS_FILE
     entries = _load_invocations(target)
 
-    entry: dict[str, Any] = {
+    entry: dict[str, JsonValue] = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "hook_id": hook_id,
         "trigger_tool": trigger_tool,
@@ -302,7 +303,7 @@ def log_invocation(
     return target
 
 
-def load_invocations(limit: int = 50, path: Path | None = None) -> list[dict[str, Any]]:
+def load_invocations(limit: int = 50, path: Path | None = None) -> list[dict[str, JsonValue]]:
     """Load recent invocation entries. Returns up to *limit* most recent entries."""
     entries = _load_invocations(path)
     if limit and len(entries) > limit:

@@ -18,6 +18,12 @@ from server.lib.models import (
 )
 
 
+@pytest.fixture(params=["asyncio"])
+def anyio_backend(request: pytest.FixtureRequest) -> str:
+    """Use asyncio backend only for anyio tests (trio is not installed)."""
+    return str(request.param)
+
+
 @pytest.fixture(autouse=True)
 def reset_session_state() -> None:
     """Reset session state before each test to prevent cross-test contamination."""

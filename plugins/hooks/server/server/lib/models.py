@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+
+from server.lib._types import JsonValue
 
 
 @dataclass
@@ -14,20 +15,20 @@ class Hook:
     trigger_tool: str
     target_tool: str
     server: str
-    param_mapping: dict[str, Any] = field(default_factory=dict)
+    param_mapping: dict[str, JsonValue] = field(default_factory=dict)
     blocking: bool = False
     condition: str | None = None
     source: str | None = None
     verification: bool = False
-    feedback_mapping: dict[str, Any] = field(default_factory=dict)
+    feedback_mapping: dict[str, JsonValue] = field(default_factory=dict)
     feedback_tool: str | None = None
 
     def __post_init__(self) -> None:
         if self.verification:
             self.blocking = True
 
-    def to_dict(self) -> dict[str, object]:
-        result: dict[str, object] = {
+    def to_dict(self) -> dict[str, JsonValue]:
+        result: dict[str, JsonValue] = {
             "id": self.id,
             "trigger_tool": self.trigger_tool,
             "target_tool": self.target_tool,
@@ -48,13 +49,13 @@ class Hook:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> Hook:
+    def from_dict(cls, data: dict[str, JsonValue]) -> Hook:
         pm_raw = data.get("param_mapping", {})
-        param_mapping: dict[str, Any] = {}
+        param_mapping: dict[str, JsonValue] = {}
         if isinstance(pm_raw, dict):
             param_mapping = {str(k): v for k, v in pm_raw.items()}
         fm_raw = data.get("feedback_mapping", {})
-        feedback_mapping: dict[str, Any] = {}
+        feedback_mapping: dict[str, JsonValue] = {}
         if isinstance(fm_raw, dict):
             feedback_mapping = {str(k): v for k, v in fm_raw.items()}
         return cls(
@@ -71,18 +72,20 @@ class Hook:
             feedback_tool=str(data["feedback_tool"]) if data.get("feedback_tool") is not None else None,
         )
 
-    def update_from(self, new_def: dict) -> None:
+    def update_from(self, new_def: dict[str, JsonValue]) -> None:
         """Update content fields in-place from new_def. Preserves id, trigger_tool, target_tool, server, source."""
         if "blocking" in new_def:
             self.blocking = bool(new_def["blocking"])
         if "condition" in new_def:
             self.condition = str(new_def["condition"]) if new_def["condition"] is not None else None
         if "param_mapping" in new_def:
-            self.param_mapping = {str(k): v for k, v in (new_def["param_mapping"] or {}).items()}
+            pm = new_def["param_mapping"]
+            self.param_mapping = {str(k): v for k, v in pm.items()} if isinstance(pm, dict) else {}
         if "feedback_tool" in new_def:
             self.feedback_tool = str(new_def["feedback_tool"]) if new_def["feedback_tool"] is not None else None
         if "feedback_mapping" in new_def:
-            self.feedback_mapping = {str(k): v for k, v in (new_def["feedback_mapping"] or {}).items()}
+            fm = new_def["feedback_mapping"]
+            self.feedback_mapping = {str(k): v for k, v in fm.items()} if isinstance(fm, dict) else {}
         if "verification" in new_def:
             self.verification = bool(new_def["verification"])
         # Enforce invariant: verification implies blocking
@@ -104,22 +107,22 @@ class HookRegistry:
 
     hooks: list[Hook] = field(default_factory=list)
     servers: dict[str, dict[str, str]] = field(default_factory=dict)
-    settings: dict[str, object] = field(default_factory=dict)
+    settings: dict[str, JsonValue] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, object]:
-        result: dict[str, object] = {}
+    def to_dict(self) -> dict[str, JsonValue]:
+        result: dict[str, JsonValue] = {}
         if self.hooks:
             result["hooks"] = [h.to_dict() for h in self.hooks]
         else:
             result["hooks"] = []
         if self.servers:
-            result["servers"] = self.servers
+            result["servers"] = self.servers  # type: ignore[assignment]
         if self.settings:
             result["settings"] = self.settings
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> HookRegistry:
+    def from_dict(cls, data: dict[str, JsonValue]) -> HookRegistry:
         hooks_raw = data.get("hooks", [])
         hooks: list[Hook] = []
         if isinstance(hooks_raw, list):
@@ -133,7 +136,7 @@ class HookRegistry:
                     servers[str(k)] = {str(sk): str(sv) for sk, sv in v.items()}
 
         settings_raw = data.get("settings", {})
-        settings: dict[str, object] = {}
+        settings: dict[str, JsonValue] = {}
         if isinstance(settings_raw, dict):
             settings = {str(k): v for k, v in settings_raw.items()}
 

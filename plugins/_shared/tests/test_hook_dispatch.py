@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +28,7 @@ from hook_dispatch.dispatch import (
 def mock_mcp():
     """Create a mock FastMCP instance with a working tool() method."""
     mcp = MagicMock()
-    registered_tools: dict[str, object] = {}
+    registered_tools: dict[str, Callable[..., str | None]] = {}
 
     def fake_tool(*args, **kwargs):
         """Mimic FastMCP.tool() — supports @mcp.tool, @mcp.tool(), @mcp.tool(name=...)."""

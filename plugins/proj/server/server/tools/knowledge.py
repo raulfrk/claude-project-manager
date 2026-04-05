@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
+from server.lib.models import ProjConfig
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ _MAX_SNIPPETS = 5
 _CONTEXT_LINES = 3
 
 
-def _resolve_files(cfg: storage.ProjConfig, name: str, scope: str) -> list[Path]:
+def _resolve_files(cfg: ProjConfig, name: str, scope: str) -> list[Path]:
     """Return the list of files to search for the given scope."""
     files: list[Path] = []
     t_dir = storage.tracking_dir(cfg, name)

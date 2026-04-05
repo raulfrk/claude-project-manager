@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
-from server.lib.models import ProjConfig, ProjectMeta
+from server.lib.models import JsonValue, ProjConfig, ProjectMeta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ def _is_sandbox_enabled(
         if not path.exists():
             continue
         try:
-            data: dict[str, object] = json.loads(path.read_text())
+            data: dict[str, JsonValue] = json.loads(path.read_text())
             sandbox = data.get("sandbox", {})
             if isinstance(sandbox, dict) and sandbox.get("enabled", False):
                 return True

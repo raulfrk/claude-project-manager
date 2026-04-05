@@ -11,6 +11,16 @@ import anyio
 import pytest
 from pathlib import Path
 
+def _unix_socket_blocked() -> bool:
+    """Check if Unix socket creation is blocked by sandbox."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.close()
+        return False
+    except PermissionError:
+        return True
+
+
 from hook_transport.dual_transport import (
     _cleanup_stale_socket,
     _delete_socket_registry,
@@ -74,6 +84,10 @@ def test_cleanup_stale_socket_nonexistent():
     _cleanup_stale_socket("/tmp/nonexistent-test-socket.sock")
 
 
+@pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX") or _unix_socket_blocked(),
+    reason="Unix sockets not available or blocked by sandbox",
+)
 def test_cleanup_stale_socket_removes_stale():
     """Removes a socket file that nobody is listening on."""
     with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
@@ -94,6 +108,10 @@ def test_cleanup_stale_socket_removes_stale():
             pass
 
 
+@pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX") or _unix_socket_blocked(),
+    reason="Unix sockets not available or blocked by sandbox",
+)
 def test_cleanup_stale_socket_raises_if_active():
     """Raises RuntimeError when a process is actively listening."""
     with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:

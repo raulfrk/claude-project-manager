@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import Self
+
+
+# Recursive JSON type for unstructured API data
+JsonScalar = str | int | float | bool | None
+JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject = dict[str, JsonValue]
+
+# Flat JSON dict usable in MCP tool signatures (pydantic-compatible — no recursion)
+TaskInput = dict[str, str | int | float | bool | list[str] | None]
 
 # -- Priority mapping ---------------------------------------------------------
 # Consistent with plugins/proj/server/server/tools/todoist_sync.py lines 27-28.
@@ -42,7 +51,7 @@ def todoist_to_local_priority(priority: str | int) -> str:
     """
     if isinstance(priority, int):
         priority = f"p{priority}"
-    if isinstance(priority, str) and priority.startswith("p"):
+    if priority.startswith("p"):
         return _TODOIST_TO_LOCAL.get(priority, "low")
     return "low"
 
@@ -59,30 +68,30 @@ class TodoistTask:
     description: str = ""
     priority: str = "low"
     labels: list[str] = field(default_factory=list)
-    due: dict[str, Any] | None = None
+    due: JsonObject | None = None
     project_id: str = ""
     parent_id: str | None = None
     is_completed: bool = False
     updated_at: str = ""
 
     @classmethod
-    def from_api(cls, data: dict[str, Any]) -> Self:
+    def from_api(cls, data: JsonObject) -> Self:
         """Parse a Todoist REST API v2 task response into a TodoistTask."""
         raw_priority = data.get("priority")
-        if raw_priority is not None:
+        if isinstance(raw_priority, (str, int)):
             priority = todoist_to_local_priority(raw_priority)
         else:
             priority = "low"
 
-        labels = data.get("labels")
-        if not isinstance(labels, list):
-            labels = []
-        else:
-            labels = [str(x) for x in labels]
+        raw_labels = data.get("labels")
+        labels: list[str] = [str(x) for x in raw_labels] if isinstance(raw_labels, list) else []
 
         due = data.get("due")
         if not isinstance(due, dict):
             due = None
+
+        parent_raw = data.get("parentId", data.get("parent_id"))
+        parent_id = str(parent_raw) if parent_raw is not None else None
 
         return cls(
             id=str(data.get("id", "")),
@@ -92,19 +101,20 @@ class TodoistTask:
             labels=labels,
             due=due,
             project_id=str(data.get("projectId", data.get("project_id", ""))),
-            parent_id=data.get("parentId", data.get("parent_id")),
+            parent_id=parent_id,
             is_completed=bool(data.get("isCompleted", data.get("is_completed", False))),
             updated_at=str(data.get("updatedAt", data.get("updated_at", ""))),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         """Serialize to a plain dictionary."""
+        label_values: list[JsonValue] = list(self.labels)
         return {
             "id": self.id,
             "content": self.content,
             "description": self.description,
             "priority": self.priority,
-            "labels": self.labels,
+            "labels": label_values,
             "due": self.due,
             "project_id": self.project_id,
             "parent_id": self.parent_id,
@@ -123,16 +133,18 @@ class TodoistProject:
     is_favorite: bool = False
 
     @classmethod
-    def from_api(cls, data: dict[str, Any]) -> Self:
+    def from_api(cls, data: JsonObject) -> Self:
         """Parse a Todoist REST API v2 project response into a TodoistProject."""
+        color_raw = data.get("color")
+        color = str(color_raw) if color_raw is not None else None
         return cls(
             id=str(data.get("id", "")),
             name=str(data.get("name", "")),
-            color=data.get("color"),
+            color=color,
             is_favorite=bool(data.get("isFavorite", data.get("is_favorite", False))),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         """Serialize to a plain dictionary."""
         return {
             "id": self.id,

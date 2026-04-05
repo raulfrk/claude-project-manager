@@ -293,25 +293,26 @@ class TestIsSandboxEnabled:
     def test_false_when_no_local_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / "nonexistent.json")
         monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
         assert storage.is_sandbox_enabled("user") is False
 
     def test_true_when_enabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        local_path.parent.mkdir(parents=True)
-        local_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
+        monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
         assert storage.is_sandbox_enabled("user") is True
 
     def test_false_when_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        local_path.parent.mkdir(parents=True)
-        local_path.write_text(json.dumps({"sandbox": {"enabled": False}}))
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"sandbox": {"enabled": False}}))
+        monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
         assert storage.is_sandbox_enabled("user") is False
 
 
@@ -331,16 +332,16 @@ class TestResolveTarget:
     def test_auto_resolves_to_sandbox_when_enabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        local_path = tmp_path / ".claude" / "settings.local.json"
-        local_path.parent.mkdir(parents=True)
-        local_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
+        monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
         assert storage.resolve_target("auto", "user") == "sandbox"
 
     def test_auto_resolves_to_settings_when_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / "nonexistent.json")
         assert storage.resolve_target("auto", "user") == "settings"
 
 

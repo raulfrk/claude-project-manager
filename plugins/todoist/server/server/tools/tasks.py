@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from server.lib.client import get_client
-from server.lib.models import TodoistTask, local_to_todoist_priority
+from server.lib.models import (
+    JsonObject,
+    JsonValue,
+    TaskInput,
+    TodoistTask,
+    local_to_todoist_priority,
+)
 
 # Todoist REST API v2 expects priority as an integer 1-4.
 # String "p1"-"p4" → strip "p" → int.
@@ -37,24 +42,35 @@ def _resolve_priority(value: str | int | None) -> int | None:
     return 1
 
 
-def _build_task_payload(task: dict[str, Any]) -> dict[str, Any]:
+def _to_json_value(val: str | int | float | bool | list[str] | None) -> JsonValue:
+    """Convert a TaskInput value to a JsonValue, handling list[str] invariance."""
+    if isinstance(val, list):
+        return [v for v in val]  # list[str] → list[JsonValue]
+    return val
+
+
+def _build_task_payload(task: TaskInput) -> JsonObject:
     """Build a Todoist REST API task creation/update payload from *task* dict."""
-    payload: dict[str, Any] = {}
+    payload: JsonObject = {}
     if "content" in task:
-        payload["content"] = task["content"]
+        payload["content"] = _to_json_value(task["content"])
     if "description" in task:
-        payload["description"] = task["description"]
-    priority = _resolve_priority(task.get("priority"))
+        payload["description"] = _to_json_value(task["description"])
+    raw_priority = task.get("priority")
+    if isinstance(raw_priority, (str, int)):
+        priority = _resolve_priority(raw_priority)
+    else:
+        priority = None
     if priority is not None:
         payload["priority"] = priority
     if "labels" in task:
-        payload["labels"] = task["labels"]
+        payload["labels"] = _to_json_value(task["labels"])
     if "dueString" in task or "due_string" in task:
-        payload["due_string"] = task.get("dueString") or task.get("due_string")
+        payload["due_string"] = _to_json_value(task.get("dueString") or task.get("due_string"))
     if "projectId" in task or "project_id" in task:
-        payload["project_id"] = task.get("projectId") or task.get("project_id")
+        payload["project_id"] = _to_json_value(task.get("projectId") or task.get("project_id"))
     if "parentId" in task or "parent_id" in task:
-        payload["parent_id"] = task.get("parentId") or task.get("parent_id")
+        payload["parent_id"] = _to_json_value(task.get("parentId") or task.get("parent_id"))
     return payload
 
 
@@ -69,10 +85,10 @@ def register(app: FastMCP) -> None:  # noqa: C901
             "Returns {successes: [...], failures: [...]}."
         ),
     )
-    def todoist_add_tasks(tasks: list[dict[str, Any]]) -> str:
+    def todoist_add_tasks(tasks: list[TaskInput]) -> str:
         client = get_client()
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
+        successes: list[JsonObject] = []
+        failures: list[JsonObject] = []
         for idx, task in enumerate(tasks):
             try:
                 if not task.get("content"):
@@ -80,11 +96,14 @@ def register(app: FastMCP) -> None:  # noqa: C901
                     continue
                 payload = _build_task_payload(task)
                 result = client.post("/tasks", json=payload)
+                if not isinstance(result, dict):
+                    failures.append({"index": idx, "error": "Unexpected response type"})
+                    continue
                 successes.append(TodoistTask.from_api(result).to_dict())
             except Exception as exc:  # noqa: BLE001
                 failures.append({
                     "index": idx,
-                    "content": task.get("content", ""),
+                    "content": str(task.get("content", "")),
                     "error": str(exc),
                 })
         return json.dumps({"successes": successes, "failures": failures})
@@ -118,7 +137,7 @@ def register(app: FastMCP) -> None:  # noqa: C901
         description: str | None = None,
         dueString: str | None = None,
     ) -> str:
-        task: dict[str, Any] = {"id": id}
+        task: TaskInput = {"id": id}
         if content is not None:
             task["content"] = content
         if priority is not None:
@@ -133,6 +152,8 @@ def register(app: FastMCP) -> None:  # noqa: C901
         try:
             payload = _build_task_payload(task)
             result = client.post(f"/tasks/{id}", json=payload)
+            if not isinstance(result, dict):
+                return json.dumps({"successes": [], "failures": [{"id": id, "error": "Unexpected response type"}]})
             return json.dumps({"successes": [TodoistTask.from_api(result).to_dict()], "failures": []})
         except Exception as exc:  # noqa: BLE001
             return json.dumps({"successes": [], "failures": [{"id": id, "error": str(exc)}]})
@@ -148,7 +169,7 @@ def register(app: FastMCP) -> None:  # noqa: C901
         client = get_client()
         try:
             task = client.get(f"/tasks/{todoist_task_id}")
-            is_completed = task.get("is_completed", False)
+            is_completed = task.get("is_completed", False) if isinstance(task, dict) else False
             return json.dumps({
                 "verified": is_completed,
                 "task_id": todoist_task_id,
@@ -170,8 +191,8 @@ def register(app: FastMCP) -> None:  # noqa: C901
     )
     def todoist_complete_tasks(ids: list[str]) -> str:
         client = get_client()
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
+        successes: list[JsonObject] = []
+        failures: list[JsonObject] = []
         for task_id in ids:
             try:
                 client.close_task(task_id)
@@ -198,13 +219,15 @@ def register(app: FastMCP) -> None:  # noqa: C901
             params["filter"] = filter
         response = client.get("/tasks", params=params or None)
         # API v1 returns {"results": [...]}, API v2 returns bare list
+        raw_tasks: list[JsonValue]
         if isinstance(response, dict) and "results" in response:
-            raw_tasks = response["results"]
+            results = response["results"]
+            raw_tasks = results if isinstance(results, list) else []
         elif isinstance(response, list):
             raw_tasks = response
         else:
             raw_tasks = []
-        tasks = [TodoistTask.from_api(t).to_dict() for t in raw_tasks]
+        tasks = [TodoistTask.from_api(t).to_dict() for t in raw_tasks if isinstance(t, dict)]
         return json.dumps(tasks)
 
     @app.tool(
@@ -214,10 +237,10 @@ def register(app: FastMCP) -> None:  # noqa: C901
             "dueString). Returns {successes: [...], failures: [...]}."
         ),
     )
-    def todoist_update_tasks(tasks: list[dict[str, Any]]) -> str:
+    def todoist_update_tasks(tasks: list[TaskInput]) -> str:
         client = get_client()
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
+        successes: list[JsonObject] = []
+        failures: list[JsonObject] = []
         for idx, task in enumerate(tasks):
             try:
                 task_id = task.get("id")
@@ -226,11 +249,14 @@ def register(app: FastMCP) -> None:  # noqa: C901
                     continue
                 payload = _build_task_payload(task)
                 result = client.post(f"/tasks/{task_id}", json=payload)
+                if not isinstance(result, dict):
+                    failures.append({"index": idx, "error": "Unexpected response type"})
+                    continue
                 successes.append(TodoistTask.from_api(result).to_dict())
             except Exception as exc:  # noqa: BLE001
                 failures.append({
                     "index": idx,
-                    "id": task.get("id", ""),
+                    "id": str(task.get("id", "")),
                     "error": str(exc),
                 })
         return json.dumps({"successes": successes, "failures": failures})
@@ -249,8 +275,8 @@ def register(app: FastMCP) -> None:  # noqa: C901
     )
     def todoist_uncomplete_tasks(ids: list[str]) -> str:
         client = get_client()
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
+        successes: list[JsonObject] = []
+        failures: list[JsonObject] = []
         for task_id in ids:
             try:
                 client.reopen_task(task_id)

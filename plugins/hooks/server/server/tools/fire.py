@@ -7,7 +7,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from server.lib._types import JsonValue
 
 from server.lib import storage
 from server.lib.conditions import evaluate_condition, _load_proj_config
@@ -36,10 +38,10 @@ _DEFAULT_SERVER_PORTS: dict[str, int] = {
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
 
 # Keep references to non-blocking background tasks to prevent GC
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
-def _resolve_server_url(server_name: str, hooks_port: int) -> str | None:
+def _resolve_server_url(server_name: str, hooks_port: int) -> str:
     """Resolve the URL for a plugin server.
 
     In Unix mode (default): reads ~/.claude/sockets/{server_name} for the
@@ -60,7 +62,8 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str | None:
             return f"unix://{path}"
     except (FileNotFoundError, OSError):
         pass
-    return None
+    # Fallback: use server name as-is (allows direct URL or name-based routing)
+    return server_name
 
 
 def _get_max_depth() -> int:
@@ -77,15 +80,23 @@ def _get_max_depth() -> int:
 # ── Core fire logic ──────────────────────────────────────────────────────────
 
 
-async def _fire_single(hook: Hook, source: dict[str, Any]) -> FireResult:
+async def _fire_single(hook: Hook, source: dict[str, JsonValue]) -> FireResult:
     """Resolve params and POST a single hook."""
     params = resolve_mapping(hook.param_mapping, source)
 
     registry = storage.load()
-    url = _resolve_server_url(hook.server, registry.settings.get("hooks_port", 19100))
-    if not url:
-        logger.warning("No URL registered for server %r, skipping", hook.server)
-        return FireResult(hook_id=hook.id, status_code=0, body="", error=f"No URL for server {hook.server!r}")
+    # Check registry.servers for explicit URL first
+    server_entry = registry.servers.get(hook.server)
+    if isinstance(server_entry, dict):
+        explicit_url = server_entry.get("url")
+        if isinstance(explicit_url, str) and explicit_url:
+            url = explicit_url
+        else:
+            hooks_port = registry.settings.get("hooks_port", 19100)
+            url = _resolve_server_url(hook.server, int(hooks_port) if isinstance(hooks_port, (int, float, str)) else 19100)
+    else:
+        hooks_port = registry.settings.get("hooks_port", 19100)
+        url = _resolve_server_url(hook.server, int(hooks_port) if isinstance(hooks_port, (int, float, str)) else 19100)
 
     return await post_hook(
         hook_id=hook.id,
@@ -119,11 +130,11 @@ def _parse_verification_response(raw_result: str | None) -> tuple[str, str]:
 
 async def _fire_verification(
     hooks: list[Hook],
-    enriched_source: dict[str, Any],
+    enriched_source: dict[str, JsonValue],
     trigger_tool: str,
     raw_source_result: str,
-    config: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
+    config: dict[str, JsonValue] | None = None,
+) -> list[dict[str, JsonValue]]:
     """Fire verification hooks (Phase 2).  All are blocking.
 
     Each result is parsed for convention-based ``{"status", "details"}``
@@ -131,7 +142,7 @@ async def _fire_verification(
 
     Verification hooks do NOT increment depth (cannot trigger other hooks).
     """
-    results: list[dict[str, Any]] = []
+    results: list[dict[str, JsonValue]] = []
 
     # Filter by condition
     eligible = [h for h in hooks if evaluate_condition(h.condition, config=config)]
@@ -191,7 +202,7 @@ async def _fire_verification(
     return results
 
 
-async def _launch_nonblocking(hook: Hook, source: dict[str, Any], source_result: str) -> None:
+async def _launch_nonblocking(hook: Hook, source: dict[str, JsonValue], source_result: str) -> None:
     """Fire a non-blocking hook and log the result without awaiting."""
     try:
         result = await _fire_single(hook, source)
@@ -229,12 +240,12 @@ async def _launch_nonblocking(hook: Hook, source: dict[str, Any], source_result:
 
 async def _fire_hooks_internal(
     trigger_tool: str,
-    source: dict[str, Any],
+    source: dict[str, JsonValue],
     depth: int,
     source_result: str,
     max_depth: int,
-    base_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    base_config: dict[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
     """Core fire logic. Returns a summary dict (not JSON)."""
     if base_config is None:
         base_config = {}
@@ -251,7 +262,7 @@ async def _fire_hooks_internal(
 
     fired = 0
     skipped = 0
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, JsonValue]] = []
     blocking_hooks: list[Hook] = []
 
     non_blocking_hooks: list[Hook] = []
@@ -307,7 +318,7 @@ async def _fire_hooks_internal(
                 )
 
     # Phase 1.5: Feedback writeback for blocking hooks
-    feedback_results: list[dict[str, Any]] = []
+    feedback_results: list[dict[str, JsonValue]] = []
     if blocking_hooks and results_by_id:
         for hook in blocking_hooks:
             if not hook.feedback_mapping or not hook.feedback_tool:
@@ -320,10 +331,10 @@ async def _fire_hooks_internal(
             except (json.JSONDecodeError, TypeError):
                 continue
 
-            feedback_params: dict[str, Any] = {}
+            feedback_params: dict[str, JsonValue] = {}
             for result_path, target_param in hook.feedback_mapping.items():
                 value = _resolve_path(result_data, result_path)
-                if value is not None:
+                if value is not None and isinstance(target_param, str):
                     feedback_params[target_param] = value
 
             if not feedback_params:
@@ -337,7 +348,8 @@ async def _fire_hooks_internal(
                 feedback_params["project_name"] = source["project_name"]
 
             # Call feedback tool on the trigger's server (proj)
-            trigger_url = _resolve_server_url("proj", registry.settings.get("hooks_port", 19100))
+            fb_port = registry.settings.get("hooks_port", 19100)
+            trigger_url = _resolve_server_url("proj", int(fb_port) if isinstance(fb_port, (int, float, str)) else 19100)
             if trigger_url:
                 try:
                     fb_result = await post_hook(
@@ -405,12 +417,16 @@ async def _fire_hooks_internal(
                 hook.target_tool, nested_source, depth + 1, raw, max_depth, base_config,
             )
             # Collect nested errors with chain path prefix
-            for err in nested.get("errors", []):
-                chain = f"[{trigger_tool} \u2192 {hook.id} \u2192 {hook.target_tool}]"
-                err_msg = err.get("error", str(err)) if isinstance(err, dict) else str(err)
-                cascade_errors.append(f"{chain} {err_msg}")
+            nested_errors = nested.get("errors", [])
+            if isinstance(nested_errors, list):
+                for err in nested_errors:
+                    chain = f"[{trigger_tool} \u2192 {hook.id} \u2192 {hook.target_tool}]"
+                    err_msg = str(err.get("error", str(err))) if isinstance(err, dict) else str(err)
+                    cascade_errors.append(f"{chain} {err_msg}")
             # Propagate deeper cascade errors
-            cascade_errors.extend(nested.get("cascade_errors", []))
+            nested_cascade = nested.get("cascade_errors", [])
+            if isinstance(nested_cascade, list):
+                cascade_errors.extend(str(e) for e in nested_cascade)
         except Exception:
             pass  # cascade failure is non-fatal
 
@@ -421,21 +437,22 @@ async def _fire_hooks_internal(
         task.add_done_callback(_background_tasks.discard)
 
     # Phase 2: Fire verification hooks with enriched source_result
-    verification_results: list[dict[str, Any]] = []
+    verification_results: list[dict[str, JsonValue]] = []
     if verification_matched:
         # Build hook_results dict from Phase 1 blocking results
-        hook_results: dict[str, Any] = dict(results_by_id)
+        hook_results: dict[str, str | None] = dict(results_by_id)
 
-        enriched = {**source, "hook_results": hook_results}
+        enriched: dict[str, JsonValue] = {**source, "hook_results": hook_results}  # type: ignore[dict-item]
         verification_results = await _fire_verification(
             verification_matched, enriched, trigger_tool, source_result, base_config,
         )
 
     target_tool_by_id = {hook.id: hook.target_tool for hook in blocking_hooks}
-    summary: dict[str, Any] = {
+    errors_jv: JsonValue = errors  # type: ignore[assignment]
+    summary: dict[str, JsonValue] = {
         "hooks_fired": fired,
         "skipped": skipped,
-        "errors": errors,
+        "errors": errors_jv,
         "results": [
             {"hook_id": k, "result": v, "target_tool": target_tool_by_id.get(k)}
             for k, v in results_by_id.items()
@@ -446,11 +463,11 @@ async def _fire_hooks_internal(
         "top_level": depth == 0,
     }
     if verification_results:
-        summary["verification"] = verification_results
+        summary["verification"] = verification_results  # type: ignore[assignment]
     if feedback_results:
-        summary["feedback"] = feedback_results
+        summary["feedback"] = feedback_results  # type: ignore[assignment]
     if cascade_errors:
-        summary["cascade_errors"] = cascade_errors
+        summary["cascade_errors"] = cascade_errors  # type: ignore[assignment]
     return summary
 
 
@@ -495,7 +512,7 @@ async def hooks_fire(
 
     # Parse source_result
     try:
-        source: dict[str, Any] = json.loads(source_result)
+        source: dict[str, JsonValue] = json.loads(source_result)
         if not isinstance(source, dict):
             return "Error: source_result must be a JSON object, got " + type(source).__name__
     except json.JSONDecodeError as e:
@@ -511,13 +528,21 @@ async def hooks_fire(
             "parent_todoist_task_id",
         )}
         if todo_fields:
-            base_config.setdefault("todo", {}).update(todo_fields)
+            todo_section = base_config.get("todo")
+            if not isinstance(todo_section, dict):
+                todo_section = {}
+                base_config["todo"] = todo_section
+            todo_section.update(todo_fields)
         # Inject project-level fields
         project_fields = {k: v for k, v in source.items() if k in (
             "todoist_project_id", "trello_card_id", "trello_checklist_id",
         )}
         if project_fields:
-            base_config.setdefault("project", {}).update(project_fields)
+            project_section = base_config.get("project")
+            if not isinstance(project_section, dict):
+                project_section = {}
+                base_config["project"] = project_section
+            project_section.update(project_fields)
 
     summary = await _fire_hooks_internal(
         trigger_tool, source, depth, source_result, max_depth, base_config,

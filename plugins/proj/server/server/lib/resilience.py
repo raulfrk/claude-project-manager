@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import yaml
+
+from server.lib.models import JsonDict, _int
 
 
 @dataclass
@@ -23,7 +24,7 @@ class CircuitBreaker:
     last_error: str | None = None
     last_status_code: int | None = None
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JsonDict:
         return {
             "service": self.service,
             "state": self.state,
@@ -36,17 +37,17 @@ class CircuitBreaker:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> CircuitBreaker:
+    def from_dict(cls, data: JsonDict) -> CircuitBreaker:
         raw_status_code = data.get("last_status_code")
         return cls(
             service=str(data.get("service", "")),
             state=str(data.get("state", "HEALTHY")),
-            failure_count=int(data.get("failure_count", 0)),
+            failure_count=_int(data.get("failure_count")),
             last_failure=str(data["last_failure"]) if data.get("last_failure") else None,
             last_success=str(data["last_success"]) if data.get("last_success") else None,
             opened_at=str(data["opened_at"]) if data.get("opened_at") else None,
             last_error=str(data["last_error"]) if data.get("last_error") else None,
-            last_status_code=int(raw_status_code) if raw_status_code is not None else None,
+            last_status_code=_int(raw_status_code) if raw_status_code is not None else None,
         )
 
 
@@ -156,7 +157,7 @@ class CircuitBreakerManager:
 
         self._save()
 
-    def get_status(self) -> dict[str, dict[str, object]]:
+    def get_status(self) -> dict[str, JsonDict]:
         """Return all breaker states for status display."""
         return {k: v.to_dict() for k, v in self._breakers.items()}
 
@@ -196,11 +197,11 @@ class OrphanLogger:
             entries = entries[-self.MAX_ENTRIES :]
         self._save_entries(entries)
 
-    def load_orphans(self) -> list[dict[str, Any]]:
+    def load_orphans(self) -> list[JsonDict]:
         """Return all orphaned resource entries."""
         return self._load_entries()
 
-    def _load_entries(self) -> list[dict[str, Any]]:
+    def _load_entries(self) -> list[JsonDict]:
         if not self.state_file.exists():
             return []
         try:
@@ -211,7 +212,7 @@ class OrphanLogger:
             return []
         return raw
 
-    def _save_entries(self, entries: list[dict[str, Any]]) -> None:
+    def _save_entries(self, entries: list[JsonDict]) -> None:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_file.with_suffix(".yaml.tmp")
         tmp.write_text(yaml.dump(entries, default_flow_style=False))

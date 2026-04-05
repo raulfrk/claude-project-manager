@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -55,15 +56,18 @@ def load_config() -> TodoistConfig:
         msg = f"Invalid YAML in {config_path}: expected a mapping, got {type(data).__name__}"
         raise ValueError(msg)
 
-    api_token = data.get("api_token", "")
-    if not api_token or not str(api_token).strip():
+    # yaml.safe_load returns an untyped value; after isinstance check we know it's a dict
+    config_data = cast("dict[str, str | bool]", data)
+
+    api_token = str(config_data.get("api_token", ""))
+    if not api_token.strip():
         msg = f"Todoist config at {config_path} is missing api_token."
         raise ValueError(msg)
 
     _cached_config = TodoistConfig(
-        api_token=str(api_token).strip(),
-        enabled=data.get("enabled", True),
-        auto_sync=data.get("auto_sync", True),
-        root_only=data.get("root_only", False),
+        api_token=api_token.strip(),
+        enabled=bool(config_data.get("enabled", True)),
+        auto_sync=bool(config_data.get("auto_sync", True)),
+        root_only=bool(config_data.get("root_only", False)),
     )
     return _cached_config

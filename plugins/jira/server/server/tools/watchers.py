@@ -1,0 +1,35 @@
+"""Jira watcher tools."""
+
+from __future__ import annotations
+
+import json
+
+from mcp.server.fastmcp import FastMCP
+
+from server.lib.client import get_client
+
+
+def register(app: FastMCP) -> None:
+    @app.tool(description="Get watchers for a Jira issue.")
+    def jira_get_watchers(issue_key: str) -> str:
+        client = get_client()
+        data = client.get(f"/rest/api/2/issue/{issue_key}/watchers")
+        return json.dumps(data)
+
+    @app.tool(description="Add a watcher to a Jira issue.")
+    def jira_add_watcher(issue_key: str, username: str) -> str:
+        client = get_client()
+        client.post(
+            f"/rest/api/2/issue/{issue_key}/watchers",
+            json_body=username,
+        )
+        return json.dumps({"ok": True, "issue_key": issue_key, "username": username})
+
+    @app.tool(description="Remove a watcher from a Jira issue.")
+    def jira_remove_watcher(issue_key: str, username: str) -> str:
+        client = get_client()
+        client.delete(
+            f"/rest/api/2/issue/{issue_key}/watchers",
+            params={"username": username},
+        )
+        return json.dumps({"deleted": True, "issue_key": issue_key, "username": username})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
@@ -98,7 +99,7 @@ def register(app: FastMCP) -> None:
             if parent_todo:
                 parent_dict = parent_todo.to_dict()
 
-        def _truncate(content: str | None, file_path: object) -> str | None:
+        def _truncate(content: str | None, file_path: Path) -> str | None:
             if content is None:
                 return None
             if len(content) > max_chars:

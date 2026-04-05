@@ -61,7 +61,10 @@ def sandbox_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     local_path = tmp_path / ".claude" / "settings.local.json"
     _write_local_settings(local_path, {"sandbox": {"enabled": True}})
     monkeypatch.setattr(storage, "_USER_LOCAL_SETTINGS", local_path)
-    monkeypatch.setattr(storage, "_USER_SETTINGS", tmp_path / ".claude" / "settings.json")
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps({"sandbox": {"enabled": True}}))
+    monkeypatch.setattr(storage, "_USER_SETTINGS", settings_path)
     return local_path
 
 

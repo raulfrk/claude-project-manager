@@ -6,7 +6,7 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from server.lib.client import get_client
+from server.lib.client import JsonValue, get_client
 
 
 def register(app: FastMCP) -> None:
@@ -129,8 +129,8 @@ def register(app: FastMCP) -> None:
         if not updates:
             return json.dumps({"error": "Missing or empty 'updates' array in payload"})
 
-        successes: list[dict[str, object]] = []
-        failures: list[dict[str, object]] = []
+        successes: list[dict[str, JsonValue]] = []
+        failures: list[dict[str, JsonValue]] = []
         for idx, update in enumerate(updates):
             try:
                 key = update.get("key", "")

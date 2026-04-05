@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
 
 from server.lib.config import TodoistConfig, load_config
+from server.lib.models import JsonObject, JsonValue
 
 BASE_URL = "https://api.todoist.com/api/v1"
 
@@ -22,7 +21,7 @@ class TodoistClient:
             timeout=30,
         )
 
-    def _handle_response(self, resp: httpx.Response) -> Any:
+    def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.status_code == 401:
             raise RuntimeError("Todoist API error 401: Invalid API token")
         if resp.status_code == 429:
@@ -31,33 +30,43 @@ class TodoistClient:
                 f"Todoist rate limited. Retry after {retry_after} seconds."
             )
         if resp.is_success:
-            return resp.json() if resp.content else {"ok": True}
+            if resp.content:
+                result: JsonValue = resp.json()
+                return result
+            return {"ok": True}
         raise RuntimeError(f"Todoist API error {resp.status_code}: {resp.text}")
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: JsonObject | None = None,
+    ) -> JsonValue:
         try:
-            resp = self._http.request(method, path, **kwargs)
+            resp = self._http.request(method, path, params=params, json=json)
         except httpx.TimeoutException:
             raise RuntimeError("Todoist API request timed out") from None
         return self._handle_response(resp)
 
-    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def get(self, path: str, params: dict[str, str] | None = None) -> JsonValue:
         """Send a GET request to the Todoist API."""
         return self._request("GET", path, params=params)
 
-    def post(self, path: str, json: dict[str, Any] | None = None) -> Any:
+    def post(self, path: str, json: JsonObject | None = None) -> JsonValue:
         """Send a POST request to the Todoist API."""
         return self._request("POST", path, json=json)
 
-    def delete(self, path: str) -> Any:
+    def delete(self, path: str) -> JsonValue:
         """Send a DELETE request to the Todoist API."""
         return self._request("DELETE", path)
 
-    def close_task(self, task_id: str) -> Any:
+    def close_task(self, task_id: str) -> JsonValue:
         """Complete a task by ID (POST /tasks/{id}/close)."""
         return self.post(f"/tasks/{task_id}/close")
 
-    def reopen_task(self, task_id: str) -> Any:
+    def reopen_task(self, task_id: str) -> JsonValue:
         """Reopen a completed task by ID (POST /tasks/{id}/reopen)."""
         return self.post(f"/tasks/{task_id}/reopen")
 

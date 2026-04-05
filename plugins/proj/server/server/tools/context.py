@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.enums import TERMINAL_STATUSES
-from server.lib.models import ProjConfig
+from server.lib.models import JsonValue, ProjConfig, Todo
 from server.tools.config import require_config
 from server.tools.git import _active_branches, _git_log
 
@@ -32,7 +32,7 @@ def _read_recent_notes(notes_path: Path, max_sections: int = 3, max_chars: int =
     return result
 
 
-def _format_todos_section(todos: list, lines: list[str]) -> None:
+def _format_todos_section(todos: list[Todo], lines: list[str]) -> None:
     """Append in-progress, ready, and blocked todo sections to lines."""
     open_todos = [t for t in todos if t.status not in ("done", "cancelled")]
     in_progress = [t for t in open_todos if t.status == "in_progress"]
@@ -63,7 +63,7 @@ def _format_notes_section(cfg: ProjConfig, project_name: str, lines: list[str]) 
 
 def _read_session_history(
     cfg: ProjConfig, project_name: str
-) -> dict[str, object]:
+) -> dict[str, JsonValue]:
     """Return session history data from recent session files.
 
     Returns a dict with:
@@ -132,8 +132,10 @@ def _format_session_history(
         return
 
     summary = data.get("summary", "")
-    decisions: list[str] = data.get("decisions", [])  # type: ignore[assignment]
-    questions: list[str] = data.get("questions", [])  # type: ignore[assignment]
+    decisions_raw = data.get("decisions", [])
+    decisions: list[str] = [str(d) for d in decisions_raw] if isinstance(decisions_raw, list) else []
+    questions_raw = data.get("questions", [])
+    questions: list[str] = [str(q) for q in questions_raw] if isinstance(questions_raw, list) else []
 
     if summary:
         lines.append(f"\n### Last Session\n{summary}")
@@ -305,7 +307,7 @@ def register(app: FastMCP) -> None:
         except FileNotFoundError:
             return f"Project metadata not found for '{project_name}'."
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "config": {
                 "tracking_dir": cfg.tracking_dir,
                 "projects_base_dir": cfg.projects_base_dir,
@@ -376,19 +378,19 @@ def register(app: FastMCP) -> None:
         blocked = [t for t in all_open if t.blocked_by]
         done_count = sum(1 for t in todos if t.status == "done")
 
-        def _todo_summary(t: object) -> dict[str, object]:
+        def _todo_summary(t: Todo) -> dict[str, JsonValue]:
             return {
-                "id": t.id,  # type: ignore[attr-defined]
-                "title": t.title,  # type: ignore[attr-defined]
-                "priority": t.priority,  # type: ignore[attr-defined]
-                "status": t.status,  # type: ignore[attr-defined]
-                "tags": t.tags,  # type: ignore[attr-defined]
-                "blocked_by": t.blocked_by,  # type: ignore[attr-defined]
-                "children_count": len(t.children),  # type: ignore[attr-defined]
+                "id": t.id,
+                "title": t.title,
+                "priority": t.priority,
+                "status": t.status,
+                "tags": t.tags,
+                "blocked_by": t.blocked_by,
+                "children_count": len(t.children),
             }
 
         # Git activity
-        git_activity: dict[str, object] = {"git_enabled": False, "commits": [], "branches": []}
+        git_activity: dict[str, JsonValue] = {"git_enabled": False, "commits": [], "branches": []}
         if meta.git_enabled:
             all_commits: list[str] = []
             all_branches: list[str] = []
@@ -408,7 +410,7 @@ def register(app: FastMCP) -> None:
                     all_branches.extend(f"{repo.label}:{b}" for b in fut.result())
             git_activity = {"git_enabled": True, "commits": all_commits, "branches": all_branches}
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "config": {
                 "tracking_dir": cfg.tracking_dir,
                 "projects_base_dir": cfg.projects_base_dir,

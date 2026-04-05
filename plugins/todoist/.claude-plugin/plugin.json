@@ -1,7 +1,9 @@
 {
   "name": "todoist",
   "description": "Todoist task and project management via REST API.",
-  "version": "1.4.3",
-  "author": { "name": "raulfrk" },
+  "version": "1.4.4",
+  "author": {
+    "name": "raulfrk"
+  },
   "mcpServers": "./.mcp.json"
 }

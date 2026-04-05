@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Any
+
+from collections.abc import Mapping
 
 import httpx
 
 from server.lib.config import JiraConfig, load_config
+
+# Recursive JSON value type — no Any needed.
+JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
+
+# HTTP query-param values are always flat scalars.
+ParamValue = str | int | float | bool
 
 
 class JiraClient:
@@ -47,40 +54,67 @@ class JiraClient:
                 time.sleep(sleep_for)
         self._request_timestamps.append(time.monotonic())
 
-    def _handle_response(self, resp: httpx.Response) -> Any:  # noqa: ANN401
+    def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.is_success:
-            return resp.json()
+            return resp.json()  # type: ignore[no-any-return]
         msg = f"Jira API error {resp.status_code}: {resp.text}"
         raise RuntimeError(msg)
 
-    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:  # noqa: ANN401
+    def get(
+        self, path: str, params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
         """Send a GET request to the Jira REST API."""
         self._rate_limit()
         return self._handle_response(self._http.get(path, params=params or {}))
 
-    def post(  # noqa: ANN401
+    def post(
         self,
         path: str,
-        json_body: dict[str, Any] | list[Any] | None = None,
-        params: dict[str, Any] | None = None,
-    ) -> Any:
+        json_body: Mapping[str, JsonValue] | list[JsonValue] | str | None = None,
+        params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
         """Send a POST request to the Jira REST API."""
         self._rate_limit()
         return self._handle_response(
             self._http.post(path, json=json_body, params=params or {})
         )
 
-    def put(  # noqa: ANN401
+    def put(
         self,
         path: str,
-        json_body: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
-    ) -> Any:
+        json_body: Mapping[str, JsonValue] | None = None,
+        params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
         """Send a PUT request to the Jira REST API."""
         self._rate_limit()
         return self._handle_response(
             self._http.put(path, json=json_body, params=params or {})
         )
+
+    def delete(
+        self, path: str, params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
+        """Send a DELETE request to the Jira REST API."""
+        self._rate_limit()
+        return self._handle_response(self._http.delete(path, params=params or {}))
+
+    def post_multipart(
+        self,
+        path: str,
+        file_path: str,
+        params: Mapping[str, ParamValue] | None = None,
+    ) -> JsonValue:
+        """Send a multipart/form-data POST (for attachments)."""
+        self._rate_limit()
+        with open(file_path, "rb") as f:  # noqa: S108
+            return self._handle_response(
+                self._http.post(
+                    path,
+                    files={"file": f},
+                    headers={"X-Atlassian-Token": "no-check"},
+                    params=params or {},
+                )
+            )
 
 
 _cached_client: JiraClient | None = None

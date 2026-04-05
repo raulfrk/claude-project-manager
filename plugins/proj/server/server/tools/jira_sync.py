@@ -10,12 +10,12 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import Todo
+from server.lib.models import JsonDict, JsonValue, ProjectMeta, ProjConfig, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ def _slugify(name: str) -> str:
     return slug or "unnamed"
 
 
-def _parse_jira_priority(issue: dict[str, Any]) -> str:
+def _parse_jira_priority(issue: JsonDict) -> str:
     """Map Jira priority to local priority string."""
     priority_raw = issue.get("priority")
     if isinstance(priority_raw, dict):
@@ -67,7 +67,7 @@ def _parse_jira_priority(issue: dict[str, Any]) -> str:
     return _JIRA_TO_LOCAL.get(name, "medium")
 
 
-def _parse_jira_status(issue: dict[str, Any]) -> str:
+def _parse_jira_status(issue: JsonDict) -> str:
     """Extract status name from Jira issue."""
     status_raw = issue.get("status")
     if isinstance(status_raw, dict):
@@ -77,19 +77,19 @@ def _parse_jira_status(issue: dict[str, Any]) -> str:
     return ""
 
 
-def _is_resolved(issue: dict[str, Any]) -> bool:
+def _is_resolved(issue: JsonDict) -> bool:
     """Check if a Jira issue is in a resolved/done state."""
     status = _parse_jira_status(issue).lower()
     return status in {"done", "resolved", "closed", "cancelled", "canceled"}
 
 
-def _parse_jira_labels(issue: dict[str, Any]) -> list[str]:
+def _parse_jira_labels(issue: JsonDict) -> list[str]:
     """Extract labels list from Jira issue."""
     labels = issue.get("labels")
     return [str(x) for x in labels] if isinstance(labels, list) else []
 
 
-def _parse_jira_duedate(issue: dict[str, Any]) -> str | None:
+def _parse_jira_duedate(issue: JsonDict) -> str | None:
     """Extract due date from Jira issue."""
     raw = issue.get("duedate")
     if isinstance(raw, str) and raw:
@@ -159,10 +159,10 @@ class JiraGroup:
     project_exists: bool = False
     matched_project: str | None = None  # Name of matched local project
     matched_strategy: str = ""  # Strategy that produced the match
-    issues: list[dict[str, object]] = field(default_factory=list)
+    issues: list[JsonDict] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, object]:
-        d: dict[str, object] = {
+    def to_dict(self) -> JsonDict:
+        d: JsonDict = {
             "source": self.source,
             "jira_key": self.jira_key,
             "name": self.name,
@@ -186,7 +186,7 @@ class JiraMappingPlan:
     groups: list[JiraGroup] = field(default_factory=list)
     total_issues: int = 0
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JsonDict:
         return {
             "groups": [g.to_dict() for g in self.groups],
             "total_issues": self.total_issues,
@@ -207,7 +207,7 @@ class JiraMappingPlan:
 class JiraApplyInput:
     """Input for applying Jira mapping to local projects."""
 
-    groups: list[dict[str, Any]] = field(default_factory=list)
+    groups: list[JsonDict] = field(default_factory=list)
 
 
 @dataclass
@@ -234,7 +234,7 @@ def _format_jira_notes(issue_key: str, description: str) -> str:
 
 def _append_jira_comments(
     todo: Todo,
-    comments: list[dict[str, Any]],
+    comments: list[JsonDict],
 ) -> None:
     """Append new Jira comments to *todo.notes*, deduplicating by comment ID.
 
@@ -278,11 +278,11 @@ def _append_jira_comments(
 
 
 def _sync_root_issue_to_notes(
-    cfg: Any,
+    cfg: ProjConfig,
     project_name: str,
-    meta: Any,
-    issue: dict[str, Any],
-    comments: list[dict[str, Any]],
+    meta: ProjectMeta,
+    issue: JsonDict,
+    comments: list[JsonDict],
 ) -> None:
     """Sync the root Jira issue (1:1 with project) to NOTES.md instead of a todo.
 
@@ -343,11 +343,12 @@ def _sync_root_issue_to_notes(
 # ── Core logic (standalone functions) ─────────────────────────────────────────
 
 
-def _build_issue_entry(issue: dict[str, Any]) -> dict[str, object]:
+def _build_issue_entry(issue: JsonDict) -> JsonDict:
     """Extract a normalised issue entry dict from a raw Jira issue."""
     # Read from nested "fields" dict when present (real Jira API), fall back
     # to top-level keys for pre-normalised / test data.
-    fields = issue.get("fields", issue)
+    fields_raw = issue.get("fields", issue)
+    fields: JsonDict = fields_raw if isinstance(fields_raw, dict) else {}
     issue_key = str(issue.get("key", ""))
     summary = str(fields.get("summary", ""))
     priority = _parse_jira_priority(fields)
@@ -363,7 +364,7 @@ def _build_issue_entry(issue: dict[str, Any]) -> dict[str, object]:
         assignee = assignee_raw
 
     subtasks_raw = fields.get("subtasks", [])
-    subtasks: list[dict[str, object]] = []
+    subtasks: list[JsonDict] = []
     if isinstance(subtasks_raw, list):
         for st in subtasks_raw:
             if isinstance(st, dict):
@@ -377,7 +378,7 @@ def _build_issue_entry(issue: dict[str, Any]) -> dict[str, object]:
                     ),
                 })
 
-    entry: dict[str, object] = {
+    entry: JsonDict = {
         "key": issue_key,
         "summary": summary,
         "priority": priority,
@@ -394,7 +395,7 @@ def _build_issue_entry(issue: dict[str, Any]) -> dict[str, object]:
     return entry
 
 
-def _detect_epic_key(issue: dict[str, Any]) -> tuple[str | None, str | None]:
+def _detect_epic_key(issue: JsonDict) -> tuple[str | None, str | None]:
     """Return (epic_key, epic_name) for an issue, or (None, None)."""
     # Check if the issue itself is an Epic
     issuetype = issue.get("issuetype")
@@ -420,7 +421,7 @@ def _detect_epic_key(issue: dict[str, Any]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _is_epic_issue(issue: dict[str, Any]) -> bool:
+def _is_epic_issue(issue: JsonDict) -> bool:
     """Return True if the issue itself is an Epic (not just linked to one)."""
     issuetype = issue.get("issuetype")
     if isinstance(issuetype, dict) and str(issuetype.get("name", "")).lower() == "epic":
@@ -433,7 +434,7 @@ def _is_epic_issue(issue: dict[str, Any]) -> bool:
     return False
 
 
-def _match_by_jira_key(jira_key: str, cfg: Any, existing_names: list[str]) -> str | None:
+def _match_by_jira_key(jira_key: str, cfg: ProjConfig, existing_names: list[str]) -> str | None:
     """Look up an existing project by its jira_issue_key metadata field."""
     for name in existing_names:
         try:
@@ -446,9 +447,9 @@ def _match_by_jira_key(jira_key: str, cfg: Any, existing_names: list[str]) -> st
 
 
 def _match_standalone(
-    issue: dict[str, Any],
+    issue: JsonDict,
     existing_names: list[str],
-    cfg: Any,
+    cfg: ProjConfig,
 ) -> tuple[str | None, str, list[str]]:
     """Try a chain of strategies to match a standalone Jira issue to a project.
 
@@ -524,7 +525,7 @@ def _match_standalone(
     return None, "none", []
 
 
-def _link_standalone_key(group: JiraGroup, cfg: Any) -> None:
+def _link_standalone_key(group: JiraGroup, cfg: ProjConfig) -> None:
     """Link jira_issue_key on todos for matched standalone issues.
 
     For each issue in *group*, loads the matched project's todos, checks if a
@@ -582,8 +583,8 @@ def _link_standalone_key(group: JiraGroup, cfg: Any) -> None:
 
 
 def compute_mapping(
-    jira_issues: list[dict[str, Any]],
-    cfg: Any,
+    jira_issues: list[JsonDict],
+    cfg: ProjConfig,
     project_name: str | None = None,
     link_keys: bool = True,
 ) -> JiraMappingPlan:
@@ -612,8 +613,10 @@ def compute_mapping(
 
     # Phase 1: separate epics and collect epic metadata
     epic_groups: dict[str, JiraGroup] = {}  # epic_key -> group
-    non_epic_issues: list[dict[str, Any]] = []
+    non_epic_issues: list[JsonDict] = []
 
+    epic_key: str | None
+    epic_name: str | None
     for issue in jira_issues:
         if _is_epic_issue(issue):
             epic_key = str(issue.get("key", ""))
@@ -622,6 +625,7 @@ def compute_mapping(
                 continue
             if epic_key not in epic_groups:
                 # Match: jira_issue_key on project first, then fuzzy name
+                matched: str | None
                 if project_name:
                     matched = project_name
                 else:
@@ -644,7 +648,7 @@ def compute_mapping(
             non_epic_issues.append(issue)
 
     # Phase 2: assign non-epic issues to epic groups or standalone
-    standalone_issues: list[tuple[dict[str, Any], dict[str, object]]] = []
+    standalone_issues: list[tuple[JsonDict, JsonDict]] = []
 
     for issue in non_epic_issues:
         issue_entry = _build_issue_entry(issue)
@@ -721,8 +725,8 @@ def compute_mapping(
 
 def apply_mapping(
     data: JiraApplyInput,
-    cfg: Any,
-    comments_by_key: dict[str, list[dict[str, Any]]] | None = None,
+    cfg: ProjConfig,
+    comments_by_key: dict[str, list[JsonDict]] | None = None,
     todo_key_index: dict[str, tuple[str, str]] | None = None,
 ) -> JiraApplyResult:
     """Apply confirmed Jira mapping to local projects.
@@ -1039,9 +1043,9 @@ def _sanitize_project_name(summary: str) -> str:
 
 def _match_todo_by_title(
     summary: str,
-    todos: list[Any],
+    todos: list[Todo],
     threshold: float = 0.8,
-) -> Any | None:
+) -> Todo | None:
     """Legacy fallback: find a todo by title similarity when jira_issue_key is unset."""
     for todo in todos:
         if todo.jira_issue_key:
@@ -1052,10 +1056,10 @@ def _match_todo_by_title(
 
 
 def _deterministic_map(
-    jira_issues: list[dict[str, Any]],
-    cfg: Any,
+    jira_issues: list[JsonDict],
+    cfg: ProjConfig,
     name: str | None = None,
-) -> tuple[JiraApplyInput, dict[str, Any]]:
+) -> tuple[JiraApplyInput, JsonDict]:
     """Build a deterministic mapping without interactive disambiguation.
 
     Returns ``(apply_input, diagnostics)`` where *diagnostics* carries
@@ -1078,7 +1082,7 @@ def _deterministic_map(
 
     # Pre-load all project metas for jira_issue_key lookup
     meta_by_jira_key: dict[str, str] = {}  # jira_key -> project_name
-    all_metas: dict[str, Any] = {}
+    all_metas: dict[str, ProjectMeta] = {}
     for pn in existing_names:
         try:
             meta = storage.load_meta(cfg, pn)
@@ -1108,9 +1112,9 @@ def _deterministic_map(
                 own_epic_keys.add(ek)
 
     # Phase 1: classify each issue
-    epic_issues: dict[str, dict[str, Any]] = {}  # epic_key -> epic issue
-    children_by_epic: dict[str, list[dict[str, Any]]] = {}
-    standalone: list[dict[str, Any]] = []
+    epic_issues: dict[str, JsonDict] = {}  # epic_key -> epic issue
+    children_by_epic: dict[str, list[JsonDict]] = {}
+    standalone: list[JsonDict] = []
 
     for issue in jira_issues:
         if _is_epic_issue(issue):
@@ -1128,7 +1132,7 @@ def _deterministic_map(
                 # Case C/D: No epic, foreign epic, or ghost epic -> standalone
                 standalone.append(issue)
 
-    groups: list[dict[str, Any]] = []
+    groups: list[JsonDict] = []
     warnings: list[str] = []
     projects_to_create = 0
 
@@ -1302,7 +1306,8 @@ def _deterministic_map(
             continue
         by_jira_key = {t.jira_issue_key: t for t in todos if t.jira_issue_key}
         changed = False
-        for ie in group.get("issues", []):
+        issues_raw = group.get("issues", [])
+        for ie in (issues_raw if isinstance(issues_raw, list) else []):
             if not isinstance(ie, dict):
                 continue
             ik = str(ie.get("key", ""))
@@ -1319,7 +1324,7 @@ def _deterministic_map(
         if changed:
             storage.save_todos(cfg, project_name, todos)
 
-    diagnostics: dict[str, Any] = {
+    diagnostics: JsonDict = {
         "warnings": warnings,
         "epic_count": len(epic_issues),
         "standalone_count": len(standalone),
@@ -1392,12 +1397,12 @@ def register(app: FastMCP) -> None:
         comments_by_key_json: str = "{}",
     ) -> str:
         try:
-            raw: dict[str, Any] = json.loads(mapping_json)
+            raw: JsonDict = json.loads(mapping_json)
         except json.JSONDecodeError as e:
             return f"Invalid JSON: {e}"
 
         try:
-            cbk: dict[str, list[dict[str, Any]]] = json.loads(comments_by_key_json)
+            cbk: dict[str, list[JsonDict]] = json.loads(comments_by_key_json)
         except json.JSONDecodeError:
             cbk = {}
 
@@ -1411,9 +1416,10 @@ def register(app: FastMCP) -> None:
         except Exception as e:
             return f"Config error: {e}"
 
-        data = JiraApplyInput(groups=raw.get("groups", []))
+        groups_raw = raw.get("groups", [])
+        data = JiraApplyInput(groups=[g for g in groups_raw if isinstance(g, dict)] if isinstance(groups_raw, list) else [])
         apply_result = apply_mapping(data, cfg_obj, comments_by_key=cbk)
-        response: dict[str, Any] = {
+        response: JsonDict = {
             "status": "ok",
             "counts": apply_result.counts,
         }
@@ -1456,7 +1462,7 @@ def register(app: FastMCP) -> None:
 
         # Parse comments
         try:
-            comments_by_key: dict[str, list[dict[str, Any]]] = json.loads(comments_json)
+            comments_by_key: dict[str, list[JsonDict]] = json.loads(comments_json)
         except json.JSONDecodeError:
             comments_by_key = {}
 
@@ -1474,7 +1480,7 @@ def register(app: FastMCP) -> None:
                     "error": "Retry token expired (>30 min). Run a fresh sync.",
                 })
 
-            retry_issues: list[dict[str, Any]] = []
+            retry_issues: list[JsonDict] = []
             for err_entry in token_data.get("errors", []):
                 payload = err_entry.get("retry_payload", {})
                 issue = payload.get("issue")
@@ -1503,7 +1509,7 @@ def register(app: FastMCP) -> None:
                                 existing_jira_keys.add(t.jira_issue_key)
                     except Exception:
                         pass
-                filtered: list[dict[str, Any]] = []
+                filtered: list[JsonDict] = []
                 for ri in retry_issues:
                     ri_key = str(ri.get("key", ""))
                     if ri_key and ri_key in existing_jira_keys:
@@ -1571,8 +1577,8 @@ def register(app: FastMCP) -> None:
             })
 
         # Apply with per-issue error tracking
-        errors: list[dict[str, Any]] = []
-        safe_groups: list[dict[str, Any]] = []
+        errors: list[JsonDict] = []
+        safe_groups: list[JsonDict] = []
         todo_key_idx = diagnostics.get("todo_key_index")
         counts: dict[str, int] = {
             "epics_mapped": 0,
@@ -1589,7 +1595,7 @@ def register(app: FastMCP) -> None:
                 _result = apply_mapping(
                     single_input, cfg_obj,
                     comments_by_key=comments_by_key,
-                    todo_key_index=todo_key_idx,
+                    todo_key_index=todo_key_idx if isinstance(todo_key_idx, dict) else None,
                 )
                 # Accumulate counts
                 counts["todos_created"] += _result.counts.get("todos_created", 0)
@@ -1606,7 +1612,8 @@ def register(app: FastMCP) -> None:
                     if status.startswith("failed:"):
                         # Find the original issue dict for retry
                         issue_dict = None
-                        for ie in group.get("issues", []):
+                        group_issues = group.get("issues", [])
+                        for ie in (group_issues if isinstance(group_issues, list) else []):
                             if isinstance(ie, dict) and str(ie.get("key", "")) == ik:
                                 issue_dict = ie
                                 break
@@ -1620,7 +1627,8 @@ def register(app: FastMCP) -> None:
                 safe_groups.append(group)
             except Exception as e:
                 jk = str(group.get("jira_key", ""))
-                for ie in group.get("issues", []):
+                exc_issues = group.get("issues", [])
+                for ie in (exc_issues if isinstance(exc_issues, list) else []):
                     if isinstance(ie, dict):
                         errors.append({
                             "issue_key": str(ie.get("key", jk)),
@@ -1631,7 +1639,7 @@ def register(app: FastMCP) -> None:
                         })
 
         # Build summary
-        summary: dict[str, Any] = {
+        summary: JsonDict = {
             "groups_processed": len(safe_groups),
             "warnings": diagnostics.get("warnings", []),
             "epic_count": diagnostics.get("epic_count", 0),
