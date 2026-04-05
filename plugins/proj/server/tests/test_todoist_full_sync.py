@@ -24,7 +24,9 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.todoist_full_sync import (
+    _infer_parent_link_from_children,
     _migrate_parent_links,
+    compute_diff,
     register as register_full_sync,
 )
 
@@ -753,3 +755,155 @@ class TestPostExecutionLinkageFix:
             f"Expected re-parent update for existing_child_tid → new_parent_tid. "
             f"Update calls: {update_calls}"
         )
+
+
+# ── _infer_parent_link_from_children unit tests ──────────────────────────────
+
+
+def _make_local_todo(todo_id: str, title: str, todoist_id: str | None = None, parent: str | None = None) -> Todo:
+    today = str(date.today())
+    t = Todo(id=todo_id, title=title, created=today, updated=today)
+    t.todoist_task_id = todoist_id
+    t.parent = parent
+    return t
+
+
+def _make_task(task_id: str, content: str, parent_id: str | None = None) -> dict:
+    task: dict = {"id": task_id, "content": content, "priority": 4, "labels": [], "description": ""}
+    if parent_id:
+        task["parentId"] = parent_id
+    return task
+
+
+class TestInferParentLinkFromChildren:
+    def _build_maps(self, todos: list[Todo]) -> tuple[dict, dict]:
+        local_by_todoist_id = {t.todoist_task_id: t for t in todos if t.todoist_task_id}
+        local_by_id = {t.id: t for t in todos}
+        return local_by_todoist_id, local_by_id
+
+    def test_single_child_linked_to_local_parent(self):
+        """1 Todoist child linked to a local child whose parent is L-P → returns L-P."""
+        parent_todo = _make_local_todo("lp", "Parent", todoist_id="tp-a")
+        child_todo = _make_local_todo("lc", "Child", todoist_id="tc", parent="lp")
+        todos = [parent_todo, child_todo]
+        todoist_by_id = {
+            "tp-b": _make_task("tp-b", "Parent"),       # unlinked duplicate
+            "tc": _make_task("tc", "Child", parent_id="tp-b"),
+        }
+        local_by_todoist_id, local_by_id = self._build_maps(todos)
+
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        assert result is not None
+        assert result.id == "lp"
+
+    def test_multiple_children_same_parent(self):
+        """2 children both linked to children of L-P → returns L-P."""
+        parent_todo = _make_local_todo("lp", "Parent", todoist_id="tp-a")
+        child1 = _make_local_todo("lc1", "Child 1", todoist_id="tc1", parent="lp")
+        child2 = _make_local_todo("lc2", "Child 2", todoist_id="tc2", parent="lp")
+        todos = [parent_todo, child1, child2]
+        todoist_by_id = {
+            "tp-b": _make_task("tp-b", "Parent"),
+            "tc1": _make_task("tc1", "Child 1", parent_id="tp-b"),
+            "tc2": _make_task("tc2", "Child 2", parent_id="tp-b"),
+        }
+        local_by_todoist_id, local_by_id = self._build_maps(todos)
+
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        assert result is not None
+        assert result.id == "lp"
+
+    def test_children_different_parents_returns_none(self):
+        """Children point to different local parents → returns None."""
+        parent1 = _make_local_todo("lp1", "Parent 1", todoist_id="tp1")
+        parent2 = _make_local_todo("lp2", "Parent 2", todoist_id="tp2")
+        child1 = _make_local_todo("lc1", "Child 1", todoist_id="tc1", parent="lp1")
+        child2 = _make_local_todo("lc2", "Child 2", todoist_id="tc2", parent="lp2")
+        todos = [parent1, parent2, child1, child2]
+        todoist_by_id = {
+            "tp-b": _make_task("tp-b", "Whatever"),
+            "tc1": _make_task("tc1", "Child 1", parent_id="tp-b"),
+            "tc2": _make_task("tc2", "Child 2", parent_id="tp-b"),
+        }
+        local_by_todoist_id, local_by_id = self._build_maps(todos)
+
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        assert result is None
+
+    def test_no_linked_children_returns_none(self):
+        """Todoist children exist but none are linked locally → returns None."""
+        todoist_by_id = {
+            "tp-b": _make_task("tp-b", "Parent"),
+            "tc": _make_task("tc", "Child", parent_id="tp-b"),
+        }
+        # tc is not in local_by_todoist_id
+        local_by_todoist_id: dict = {}
+        local_by_id: dict = {}
+
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        assert result is None
+
+    def test_no_children_at_all_returns_none(self):
+        """Todoist task has no children → returns None immediately."""
+        todoist_by_id = {"tp-b": _make_task("tp-b", "Parent")}
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, {}, {})
+        assert result is None
+
+    def test_child_no_local_parent_returns_none(self):
+        """Linked child has parent=None → no parent to infer → returns None."""
+        child_todo = _make_local_todo("lc", "Child", todoist_id="tc", parent=None)
+        todos = [child_todo]
+        todoist_by_id = {
+            "tp-b": _make_task("tp-b", "Parent"),
+            "tc": _make_task("tc", "Child", parent_id="tp-b"),
+        }
+        local_by_todoist_id, local_by_id = self._build_maps(todos)
+
+        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        assert result is None
+
+
+class TestComputeDiffChildInference:
+    """Integration tests for child-based parent inference in compute_diff."""
+
+    def test_child_inference_prevents_duplicate_pull(
+        self, cfg_with_project: tuple
+    ):
+        """The exact incident scenario: local parent already linked to task A,
+        Todoist task B (same title, children linked to local children of parent)
+        → B goes to potential_links, NOT pull_create."""
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # Local state: parent (linked to task-a), two children (linked to tc1, tc2)
+        parent_todo = Todo(id="1", title="sandbox-perms skill", created=today, updated=today)
+        parent_todo.todoist_task_id = "task-a"
+        child1 = Todo(id="1.1", title="Manual test 1", created=today, updated=today)
+        child1.todoist_task_id = "tc1"
+        child1.parent = "1"
+        child2 = Todo(id="1.2", title="Manual test 2", created=today, updated=today)
+        child2.todoist_task_id = "tc2"
+        child2.parent = "1"
+        storage.save_todos(cfg, name, [parent_todo, child1, child2])
+
+        # Todoist state: task-a (linked), task-b (unlinked duplicate), tc1/tc2 (children of task-b)
+        todoist_tasks = [
+            _make_task("task-a", "sandbox-perms skill"),
+            _make_task("task-b", "sandbox-perms skill"),   # duplicate, unlinked
+            _make_task("tc1", "Manual test 1", parent_id="task-b"),
+            _make_task("tc2", "Manual test 2", parent_id="task-b"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # task-b should be in potential_links with score 1.0
+        link_ids = [e["todoist_task"]["id"] for e in plan.potential_links]
+        assert "task-b" in link_ids, f"Expected task-b in potential_links, got: {plan.potential_links}"
+
+        # task-b must NOT be in pull_create
+        pull_create_ids = [e["todoist_task_id"] for e in plan.pull_create]
+        assert "task-b" not in pull_create_ids, f"task-b should not be in pull_create: {plan.pull_create}"
+
+        # Score for task-b should be 1.0
+        task_b_link = next(e for e in plan.potential_links if e["todoist_task"]["id"] == "task-b")
+        assert task_b_link["score"] == 1.0

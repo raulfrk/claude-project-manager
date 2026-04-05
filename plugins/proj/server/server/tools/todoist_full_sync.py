@@ -317,6 +317,39 @@ def _find_link_candidate_reverse(
     return None
 
 
+def _infer_parent_link_from_children(
+    todoist_id: str,
+    todoist_by_id: dict[str, Any],
+    local_by_todoist_id: dict[str, "Todo"],
+    local_by_id: dict[str, "Todo"],
+) -> "Todo | None":
+    """Infer local parent by checking whether Todoist children are already linked locally.
+
+    Returns the local parent Todo if ALL linked Todoist children agree on the same
+    local parent. Returns None if no linked children exist, children disagree, or
+    no local child has a parent set.
+    """
+    todoist_children = [
+        t for t in todoist_by_id.values()
+        if str(t.get("parentId") or "") == todoist_id
+    ]
+    if not todoist_children:
+        return None
+
+    local_child_parents: set[str] = set()
+    for child_task in todoist_children:
+        child_id = str(child_task.get("id", ""))
+        linked_local = local_by_todoist_id.get(child_id)
+        if linked_local and linked_local.parent:
+            local_child_parents.add(linked_local.parent)
+
+    if len(local_child_parents) != 1:
+        return None  # No linked children, or children disagree on parent
+
+    parent_id = next(iter(local_child_parents))
+    return local_by_id.get(parent_id)
+
+
 def compute_diff(
     todoist_tasks: list[dict[str, Any]],
     cfg: Any,
@@ -363,6 +396,9 @@ def compute_diff(
     # Track local todo IDs matched via link candidates so they're excluded from push_create
     linked_local_ids: set[str] = set()
 
+    # Pre-build local_by_id for child-inference lookups (O(n) once, not per task)
+    local_by_id: dict[str, Todo] = {t.id: t for t in todos}
+
     # ── Todoist -> Local (pull) ───────────────────────────────────────
 
     for todoist_id, task in todoist_by_id.items():
@@ -381,6 +417,21 @@ def compute_diff(
             # Ghost check (title-based fallback for todos archived before ID was saved)
             if _ghost_check(content, archived):
                 plan.ghost_close.append(todoist_id)
+                continue
+            # Child-based parent inference: if this task's Todoist children are already
+            # linked to local todos, infer the local parent from those children.
+            # This catches duplicates where the local parent is already linked to a
+            # different Todoist ID (and therefore not in local_unlinked).
+            parent_match = _infer_parent_link_from_children(
+                todoist_id, todoist_by_id, local_by_todoist_id, local_by_id
+            )
+            if parent_match:
+                plan.potential_links.append({
+                    "local_todo": {"id": parent_match.id, "title": parent_match.title},
+                    "todoist_task": {"id": todoist_id, "content": content},
+                    "score": 1.0,
+                })
+                linked_local_ids.add(parent_match.id)
                 continue
             # Link candidate check: see if an unlinked local todo matches this Todoist task
             link_match = _find_link_candidate_reverse(task, local_unlinked)
@@ -449,8 +500,14 @@ def compute_diff(
                     })
 
     # Split unlinked into roots (phase 1) and children-of-unlinked (phase 2)
-    # Exclude todos that were matched as link candidates to prevent duplicate push_create
-    remaining_unlinked = [t for t in local_unlinked if t.id not in linked_local_ids]
+    # Exclude todos that were matched as link candidates to prevent duplicate push_create.
+    # Also exclude children of child-inferred parents — their parent won't be created via
+    # push_create so they'd have an unresolvable _parent_local_id in phase 2.
+    remaining_unlinked = [
+        t for t in local_unlinked
+        if t.id not in linked_local_ids
+        and not (t.parent and t.parent in linked_local_ids)
+    ]
     unlinked_ids = {t.id for t in remaining_unlinked}
     unlinked_roots: list[Todo] = []
     unlinked_children: list[Todo] = []
