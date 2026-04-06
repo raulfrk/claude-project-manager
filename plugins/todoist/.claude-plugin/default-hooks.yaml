@@ -71,6 +71,15 @@ hooks:
     blocking: true
     condition: "sync.todoist.enabled"
 
+  - id: todoist-full-sync-on-proj-load
+    trigger_tool: proj_load_session
+    target_tool: proj_todoist_full_sync
+    server: proj
+    param_mapping:
+      project_name: "${project_name}"
+    blocking: true
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"
+
   - id: todoist-on-proj-archive
     trigger_tool: proj_archive
     target_tool: todoist_find_tasks

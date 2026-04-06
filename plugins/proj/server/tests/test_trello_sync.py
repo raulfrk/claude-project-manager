@@ -2761,7 +2761,7 @@ class TestProjTrelloFullSync:
                 "retry_payload": {
                     "type": "push_create_checklist",
                     "tool": "create_checklist",
-                    "params": {"cardId": "card_abc", "name": "My checklist"},
+                    "params": {"card_id": "card_abc", "name": "My checklist"},
                 },
             }
         ]
@@ -2874,14 +2874,14 @@ class TestExecutePushOps:
             {
                 "type": "push_create_checklist",
                 "tool": "create_checklist",
-                "params": {"cardId": "c1", "name": "CL"},
+                "params": {"card_id": "c1", "name": "CL"},
                 "checklist_key": "todo_1",
                 "todo_id": "1",
             },
             {
                 "type": "push_create_item",
                 "tool": "add_checklist_item",
-                "params": {"checklistId": "?", "name": "Item"},
+                "params": {"checklist_id": "?", "name": "Item"},
                 "todo_id": "1.1",
                 "parent_checklist_todo_id": "todo_1",
             },
@@ -2913,7 +2913,7 @@ class TestRetryFailedOps:
                 "retry_payload": {
                     "type": "push_create_item",
                     "tool": "add_checklist_item",
-                    "params": {"checklistId": "cl1", "name": "Item"},
+                    "params": {"checklist_id": "cl1", "name": "Item"},
                 },
             }
         ]
@@ -2930,7 +2930,7 @@ class TestRetryFailedOps:
         assert len(still_failed) == 0
 
     def test_checklist_not_in_cache_proceeds_with_retry(self, monkeypatch) -> None:
-        """When checklistId is not found in any cached card data, dedup_match stays None
+        """When checklist_id is not found in any cached card data, dedup_match stays None
         and the retry proceeds normally (no UnboundLocalError)."""
         failed = [
             {
@@ -2940,8 +2940,8 @@ class TestRetryFailedOps:
                 "retry_payload": {
                     "type": "push_create_item",
                     "tool": "add_checklist_item",
-                    # No cardId provided, and checklistId won't match anything in cache
-                    "params": {"checklistId": "cl_unknown", "name": "My Task"},
+                    # No card_id provided, and checklist_id won't match anything in cache
+                    "params": {"checklist_id": "cl_unknown", "name": "My Task"},
                 },
             }
         ]
@@ -2982,8 +2982,8 @@ class TestRetryFailedOps:
                 "retry_payload": {
                     "type": "push_create_item",
                     "tool": "add_checklist_item",
-                    # No cardId — must be resolved via cache scan
-                    "params": {"checklistId": "cl1", "name": "New Task"},
+                    # No card_id — must be resolved via cache scan
+                    "params": {"checklist_id": "cl1", "name": "New Task"},
                 },
             }
         ]
@@ -3004,8 +3004,8 @@ class TestRetryFailedOps:
 
         # Pre-seed the cache so card_id can be found via scan.
         # We do this by running a preliminary call that populates _checklist_cache,
-        # but since the cache is local to _retry_failed_ops we inject cardId instead.
-        failed[0]["retry_payload"]["params"]["cardId"] = "card1"
+        # but since the cache is local to _retry_failed_ops we inject card_id instead.
+        failed[0]["retry_payload"]["params"]["card_id"] = "card1"
 
         succeeded, still_failed = _retry_failed_ops(failed)
         assert len(succeeded) == 1
@@ -3109,7 +3109,7 @@ class TestDedupGuards:
             {
                 "type": "push_create_checklist",
                 "tool": "create_checklist",
-                "params": {"cardId": "c1", "name": "Tasks"},
+                "params": {"card_id": "c1", "name": "Tasks"},
                 "checklist_key": "todo_1",
                 "todo_id": "1",
             },
@@ -3143,7 +3143,7 @@ class TestDedupGuards:
             {
                 "type": "push_create_item",
                 "tool": "add_checklist_item",
-                "params": {"checklistId": "cl1", "name": "Build feature"},
+                "params": {"checklist_id": "cl1", "name": "Build feature"},
                 "todo_id": "1.1",
             },
         ]

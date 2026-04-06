@@ -1444,7 +1444,7 @@ def register(app: FastMCP) -> None:
         )
     )
     def proj_jira_full_sync(
-        jira_issues_json: str | None = None,
+        jira_issues_json: str | dict | list | None = None,
         project_name: str | None = None,
         comments_json: str = "{}",
         retry_failures: str | None = None,
@@ -1543,11 +1543,13 @@ def register(app: FastMCP) -> None:
                         "error": str(e),
                         "guidance": "Jira plugin socket unreachable. Ensure the Jira plugin is running.",
                     })
-            else:
-                # Legacy path — parse provided JSON
+            elif isinstance(jira_issues_json, (dict, list)):
+                jira_issues_parsed = jira_issues_json
+                if isinstance(jira_issues_parsed, dict) and "issues" in jira_issues_parsed:
+                    jira_issues_parsed = jira_issues_parsed["issues"]
+            elif isinstance(jira_issues_json, str):
                 try:
                     jira_issues_parsed = json.loads(jira_issues_json)
-                    # Unwrap Jira search response envelope: {"issues": [...], "total": ...}
                     if isinstance(jira_issues_parsed, dict) and "issues" in jira_issues_parsed:
                         jira_issues_parsed = jira_issues_parsed["issues"]
                 except json.JSONDecodeError as e:

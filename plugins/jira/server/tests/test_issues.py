@@ -180,6 +180,85 @@ class TestJiraGetUserIssues:
         assert "project in" not in jql
 
 
+class TestJiraCreateIssue:
+    def test_create_issue_minimal(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.post.return_value = {"key": "PROJ-1", "self": "https://jira.example.com/rest/api/2/issue/10001"}
+
+        result = issue_tools["jira_create_issue"](project_key="PROJ", summary="New task")
+
+        mock_jira_client.post.assert_called_once_with(
+            "/rest/api/2/issue",
+            json_body={
+                "fields": {
+                    "project": {"key": "PROJ"},
+                    "summary": "New task",
+                    "issuetype": {"name": "Task"},
+                }
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed == {"key": "PROJ-1", "self": "https://jira.example.com/rest/api/2/issue/10001"}
+
+    def test_create_issue_with_epic_link(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.post.return_value = {"key": "PROJ-2", "self": "https://jira.example.com/rest/api/2/issue/10002"}
+
+        result = issue_tools["jira_create_issue"](
+            project_key="PROJ", summary="Child task", parent_key="PROJ-100"
+        )
+
+        call_args = mock_jira_client.post.call_args
+        fields = call_args[1]["json_body"]["fields"]
+        assert fields["parent"] == {"key": "PROJ-100"}
+        parsed = json.loads(result)
+        assert parsed["key"] == "PROJ-2"
+
+    def test_create_issue_all_fields(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.post.return_value = {"key": "PROJ-3", "self": "https://jira.example.com/rest/api/2/issue/10003"}
+
+        result = issue_tools["jira_create_issue"](
+            project_key="PROJ",
+            summary="Full issue",
+            issue_type="Story",
+            description="A detailed description",
+            priority="High",
+            assignee="alice",
+            parent_key="PROJ-50",
+            labels="backend, urgent",
+            components="API, Core",
+        )
+
+        call_args = mock_jira_client.post.call_args
+        fields = call_args[1]["json_body"]["fields"]
+        assert fields["project"] == {"key": "PROJ"}
+        assert fields["summary"] == "Full issue"
+        assert fields["issuetype"] == {"name": "Story"}
+        assert fields["description"] == "A detailed description"
+        assert fields["priority"] == {"name": "High"}
+        assert fields["assignee"] == {"name": "alice"}
+        assert fields["parent"] == {"key": "PROJ-50"}
+        assert fields["labels"] == ["backend", "urgent"]
+        assert fields["components"] == [{"name": "API"}, {"name": "Core"}]
+        parsed = json.loads(result)
+        assert parsed["key"] == "PROJ-3"
+
+    def test_create_issue_api_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error 400: bad request")
+
+        result = issue_tools["jira_create_issue"](project_key="PROJ", summary="Will fail")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "400" in parsed["error"]
+
+
 class TestJiraBulkCreateIssues:
     def test_posts_bulk_payload(
         self, mock_jira_client: MagicMock, issue_tools: dict

@@ -91,10 +91,54 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Create a single Jira issue with full field support including epic linking. "
+            "Use parent_key to link the issue to an epic (Cloud/next-gen projects). "
+            "For labels and components, pass comma-separated values."
+        ),
+    )
+    def jira_create_issue(
+        project_key: str,
+        summary: str,
+        issue_type: str = "Task",
+        description: str | None = None,
+        priority: str | None = None,
+        assignee: str | None = None,
+        parent_key: str | None = None,
+        labels: str | None = None,
+        components: str | None = None,
+    ) -> str:
+        client = get_client()
+        fields: dict[str, JsonValue] = {
+            "project": {"key": project_key},
+            "summary": summary,
+            "issuetype": {"name": issue_type},
+        }
+        if parent_key:
+            fields["parent"] = {"key": parent_key}
+        if description:
+            fields["description"] = description
+        if priority:
+            fields["priority"] = {"name": priority}
+        if assignee:
+            fields["assignee"] = {"name": assignee}
+        if labels:
+            fields["labels"] = [lbl.strip() for lbl in labels.split(",")]
+        if components:
+            fields["components"] = [{"name": c.strip()} for c in components.split(",")]
+        try:
+            data = client.post("/rest/api/2/issue", json_body={"fields": fields})
+            return json.dumps({"key": data["key"], "self": data["self"]})
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @app.tool(
+        description=(
             "Bulk-create Jira issues using the bulk endpoint (POST /rest/api/2/issue/bulk). "
             "issues_json is a JSON string with an 'issueUpdates' array. "
             "Each entry has 'fields' with at minimum 'project.key', 'summary', 'issuetype.name'. "
-            "Returns the Jira bulk-create response with created issue keys."
+            "Returns the Jira bulk-create response with created issue keys. "
+            "Note: The bulk endpoint does not support epic linking via the parent field. "
+            "Use jira_create_issue for individual issues that need epic links."
         ),
     )
     def jira_bulk_create_issues(issues_json: str) -> str:

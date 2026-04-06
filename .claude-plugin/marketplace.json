@@ -54,7 +54,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "2.10.22",
+      "version": "2.10.23",
       "author": {
         "name": "raulfrk"
       },
@@ -89,7 +89,7 @@
       "name": "jira",
       "source": "./plugins/jira",
       "description": "Read-only Jira Server issue and project access via REST API.",
-      "version": "2.1.3",
+      "version": "2.1.4",
       "author": {
         "name": "raulfrk"
       },
@@ -140,7 +140,7 @@
       "name": "todoist",
       "source": "./plugins/todoist",
       "description": "Todoist task and project management via REST API \u2014 create, complete, update, find, and delete tasks and projects",
-      "version": "1.4.4",
+      "version": "1.4.5",
       "author": {
         "name": "raulfrk"
       },

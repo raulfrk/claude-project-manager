@@ -60,6 +60,7 @@ Do not proceed with any further sync steps.
 - Call `mcp__proj__proj_jira_full_sync` with:
   - `project_name`: optional, to scope sync to one project
   - `comments_json`: JSON of the `comments_by_key` dict from step 2 (if available)
+  - **Important**: When passing Jira issues from `jira_get_user_issues`, serialize the result with `json.dumps()` before passing to `jira_issues_json`. The tool also accepts raw dicts/lists as a fallback, but string serialization is preferred.
 - Handle the response:
   - `"success"` -- display the summary counts
   - `"partial_success"` -- display errors table, offer one retry:

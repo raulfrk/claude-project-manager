@@ -1,4 +1,4 @@
-"""Tests for default-hooks.yaml: parse, validate structure, check all 9 hooks."""
+"""Tests for default-hooks.yaml: parse, validate structure, check all 10 hooks."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class TestDefaultHooksYaml:
     def test_has_9_hooks(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
-        assert len(data["hooks"]) == 9
+        assert len(data["hooks"]) == 10
 
     def test_all_hooks_have_required_fields(self) -> None:
         with _HOOKS_PATH.open() as f:
@@ -43,12 +43,14 @@ class TestDefaultHooksYaml:
         ids = [h["id"] for h in data["hooks"]]
         assert len(ids) == len(set(ids)), f"Duplicate hook IDs: {ids}"
 
-    def test_all_hooks_target_todoist_server(self) -> None:
+    def test_all_hooks_target_expected_server(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
+        cross_server = {"todoist-full-sync-on-proj-load": "proj"}
         for hook in data["hooks"]:
-            assert hook["server"] == "todoist", (
-                f"Hook {hook['id']} server is {hook['server']}, expected 'todoist'"
+            expected = cross_server.get(hook["id"], "todoist")
+            assert hook["server"] == expected, (
+                f"Hook {hook['id']} server is {hook['server']}, expected '{expected}'"
             )
 
     def test_param_mapping_is_dict(self) -> None:
@@ -70,8 +72,23 @@ class TestDefaultHooksYaml:
             "todoist-on-todo-delete",
             "todoist-on-proj-init",
             "todoist-on-proj-load",
+            "todoist-full-sync-on-proj-load",
             "todoist-on-proj-archive",
             "verify-todoist-complete",
             "todoist-on-todo-add-child",
         }
         assert ids == expected
+
+    def test_full_sync_on_proj_load_hook(self) -> None:
+        with _HOOKS_PATH.open() as f:
+            data = yaml.safe_load(f)
+        hooks_by_id = {h["id"]: h for h in data["hooks"]}
+        hook = hooks_by_id["todoist-full-sync-on-proj-load"]
+        assert hook["trigger_tool"] == "proj_load_session"
+        assert hook["target_tool"] == "proj_todoist_full_sync"
+        assert hook["server"] == "proj"
+        assert "project_name" in hook["param_mapping"]
+        assert hook["blocking"] is True
+        assert "sync.todoist.enabled" in hook["condition"]
+        assert "sync.todoist.auto_sync" in hook["condition"]
+        assert "project.todoist_project_id" in hook["condition"]

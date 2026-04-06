@@ -2536,6 +2536,102 @@ class TestSelfFetchFullSync:
         assert result["summary"]["groups_processed"] >= 1
 
 
+class TestFullSyncInputTypes:
+    """Tests for proj_jira_full_sync accepting dict, list, str, and None inputs."""
+
+    def _get_full_sync_fn(self):
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools["proj_jira_full_sync"]
+
+    def test_full_sync_dict_input(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Passing a dict with 'issues' key works without validation error."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        envelope = {"issues": issues, "total": len(issues)}
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=envelope, project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+    def test_full_sync_list_input(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Passing a bare list of issues works."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=issues, project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+    def test_full_sync_string_input(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Passing a JSON string still works (backwards compatible)."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
+        assert result["status"] == "success"
+        assert result["summary"]["groups_processed"] >= 1
+
+    def test_full_sync_none_input(
+        self, cfg_with_project: tuple[ProjConfig, str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Passing None triggers the self-fetch path."""
+        cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-1", "Auth Epic"),
+            _make_jira_issue(
+                "PROJ-2", "Login page",
+                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
+            ),
+        ]
+        monkeypatch.setattr(
+            "server.tools.jira_full_sync._fetch_jira_issues",
+            lambda: (issues, len(issues)),
+        )
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json=None, project_name=name))
+        assert result["status"] == "success"
+
+    def test_full_sync_empty_dict(
+        self, cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        """Passing an empty dict {} handles gracefully (no 'issues' key)."""
+        cfg, name = cfg_with_project
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(jira_issues_json={}, project_name=name))
+        assert result["status"] == "success"
+        assert "up to date" in result["summary"].get("message", "").lower() or result["summary"].get("message") == "Everything up to date"
+
+
 class TestDedupGuards:
     """Tests for dedup guards in apply_mapping."""
 
