@@ -392,7 +392,7 @@ class TestRunSync:
             sandbox_mode=False,
         )
 
-        assert "perms_add_mcp_allow" in result
+        assert "sandbox_add_mcp_allow" in result
 
     def test_todoist_rule_appears_when_enabled(self) -> None:
         meta = _make_meta(repos=[])

@@ -1,6 +1,6 @@
 """End-to-end tests for hook fire chain.
 
-Starts a real perms MCP server as a subprocess with dual transport,
+Starts a real sandbox MCP server as a subprocess with dual transport,
 registers hooks in a temp hooks.yaml, fires via hooks_fire(), and verifies
 target tools actually execute via HTTP POST.  No mocking of HTTP anywhere.
 """
@@ -23,7 +23,7 @@ from server.lib.models import Hook, HookRegistry
 from server.tools.fire import hooks_fire
 
 _PLUGINS_DIR = Path(__file__).resolve().parents[3]
-_PERMS_SERVER_DIR = _PLUGINS_DIR / "perms" / "server"
+_SANDBOX_SERVER_DIR = _PLUGINS_DIR / "sandbox" / "server"
 
 # Atomic port counter — each xdist worker gets a separate range to avoid collisions.
 _port_counter_lock = threading.Lock()
@@ -52,12 +52,12 @@ def _wait_for_health(port: int, *, timeout: float = 15.0) -> None:
                 resp = client.get(f"http://127.0.0.1:{port}/health")
                 if resp.status_code == 200:
                     data = resp.json()
-                    if "perms_list" in data.get("tools", []):
+                    if "sandbox_list" in data.get("tools", []):
                         return
             except (httpx.ConnectError, httpx.ReadTimeout) as exc:
                 last_exc = exc
             time.sleep(0.3)
-    msg = f"Perms server on port {port} not healthy after {timeout}s"
+    msg = f"Sandbox server on port {port} not healthy after {timeout}s"
     if last_exc:
         msg += f": {last_exc}"
     pytest.skip(msg)
@@ -89,14 +89,14 @@ def _strip_proxy(monkeypatch):
 
 
 @pytest.fixture()
-def perms_port():
-    """Start a real perms MCP server subprocess and yield its HTTP port."""
+def sandbox_port():
+    """Start a real sandbox MCP server subprocess and yield its HTTP port."""
     port = _next_port()
     env = _clean_env(HOOK_HTTP_PORT=str(port))
 
     proc = subprocess.Popen(
         ["uv", "run", "python", "-m", "server.main"],
-        cwd=str(_PERMS_SERVER_DIR),
+        cwd=str(_SANDBOX_SERVER_DIR),
         env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -127,9 +127,9 @@ class TestE2EHookFire:
 
     @pytest.mark.asyncio
     async def test_blocking_hook_returns_result(
-        self, perms_port: int, tmp_path: Path
+        self, sandbox_port: int, tmp_path: Path
     ):
-        """Blocking hook → perms_list → result included in response."""
+        """Blocking hook → sandbox_list → result included in response."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"
 
@@ -138,13 +138,13 @@ class TestE2EHookFire:
                 Hook(
                     id="e2e-001",
                     trigger_tool="test_trigger",
-                    target_tool="perms_list",
-                    server="perms",
+                    target_tool="sandbox_list",
+                    server="sandbox",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{perms_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -159,7 +159,7 @@ class TestE2EHookFire:
         assert data["errors"] == []
         assert len(data["results"]) == 1
         assert data["results"][0]["hook_id"] == "e2e-001"
-        # perms_list returns a string result (permissions listing)
+        # sandbox_list returns a string result (permissions listing)
         assert data["results"][0]["result"] is not None
 
     @pytest.mark.asyncio
@@ -174,13 +174,13 @@ class TestE2EHookFire:
                 Hook(
                     id="e2e-002",
                     trigger_tool="test_trigger",
-                    target_tool="perms_list",
-                    server="perms",
+                    target_tool="sandbox_list",
+                    server="sandbox",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{dead_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{dead_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -201,7 +201,7 @@ class TestE2EHookFire:
 
     @pytest.mark.asyncio
     async def test_nonblocking_returns_immediately(
-        self, perms_port: int, tmp_path: Path
+        self, sandbox_port: int, tmp_path: Path
     ):
         """Non-blocking hook → hooks_fire returns immediately, results empty."""
         hooks_yaml = tmp_path / "hooks.yaml"
@@ -212,13 +212,13 @@ class TestE2EHookFire:
                 Hook(
                     id="e2e-003",
                     trigger_tool="test_trigger",
-                    target_tool="perms_list",
-                    server="perms",
+                    target_tool="sandbox_list",
+                    server="sandbox",
                     param_mapping={},
                     blocking=False,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{perms_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -236,7 +236,7 @@ class TestE2EHookFire:
 
     @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(
-        self, perms_port: int, tmp_path: Path
+        self, sandbox_port: int, tmp_path: Path
     ):
         """Hook targeting non-existent tool → 404 error captured."""
         hooks_yaml = tmp_path / "hooks.yaml"
@@ -248,12 +248,12 @@ class TestE2EHookFire:
                     id="e2e-004",
                     trigger_tool="test_trigger",
                     target_tool="nonexistent_tool",
-                    server="perms",
+                    server="sandbox",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{perms_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -275,7 +275,7 @@ class TestE2EHookFire:
 
     @pytest.mark.asyncio
     async def test_blocking_with_param_mapping(
-        self, perms_port: int, tmp_path: Path
+        self, sandbox_port: int, tmp_path: Path
     ):
         """Blocking hook with param_mapping resolves templates from source_result."""
         hooks_yaml = tmp_path / "hooks.yaml"
@@ -286,13 +286,13 @@ class TestE2EHookFire:
                 Hook(
                     id="e2e-005",
                     trigger_tool="test_trigger",
-                    target_tool="perms_list",
-                    server="perms",
+                    target_tool="sandbox_list",
+                    server="sandbox",
                     param_mapping={"format": "${format}"},
                     blocking=True,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{perms_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -309,12 +309,12 @@ class TestE2EHookFire:
         assert data["hooks_fired"] == 1
         assert data["errors"] == []
         assert len(data["results"]) == 1
-        # perms_list with format=json returns JSON-parseable output
+        # sandbox_list with format=json returns JSON-parseable output
         assert data["results"][0]["result"] is not None
 
     @pytest.mark.asyncio
     async def test_multiple_hooks_same_trigger(
-        self, perms_port: int, tmp_path: Path
+        self, sandbox_port: int, tmp_path: Path
     ):
         """Multiple hooks for the same trigger all fire correctly."""
         hooks_yaml = tmp_path / "hooks.yaml"
@@ -325,21 +325,21 @@ class TestE2EHookFire:
                 Hook(
                     id="e2e-006a",
                     trigger_tool="test_trigger",
-                    target_tool="perms_list",
-                    server="perms",
+                    target_tool="sandbox_list",
+                    server="sandbox",
                     param_mapping={},
                     blocking=True,
                 ),
                 Hook(
                     id="e2e-006b",
                     trigger_tool="test_trigger",
-                    target_tool="perms_is_sandbox_enabled",
-                    server="perms",
+                    target_tool="sandbox_check",
+                    server="sandbox",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"perms": {"url": f"http://127.0.0.1:{perms_port}/hook"}},
+            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 

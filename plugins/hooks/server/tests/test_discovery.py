@@ -495,15 +495,15 @@ class TestPopulateServerUrls:
             assert registry.servers[name]["url"] == f"http://127.0.0.1:{port}/hook"
 
     def test_populate_server_urls_preserves_manual_override(self):
-        registry = HookRegistry(servers={"perms": {"url": "http://custom:9999/hook"}})
+        registry = HookRegistry(servers={"sandbox": {"url": "http://custom:9999/hook"}})
         added = populate_server_urls(registry)
-        assert registry.servers["perms"]["url"] == "http://custom:9999/hook"
+        assert registry.servers["sandbox"]["url"] == "http://custom:9999/hook"
         assert added == len(_DEFAULT_SERVER_PORTS) - 1
 
     def test_populate_server_urls_with_port_override(self):
         registry = HookRegistry()
-        added = populate_server_urls(registry, port_overrides={"perms": 29101})
-        assert registry.servers["perms"]["url"] == "http://127.0.0.1:29101/hook"
+        added = populate_server_urls(registry, port_overrides={"sandbox": 29101})
+        assert registry.servers["sandbox"]["url"] == "http://127.0.0.1:29101/hook"
         assert added == len(_DEFAULT_SERVER_PORTS)
 
     def test_populate_server_urls_idempotent(self):

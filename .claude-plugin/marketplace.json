@@ -55,7 +55,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "2.10.23",
+      "version": "3.0.1",
       "author": {
         "name": "raulfrk"
       },
@@ -107,7 +107,7 @@
       "name": "hooks",
       "source": "./plugins/hooks",
       "description": "Central MCP-to-MCP hook registry with schema-based param mapping, auto-registration, and recovery",
-      "version": "1.9.5",
+      "version": "1.10.1",
       "author": {
         "name": "raulfrk"
       },
