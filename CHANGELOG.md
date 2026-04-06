@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0 — 2026-04-06
+
+Fix sandbox MCP server failing to start — `uv sync` could not write to `~/.cache/uv` when running inside Claude Code sandbox mode. Added `UV_CACHE_DIR` fallback to all plugin `start.sh` scripts, redirecting the uv cache to a writable location within the plugin directory.
+
 ## 0.8.0 — 2026-03-03
 
 Add `claude-helper` plugin:

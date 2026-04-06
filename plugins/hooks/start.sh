@@ -4,6 +4,7 @@ DIR="$(cd "$1" && pwd)"
 SERVER="$2"
 export UV_LINK_MODE=copy
 export UV_PROJECT_ENVIRONMENT="$DIR/.venv"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$DIR/.uv-cache}"
 
 # Ensure _shared (claude-hook-transport) is available and up-to-date.
 # In the plugin cache the layout is <marketplace>/<plugin>/<version>/server/
