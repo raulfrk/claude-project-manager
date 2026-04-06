@@ -1,7 +1,7 @@
 {
   "name": "sandbox",
   "description": "Manage Claude Code sandbox-mode settings.json. Provides MCP tools to add/remove write paths, MCP allow rules, network domains, and deny rules.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "raulfrk"
   },

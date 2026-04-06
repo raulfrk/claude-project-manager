@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sandbox-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for managing Claude Code sandbox-mode settings.json"
 requires-python = ">=3.12"
 dependencies = [
