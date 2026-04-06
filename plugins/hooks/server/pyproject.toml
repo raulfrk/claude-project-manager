@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hooks-mcp-server"
-version = "1.9.5"
+version = "1.10.0"
 description = "MCP server for central hook registry with schema-based param mapping"
 requires-python = ">=3.12"
 dependencies = [

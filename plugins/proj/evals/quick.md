@@ -23,7 +23,7 @@ Note: The quick skill invokes the run skill via the Skill tool (`skill: "proj:ru
   - P2: Asks for todo title (simulated: "Build a hello world CLI")
   - P3: Calls `config_load` for `projects_base_dir`, presents location options
   - P4: Calls `proj_init` with `name="eval-quick-project"`, `path=<chosen_path>`, `description="Build a hello world CLI"`. Calls `proj_load_session`
-  - P5: If `perms_integration: true`: calls `proj_setup_permissions`
+  - P5: If `sandbox_integration: true`: calls `proj_setup_permissions`
   - P6: Calls `claudemd_write` with project overview template
   - P7: Calls `todo_add` with `title="Build a hello world CLI"`, `priority=<default_priority>`
   - P8: Calls the Skill tool with `skill="proj:run"`, `args="<new_id> --iter 3"`

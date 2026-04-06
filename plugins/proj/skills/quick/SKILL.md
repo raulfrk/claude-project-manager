@@ -77,10 +77,10 @@ Call `mcp__proj__proj_load_session`.
 
 **P5.** Permissions
 
-Skip unless `perms_integration: true` in config.
+Skip unless `sandbox_integration: true` in config.
 
 Call `mcp__proj__proj_setup_permissions` with `mcp_servers=[<list>]` — build list:
-  always include `"plugin_proj_proj"`, `"plugin_perms_perms"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
+  always include `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
   add `"plugin_worktree_worktree"` if worktree_integration; add `"todoist"` if todoist.enabled; add `"trello"` if trello.enabled; add `"jira"` if jira.enabled.
 > If proj_setup_permissions returned an error, go to **Error Recovery**.
 

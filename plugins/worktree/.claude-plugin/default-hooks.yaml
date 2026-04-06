@@ -1,21 +1,21 @@
 hooks:
-  - id: worktree-on-wt-create-perms
+  - id: worktree-on-wt-create-sandbox
     trigger_tool: wt_create
-    target_tool: perms_add_allow
-    server: perms
+    target_tool: sandbox_add_write_path
+    server: sandbox
     param_mapping:
       path: "${worktree_path}"
     blocking: true
-    condition: "perms_integration"
+    condition: "sandbox_integration"
 
-  - id: worktree-on-wt-remove-perms
+  - id: worktree-on-wt-remove-sandbox
     trigger_tool: wt_remove
-    target_tool: perms_remove_allow
-    server: perms
+    target_tool: sandbox_remove_write_path
+    server: sandbox
     param_mapping:
       path: "${worktree_path}"
     blocking: true
-    condition: "perms_integration"
+    condition: "sandbox_integration"
 
   - id: worktree-on-wt-create-zoxide
     trigger_tool: wt_create

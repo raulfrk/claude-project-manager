@@ -1,4 +1,4 @@
-"""Perms sync tool — compare expected vs actual allow rules."""
+"""Sandbox sync tool — compare expected vs actual allow rules."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig, ProjectMeta
-from server.lib.perms_helpers import project_dirs_from_meta
+from server.lib.sandbox_helpers import project_dirs_from_meta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -27,8 +27,8 @@ def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
         # proj is always present — it's the running plugin itself
         rules.add("mcp__plugin_proj_proj__*")
         # perms and worktree are only expected when their integrations are enabled
-        if cfg.perms_integration:
-            rules.add("mcp__plugin_perms_perms__*")
+        if cfg.sandbox_integration:
+            rules.add("mcp__plugin_sandbox_sandbox__*")
         if cfg.worktree_integration:
             rules.add("mcp__plugin_worktree_worktree__*")
         if cfg.todoist.enabled:
@@ -134,7 +134,7 @@ def run_sync(
     if actual_additional_dirs is not None:
         missing_additional_dirs = expected_additional - actual_additional_dirs
 
-    target_name = "settings.local.json" if sandbox_mode else "settings.json"
+    target_name = "settings.json"
 
     # Check deny rules presence (v4 mode = projects_root is set)
     deny_warning = ""
@@ -193,7 +193,7 @@ def run_sync(
     hint = "\nRun `proj_setup_permissions` to add all missing rules at once."
     if missing_mcp:
         hint += (
-            "\nOr use `perms_add_mcp_allow` / `perms_batch_add_mcp_allow` "
+            "\nOr use `sandbox_add_mcp_allow` "
             "to add MCP rules individually."
         )
     lines.append(hint)

@@ -2,7 +2,7 @@
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
 context: fork
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, mcp__proj__proj_decision_log
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log
 argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
 ---
 
@@ -433,7 +433,7 @@ For each todo in current batch:
 1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
-3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+3. Call `sandbox_add_write_path` to add the worktree path to sandbox write allowlist.
 4. Store `worktree_path` and `worktree_branch` for this todo.
 
 With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
@@ -572,7 +572,7 @@ For each todo in current batch:
 1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
-3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+3. Call `sandbox_add_write_path` to add the worktree path to sandbox write allowlist.
 4. Store `worktree_path` and `worktree_branch` for this todo.
 
 With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
@@ -696,7 +696,7 @@ Clear `executing_agents = {}` before proceeding to the next batch.
 For each worktree created during this execution:
 1. Call `wt_unlock` on the worktree.
 2. Call `wt_remove` to delete the worktree.
-3. Call `perms_cleanup_stale` to remove sandbox entries for deleted worktree paths.
+3. Call `sandbox_reconcile` to remove sandbox entries for deleted worktree paths.
 4. Call `wt_prune` to clean any stale worktree admin entries.
 Display: "Cleaned up N worktrees."
 
@@ -1020,7 +1020,7 @@ For each todo in current batch:
 1. Call `wt_create` with repo_label and branch name `todo-{id}`.
    If fails: fall back to main for this todo, display warning. Continue with remaining todos.
 2. Call `wt_lock` on the created worktree.
-3. Call `perms_add_allow` to add the worktree path to sandbox write allowlist.
+3. Call `sandbox_add_write_path` to add the worktree path to sandbox write allowlist.
 4. Store `worktree_path` and `worktree_branch` for this todo.
 
 With pipeline: setup runs per-todo immediately after plan approval (before spawning execution agent).
@@ -1199,7 +1199,7 @@ Clear `executing_agents = {}` before proceeding to the next batch.
 For each worktree created during this execution:
 1. Call `wt_unlock` on the worktree.
 2. Call `wt_remove` to delete the worktree.
-3. Call `perms_cleanup_stale` to remove sandbox entries for deleted worktree paths.
+3. Call `sandbox_reconcile` to remove sandbox entries for deleted worktree paths.
 4. Call `wt_prune` to clean any stale worktree admin entries.
 Display: "Cleaned up N worktrees."
 

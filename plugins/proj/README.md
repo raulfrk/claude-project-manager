@@ -335,7 +335,7 @@ Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`).
 | `projects_base_dir` | null | If set, `/proj:init` uses `<base>/<name>` as content path |
 | `git_integration` | `true` | Enable git commit detection |
 | `default_priority` | `medium` | Default priority for new todos |
-| `perms_integration` | `false` | Enable automatic permission management |
+| `sandbox_integration` | `false` | Enable automatic permission management |
 | `worktree_integration` | `false` | Enable worktree plugin integration |
 | `permissions.auto_grant` | `true` | Auto-add Read/Edit rules |
 | `permissions.auto_allow_mcps` | `true` | Auto-add MCP wildcard rules |
@@ -382,7 +382,7 @@ When `trello.enabled: true`, bidirectional sync of root-level todos with a Trell
 
 ## Permissions integration
 
-When `perms_integration: true` (requires the `perms` plugin), automatic management of `~/.claude/settings.json` allow rules for path access, Bash investigation tools, and MCP wildcards.
+When `sandbox_integration: true` (requires the `perms` plugin), automatic management of `~/.claude/settings.json` allow rules for path access, Bash investigation tools, and MCP wildcards.
 
 ---
 

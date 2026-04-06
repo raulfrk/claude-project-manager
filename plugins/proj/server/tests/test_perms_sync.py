@@ -37,14 +37,14 @@ def _make_cfg(
     jira_enabled: bool = False,
     trello_enabled: bool = False,
     tracking_dir: str = "/tmp/tracking",
-    perms_integration: bool = False,
+    sandbox_integration: bool = False,
     worktree_integration: bool = False,
     projects_root: str | None = None,
     tracking_root: str | None = None,
 ) -> ProjConfig:
     cfg = ProjConfig(
         tracking_dir=tracking_dir,
-        perms_integration=perms_integration,
+        sandbox_integration=sandbox_integration,
         worktree_integration=worktree_integration,
     )
     cfg.permissions = PermissionsConfig(
@@ -108,14 +108,14 @@ class TestDeriveExpectedRules:
         cfg = _make_cfg(
             auto_allow_mcps=True,
             todoist_enabled=False,
-            perms_integration=True,
+            sandbox_integration=True,
             worktree_integration=True,
         )
 
         rules = _derive_expected_rules(meta, cfg)
 
         assert "mcp__plugin_proj_proj__*" in rules
-        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_sandbox_sandbox__*" in rules
         assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__todoist__*" not in rules
 
@@ -166,7 +166,7 @@ class TestDeriveExpectedRules:
             todoist_enabled=True,
             jira_enabled=True,
             trello_enabled=True,
-            perms_integration=True,
+            sandbox_integration=True,
             worktree_integration=True,
         )
 
@@ -174,7 +174,7 @@ class TestDeriveExpectedRules:
 
         # All plugin MCP servers are excluded when auto_allow_mcps=False
         assert "mcp__plugin_proj_proj__*" not in rules
-        assert "mcp__plugin_perms_perms__*" not in rules
+        assert "mcp__plugin_sandbox_sandbox__*" not in rules
         assert "mcp__plugin_worktree_worktree__*" not in rules
         assert "mcp__todoist__*" not in rules
         assert "mcp__plugin_jira_jira__*" not in rules
@@ -210,34 +210,34 @@ class TestDeriveExpectedRules:
     def test_no_repos_auto_allow_with_integrations(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(
-            auto_allow_mcps=True, perms_integration=True, worktree_integration=True
+            auto_allow_mcps=True, sandbox_integration=True, worktree_integration=True
         )
 
         rules = _derive_expected_rules(meta, cfg)
 
         assert "mcp__plugin_proj_proj__*" in rules
-        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_sandbox_sandbox__*" in rules
         assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
-    def test_perms_integration_only_adds_perms_mcp_rule(self) -> None:
+    def test_sandbox_integration_only_adds_perms_mcp_rule(self) -> None:
         meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, perms_integration=True, worktree_integration=False)
+        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=True, worktree_integration=False)
 
         rules = _derive_expected_rules(meta, cfg)
 
-        assert "mcp__plugin_perms_perms__*" in rules
+        assert "mcp__plugin_sandbox_sandbox__*" in rules
         assert "mcp__plugin_worktree_worktree__*" not in rules
 
     def test_worktree_integration_only_adds_worktree_mcp_rule(self) -> None:
         meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, perms_integration=False, worktree_integration=True)
+        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=False, worktree_integration=True)
 
         rules = _derive_expected_rules(meta, cfg)
 
         assert "mcp__plugin_worktree_worktree__*" in rules
-        assert "mcp__plugin_perms_perms__*" not in rules
+        assert "mcp__plugin_sandbox_sandbox__*" not in rules
 
     def test_no_repos_no_mcps_only_global_mcp_rules(self) -> None:
         meta = _make_meta(repos=[])
@@ -350,7 +350,7 @@ class TestRunSync:
         cfg = _make_cfg(
             auto_allow_mcps=True,
             todoist_enabled=False,
-            perms_integration=True,
+            sandbox_integration=True,
             worktree_integration=True,
         )
 
@@ -407,12 +407,12 @@ class TestRunSync:
 
         assert "mcp__todoist__*" in result
 
-    def test_perms_integration_false_mcp_perms_not_reported_missing(self) -> None:
-        """When perms_integration=False, mcp__perms__* is not expected so it is not reported missing."""
+    def test_sandbox_integration_false_mcp_perms_not_reported_missing(self) -> None:
+        """When sandbox_integration=False, mcp__perms__* is not expected so it is not reported missing."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, perms_integration=False, worktree_integration=False)
+        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=False, worktree_integration=False)
         expected = _derive_expected_rules(meta, cfg)
-        assert "mcp__plugin_perms_perms__*" not in expected
+        assert "mcp__plugin_sandbox_sandbox__*" not in expected
 
         result = run_sync(
             meta, cfg,
@@ -496,9 +496,7 @@ class TestRunSync:
         meta = _make_meta(repos=[RepoEntry(label="code", path=repo_path)])
         cfg = _make_cfg(auto_allow_mcps=False)
         settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
         result = run_sync(
             meta, cfg,
@@ -699,9 +697,7 @@ class TestProjPermsSyncTool:
         state.set_session_active("myproject")
 
         settings_path = _write_settings(tmp_path, allow=[])
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_SETTINGS", settings_path)
-        monkeypatch.setattr("server.tools.perms_grant._USER_LOCAL_SETTINGS", tmp_path / "nonexistent.json")
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(
             mcp_app, "proj_perms_sync",
@@ -828,7 +824,7 @@ class TestRunSyncSandbox:
             sandbox_mode=True,
         )
 
-        assert "settings.local.json" in result
+        assert "settings.json" in result
         assert "in sync" in result
 
     def test_missing_sandbox_paths_reported(self) -> None:
@@ -859,7 +855,7 @@ class TestRunSyncSandbox:
         )
 
         assert "❌" in result
-        assert "settings.local.json" in result
+        assert "settings.json" in result
         assert "MCP rules" in result or "Sandbox allowWrite" in result
         assert "Read(" not in result
 

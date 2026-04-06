@@ -1,7 +1,7 @@
 """Config-driven condition evaluation for hooks.
 
 Loads ``~/.claude/proj.yaml`` at fire time and resolves dot-path conditions
-(e.g. ``sync.todoist.enabled``, ``perms_integration``) to gate whether a hook
+(e.g. ``sync.todoist.enabled``, ``sandbox_integration``) to gate whether a hook
 should fire.
 """
 

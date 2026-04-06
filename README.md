@@ -61,9 +61,9 @@ $ /proj:status
 
 ## Plugins
 
-### perms
+### sandbox
 
-MCP-only server (no skills). Provides atomic read/write access to Claude Code's `settings.json` and `settings.local.json`. Used internally by `proj` and `worktree` during setup, and can be called directly.
+MCP-only server (no skills). Provides atomic read/write access to Claude Code's `settings.json` for sandbox-mode permission management. Used internally by `proj` and `worktree` during setup, and can be called directly.
 
 **MCP Tools:**
 

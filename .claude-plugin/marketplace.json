@@ -16,21 +16,21 @@
   },
   "plugins": [
     {
-      "name": "perms",
-      "source": "./plugins/perms",
-      "description": "Manage Claude Code settings.json permissions \u2014 auto-grant directory access for project workflows",
-      "version": "2.4.3",
+      "name": "sandbox",
+      "source": "./plugins/sandbox",
+      "description": "Manage Claude Code sandbox-mode settings.json \u2014 write paths, MCP allow rules, network domains, deny rules",
+      "version": "0.1.0",
       "author": {
         "name": "raulfrk"
       },
       "license": "MIT",
       "category": "utilities",
       "keywords": [
+        "sandbox",
         "permissions",
         "settings",
         "allow",
-        "access",
-        "sandbox"
+        "access"
       ]
     },
     {

@@ -311,7 +311,7 @@ class ProjConfig:
     jira: JiraSync = field(default_factory=JiraSync)
     git_tracking: GitTracking = field(default_factory=GitTracking)
     # Optional integration flags set by /proj:init-plugin
-    perms_integration: bool = False
+    sandbox_integration: bool = False
     worktree_integration: bool = False
     zoxide_integration: bool = False
     claudemd_management: bool = False
@@ -332,7 +332,7 @@ class ProjConfig:
             "permissions": self.permissions.to_dict(),
             "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict(), "jira": self.jira.to_dict()},
             "git_tracking": self.git_tracking.to_dict(),
-            "perms_integration": self.perms_integration,
+            "sandbox_integration": self.sandbox_integration,
             "worktree_integration": self.worktree_integration,
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
@@ -395,7 +395,7 @@ class ProjConfig:
             trello=TrelloSync.from_dict(trello_raw),
             jira=JiraSync.from_dict(jira_raw),
             git_tracking=GitTracking.from_dict(git_tracking_raw),
-            perms_integration=bool(data.get("perms_integration", False)),
+            sandbox_integration=bool(data.get("sandbox_integration", False)),
             worktree_integration=bool(data.get("worktree_integration", False)),
             zoxide_integration=bool(data.get("zoxide_integration", False)),
             claudemd_management=bool(data.get("claudemd_management", False)),

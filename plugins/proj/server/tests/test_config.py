@@ -136,7 +136,7 @@ class TestConfigUpdateMcpServer:
 
 @pytest.mark.anyio
 class TestConfigUpdateIntegrationFlags:
-    async def test_perms_integration_true_plugin_present(
+    async def test_sandbox_integration_true_plugin_present(
         self,
         mcp_app: Any,
         cfg: ProjConfig,
@@ -147,18 +147,18 @@ class TestConfigUpdateIntegrationFlags:
 
         settings_path = tmp_path / "settings.json"
         settings_path.write_text(
-            json.dumps({"permissions": {"allow": ["mcp__plugin_perms_perms__*"]}})
+            json.dumps({"permissions": {"allow": ["mcp__plugin_sandbox_sandbox__*"]}})
         )
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
-        result = await call_tool(mcp_app, "config_update", perms_integration=True)
+        result = await call_tool(mcp_app, "config_update", sandbox_integration=True)
 
         assert "updated" in result.lower()
         assert "Warning" not in result
         loaded = storage.load_config()
-        assert loaded.perms_integration is True
+        assert loaded.sandbox_integration is True
 
-    async def test_perms_integration_false_no_warning(
+    async def test_sandbox_integration_false_no_warning(
         self,
         mcp_app: Any,
         cfg: ProjConfig,
@@ -166,14 +166,14 @@ class TestConfigUpdateIntegrationFlags:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         settings_path = tmp_path / "settings_missing.json"
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
-        result = await call_tool(mcp_app, "config_update", perms_integration=False)
+        result = await call_tool(mcp_app, "config_update", sandbox_integration=False)
 
         assert "Warning" not in result
         assert "updated" in result.lower()
         loaded = storage.load_config()
-        assert loaded.perms_integration is False
+        assert loaded.sandbox_integration is False
 
     async def test_worktree_integration_false_no_warning(
         self,
@@ -183,7 +183,7 @@ class TestConfigUpdateIntegrationFlags:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         settings_path = tmp_path / "settings_missing.json"
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
         result = await call_tool(mcp_app, "config_update", worktree_integration=False)
 
@@ -203,10 +203,10 @@ class TestConfigUpdateIntegrationFlags:
 
         settings_path = tmp_path / "settings.json"
         settings_path.write_text(json.dumps({}))
-        monkeypatch.setattr("server.lib.perms_helpers._USER_SETTINGS", settings_path)
+        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
         # Set initial values
-        await call_tool(mcp_app, "config_update", perms_integration=False)
+        await call_tool(mcp_app, "config_update", sandbox_integration=False)
         await call_tool(mcp_app, "config_update", worktree_integration=False)
 
         # Update an unrelated field — both integration flags must stay unchanged
@@ -214,7 +214,7 @@ class TestConfigUpdateIntegrationFlags:
 
         assert "Warning" not in result
         loaded = storage.load_config()
-        assert loaded.perms_integration is False
+        assert loaded.sandbox_integration is False
         assert loaded.worktree_integration is False
 
 

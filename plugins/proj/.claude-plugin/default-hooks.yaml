@@ -53,10 +53,10 @@ hooks:
     blocking: true
     condition: "git_tracking.enabled"
 
-  - id: proj-perms-sync-on-load-session
+  - id: proj-sandbox-sync-on-load-session
     trigger_tool: proj_load_session
     target_tool: proj_perms_sync
     server: proj
     param_mapping: {}
     blocking: true
-    condition: "perms_integration"
+    condition: "sandbox_integration"

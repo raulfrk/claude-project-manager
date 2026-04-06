@@ -1,4 +1,7 @@
-"""Grant / revoke sandbox allowWrite paths and MCP wildcard rules for project paths."""
+"""Grant / revoke sandbox allowWrite paths and MCP wildcard rules for project paths.
+
+Delegates to the sandbox plugin for actual settings.json writes via hooks.
+"""
 
 from __future__ import annotations
 
@@ -9,41 +12,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
-from server.lib.models import JsonValue, ProjConfig, ProjectMeta
+from server.lib.models import ProjConfig, ProjectMeta
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-
-
-# ── Local settings path constants and sandbox detection ───────────────────────
-
-_USER_SETTINGS = Path.home() / ".claude" / "settings.json"
-_USER_LOCAL_SETTINGS = Path.home() / ".claude" / "settings.local.json"
-
-
-def _is_sandbox_enabled(
-    project_dir: Path | None = None,
-    project_dirs: list[Path] | None = None,
-) -> bool:
-    """Check if sandbox mode is enabled in user-level or project-level settings.local.json."""
-    paths = [_USER_LOCAL_SETTINGS]
-    if project_dirs:
-        for d in project_dirs:
-            paths.append(Path(d) / ".claude" / "settings.local.json")
-    elif project_dir:
-        paths.append(Path(project_dir) / ".claude" / "settings.local.json")
-    for path in paths:
-        if not path.exists():
-            continue
-        try:
-            data: dict[str, JsonValue] = json.loads(path.read_text())
-            sandbox = data.get("sandbox", {})
-            if isinstance(sandbox, dict) and sandbox.get("enabled", False):
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-    return False
 
 
 
@@ -85,21 +58,6 @@ def _mcp_allow_entry(server_name: str) -> str:
 
 # ── Setup (one-shot atomic write) ─────────────────────────────────────────────
 
-
-def _apply_mcp_rules(
-    servers: list[str],
-    allow_set: set[str],
-    new_entries: list[str],
-) -> int:
-    """Add MCP wildcard allow rules. Returns count added."""
-    count = 0
-    for server in servers:
-        entry = _mcp_allow_entry(server)
-        if entry not in allow_set:
-            new_entries.append(entry)
-            allow_set.add(entry)
-            count += 1
-    return count
 
 
 _SANDBOX_ADDED_RE = re.compile(r"Sandbox paths added:\s*(\d+)")
@@ -319,10 +277,10 @@ def register(app: FastMCP) -> None:
         description=(
             "Grant sandbox allowWrite paths + MCP wildcard rules for a project "
             "in one atomic write. Idempotent. "
-            "Automatically detects sandbox mode and writes to settings.local.json if enabled. "
+            "Delegates to the sandbox plugin for settings.json writes. "
             "Writable repo paths and the tracking dir are added to sandbox.filesystem.allowWrite. "
             "mcp_servers is a list of server names to add wildcard allow rules for "
-            "(e.g. ['plugin_proj_proj', 'plugin_perms_perms', 'trello'])."
+            "(e.g. ['plugin_proj_proj', 'plugin_sandbox_sandbox', 'trello'])."
         )
     )
     def proj_setup_permissions(
@@ -374,7 +332,7 @@ def register(app: FastMCP) -> None:
             "MCP wildcard rules are only removed when mcp_servers is provided, "
             "because they are shared across projects. "
             "Automatically called by proj_archive. Idempotent. "
-            "Automatically detects sandbox mode."
+            "Delegates to the sandbox plugin for settings.json writes."
         )
     )
     def proj_revoke_all_permissions(

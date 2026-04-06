@@ -6,7 +6,7 @@
 ## Overview
 
 Claude Code plugin marketplace for project management workflows. Five plugins:
-- `perms` — auto-manage `settings.json` permissions (file paths + MCP tool wildcards)
+- `sandbox` — manage sandbox-mode `settings.json` (write paths, MCP allow rules, network domains, deny rules)
 - `worktree` — git worktree management
 - `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync)
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
@@ -22,7 +22,7 @@ It contains the full workflow map, user vision, quality assessment, gap analysis
 - **3 new plugins planned**: `plugins/todoist/` (local, replacing external MCP), `plugins/zoxide/`, `plugins/hooks/`
 - **Perms is single source of truth** for settings.json — proj must never write settings files directly
 - **Proj must not read worktree.yaml directly** — use worktree MCP tools
-- **Remove deny functionality** from perms (denyWrite/denyRead)
+- **Remove deny functionality** from sandbox (denyWrite/denyRead)
 - **Define skill rewrite** — free-form writing → probing Q&A → iterative rerun → quality gate
 - **Default --iter 5** for `/proj:run`
 
@@ -40,7 +40,7 @@ After completing any implementation, always validate the result against the spec
 - `hooks/hooks.json` is auto-discovered — do NOT reference it in `plugin.json`
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
-- MCP allow rules: `mcp__<server>__*` wildcard format; use `perms_add_mcp_allow(server_name)`
+- MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
 
 ## Todo Tags
 
@@ -82,7 +82,7 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 | Plugin | Port |
 |--------|-------|
 | hooks | 19100 |
-| perms | 19101 |
+| sandbox | 19101 |
 | proj | 19102 |
 | worktree | 19103 |
 | trello | 19104 |
@@ -108,7 +108,7 @@ Condition-to-`proj.yaml` path mapping (from `default-hooks.yaml` files):
 
 | Condition | `proj.yaml` path | Used by |
 |-----------|------------------|---------|
-| `perms_integration` | `perms_integration` (top-level bool) | perms, proj, worktree |
+| `sandbox_integration` | `sandbox_integration` (top-level bool) | sandbox, proj, worktree |
 | `zoxide_integration` | `zoxide_integration` (top-level bool) | worktree, zoxide |
 | `git_tracking.enabled` | `git_tracking.enabled` | proj |
 | `sync.todoist.enabled` | `sync.todoist.enabled` | todoist |
@@ -131,7 +131,7 @@ Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.aut
 
 - **Field names**: `underscore_case` (`tracking_dir`, `auto_sync`, `default_priority`)
 - **Nested section names**: lowercase (`sync.todoist`, `permissions`, `archive`)
-- **Integration flags**: `underscore_case` (`perms_integration`, `worktree_integration`)
+- **Integration flags**: `underscore_case` (`sandbox_integration`, `worktree_integration`)
 - **MCP tool names**: `mcp__plugin_<name>_<name>__<tool_name>` (internal plugins), `mcp__<server>__<tool-name>` (external MCP servers)
 - **Git flush messages**: `"Action: subject"` pattern (`"Define: {todo-id}"`, `"Sync: Jira"`, `"Save: session"`)
 

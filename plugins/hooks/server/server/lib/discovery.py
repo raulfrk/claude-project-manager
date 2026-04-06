@@ -131,7 +131,7 @@ def _plugin_name_from_path(path: Path) -> str:
 
 _DEFAULT_SERVER_PORTS: dict[str, int] = {
     "hooks": 19100,
-    "perms": 19101,
+    "sandbox": 19101,
     "proj": 19102,
     "worktree": 19103,
     "trello": 19104,

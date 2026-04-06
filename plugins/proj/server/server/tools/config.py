@@ -81,7 +81,7 @@ def register(app: FastMCP) -> None:
             f"  trello.list_mappings.archived: {cfg.trello.list_mappings.archived or '(not set)'}\n"
             f"  jira.enabled: {cfg.jira.enabled}\n"
             f"  jira.default_user: {cfg.jira.default_user or '(not set)'}\n"
-            f"  perms_integration: {cfg.perms_integration}\n"
+            f"  sandbox_integration: {cfg.sandbox_integration}\n"
             f"  worktree_integration: {cfg.worktree_integration}\n"
             f"  zoxide_integration: {cfg.zoxide_integration}\n"
             f"  claudemd_management: {cfg.claudemd_management}\n"
@@ -129,7 +129,7 @@ def register(app: FastMCP) -> None:
         jira_default_user: str = "",
         git_integration: bool = True,
         default_priority: str = "medium",
-        perms_integration: bool = False,
+        sandbox_integration: bool = False,
         worktree_integration: bool = False,
         zoxide_integration: bool = False,
         claudemd_management: bool = False,
@@ -155,7 +155,7 @@ def register(app: FastMCP) -> None:
             projects_base_dir=projects_base_dir,
             git_integration=git_integration,
             default_priority=default_priority,
-            perms_integration=perms_integration,
+            sandbox_integration=sandbox_integration,
             worktree_integration=worktree_integration,
             zoxide_integration=zoxide_integration,
             claudemd_management=claudemd_management,
@@ -234,7 +234,7 @@ def register(app: FastMCP) -> None:
         jira_default_user: str | None = None,
         git_integration: bool | None = None,
         default_priority: str | None = None,
-        perms_integration: bool | None = None,
+        sandbox_integration: bool | None = None,
         worktree_integration: bool | None = None,
         zoxide_integration: bool | None = None,
         claudemd_management: bool | None = None,
@@ -373,8 +373,8 @@ def register(app: FastMCP) -> None:
             cfg.git_integration = git_integration
         if default_priority is not None:
             cfg.default_priority = default_priority
-        if perms_integration is not None:
-            cfg.perms_integration = perms_integration
+        if sandbox_integration is not None:
+            cfg.sandbox_integration = sandbox_integration
         if worktree_integration is not None:
             cfg.worktree_integration = worktree_integration
         if zoxide_integration is not None:

@@ -94,12 +94,12 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
    Call `mcp__proj__proj_load_session` to set as active for this session.
 
-**6.** Permissions (if `perms_integration: true` in config and project's auto_grant != false):
+**6.** Permissions (if `sandbox_integration: true` in config and project's auto_grant != false):
    - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"
    - Ask: "Auto-allow plugin MCP tools for this project? [yes/no/use global: yes]"
    - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
      - `mcp_servers=[<list>]` — build list when second answer is yes:
-       always include `"plugin_proj_proj"`, `"plugin_perms_perms"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
+       always include `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
        add `"plugin_worktree_worktree"` if worktree_integration; add `"jira"` if jira.enabled; add `"trello"` if trello.enabled
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`

@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_perms_perms__perms_batch_add_mcp_allow, mcp__plugin_perms_perms__perms_add_allow, mcp__plugin_perms_perms__perms_list, mcp__plugin_perms_perms__perms_set_sandbox_paths, mcp__plugin_perms_perms__perms_set_deny, mcp__plugin_perms_perms__perms_is_sandbox_enabled, mcp__plugin_perms_perms__perms_sandbox_init, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -18,7 +18,7 @@ Call `mcp__proj__config_load`. If already configured:
 Auto-detect which plugins are available by attempting to call their MCP tools. Do NOT ask the user whether plugins are installed — detect programmatically.
 
 Check each plugin by calling a lightweight tool from its server:
-- **perms**: call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"` — if it returns a result, perms is installed
+- **perms**: call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"` — if it returns a result, perms is installed
 - **worktree**: call `mcp__plugin_worktree_worktree__wt_list_repos` — if it returns a result, worktree is installed
 - **hooks**: call `mcp__plugin_hooks_hooks__hooks_list_tool` — if it returns a result, hooks is installed
 - **todoist**: call `mcp__plugin_todoist_todoist__todoist_find_projects` with `name=""` — if it returns a result (even empty), todoist plugin is installed
@@ -167,7 +167,7 @@ If the user declines, return to step 4.
 Call `mcp__proj__config_init` with all collected values including:
 - Core paths: `tracking_dir`, `projects_base_dir`
 - Permissions: `auto_grant_permissions`, `auto_allow_mcps`
-- Plugin flags: `perms_integration` (auto-set from detection), `worktree_integration` (auto-set from detection), `zoxide_integration`
+- Plugin flags: `sandbox_integration` (auto-set from detection), `worktree_integration` (auto-set from detection), `zoxide_integration`
 - Sync: `todoist_enabled`, `todoist_auto_sync`, `todoist_mcp_server`, `trello_enabled`, `trello_auto_sync`, `trello_default_board_id`, `trello_on_delete`, `jira_enabled`, `jira_default_user`
 - Git: `git_integration`, `git_tracking_enabled`, `git_tracking_github_enabled`, `git_tracking_github_repo_format`
 - Extras: `team_mode_enabled`, `team_mode_max_agents`, `team_mode_trust_level`, `default_priority`, `archive_purge_after_days`
@@ -177,32 +177,32 @@ Omit `todoist_mcp_server` when `todoist_enabled: false`.
 ## Step 7: Permission setup (if perms plugin detected)
 
 ### 7a. MCP auto-allow
-Build the server list and call `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` once:
+Build the server list and call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` once:
 - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
-- If `auto_allow_mcps: true`, also include: `"plugin_proj_proj"`, `"plugin_perms_perms"`
+- If `auto_allow_mcps: true`, also include: `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`
 - If `auto_allow_mcps: true` and worktree detected: `"plugin_worktree_worktree"`
 - If `auto_allow_mcps: true` and hooks detected: `"plugin_hooks_hooks"`
 - If `auto_allow_mcps: true` and todoist enabled: the `todoist_mcp_server` value (e.g. `"claude_ai_Todoist"`) AND `"plugin_todoist_todoist"`
 - If `auto_allow_mcps: true` and trello enabled: `"plugin_trello_trello"`
 - If `auto_allow_mcps: true` and jira enabled: `"plugin_jira_jira"`
 - If `auto_allow_mcps: true` and zoxide detected: `"plugin_zoxide_zoxide"`
-- Call: `mcp__plugin_perms_perms__perms_batch_add_mcp_allow(servers=[<list>])`
-- If `zoxide_integration: true`, also call `mcp__plugin_perms_perms__perms_add_allow` with `entry="Bash(zoxide *)"`.
+- Call: `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow(servers=[<list>])`
+- If `zoxide_integration: true`, also call `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` with `entry="Bash(zoxide *)"`.
 
 ### 7b. Verify MCP rules
-Call `mcp__plugin_perms_perms__perms_list` with `scope="user"` and `format="json"`.
+Call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"`.
 Parse `permissions_allow` from the result.
-- If `perms_integration: true`: check for `mcp__plugin_perms_perms__*` — warn if missing
+- If `sandbox_integration: true`: check for `mcp__plugin_sandbox_sandbox__*` — warn if missing
 - If `worktree_integration: true`: check for `mcp__plugin_worktree_worktree__*` — warn if missing
 
 ### 7c. Sandbox setup
 - Compute `projects_root` from `projects_base_dir`
 - Compute `tracking_root` from `tracking_dir`
 - Compute `archive_destination` from archive config
-- Call `perms_set_sandbox_paths` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`
+- Call `sandbox_batch_setup` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`
 
 ### 7d. Default deny rules
-- Call `perms_set_deny` with the default deny rules list (from `DEFAULT_DENY_RULES` constant)
+- Call `sandbox_set_deny` with the default deny rules list (from `DEFAULT_DENY_RULES` constant)
 
 ### 7e. Persist root paths
 - Call `config_update` with `permissions_projects_root=<projects_root>` and `permissions_tracking_root=<tracking_root>`
@@ -223,12 +223,12 @@ Inspect the hooks list result.
 - If no hooks registered: warn "No hooks registered. Will attempt to register default hooks for detected plugins."
 
 For each detected and enabled plugin, register its default hooks by calling `mcp__plugin_hooks_hooks__hooks_register_tool` for each hook entry from the plugin's `default-hooks.yaml`. Only register hooks whose conditions match enabled integrations:
-- **proj** hooks: register if `git_tracking.enabled` (tracking flush hooks) or `perms_integration` (perms sync hook)
+- **proj** hooks: register if `git_tracking.enabled` (tracking flush hooks) or `sandbox_integration` (perms sync hook)
 - **todoist** hooks: register if `todoist_enabled`
 - **trello** hooks: register if `trello_enabled`
 - **zoxide** hooks: register if `zoxide_integration`
 - **worktree** hooks: register if `worktree_integration` (perms hooks) or `zoxide_integration` (zoxide hooks)
-- **perms** hooks: register if `perms_integration`
+- **perms** hooks: register if `sandbox_integration`
 
 Report how many hooks were registered: "Registered N default hooks for: proj, todoist, zoxide"
 

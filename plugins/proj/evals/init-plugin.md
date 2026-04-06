@@ -40,9 +40,9 @@ Note: This is an interactive skill. User answers to prompts should be simulated 
   - `zoxide_integration=false`
   - `default_priority="medium"`
   - `archive_purge_after_days=null`
-  - `perms_integration=false`
+  - `sandbox_integration=false`
   - `worktree_integration=false`
-  - No `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` call (perms not installed).
+  - No `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` call (perms not installed).
   - Confirmation message includes "proj plugin configured! Configuration saved to ~/.claude/proj.yaml".
 - **Assert**:
   - `mcp__proj__config_load` returns a valid config with the above values.
@@ -73,11 +73,11 @@ Note: This is an interactive skill. User answers to prompts should be simulated 
   - perms plugin: yes
   - worktree plugin: yes
 - **Expected**: The skill flow results in:
-  - `mcp__proj__config_init` called with `projects_base_dir="/tmp/claude-1000/eval-init-plugin/projects"`, `zoxide_integration=true`, `default_priority="high"`, `archive_purge_after_days=30`, `perms_integration=true`, `worktree_integration=true`.
-  - `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` called with servers list containing: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`, `"plugin_proj_proj"`, `"plugin_perms_perms"`, `"plugin_worktree_worktree"`.
-  - `mcp__plugin_perms_perms__perms_add_allow` called with `entry="Bash(zoxide *)"`.
+  - `mcp__proj__config_init` called with `projects_base_dir="/tmp/claude-1000/eval-init-plugin/projects"`, `zoxide_integration=true`, `default_priority="high"`, `archive_purge_after_days=30`, `sandbox_integration=true`, `worktree_integration=true`.
+  - `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` called with servers list containing: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`, `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`, `"plugin_worktree_worktree"`.
+  - `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` called with `entry="Bash(zoxide *)"`.
 - **Assert**:
-  - `mcp__proj__config_load` returns config with `perms_integration=true`, `worktree_integration=true`, `zoxide_integration=true`, `archive_purge_after_days=30`.
+  - `mcp__proj__config_load` returns config with `sandbox_integration=true`, `worktree_integration=true`, `zoxide_integration=true`, `archive_purge_after_days=30`.
 
 ### Scenario 4: Setup with Todoist enabled
 - **Invocation**: Remove `~/.claude/proj.yaml`. Follow the skill instructions as if user said `/proj:init-plugin`
@@ -98,7 +98,7 @@ Note: This is an interactive skill. User answers to prompts should be simulated 
   - worktree plugin: no
 - **Expected**: The skill flow results in:
   - `mcp__proj__config_init` called with `todoist_enabled=true`, `todoist_mcp_server="claude_ai_Todoist"`.
-  - `mcp__plugin_perms_perms__perms_batch_add_mcp_allow` called with servers list including `"claude_ai_Todoist"`.
+  - `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` called with servers list including `"claude_ai_Todoist"`.
 - **Assert**:
   - `mcp__proj__config_load` returns config with `todoist.enabled=true`, `todoist.mcp_server="claude_ai_Todoist"`, `todoist.auto_sync=true`.
 

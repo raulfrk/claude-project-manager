@@ -354,7 +354,7 @@ class TestValidateConditionSyntax:
         assert err is None
 
     def test_valid_compound_condition(self):
-        valid, err = validate_condition_syntax("sync.todoist.enabled and sync.todoist.auto_sync or perms_integration")
+        valid, err = validate_condition_syntax("sync.todoist.enabled and sync.todoist.auto_sync or sandbox_integration")
         assert valid is True
         assert err is None
 
