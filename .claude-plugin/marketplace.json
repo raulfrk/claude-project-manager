@@ -19,7 +19,7 @@
       "name": "sandbox",
       "source": "./plugins/sandbox",
       "description": "Manage Claude Code sandbox-mode settings.json \u2014 write paths, MCP allow rules, network domains, deny rules",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "raulfrk"
       },
@@ -30,7 +30,8 @@
         "permissions",
         "settings",
         "allow",
-        "access"
+        "access",
+        "skills"
       ]
     },
     {

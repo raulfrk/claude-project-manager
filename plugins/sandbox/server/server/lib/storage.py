@@ -75,6 +75,20 @@ def allow_entries_for_path(abs_path: str) -> list[str]:
     return [f"Edit({prefix}/**)"]
 
 
+def skill_allow_entry(prefix: str) -> str:
+    """Return the wildcard allow rule for a skill prefix.
+
+    E.g. prefix="proj" -> "Skill(proj:*)"
+    """
+    if not prefix:
+        msg = "prefix must not be empty"
+        raise ValueError(msg)
+    if "*" in prefix or "(" in prefix or ")" in prefix:
+        msg = f"prefix must not contain '*', '(' or ')': {prefix!r}"
+        raise ValueError(msg)
+    return f"Skill({prefix}:*)"
+
+
 def mcp_allow_entry(server_name: str) -> str:
     """Return the wildcard allow rule for an MCP server.
 

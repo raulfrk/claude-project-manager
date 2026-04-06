@@ -8,7 +8,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from server.lib import storage
-from server.lib.storage import allow_entries_for_path, mcp_allow_entry
+from server.lib.storage import allow_entries_for_path, mcp_allow_entry, skill_allow_entry
 
 
 def _resolve_path(path: str) -> str:
@@ -137,6 +137,61 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
         )
 
     @mcp.tool()
+    def sandbox_add_skill_allow(prefixes: str | list[str]) -> str:
+        """Add Skill wildcard allow rules. Accepts single prefix or list.
+
+        E.g. prefixes=["proj", "worktree"] adds Skill(proj:*) and Skill(worktree:*).
+        """
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+
+        settings = storage.load()
+        added = 0
+        skipped = 0
+
+        for prefix in prefixes:
+            entry = skill_allow_entry(prefix)
+            if entry not in settings.permissions.allow:
+                settings.permissions.allow.append(entry)
+                added += 1
+            else:
+                skipped += 1
+
+        if added:
+            storage.save(settings)
+
+        return _json_result(
+            result=f"Added {added} Skill rule(s), skipped {skipped}",
+            settings_path=str(settings.path),
+            added=added,
+            skipped=skipped,
+        )
+
+    @mcp.tool()
+    def sandbox_remove_skill_allow(prefixes: str | list[str]) -> str:
+        """Remove Skill wildcard allow rules. Accepts single prefix or list."""
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+
+        settings = storage.load()
+        removed = 0
+
+        for prefix in prefixes:
+            entry = skill_allow_entry(prefix)
+            if entry in settings.permissions.allow:
+                settings.permissions.allow.remove(entry)
+                removed += 1
+
+        if removed:
+            storage.save(settings)
+
+        return _json_result(
+            result=f"Removed {removed} Skill rule(s)",
+            settings_path=str(settings.path),
+            removed=removed,
+        )
+
+    @mcp.tool()
     def sandbox_add_domain(domain: str) -> str:
         """Add a domain to the sandbox network allowedDomains list."""
         settings = storage.load()
@@ -188,12 +243,14 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
         paths: list[str] | None = None,
         mcp_servers: list[str] | None = None,
         domains: list[str] | None = None,
+        skill_prefixes: list[str] | None = None,
     ) -> str:
-        """Add write paths, MCP allow rules, and domains in one atomic write."""
+        """Add write paths, MCP allow rules, domains, and Skill rules in one atomic write."""
         settings = storage.load()
         paths_added = 0
         mcp_added = 0
         domains_added = 0
+        skills_added = 0
 
         for p in paths or []:
             abs_path = _resolve_path(p)
@@ -215,7 +272,13 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
                 settings.sandbox.network.allowed_domains.append(d)
                 domains_added += 1
 
-        total = paths_added + mcp_added + domains_added
+        for prefix in skill_prefixes or []:
+            entry = skill_allow_entry(prefix)
+            if entry not in settings.permissions.allow:
+                settings.permissions.allow.append(entry)
+                skills_added += 1
+
+        total = paths_added + mcp_added + domains_added + skills_added
         if total:
             storage.save(settings)
 
@@ -225,6 +288,7 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
             paths_added=paths_added,
             mcp_added=mcp_added,
             domains_added=domains_added,
+            skills_added=skills_added,
             skipped=0,
         )
 
@@ -233,12 +297,14 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
         paths: list[str] | None = None,
         mcp_servers: list[str] | None = None,
         domains: list[str] | None = None,
+        skill_prefixes: list[str] | None = None,
     ) -> str:
-        """Remove write paths, MCP allow rules, and domains in one atomic write."""
+        """Remove write paths, MCP allow rules, domains, and Skill rules in one atomic write."""
         settings = storage.load()
         paths_removed = 0
         mcp_removed = 0
         domains_removed = 0
+        skills_removed = 0
 
         for p in paths or []:
             abs_path = _resolve_path(p)
@@ -260,7 +326,13 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
                 settings.sandbox.network.allowed_domains.remove(d)
                 domains_removed += 1
 
-        total = paths_removed + mcp_removed + domains_removed
+        for prefix in skill_prefixes or []:
+            entry = skill_allow_entry(prefix)
+            if entry in settings.permissions.allow:
+                settings.permissions.allow.remove(entry)
+                skills_removed += 1
+
+        total = paths_removed + mcp_removed + domains_removed + skills_removed
         if total:
             storage.save(settings)
 
@@ -270,6 +342,7 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
             paths_removed=paths_removed,
             mcp_removed=mcp_removed,
             domains_removed=domains_removed,
+            skills_removed=skills_removed,
         )
 
     @mcp.tool()
@@ -282,6 +355,9 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
                 "write_paths": settings.sandbox.filesystem.allow_write,
                 "mcp_allow": [
                     r for r in settings.permissions.allow if r.startswith("mcp__")
+                ],
+                "skill_allow": [
+                    r for r in settings.permissions.allow if r.startswith("Skill(")
                 ],
                 "edit_rules": [
                     r for r in settings.permissions.allow if r.startswith("Edit(")
@@ -307,6 +383,12 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
             lines.append(f"  - {r}")
         lines.append("")
 
+        skill_rules = [r for r in settings.permissions.allow if r.startswith("Skill(")]
+        lines.append("### Skill Allow Rules")
+        for r in skill_rules or ["(none)"]:
+            lines.append(f"  - {r}")
+        lines.append("")
+
         lines.append("### Network Domains")
         for d in settings.sandbox.network.allowed_domains or ["(none)"]:
             lines.append(f"  - {d}")
@@ -323,10 +405,11 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
         path: str | None = None,
         server: str | None = None,
         domain: str | None = None,
+        skill: str | None = None,
     ) -> str:
-        """Check if a path, MCP server, or domain is configured in sandbox settings."""
-        if not any([path, server, domain]):
-            return _json_result(error="At least one of path, server, or domain required")
+        """Check if a path, MCP server, domain, or skill prefix is configured in sandbox settings."""
+        if not any([path, server, domain, skill]):
+            return _json_result(error="At least one of path, server, domain, or skill required")
 
         settings = storage.load()
         results: list[dict[str, str]] = []
@@ -345,6 +428,11 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
             present = domain in settings.sandbox.network.allowed_domains
             results.append({"type": "domain", "value": domain, "status": "present" if present else "missing"})
 
+        if skill:
+            entry = skill_allow_entry(skill)
+            present = entry in settings.permissions.allow
+            results.append({"type": "skill", "value": skill, "status": "present" if present else "missing"})
+
         return json.dumps({"results": results})
 
     @mcp.tool()
@@ -352,8 +440,9 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
         expected_servers: list[str],
         expected_paths: list[str] | None = None,
         stale_servers: list[str] | None = None,
+        expected_skill_prefixes: list[str] | None = None,
     ) -> str:
-        """Sync expected vs actual MCP servers and paths. Removes stale, adds missing."""
+        """Sync expected vs actual MCP servers, paths, and skill prefixes. Removes stale, adds missing."""
         settings = storage.load()
         added = 0
         removed = 0
@@ -392,6 +481,14 @@ def register(mcp: FastMCP) -> None:  # noqa: C901, PLR0915
                 for entry in allow_entries_for_path(abs_path):
                     if entry not in settings.permissions.allow:
                         settings.permissions.allow.append(entry)
+
+        # Reconcile skill prefixes if provided
+        if expected_skill_prefixes is not None:
+            for prefix in expected_skill_prefixes:
+                entry = skill_allow_entry(prefix)
+                if entry not in settings.permissions.allow:
+                    settings.permissions.allow.append(entry)
+                    added += 1
 
         if added or removed:
             storage.save(settings)
