@@ -19,12 +19,12 @@ Convenience wrapper that chains `/proj:jira-sync` and `/proj:trello-sync` in seq
 
 **2.** Run Jira sync
 
-- Invoke `Skill("proj:jira-sync")` passing through any `--user` and `--projects` arguments from the original invocation.
+- Call the Skill tool: `skill: "proj:jira-sync", args: "<forwarded --user and --projects arguments>"`.
 - If jira-sync fails or is cancelled, stop. Do not proceed to Trello sync.
 
 **3.** Run Trello sync
 
-- Invoke `Skill("proj:trello-sync")`.
+- Call the Skill tool: `skill: "proj:trello-sync"`.
 
 **4.** Combined summary
 

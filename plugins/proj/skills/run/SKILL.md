@@ -1,6 +1,7 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
+context: fork
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, mcp__proj__proj_decision_log
 argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
 ---
@@ -113,8 +114,7 @@ Build descendant list: call `mcp__proj__todo_tree`, flatten depth-first.
 **If `define`** — sequential, interactive:
 - For each todo in descendant list (in dependency order via `mcp__proj__proj_identify_batches`):
   - Announce: `Define: <id> — <title>`
-  - Execute the define skill interactively (Q&A + research in main conversation)
-  - If current iteration > 1, pass `--skip-bg-prep` to define (codebase hasn't changed between iterations, background prep would be redundant).
+  - Call the Skill tool: `skill: "proj:define", args: "<id>"` (if current iteration > 1, append `--skip-bg-prep`).
 
 **Quality gate check** (after define phase):
 For each todo defined non-interactively (agent-driven):
@@ -235,8 +235,7 @@ When the user picks option 3: prompt for todo IDs, run interactive define on eac
 IF quality_level == fast: skip refine entirely, proceed to next step.
 IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
-Execute the refine sub-skill for each todo in the descendant list:
-  The sub-skill spawns 3 review agents (Skeptic, Edge-Case Finder, Architecture Reviewer), synthesizes a Refinement Report, and prompts Apply/Edit/Skip/Stop.
+For each todo in the descendant list, call the Skill tool: `skill: "proj:refine", args: "<id>"`.
   If Apply: requirements/research are updated and preflight re-runs automatically.
 
 **5.** Execute (only if `has_execute`)
@@ -267,7 +266,7 @@ IF quality_level == fast:
   - Security-tagged todos (security/breaking-change/migration) that received FULL REVIEW under --fast also get STANDARD verification before completion.
 
 1. Call `mcp__proj__todo_check_executable` — if manual-tagged: display warning and stop.
-2. Execute the step (plan mode is built into the execute skill — it calls EnterPlanMode/ExitPlanMode).
+2. Call the Skill tool: `skill: "proj:execute", args: "<id>"`.
 
 IF quality_level == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
@@ -834,8 +833,7 @@ Then show the between-iteration prompt (same 4 options as single-ID mode).
 IF quality_level == fast: skip refine entirely, proceed to Phase C.
 IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
-Execute the refine sub-skill for each todo in dependency order:
-  Execute the refine sub-skill per-todo (3 agents each, 3*N total for N todos). Subject to `max_parallel` throttling from quality_level.
+For each todo in dependency order, call the Skill tool: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttling from quality_level.
   Present per-todo refinement reports sequentially.
   If Apply on any todo: requirements/research updated, preflight re-runs on that todo.
 

@@ -1,6 +1,7 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
+context: fork
 allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_batch_add_children, mcp__proj__tracking_git_flush, Skill, Task
 argument-hint: "<todo-id>"
 ---
@@ -59,7 +60,7 @@ Decompose todo $ARGUMENTS into sub-todos.
    - A title is **clear** if a developer can understand exactly what to do without further context.
    - A title is **vague** if it uses ambiguous terms ("handle", "improve", "set up stuff"), lacks a specific target, or could mean multiple things.
    - Flag each vague title with a brief explanation of why it is vague.
-   - Offer to run the full interactive define flow via the `Skill` tool (invoke skill `proj:define` with the sub-todo ID) for each vague one, after creation.
+   - Offer to run define on each vague sub-todo after creation by calling the Skill tool: `skill: "proj:define", args: "<sub-todo-id>"`.
 
 **8.** Present the proposed multi-level breakdown as **indented bullet points**:
    - Root tasks at level 0; each nesting level adds two spaces of indentation.

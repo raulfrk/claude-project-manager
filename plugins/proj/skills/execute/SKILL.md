@@ -1,6 +1,7 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
+context: fork
 allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__perms__perms_add_allow, mcp__perms__perms_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
 argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
 ---
@@ -189,10 +190,10 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
       - Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `tags="correction,quality"`, `context="execute:satisfaction:{todo_id}"`, `todo_id=<todo_id>`.
       - Re-ask satisfaction (go back to step 5a)
    c. If redefine:
-      - Invoke `/proj:define <id>` via Skill tool (existing requirements/research kept as context — non-destructive)
+      - Call the Skill tool: `skill: "proj:define", args: "<id>"` (existing requirements/research kept as context — non-destructive)
       - After define completes, check if todo has/needs children:
-        - If decomposable: invoke `/proj:decompose <id>` via Skill tool
-      - Invoke `/proj:execute <id>` via Skill tool
+        - If decomposable: call the Skill tool: `skill: "proj:decompose", args: "<id>"`
+      - Call the Skill tool: `skill: "proj:execute", args: "<id>"`
       - When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2.
       - Re-ask satisfaction on original todo (go back to step 5a)
    d. Call `mcp__proj__todo_complete`
