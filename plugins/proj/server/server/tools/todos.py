@@ -42,6 +42,8 @@ def _todo_hook_fields(
             fields["parent_todoist_task_id"] = parent_todo.todoist_task_id
         if parent_todo and parent_todo.trello_card_id:
             fields["parent_trello_card_id"] = parent_todo.trello_card_id
+        if parent_todo and parent_todo.trello_checklist_id:
+            fields["parent_trello_checklist_id"] = parent_todo.trello_checklist_id
     return fields
 
 

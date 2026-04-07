@@ -982,6 +982,8 @@ class Todo:
             "todoist_task_id": self.todoist_task_id,
             "todoist_description_synced": self.todoist_description_synced,
             "trello_card_id": self.trello_card_id,
+            "trello_checklist_id": self.trello_checklist_id,
+            "trello_checklist_item_id": self.trello_checklist_item_id,
             "jira_issue_key": self.jira_issue_key,
             "jira_synced_comment_ids": self.jira_synced_comment_ids,
             "due_date": self.due_date,

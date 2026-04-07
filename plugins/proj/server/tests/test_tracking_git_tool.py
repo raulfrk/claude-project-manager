@@ -16,6 +16,10 @@ from tests.conftest import call_tool, setup_project
 def _isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent git from discovering the parent project repo."""
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Test User")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Test User")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 
 
 class TestTrackingGitFlush:

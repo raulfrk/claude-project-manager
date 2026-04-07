@@ -339,7 +339,7 @@ class TestParsePorcelainCorruptedOutput:
 
 def _init_repo(path: Path) -> None:
     """Create a git repo at *path* with one initial commit."""
-    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=str(path),

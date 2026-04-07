@@ -23,10 +23,15 @@ def _isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     Sets GIT_CEILING_DIRECTORIES so that tmp_path directories are not
     considered part of any enclosing git repository.
+    Also configures git user identity for CI environments.
     """
     # The ceiling must be the parent of tmp_path (or higher) so that
     # git won't traverse upward past tmp_path into the real project repo.
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Test User")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Test User")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 
 
 class TestIsGitRepo:

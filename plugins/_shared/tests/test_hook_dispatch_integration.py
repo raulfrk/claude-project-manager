@@ -13,6 +13,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
 from hook_dispatch import enable_hook_dispatch
 
@@ -252,7 +253,7 @@ async def test_e2e_exception_no_dispatch():
     async def boom() -> str:
         raise RuntimeError("kaboom")
 
-    with _patch_client_factory(_capturing_transport(captured)), pytest.raises(RuntimeError):
+    with _patch_client_factory(_capturing_transport(captured)), pytest.raises(ToolError):
         await mcp._tool_manager.call_tool("boom", {})
 
     assert len(captured) == 0

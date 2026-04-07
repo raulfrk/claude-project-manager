@@ -257,8 +257,9 @@ def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) ->
             except Exception:
                 logger.warning("context_injection failed, falling back to legacy", exc_info=True)
                 _format_notes_section(cfg, project_name, lines)
-                _format_session_history(cfg, project_name, lines)
                 _format_knowledge_section(cfg, project_name, lines)
+            # Session history is always appended (not handled by context injection)
+            _format_session_history(cfg, project_name, lines)
         else:
             _format_notes_section(cfg, project_name, lines)
             _format_session_history(cfg, project_name, lines)
