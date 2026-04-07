@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig
@@ -75,10 +76,8 @@ def project_with_sessions(cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, 
 
 
 @pytest.fixture()
-def digest_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
+def digest_app(cfg: ProjConfig) -> FastMCP:
     """Return a FastMCP app with digest tool registered."""
-    from mcp.server.fastmcp import FastMCP
-
     from server.tools import config as config_mod
     from server.tools import digest, projects
 
@@ -93,8 +92,8 @@ def digest_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
 class TestProjSessionDigest:
     async def test_aggregates_all_sessions(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=3, focus="all")
         data = json.loads(result)
@@ -110,8 +109,8 @@ class TestProjSessionDigest:
 
     async def test_focus_decisions(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=3, focus="decisions")
         data = json.loads(result)
@@ -124,8 +123,8 @@ class TestProjSessionDigest:
 
     async def test_focus_questions(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=3, focus="questions")
         data = json.loads(result)
@@ -135,8 +134,8 @@ class TestProjSessionDigest:
 
     async def test_focus_insights(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=3, focus="insights")
         data = json.loads(result)
@@ -146,8 +145,8 @@ class TestProjSessionDigest:
 
     async def test_deduplication(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=3, focus="all")
         data = json.loads(result)
@@ -158,8 +157,8 @@ class TestProjSessionDigest:
 
     async def test_last_n_limits_sessions(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", last_n=1, focus="all")
         data = json.loads(result)
@@ -170,7 +169,12 @@ class TestProjSessionDigest:
         assert "Decided to use YAML for config" not in data["decisions"]
         assert "Added retry logic for external API calls" not in data["decisions"]
 
-    async def test_empty_sessions_dir(self, digest_app, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_empty_sessions_dir(
+        self,
+        digest_app: FastMCP,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
         setup_project(cfg, "empty", str(tmp_path / "emptyrepo"))
         state.set_session_active("empty")
         # sessions dir does not exist
@@ -182,7 +186,7 @@ class TestProjSessionDigest:
         assert data["insights"] == []
 
     async def test_empty_sessions_dir_exists_but_no_files(
-        self, digest_app, cfg: ProjConfig, tmp_path: Path
+        self, digest_app: FastMCP, cfg: ProjConfig, tmp_path: Path
     ) -> None:
         setup_project(cfg, "nofiles", str(tmp_path / "norepo"))
         state.set_session_active("nofiles")
@@ -195,21 +199,26 @@ class TestProjSessionDigest:
 
     async def test_no_active_project(
         self,
-        digest_app,
-        cfg: ProjConfig,  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        cfg: ProjConfig,
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest")
         assert "No active project" in result
 
     async def test_invalid_focus(
         self,
-        digest_app,
-        project_with_sessions: tuple[ProjConfig, str],  # type: ignore[type-arg]
+        digest_app: FastMCP,
+        project_with_sessions: tuple[ProjConfig, str],
     ) -> None:
         result = await call_tool(digest_app, "proj_session_digest", focus="invalid")
         assert "Invalid focus" in result
 
-    async def test_project_name_override(self, digest_app, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_project_name_override(
+        self,
+        digest_app: FastMCP,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
         setup_project(cfg, "other", str(tmp_path / "otherrepo"))
         sess_dir = storage.sessions_dir(cfg, "other")
         sess_dir.mkdir(parents=True, exist_ok=True)

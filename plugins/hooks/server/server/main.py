@@ -45,14 +45,12 @@ def _run_startup_discovery() -> None:
     root = Path(root_env) if root_env else None
 
     glob_env = os.environ.get("HOOKS_DISCOVERY_GLOB")
-    kwargs: dict[str, Path | str] = {}
-    if root is not None:
-        kwargs["root"] = root
-    if glob_env:
-        kwargs["glob_pattern"] = glob_env
 
     try:
-        summary = run_discovery(**kwargs)  # type: ignore[arg-type]
+        if glob_env:
+            summary = run_discovery(root=root, glob_pattern=glob_env)
+        else:
+            summary = run_discovery(root=root)
         logger.info(summary)
     except Exception:
         logger.exception("Hook auto-discovery failed")

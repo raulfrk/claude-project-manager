@@ -42,7 +42,7 @@ def _serialize_result(result: JsonValue) -> JsonValue:
     if isinstance(result, (list, tuple)):
         if result and isinstance(result[0], _ContentBlock):
             texts: list[str] = [item.text for item in result if isinstance(item, _ContentBlock)]
-            return texts[0] if len(texts) == 1 else texts
+            return texts[0] if len(texts) == 1 else texts  # pyright: ignore[reportReturnType]  # list[str] is valid JsonValue at runtime
         return list(result)
     # Fallback: stringify
     return str(result)

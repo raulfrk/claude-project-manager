@@ -28,4 +28,5 @@ def write_settings(tmp_path: Path, data: dict[str, Any]) -> Path:
 def read_settings(tmp_path: Path) -> dict[str, Any]:
     """Read the settings.json from tmp_path."""
     settings_path = tmp_path / "settings.json"
-    return json.loads(settings_path.read_text())  # type: ignore[no-any-return]
+    result: dict[str, Any] = json.loads(settings_path.read_text())
+    return result

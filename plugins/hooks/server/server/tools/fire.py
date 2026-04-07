@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from server.lib import storage
 from server.lib.conditions import _load_proj_config, evaluate_condition
@@ -561,9 +561,9 @@ async def _fire_hooks_internal(
     verification_results: list[dict[str, JsonValue]] = []
     if verification_matched:
         # Build hook_results dict from Phase 1 blocking results
-        hook_results: dict[str, str | None] = dict(results_by_id)
+        hook_results: dict[str, JsonValue] = dict(results_by_id.items())
 
-        enriched: dict[str, JsonValue] = {**source, "hook_results": hook_results}  # type: ignore[dict-item]
+        enriched: dict[str, JsonValue] = {**source, "hook_results": hook_results}
         verification_results = await _fire_verification(
             verification_matched,
             enriched,
@@ -573,7 +573,7 @@ async def _fire_hooks_internal(
         )
 
     target_tool_by_id = {hook.id: hook.target_tool for hook in blocking_hooks}
-    errors_jv: JsonValue = errors  # type: ignore[assignment]
+    errors_jv: JsonValue = cast("JsonValue", errors)
     summary: dict[str, JsonValue] = {
         "hooks_fired": fired,
         "skipped": skipped,
@@ -588,11 +588,11 @@ async def _fire_hooks_internal(
         "top_level": depth == 0,
     }
     if verification_results:
-        summary["verification"] = verification_results  # type: ignore[assignment]
+        summary["verification"] = cast("JsonValue", verification_results)
     if feedback_results:
-        summary["feedback"] = feedback_results  # type: ignore[assignment]
+        summary["feedback"] = cast("JsonValue", feedback_results)
     if cascade_errors:
-        summary["cascade_errors"] = cascade_errors  # type: ignore[assignment]
+        summary["cascade_errors"] = cast("JsonValue", cascade_errors)
     return summary
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+
 import httpx
 import pytest
 
@@ -22,12 +24,12 @@ _PROXY_VARS = (
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset cached client and clear proxy env vars that break httpx.Client()."""
     client_mod._cached_client = None
     for var in _PROXY_VARS:
         monkeypatch.delenv(var, raising=False)
-    yield  # type: ignore[misc]
+    yield
     client_mod._cached_client = None
 
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from server.lib import state, storage
 from server.lib.models import (
@@ -25,10 +27,10 @@ def anyio_backend(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture(autouse=True)
-def reset_session_state() -> None:
+def reset_session_state() -> Generator[None, None, None]:
     """Reset session state before each test to prevent cross-test contamination."""
     state.clear_session_active()
-    yield  # type: ignore[misc]
+    yield
     state.clear_session_active()
 
 
@@ -60,10 +62,8 @@ def setup_project(cfg: ProjConfig, name: str, repo_path: str) -> None:
 
 
 @pytest.fixture()
-def mcp_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
+def mcp_app(cfg: ProjConfig) -> FastMCP:
     """Return a configured FastMCP app with all tools registered."""
-    from mcp.server.fastmcp import FastMCP
-
     from server.tools import (
         config,
         content,

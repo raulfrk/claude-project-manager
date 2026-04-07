@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from server.lib import storage
 from server.lib.ids import next_todo_id
 from server.lib.models import (
     JiraSync,
+    JsonDict,
+    JsonValue,
     ProjConfig,
     ProjectDates,
     ProjectEntry,
@@ -84,11 +87,11 @@ def _make_jira_issue(
     summary: str,
     priority: str = "Medium",
     status: str = "To Do",
-    parent: dict[str, object] | None = None,
-    issuetype: dict[str, object] | None = None,
-    **kwargs: object,
-) -> dict[str, object]:
-    issue: dict[str, object] = {
+    parent: JsonDict | None = None,
+    issuetype: JsonDict | None = None,
+    **kwargs: JsonValue,
+) -> JsonDict:
+    issue: JsonDict = {
         "key": key,
         "summary": summary,
         "priority": {"name": priority},
@@ -107,7 +110,7 @@ def _make_jira_issue(
     return issue
 
 
-def _make_epic_parent(key: str, summary: str) -> dict[str, object]:
+def _make_epic_parent(key: str, summary: str) -> JsonDict:
     """Helper to create a parent reference that looks like an epic."""
     return {
         "key": key,
@@ -118,7 +121,7 @@ def _make_epic_parent(key: str, summary: str) -> dict[str, object]:
     }
 
 
-def _make_epic_issue(key: str, summary: str, **kwargs: object) -> dict[str, object]:
+def _make_epic_issue(key: str, summary: str, **kwargs: JsonValue) -> JsonDict:
     """Helper to create an issue that IS an epic."""
     return _make_jira_issue(
         key,
@@ -233,7 +236,7 @@ class TestComputeMapping:
                 "PROJ-11", "Register page", parent=_make_epic_parent("PROJ-5", "User Auth")
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert plan.total_issues == 3
         # Epic itself is not added as a sub-item, only the two child issues
         epic_groups = [g for g in plan.groups if g.is_epic]
@@ -256,7 +259,7 @@ class TestComputeMapping:
                 "PROJ-11", "Register page", parent=_make_epic_parent("PROJ-5", "User Auth")
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert plan.total_issues == 2
         assert len(plan.groups) == 1
         assert plan.groups[0].source == "epic"
@@ -273,7 +276,7 @@ class TestComputeMapping:
             _make_jira_issue("PROJ-10", "Standalone task"),
             _make_jira_issue("PROJ-11", "Another task"),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         # Each standalone issue gets its own group
         standalone = [g for g in plan.groups if g.source == "standalone"]
         assert len(standalone) == 2
@@ -292,7 +295,7 @@ class TestComputeMapping:
             ),
             _make_jira_issue("PROJ-20", "No epic task"),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 2
         sources = {g.source for g in plan.groups}
         assert sources == {"epic", "standalone"}
@@ -312,7 +315,7 @@ class TestComputeMapping:
                 "PROJ-10", "Task", parent=_make_epic_parent("PROJ-5", "Some Different Name")
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 1
         assert plan.groups[0].matched_project == "myapp"
         assert plan.groups[0].project_exists is True
@@ -330,7 +333,7 @@ class TestComputeMapping:
                 "PROJ-2", "Low task", priority="Low", parent=_make_epic_parent("PROJ-5", "Tasks")
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 1
         priorities = [str(i.get("priority")) for i in plan.groups[0].issues]
         assert priorities == ["high", "low"]
@@ -340,7 +343,7 @@ class TestComputeMapping:
         issues = [
             _make_jira_issue("PROJ-10", "Task", parent=_make_epic_parent("PROJ-5", "Something")),
         ]
-        plan = compute_mapping(issues, cfg, project_name="myapp")  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, project_name="myapp")
         assert plan.groups[0].suggested_project == "myapp"
         assert plan.groups[0].project_exists is True
 
@@ -358,7 +361,7 @@ class TestComputeMapping:
                 parent=_make_epic_parent("PROJ-5", "Test Epic"),
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         issue = plan.groups[0].issues[0]
         assert issue["key"] == "PROJ-1"
         assert issue["summary"] == "Test task"
@@ -381,7 +384,7 @@ class TestComputeMapping:
                 ],
             ),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         issue = plan.groups[0].issues[0]
         subtasks = issue.get("subtasks", [])
         assert isinstance(subtasks, list)
@@ -393,7 +396,7 @@ class TestComputeMapping:
         issues = [
             _make_jira_issue("OTHER-1", "Random task"),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 1
         g = plan.groups[0]
         assert g.source == "standalone"
@@ -409,7 +412,7 @@ class TestComputeMapping:
         issues = [
             _make_jira_issue("PROJ-10", "myapp"),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         g = plan.groups[0]
         assert g.source == "standalone"
         assert g.matched_project == "myapp"
@@ -833,7 +836,7 @@ class TestNoCatchallBehavior:
         """Standalone issue with unrelated name needs user decision (recent_suggestion)."""
         cfg, _name = cfg_with_project
         issues = [_make_jira_issue("ZZZZ-999", "Completely unrelated task name xyz")]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 1
         g = plan.groups[0]
         assert g.needs_user_decision is True
@@ -868,7 +871,7 @@ class TestNoCatchallBehavior:
 
         # Issue that does NOT match either project
         issues = [_make_jira_issue("XYZ-1", "Completely unrelated item")]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         assert len(plan.groups) == 1
         g = plan.groups[0]
         assert g.needs_user_decision is True
@@ -954,7 +957,7 @@ class TestNoCatchallBehavior:
             _make_jira_issue("B-2", "Beta task"),
             _make_jira_issue("C-3", "Gamma task"),
         ]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         for g in plan.groups:
             if g.source == "standalone" and g.matched_strategy in {
                 "recent_suggestion",
@@ -974,14 +977,14 @@ class TestNoCatchallBehavior:
 
 
 class TestMCPTools:
-    def _get_tools(self) -> dict[str, object]:
+    def _get_tools(self) -> dict[str, Callable[..., str]]:
         from unittest.mock import MagicMock
 
         from server.tools.jira_sync import register
 
         app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        tools: dict[str, Callable[..., str]] = {}
+        app.tool = lambda **kw: (lambda fn: tools.update({fn.__name__: fn}) or fn)
         register(app)
         return tools
 
@@ -992,7 +995,7 @@ class TestMCPTools:
         issues = [
             _make_jira_issue("PROJ-1", "Test task", parent=_make_epic_parent("PROJ-5", "Epic"))
         ]
-        result = json.loads(map_fn(jira_issues_json=json.dumps(issues), project_name=name))  # type: ignore[operator]
+        result = json.loads(map_fn(jira_issues_json=json.dumps(issues), project_name=name))
         assert "groups" in result
         assert result["total_issues"] == 1
 
@@ -1000,7 +1003,7 @@ class TestMCPTools:
         _cfg, name = cfg_with_project
         tools = self._get_tools()
         map_fn = tools["proj_jira_map"]
-        result = map_fn(jira_issues_json="not json", project_name=name)  # type: ignore[operator]
+        result = map_fn(jira_issues_json="not json", project_name=name)
         assert "Invalid JSON" in result
 
     def test_proj_jira_apply_returns_counts(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
@@ -1027,7 +1030,7 @@ class TestMCPTools:
                 }
             ],
         }
-        result = json.loads(apply_fn(mapping_json=json.dumps(mapping), project_name=name))  # type: ignore[operator]
+        result = json.loads(apply_fn(mapping_json=json.dumps(mapping), project_name=name))
         assert result["status"] == "ok"
         assert result["counts"]["todos_created"] == 1
 
@@ -1035,7 +1038,7 @@ class TestMCPTools:
         _cfg, name = cfg_with_project
         tools = self._get_tools()
         apply_fn = tools["proj_jira_apply"]
-        result = apply_fn(mapping_json="not json", project_name=name)  # type: ignore[operator]
+        result = apply_fn(mapping_json="not json", project_name=name)
         assert "Invalid JSON" in result
 
 
@@ -1068,12 +1071,15 @@ class TestJiraMappingPlan:
         )
         d = plan.to_dict()
         assert d["total_issues"] == 1
-        assert len(d["groups"]) == 1  # type: ignore[arg-type]
-        group = d["groups"][0]  # type: ignore[index]
-        assert group["source"] == "epic"  # type: ignore[index]
-        assert group["jira_key"] == "PROJ-5"  # type: ignore[index]
-        assert group["is_epic"] is True  # type: ignore[index]
-        assert group["needs_user_decision"] is False  # type: ignore[index]
+        groups = d["groups"]
+        assert isinstance(groups, list)
+        assert len(groups) == 1
+        group = groups[0]
+        assert isinstance(group, dict)
+        assert group["source"] == "epic"
+        assert group["jira_key"] == "PROJ-5"
+        assert group["is_epic"] is True
+        assert group["needs_user_decision"] is False
 
 
 # ── Description & comment sync tests (todo 236) ──────────────────────────────
@@ -1407,7 +1413,7 @@ class TestApplyDescriptionAndComments:
         }
         cbk = {"PROJ-1": [{"id": "c1", "author": "X", "created": "2026-03-19", "body": "note"}]}
         result = json.loads(
-            apply_fn(  # type: ignore[operator]
+            apply_fn(
                 mapping_json=json.dumps(mapping),
                 project_name=name,
                 comments_by_key_json=json.dumps(cbk),
@@ -1821,14 +1827,14 @@ class TestPlanSummary:
 
 
 class TestSummaryOnlyFlag:
-    def _get_tools(self) -> dict[str, object]:
+    def _get_tools(self) -> dict[str, Callable[..., str]]:
         from unittest.mock import MagicMock
 
         from server.tools.jira_sync import register
 
         app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        tools: dict[str, Callable[..., str]] = {}
+        app.tool = lambda **kw: (lambda fn: tools.update({fn.__name__: fn}) or fn)
         register(app)
         return tools
 
@@ -1845,7 +1851,7 @@ class TestSummaryOnlyFlag:
             _make_jira_issue("PROJ-20", "Standalone task"),
         ]
         result = json.loads(
-            map_fn(  # type: ignore[operator]
+            map_fn(
                 jira_issues_json=json.dumps(issues),
                 project_name=name,
                 summary_only=True,
@@ -1869,7 +1875,7 @@ class TestSummaryOnlyFlag:
             _make_jira_issue("PROJ-10", "Login", parent=_make_epic_parent("PROJ-5", "Auth")),
         ]
         result = json.loads(
-            map_fn(  # type: ignore[operator]
+            map_fn(
                 jira_issues_json=json.dumps(issues),
                 project_name=name,
                 summary_only=False,
@@ -2116,7 +2122,7 @@ class TestComputeMappingWithStrategies:
         storage.save_meta(cfg, meta)
 
         issues = [_make_jira_issue("XYZ-1", "Unrelated xyz", labels=["infra"])]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         g = plan.groups[0]
         assert g.matched_project == "myapp"
         assert g.matched_strategy == "tag_match"
@@ -2128,7 +2134,7 @@ class TestComputeMappingWithStrategies:
         """Standalone with no match falls to recent_suggestion with needs_user_decision."""
         cfg, _name = cfg_with_project
         issues = [_make_jira_issue("XYZ-999", "Zzzzz qqqq wwww")]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         g = plan.groups[0]
         assert g.matched_strategy == "recent_suggestion"
         assert g.needs_user_decision is True
@@ -2140,7 +2146,7 @@ class TestComputeMappingWithStrategies:
         cfg, _name = cfg_with_project
         # "myapp" as keyword in summary
         issues = [_make_jira_issue("XYZ-1", "Fix bug in myapp module", labels=[])]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         g = plan.groups[0]
         # fuzzy_name should match first since "myapp" is in the summary
         # but the issue name as a whole doesn't fuzzy-match "myapp" at 0.6 threshold
@@ -2181,7 +2187,7 @@ class TestComputeMappingWithStrategies:
         storage.save_index(cfg, index)
 
         issues = [_make_jira_issue("XYZ-1", "Unrelated xyz", labels=["shared"])]
-        plan = compute_mapping(issues, cfg)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg)
         g = plan.groups[0]
         assert g.matched_strategy == "tag_match_ambiguous"
         assert g.needs_user_decision is True
@@ -2193,7 +2199,7 @@ class TestComputeMappingWithStrategies:
         """When project_name is provided, strategy is 'project_name_override'."""
         cfg, _name = cfg_with_project
         issues = [_make_jira_issue("XYZ-1", "Something")]
-        plan = compute_mapping(issues, cfg, project_name="myapp")  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, project_name="myapp")
         g = plan.groups[0]
         assert g.matched_project == "myapp"
         assert g.matched_strategy == "project_name_override"
@@ -2596,7 +2602,7 @@ class TestLinkStandaloneKey:
         """Standalone issue matching a project gets a todo with jira_issue_key during map."""
         cfg, name = cfg_with_project
         issues = [_make_jira_issue("PROJ-10", "myapp")]  # fuzzy matches "myapp"
-        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, link_keys=True)
 
         g = plan.groups[0]
         assert g.matched_project == "myapp"
@@ -2614,8 +2620,8 @@ class TestLinkStandaloneKey:
         cfg, name = cfg_with_project
         issues = [_make_jira_issue("PROJ-10", "myapp")]
 
-        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
-        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        compute_mapping(issues, cfg, link_keys=True)
+        compute_mapping(issues, cfg, link_keys=True)
 
         todos = storage.load_todos(cfg, name)
         assert len(todos) == 1
@@ -2625,7 +2631,7 @@ class TestLinkStandaloneKey:
         """link_keys=False means no storage writes for jira_issue_key (dry-run)."""
         cfg, name = cfg_with_project
         issues = [_make_jira_issue("PROJ-10", "myapp")]
-        plan = compute_mapping(issues, cfg, link_keys=False)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, link_keys=False)
 
         # Match should still happen in the plan
         assert plan.groups[0].matched_project == "myapp"
@@ -2650,7 +2656,7 @@ class TestLinkStandaloneKey:
 
         monkeypatch.setattr(storage, "save_todos", _boom)
 
-        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, link_keys=True)
 
         # Plan should still be returned
         assert plan.total_issues == 1
@@ -2670,7 +2676,7 @@ class TestLinkStandaloneKey:
         issues = [_make_jira_issue("PROJ-10", "myapp")]
 
         # Map phase creates minimal todo
-        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        compute_mapping(issues, cfg, link_keys=True)
         todos_before = storage.load_todos(cfg, name)
         assert len(todos_before) == 1
         assert todos_before[0].jira_issue_key == "PROJ-10"
@@ -2715,7 +2721,7 @@ class TestLinkStandaloneKey:
         issues = [_make_jira_issue("PROJ-10", "myapp")]
 
         # First map: creates todo
-        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        compute_mapping(issues, cfg, link_keys=True)
         todos = storage.load_todos(cfg, name)
         assert len(todos) == 1
 
@@ -2723,7 +2729,7 @@ class TestLinkStandaloneKey:
         storage.save_todos(cfg, name, [])
 
         # Second map: re-creates it
-        compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        compute_mapping(issues, cfg, link_keys=True)
         todos = storage.load_todos(cfg, name)
         assert len(todos) == 1
         assert todos[0].jira_issue_key == "PROJ-10"
@@ -2732,7 +2738,7 @@ class TestLinkStandaloneKey:
         """Standalone issues that need user decision are NOT linked during map."""
         cfg, name = cfg_with_project
         issues = [_make_jira_issue("ZZZ-999", "Completely unrelated task name xyz")]
-        plan = compute_mapping(issues, cfg, link_keys=True)  # type: ignore[arg-type]
+        plan = compute_mapping(issues, cfg, link_keys=True)
 
         g = plan.groups[0]
         assert g.needs_user_decision is True
@@ -2760,7 +2766,7 @@ class TestProjJiraFullSync:
                 "PROJ-3", "Register page", parent=_make_epic_parent("PROJ-1", "Auth Epic")
             ),
         ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)
         assert len(apply_input.groups) == 1
         assert diagnostics["epic_count"] == 1
         assert diagnostics["standalone_count"] == 0
@@ -2784,7 +2790,7 @@ class TestProjJiraFullSync:
                 "PROJ-2", "Login page", parent=_make_epic_parent("PROJ-1", "Auth Epic")
             ),
         ]
-        apply_input, _diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, _diagnostics = _deterministic_map(issues, cfg)
         assert len(apply_input.groups) >= 1
 
         # The group should have create_project=True — apply it successfully
@@ -2832,7 +2838,7 @@ class TestProjJiraFullSync:
                 "NEW-2", "Sub-task", parent=_make_epic_parent("NEW-1", "Brand New Feature")
             ),
         ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)
         assert diagnostics["projects_to_create"] == 1
 
         # The group should be flagged for creation
@@ -2855,7 +2861,7 @@ class TestProjJiraFullSync:
         issues = [
             _make_jira_issue("LONE-1", "Orphan task zzz unique xyz"),
         ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)
         assert diagnostics["standalone_count"] == 1
         # A standalone project group should be created
         assert len(apply_input.groups) == 1
@@ -2870,7 +2876,7 @@ class TestProjJiraFullSync:
     ) -> None:
         """Empty issue list produces empty mapping."""
         cfg, _name = cfg_with_project
-        apply_input, diagnostics = _deterministic_map([], cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map([], cfg)
         assert len(apply_input.groups) == 0
         assert diagnostics["epic_count"] == 0
         assert diagnostics["standalone_count"] == 0
@@ -2898,7 +2904,7 @@ class TestProjJiraFullSync:
                 "PROJ-2", "Login page", status="Done", parent=_make_epic_parent("PROJ-1", "myapp")
             ),
         ]
-        apply_input, _diag = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, _diag = _deterministic_map(issues, cfg)
         result = apply_mapping(apply_input, cfg)
         assert result.counts["todos_updated"] >= 1
 
@@ -2933,7 +2939,7 @@ class TestProjJiraFullSync:
                 parent=_make_epic_parent("PROJ-1", "myapp"),
             ),
         ]
-        _apply_input, _diag = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        _apply_input, _diag = _deterministic_map(issues, cfg)
 
         # The deterministic_map should have set the todo to pending
         todos = storage.load_todos(cfg, name)
@@ -3395,7 +3401,7 @@ class TestJiraRouting:
                 parent=_make_epic_parent("FOREIGN-1", "Someone Elses Epic"),
             ),
         ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)
         assert diagnostics["standalone_count"] == 1
         # The issue should route as standalone (not under an epic project)
         assert len(apply_input.groups) == 1
@@ -3443,7 +3449,7 @@ class TestJiraRouting:
                 parent=_make_epic_parent("DELETED-1", "Deleted Epic"),
             ),
         ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, diagnostics = _deterministic_map(issues, cfg)
         assert diagnostics["standalone_count"] == 1
         assert len(apply_input.groups) == 1
         group = apply_input.groups[0]
@@ -3462,7 +3468,7 @@ class TestJiraRouting:
         issues = [
             _make_jira_issue("TASK-1", "Login page redesign"),
         ]
-        apply_input, _diagnostics = _deterministic_map(issues, cfg)  # type: ignore[arg-type]
+        apply_input, _diagnostics = _deterministic_map(issues, cfg)
         # Should find the existing project via legacy title match
         matched_group = apply_input.groups[0]
         assert matched_group["project_exists"] is True

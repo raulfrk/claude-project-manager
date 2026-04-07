@@ -378,7 +378,7 @@ class TestArchiveAndRemoveTodos:
         call_count = 0
         original_replace = Path.replace
 
-        def replace_side_effect(self: Path, target: Path) -> Path:  # type: ignore[override]
+        def replace_side_effect(self: Path, target: Path) -> Path:
             nonlocal call_count
             call_count += 1
             if call_count == 2:

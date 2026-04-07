@@ -15,7 +15,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 
@@ -960,11 +960,11 @@ def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValu
             # Tools return json.dumps(...) strings — parse them
             if isinstance(result, str):
                 try:
-                    return json.loads(result)  # type: ignore[no-any-return]  # json.loads returns Any
+                    return cast("JsonValue", json.loads(result))
                 except (json.JSONDecodeError, ValueError):
                     return result
-            return result  # type: ignore[no-any-return]  # result from json.loads
-        return data  # type: ignore[no-any-return]  # resp.json() returns Any per httpx
+            return cast("JsonValue", result)
+        return cast("JsonValue", data)
 
 
 # -- Push operation helpers ---------------------------------------------------
@@ -1714,7 +1714,7 @@ def register(app: FastMCP) -> None:
         # Post-execution linkage fix: re-parent pre-existing children whose
         # parent was created in this sync run (phase 1/2).
         if combined_id_map and todoist_tasks:
-            post_link_updates: list[dict[str, str]] = []
+            post_link_updates: list[dict[str, JsonValue]] = []
             _post_todoist_by_id = {str(t["id"]): t for t in todoist_tasks}
             _post_local_by_tid: dict[str, Todo] = {}
             _post_todos = storage.load_todos(cfg, name)
@@ -1735,7 +1735,7 @@ def register(app: FastMCP) -> None:
                 if parent_tid:
                     post_link_updates.append({"id": tid, "parentId": parent_tid})
             if post_link_updates:
-                _execute_push_updates(post_link_updates)  # type: ignore[arg-type]  # dict[str, str] is a subtype of dict[str, JsonValue] but mypy can't verify with recursive type alias
+                _execute_push_updates(post_link_updates)
 
         link_ops: list[dict[str, str]] = []
         for task in p1_succeeded + p2_succeeded:

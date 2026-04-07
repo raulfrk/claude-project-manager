@@ -61,13 +61,17 @@ ignore = ["S603", "S607"]
 [tool.basedpyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
-reportUnusedFunction = false
+reportUnusedFunction = false  # @mcp.tool() decorated functions flagged as unused
+# reportUnknownMemberType: blocked by httpx/mcp stubs (would cascade 100+ errors)
 reportUnknownMemberType = false
+# reportUnknownVariableType: blocked until JsonValue unified across plugins
 reportUnknownVariableType = false
+# reportUnknownArgumentType: blocked by httpx/mcp stubs
 reportUnknownArgumentType = false
 reportPrivateUsage = false
 reportMissingTypeStubs = false
-reportUnnecessaryIsInstance = false
+reportUnnecessaryIsInstance = false  # runtime guards for dynamic JSON/MCP data (34 sites)
+# reportUnknownParameterType: blocked by httpx/mcp stubs
 reportUnknownParameterType = false
 
 [tool.pytest.ini_options]

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from server.lib import state
 from server.lib.models import (
@@ -224,7 +225,7 @@ class TestSetupPermissions:
 
 class TestProjSetupPermissionsTool:
     @pytest.mark.anyio
-    async def test_setup_permissions_tool_registered(self, mcp_app_with_grant) -> None:  # type: ignore[no-untyped-def]
+    async def test_setup_permissions_tool_registered(self, mcp_app_with_grant: FastMCP) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app_with_grant, "proj_setup_permissions")
@@ -236,9 +237,9 @@ class TestProjSetupPermissionsTool:
         self,
         cfg: ProjConfig,
         tmp_path: Path,
-        mcp_app_with_grant,
+        mcp_app_with_grant: FastMCP,
         monkeypatch: pytest.MonkeyPatch,
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         from tests.conftest import call_tool, setup_project
 
         repo_path = str(tmp_path / "myrepo")
@@ -804,10 +805,8 @@ class TestComputeSetupPathsUserPaths:
 
 
 @pytest.fixture()
-def mcp_app_with_grant(cfg: ProjConfig):  # type: ignore[no-untyped-def]
+def mcp_app_with_grant(cfg: ProjConfig) -> FastMCP:
     """FastMCP app with perms_grant registered in addition to standard tools."""
-    from mcp.server.fastmcp import FastMCP
-
     from server.tools import (
         config,
         content,

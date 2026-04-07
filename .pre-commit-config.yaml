@@ -11,7 +11,7 @@ repos:
     hooks:
       - id: basedpyright
         name: basedpyright
-        entry: bash -c 'export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"; exit_code=0; for dir in plugins/*/server; do echo "==> basedpyright $dir"; uv run --directory "$dir" basedpyright server || exit_code=1; done; exit $exit_code'
+        entry: bash -c 'export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"; exit_code=0; for dir in plugins/*/server; do echo "==> basedpyright $dir"; uv run --directory "$dir" basedpyright server || exit_code=1; done; echo "==> basedpyright plugins/_shared"; uv run --directory plugins/_shared basedpyright hook_transport hook_dispatch || exit_code=1; exit $exit_code'
         language: system
         pass_filenames: false
         types: [python]

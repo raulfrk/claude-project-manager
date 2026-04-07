@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from server.lib import state, storage
 from server.lib.models import GitTracking, ProjConfig
 from tests.conftest import call_tool, setup_project
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +35,7 @@ class TestTrackingGitFlush:
         return cfg
 
     @pytest.fixture()
-    def project_with_git(self, cfg_with_git: ProjConfig, tmp_path: Path, mcp_app) -> str:  # type: ignore[no-untyped-def]
+    def project_with_git(self, cfg_with_git: ProjConfig, tmp_path: Path, mcp_app: FastMCP) -> str:
         name = "test-proj"
         repo_path = str(tmp_path / "repo")
         Path(repo_path).mkdir()
@@ -40,7 +44,7 @@ class TestTrackingGitFlush:
         return name
 
     @pytest.mark.anyio
-    async def test_flush_disabled(self, cfg: ProjConfig, tmp_path: Path, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_disabled(self, cfg: ProjConfig, tmp_path: Path, mcp_app: FastMCP) -> None:
         name = "test-proj"
         setup_project(cfg, name, str(tmp_path / "repo"))
         Path(tmp_path / "repo").mkdir(exist_ok=True)
@@ -51,8 +55,8 @@ class TestTrackingGitFlush:
 
     @pytest.mark.anyio
     async def test_flush_commits(
-        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
+    ) -> None:
         # Write something to tracking dir
         tracking = storage.tracking_dir(cfg_with_git, project_with_git)
         (tracking / "extra.txt").write_text("new data")
@@ -64,8 +68,8 @@ class TestTrackingGitFlush:
 
     @pytest.mark.anyio
     async def test_flush_no_changes(
-        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
+    ) -> None:
         # First flush to commit existing files
         await call_tool(mcp_app, "tracking_git_flush", commit_message="initial")
         # Second flush with no new changes
@@ -75,8 +79,8 @@ class TestTrackingGitFlush:
 
     @pytest.mark.anyio
     async def test_flush_auto_message(
-        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
+    ) -> None:
         tracking = storage.tracking_dir(cfg_with_git, project_with_git)
         (tracking / "extra.txt").write_text("data")
         result = await call_tool(mcp_app, "tracking_git_flush")
@@ -86,8 +90,8 @@ class TestTrackingGitFlush:
 
     @pytest.mark.anyio
     async def test_flush_per_project_override_disables(
-        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
+    ) -> None:
         """Per-project enabled=False overrides global enabled=True."""
         from server.lib.models import ProjectGitTrackingConfig
 
@@ -100,8 +104,8 @@ class TestTrackingGitFlush:
 
     @pytest.mark.anyio
     async def test_flush_per_project_override_enables(
-        self, cfg: ProjConfig, tmp_path: Path, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg: ProjConfig, tmp_path: Path, mcp_app: FastMCP
+    ) -> None:
         """Per-project enabled=True overrides global enabled=False (default)."""
         from server.lib.models import ProjectGitTrackingConfig
 
@@ -124,8 +128,8 @@ class TestTrackingGitFlush:
 class TestProjUpdateMetaGitTracking:
     @pytest.mark.anyio
     async def test_update_git_tracking_fields(
-        self, cfg: ProjConfig, tmp_path: Path, mcp_app
-    ) -> None:  # type: ignore[no-untyped-def]
+        self, cfg: ProjConfig, tmp_path: Path, mcp_app: FastMCP
+    ) -> None:
         name = "test-proj"
         repo_path = str(tmp_path / "repo")
         Path(repo_path).mkdir()

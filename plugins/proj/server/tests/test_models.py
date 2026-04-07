@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from server.lib.models import (
     ArchiveConfig,
     GitTracking,
@@ -53,8 +55,8 @@ class TestTodoistSyncModel:
 class TestTodoDueDateModel:
     """Tests for Todo.due_date round-trips and backward-compat deserialization."""
 
-    def _make_minimal_todo(self, **kwargs: object) -> Todo:
-        return Todo(id="1", title="Task", created="2026-01-01", updated="2026-01-01", **kwargs)  # type: ignore[arg-type]
+    def _make_minimal_todo(self, **kwargs: Any) -> Todo:
+        return Todo(id="1", title="Task", created="2026-01-01", updated="2026-01-01", **kwargs)
 
     def test_due_date_defaults_to_none(self) -> None:
         todo = self._make_minimal_todo()

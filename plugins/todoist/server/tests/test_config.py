@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -11,10 +12,10 @@ from server.lib.config import load_config
 
 
 @pytest.fixture(autouse=True)
-def _clear_config_cache() -> None:
+def _clear_config_cache() -> Generator[None, None, None]:
     """Reset the cached config before each test."""
     config_mod._cached_config = None
-    yield  # type: ignore[misc]
+    yield
     config_mod._cached_config = None
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 HOOKS_FILE = Path(__file__).parents[2] / "hooks" / "hooks.json"
 PLUGIN_JSON = Path(__file__).parents[2] / ".claude-plugin" / "plugin.json"
@@ -19,10 +20,11 @@ STANDARD_HOOKS_PATH = "./hooks/hooks.json"
 REQUIRED_EVENTS = ["SessionStart", "SessionEnd", "PreCompact"]
 
 
-def _load_hooks() -> dict[str, object]:
+def _load_hooks() -> dict[str, Any]:
     assert HOOKS_FILE.exists(), f"hooks.json not found at {HOOKS_FILE}"
     with HOOKS_FILE.open() as f:
-        return json.load(f)  # type: ignore[return-value]
+        result: dict[str, Any] = json.load(f)
+        return result
 
 
 def test_hooks_file_is_valid_json() -> None:

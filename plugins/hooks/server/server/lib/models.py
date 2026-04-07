@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from server.lib._types import JsonValue
@@ -127,7 +127,7 @@ class HookRegistry:
         else:
             result["hooks"] = []
         if self.servers:
-            result["servers"] = self.servers  # type: ignore[assignment]
+            result["servers"] = cast("JsonValue", self.servers)
         if self.settings:
             result["settings"] = self.settings
         return result

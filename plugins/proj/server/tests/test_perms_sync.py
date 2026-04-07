@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -26,6 +27,9 @@ from server.tools._perms_common import (
 from server.tools.perms_sync import (
     run_sync,
 )
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -620,7 +624,7 @@ class TestRunSync:
 
 class TestProjPermsSyncTool:
     @pytest.mark.anyio
-    async def test_tool_registered(self, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_registered(self, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         # Without actual_rules the tool should return an error
@@ -630,7 +634,11 @@ class TestProjPermsSyncTool:
         assert len(result) > 0
 
     @pytest.mark.anyio
-    async def test_tool_missing_actual_rules_returns_error(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_missing_actual_rules_returns_error(
+        self,
+        cfg: ProjConfig,
+        mcp_app: FastMCP,
+    ) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app, "proj_perms_sync")
@@ -642,7 +650,7 @@ class TestProjPermsSyncTool:
             assert "actual_rules" in result.lower() or "required" in result.lower()
 
     @pytest.mark.anyio
-    async def test_tool_no_active_project(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_no_active_project(self, cfg: ProjConfig, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app, "proj_perms_sync", actual_rules=[])
@@ -657,9 +665,9 @@ class TestProjPermsSyncTool:
         self,
         cfg: ProjConfig,
         tmp_path: Path,
-        mcp_app,
+        mcp_app: FastMCP,
         monkeypatch: pytest.MonkeyPatch,
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         from server.lib import state
         from tests.conftest import call_tool, setup_project
 
@@ -685,7 +693,7 @@ class TestProjPermsSyncTool:
             assert "✅" in result
 
     @pytest.mark.anyio
-    async def test_tool_unknown_project_name(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_unknown_project_name(self, cfg: ProjConfig, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(
@@ -705,9 +713,9 @@ class TestProjPermsSyncTool:
         self,
         cfg: ProjConfig,
         tmp_path: Path,
-        mcp_app,
+        mcp_app: FastMCP,
         monkeypatch: pytest.MonkeyPatch,
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         """apply=True via the MCP tool writes missing rules."""
         from server.lib import state
         from tests.conftest import call_tool, setup_project

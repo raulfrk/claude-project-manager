@@ -159,7 +159,12 @@ class TestProjConfigListMappings:
             ),
         )
         d = cfg.to_dict()
-        lm = d["sync"]["trello"]["list_mappings"]  # type: ignore[index]
+        sync = d["sync"]
+        assert isinstance(sync, dict)
+        trello = sync["trello"]
+        assert isinstance(trello, dict)
+        lm = trello["list_mappings"]
+        assert isinstance(lm, dict)
         assert lm["active"] == "Active"
         assert lm["archived"] == "Archive"
 

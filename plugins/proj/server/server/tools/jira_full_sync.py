@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 
@@ -84,8 +84,8 @@ def _call_jira_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
                 # Tools return json.dumps(...) strings — parse them
                 if isinstance(result, str):
                     try:
-                        return json.loads(result)  # type: ignore[no-any-return]  # json.loads returns Any
+                        return cast("JsonValue", json.loads(result))
                     except (json.JSONDecodeError, ValueError):
                         return result
-                return result  # type: ignore[no-any-return]  # json.loads returns Any per stdlib
-        return data  # type: ignore[no-any-return]  # resp.json() returns Any per httpx
+                return cast("JsonValue", result)
+        return cast("JsonValue", data)

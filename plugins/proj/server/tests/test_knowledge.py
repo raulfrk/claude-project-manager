@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from server.lib import state, storage
 from server.lib.models import ProjConfig
@@ -75,10 +77,8 @@ def project(cfg: ProjConfig, tmp_path: Path) -> str:
 
 
 @pytest.fixture()
-def knowledge_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
+def knowledge_app(cfg: ProjConfig) -> FastMCP:
     """Return a FastMCP app with knowledge tool registered."""
-    from mcp.server.fastmcp import FastMCP
-
     from server.tools import config, knowledge
 
     app = FastMCP("test-knowledge")
@@ -87,7 +87,7 @@ def knowledge_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
     return app
 
 
-async def _call(app, tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
+async def _call(app: Any, tool_name: str, **kwargs: Any) -> Any:
     """Helper to call an MCP tool by name."""
     raw = await app.call_tool(tool_name, kwargs)
     items = raw[0] if isinstance(raw, tuple) else raw
@@ -100,7 +100,7 @@ async def _call(app, tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.asyncio
-async def test_scope_sessions(knowledge_app, project: str) -> None:
+async def test_scope_sessions(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(
             knowledge_app, "proj_search_knowledge", query="authentication", scope="sessions"
@@ -112,7 +112,7 @@ async def test_scope_sessions(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_notes(knowledge_app, project: str) -> None:
+async def test_scope_notes(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="authentication", scope="notes")
     )
@@ -122,7 +122,7 @@ async def test_scope_notes(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_requirements(knowledge_app, project: str) -> None:
+async def test_scope_requirements(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="OAuth2", scope="requirements")
     )
@@ -132,7 +132,7 @@ async def test_scope_requirements(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_research(knowledge_app, project: str) -> None:
+async def test_scope_research(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="authlib", scope="research")
     )
@@ -142,7 +142,7 @@ async def test_scope_research(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_decisions(knowledge_app, project: str) -> None:
+async def test_scope_decisions(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="authlib", scope="decisions")
     )
@@ -152,7 +152,7 @@ async def test_scope_decisions(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_all_searches_all_stores(knowledge_app, project: str) -> None:
+async def test_scope_all_searches_all_stores(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="authentication", scope="all")
     )
@@ -170,7 +170,7 @@ async def test_scope_all_searches_all_stores(knowledge_app, project: str) -> Non
 
 
 @pytest.mark.asyncio
-async def test_regex_matching(knowledge_app, project: str) -> None:
+async def test_regex_matching(knowledge_app: FastMCP, project: str) -> None:
     # Use regex pattern to match "OAuth2" or "OAuth"
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="OAuth\\d?", scope="all")
@@ -179,7 +179,7 @@ async def test_regex_matching(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_lines_included(knowledge_app, project: str) -> None:
+async def test_context_lines_included(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(knowledge_app, "proj_search_knowledge", query="login bug", scope="sessions")
     )
@@ -193,7 +193,7 @@ async def test_context_lines_included(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_snippets_limit(cfg: ProjConfig, knowledge_app, tmp_path: Path) -> None:
+async def test_max_snippets_limit(cfg: ProjConfig, knowledge_app: FastMCP, tmp_path: Path) -> None:
     """Create a project with many matching lines and verify max 5 snippets."""
     name = "many-matches"
     repo = tmp_path / "repo2"
@@ -218,7 +218,7 @@ async def test_max_snippets_limit(cfg: ProjConfig, knowledge_app, tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_empty_results(knowledge_app, project: str) -> None:
+async def test_empty_results(knowledge_app: FastMCP, project: str) -> None:
     result = json.loads(
         await _call(
             knowledge_app, "proj_search_knowledge", query="zzz_nonexistent_term", scope="all"
@@ -232,7 +232,11 @@ async def test_empty_results(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_sessions_dir(cfg: ProjConfig, knowledge_app, tmp_path: Path) -> None:
+async def test_missing_sessions_dir(
+    cfg: ProjConfig,
+    knowledge_app: FastMCP,
+    tmp_path: Path,
+) -> None:
     """Project with no sessions/ directory should return empty, not error."""
     name = "no-sessions"
     repo = tmp_path / "repo3"
@@ -248,7 +252,7 @@ async def test_missing_sessions_dir(cfg: ProjConfig, knowledge_app, tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_missing_todos_dir(cfg: ProjConfig, knowledge_app, tmp_path: Path) -> None:
+async def test_missing_todos_dir(cfg: ProjConfig, knowledge_app: FastMCP, tmp_path: Path) -> None:
     """Project with no todos/ directory should return empty for requirements/research."""
     name = "no-todos"
     repo = tmp_path / "repo4"
@@ -265,7 +269,11 @@ async def test_missing_todos_dir(cfg: ProjConfig, knowledge_app, tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_missing_decisions_file(cfg: ProjConfig, knowledge_app, tmp_path: Path) -> None:
+async def test_missing_decisions_file(
+    cfg: ProjConfig,
+    knowledge_app: FastMCP,
+    tmp_path: Path,
+) -> None:
     """Project with no decisions.yaml should return empty."""
     name = "no-decisions"
     repo = tmp_path / "repo5"
@@ -284,14 +292,14 @@ async def test_missing_decisions_file(cfg: ProjConfig, knowledge_app, tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_no_active_project(cfg: ProjConfig, knowledge_app) -> None:
+async def test_no_active_project(cfg: ProjConfig, knowledge_app: FastMCP) -> None:
     state.clear_session_active()
     result = await _call(knowledge_app, "proj_search_knowledge", query="test")
     assert result == "No active project."
 
 
 @pytest.mark.asyncio
-async def test_invalid_scope(knowledge_app, project: str) -> None:
+async def test_invalid_scope(knowledge_app: FastMCP, project: str) -> None:
     result = await _call(knowledge_app, "proj_search_knowledge", query="test", scope="invalid")
     assert "Invalid scope" in result
 
@@ -300,7 +308,11 @@ async def test_invalid_scope(knowledge_app, project: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_snippets_sorted_by_density(cfg: ProjConfig, knowledge_app, tmp_path: Path) -> None:
+async def test_snippets_sorted_by_density(
+    cfg: ProjConfig,
+    knowledge_app: FastMCP,
+    tmp_path: Path,
+) -> None:
     """Snippets with more matches in context should rank higher."""
     name = "density-test"
     repo = tmp_path / "repo6"

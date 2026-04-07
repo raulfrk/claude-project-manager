@@ -10,6 +10,7 @@ import pytest
 from server.lib import storage
 from server.lib.ids import next_todo_id
 from server.lib.models import (
+    JsonValue,
     ProjConfig,
     ProjectDates,
     ProjectEntry,
@@ -78,9 +79,9 @@ def _make_todoist_task(
     content: str,
     priority: int = 4,
     updated_at: str = "2099-01-01T00:00:00Z",
-    **kwargs: object,
-) -> dict[str, object]:
-    task: dict[str, object] = {
+    **kwargs: JsonValue,
+) -> dict[str, JsonValue]:
+    task: dict[str, JsonValue] = {
         "id": task_id,
         "content": content,
         "priority": priority,
@@ -150,7 +151,7 @@ class TestComputeDiff:
     def test_new_todoist_task(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
         tasks = [_make_todoist_task("t1", "New task", priority=3)]
-        plan = compute_diff(tasks, cfg, name)  # type: ignore[arg-type]
+        plan = compute_diff(tasks, cfg, name)
         assert len(plan.pull_create) == 1
         assert plan.pull_create[0]["title"] == "New task"
 
@@ -209,7 +210,7 @@ class TestPotentialLinks:
         storage.save_todos(cfg, name, [todo])
 
         tasks = [_make_todoist_task("t1", "Implement user authentication")]
-        plan = compute_diff(tasks, cfg, name)  # type: ignore[arg-type]
+        plan = compute_diff(tasks, cfg, name)
 
         assert len(plan.potential_links) == 1
         assert plan.potential_links[0]["local_todo"]["id"] == todo.id
@@ -227,7 +228,7 @@ class TestPotentialLinks:
         storage.save_todos(cfg, name, [todo])
 
         tasks = [_make_todoist_task("t1", "Fix database migration script")]
-        plan = compute_diff(tasks, cfg, name)  # type: ignore[arg-type]
+        plan = compute_diff(tasks, cfg, name)
 
         assert plan.potential_links == []
         assert len(plan.pull_create) == 1
@@ -310,5 +311,7 @@ class TestSyncPlan:
     def test_to_dict_has_summary(self) -> None:
         plan = SyncPlan(push_create=[{"content": "x"}])
         d = plan.to_dict()
-        assert d["summary"]["push_create_count"] == 1  # type: ignore[index]
-        assert d["summary"]["pull_create_count"] == 0  # type: ignore[index]
+        summary = d["summary"]
+        assert isinstance(summary, dict)
+        assert summary["push_create_count"] == 1
+        assert summary["pull_create_count"] == 0

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from server.lib import storage
 from server.lib.conditions import resolve_condition_status, validate_condition_syntax
@@ -210,9 +210,9 @@ def hooks_list(trigger_tool: str | None = None) -> str:
             primary_out.append(entry)
 
     result: dict[str, JsonValue] = {
-        "hooks": primary_out,  # type: ignore[dict-item]
-        "verification_hooks": verification_out,  # type: ignore[dict-item]
-        "servers": registry.servers,  # type: ignore[dict-item]
+        "hooks": cast("JsonValue", primary_out),
+        "verification_hooks": cast("JsonValue", verification_out),
+        "servers": cast("JsonValue", registry.servers),
     }
     return json.dumps(result, indent=2)
 

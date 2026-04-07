@@ -8,6 +8,7 @@ _topo_sort_todos, apply_changes.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -854,13 +855,17 @@ class TestTrelloSyncPlan:
     def test_to_dict_has_summary(self) -> None:
         plan = TrelloSyncPlan(push_create_card=[{"todo_id": "1"}])
         d = plan.to_dict()
-        assert d["summary"]["push_create_card_count"] == 1  # type: ignore[index]
-        assert d["summary"]["pull_update_count"] == 0  # type: ignore[index]
+        summary = d["summary"]
+        assert isinstance(summary, dict)
+        assert summary["push_create_card_count"] == 1
+        assert summary["pull_update_count"] == 0
 
     def test_to_dict_has_conflict_count(self) -> None:
         plan = TrelloSyncPlan(conflicts=[{"todo_id": "1"}])
         d = plan.to_dict()
-        assert d["summary"]["conflict_count"] == 1  # type: ignore[index]
+        summary = d["summary"]
+        assert isinstance(summary, dict)
+        assert summary["conflict_count"] == 1
 
     def test_to_dict_has_all_fields(self) -> None:
         plan = TrelloSyncPlan()
@@ -946,13 +951,13 @@ class TestTrelloSyncState:
 
 
 class TestMCPToolDiff:
-    def _get_tools(self) -> dict[str, object]:
+    def _get_tools(self) -> dict[str, Callable[..., str]]:
         from unittest.mock import MagicMock
 
         from server.tools.trello_sync import register
 
         app = MagicMock()
-        tools: dict[str, object] = {}
+        tools: dict[str, Callable[..., str]] = {}
         app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
         register(app)
         return tools
@@ -963,14 +968,14 @@ class TestMCPToolDiff:
         diff = tools["proj_trello_diff"]
         result = json.loads(
             diff(trello_cards_json=_make_trello_data(cards=[], lists=[]), project_name=name)
-        )  # type: ignore[operator]
+        )
         assert "summary" in result
 
     def test_diff_invalid_json(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         _cfg, name = cfg_with_project
         tools = self._get_tools()
         diff = tools["proj_trello_diff"]
-        result = json.loads(diff(trello_cards_json="not json", project_name=name))  # type: ignore[operator]
+        result = json.loads(diff(trello_cards_json="not json", project_name=name))
         assert "summary" in result
 
     def test_auto_apply_returns_project_info(
@@ -981,7 +986,7 @@ class TestMCPToolDiff:
         tools = self._get_tools()
         diff = tools["proj_trello_diff"]
         result = json.loads(
-            diff(  # type: ignore[operator]
+            diff(
                 trello_cards_json=_make_trello_data(cards=[], lists=[]),
                 auto_apply=True,
                 project_name=name,
@@ -993,13 +998,13 @@ class TestMCPToolDiff:
 
 
 class TestMCPToolApply:
-    def _get_apply_fn(self) -> object:
+    def _get_apply_fn(self) -> Callable[..., str]:
         from unittest.mock import MagicMock
 
         from server.tools.trello_sync import register
 
         app = MagicMock()
-        tools: dict[str, object] = {}
+        tools: dict[str, Callable[..., str]] = {}
         app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
         register(app)
         return tools["proj_trello_apply"]
@@ -1014,7 +1019,7 @@ class TestMCPToolApply:
             "link_card_ids": [{"todo_id": todo.id, "card_id": "card_xyz"}],
             "link_project_card_id": "proj_card_xyz",
         }
-        result = json.loads(apply_fn(apply_json=json.dumps(data), project_name=name))  # type: ignore[operator]
+        result = json.loads(apply_fn(apply_json=json.dumps(data), project_name=name))
         assert result["status"] == "ok"
         assert result["counts"]["linked"] == 1
         meta = storage.load_meta(cfg, name)
@@ -1025,5 +1030,5 @@ class TestMCPToolApply:
     ) -> None:
         _cfg, name = cfg_with_project
         apply_fn = self._get_apply_fn()
-        result = apply_fn(apply_json="not json", project_name=name)  # type: ignore[operator]
+        result = apply_fn(apply_json="not json", project_name=name)
         assert "Invalid JSON" in result

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 
@@ -58,7 +58,7 @@ class TrelloClient:
 
     def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.is_success:
-            return resp.json()  # type: ignore[no-any-return]
+            return cast("JsonValue", resp.json())
         msg = f"Trello API error {resp.status_code}: {resp.text}"
         raise RuntimeError(msg)
 

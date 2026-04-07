@@ -349,7 +349,7 @@ def _wrap_tool_fn[**P, R](
     """
     import inspect
 
-    if asyncio.iscoroutinefunction(fn):
+    if asyncio.iscoroutinefunction(fn):  # pyright: ignore[reportDeprecated]  # asyncio version needed for decorated coroutines
 
         async def async_wrapper(
             *args: P.args, **kwargs: P.kwargs

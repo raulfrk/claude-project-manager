@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,9 @@ from server.lib.models import (
     Todo,
 )
 from server.tools.migrate import _cleanup_config, _migrate_project
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 @pytest.fixture()
@@ -688,7 +692,7 @@ class TestMigrateArchiveAndDecisions:
 
 class TestProjMigrateIdsTool:
     @pytest.mark.anyio
-    async def test_tool_registered(self, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_registered(self, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app, "proj_migrate_ids")
@@ -697,7 +701,7 @@ class TestProjMigrateIdsTool:
         assert "dry_run" in parsed
 
     @pytest.mark.anyio
-    async def test_tool_dry_run_flag(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_dry_run_flag(self, cfg: ProjConfig, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool, setup_project
 
         setup_project(cfg, "tool_test", str(Path(cfg.tracking_dir) / "tool_test"))
@@ -715,7 +719,7 @@ class TestProjMigrateIdsTool:
         assert saved[0].id == "T001"
 
     @pytest.mark.anyio
-    async def test_tool_no_projects(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_no_projects(self, cfg: ProjConfig, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         result = await call_tool(mcp_app, "proj_migrate_ids")
@@ -827,7 +831,7 @@ class TestCleanupConfig:
 
 class TestMigrateIdsToolMultiProject:
     @pytest.mark.anyio
-    async def test_tool_multi_project_iteration(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_multi_project_iteration(self, cfg: ProjConfig, mcp_app: FastMCP) -> None:
         from tests.conftest import call_tool
 
         _setup_project_with_todos(
@@ -857,7 +861,11 @@ class TestMigrateIdsToolMultiProject:
         assert by_project["proj_b"]["id_count"] == 1
 
     @pytest.mark.anyio
-    async def test_tool_per_project_error_isolation(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_tool_per_project_error_isolation(
+        self,
+        cfg: ProjConfig,
+        mcp_app: FastMCP,
+    ) -> None:
         from tests.conftest import call_tool
 
         _setup_project_with_todos(cfg, "good", [_make_todo("T001", "OK task")])
