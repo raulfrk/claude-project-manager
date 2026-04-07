@@ -288,7 +288,7 @@ class TestDiscoverAndRegister:
                     "trigger_tool": "todo_complete",
                     "target_tool": "todoist_verify_complete",
                     "server": "todoist",
-                    "param_mapping": {"todoist_task_id": "${result.todoist_task_id}"},
+                    "param_mapping": {"todoist_task_id": "${todoist_task_id}"},
                     "verification": True,
                     "condition": "sync.todoist.enabled and sync.todoist.auto_sync",
                 },

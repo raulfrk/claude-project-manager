@@ -62,7 +62,7 @@ Call `mcp__plugin_sandbox_sandbox__sandbox_list()` to snapshot the current permi
 Call `mcp__plugin_sandbox_sandbox__sandbox_batch_setup()` in a single atomic call with:
 
 - `mcp_servers`: `["plugin_hooks_hooks", "plugin_proj_proj", "plugin_sandbox_sandbox", "plugin_worktree_worktree", "plugin_trello_trello", "plugin_jira_jira", "plugin_todoist_todoist", "plugin_zoxide_zoxide"]`
-- `paths`: `["//home/raul/projects/**", "//home/raul/projects/tracking/**", "//home/raul/worktrees/**", "//home/raul/.claude/skills/**", "//home/raul/.claude/plugins/**"]`
+- `paths`: `["//home/raul/projects/**", "//home/raul/projects/tracking/**", "//home/raul/worktrees/**", "//home/raul/.claude/skills/**", "//home/raul/.claude/plugins/**", "//tmp/**"]`
 - `skill_prefixes`: `["proj:", "worktree:", "hooks:", "review:"]`
 - `target`: `"settings"`
 
@@ -78,6 +78,7 @@ Add `Read(path)` entries to `permissions.allow` in `~/.claude/settings.json` for
 - `"Read(//home/raul/worktrees/**)"`
 - `"Read(//home/raul/.claude/skills/**)"`
 - `"Read(//home/raul/.claude/plugins/**)"`
+- `"Read(//tmp/**)"`
 
 **S6.** Verify grants
 

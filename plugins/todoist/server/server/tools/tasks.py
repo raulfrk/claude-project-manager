@@ -161,6 +161,47 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Hook-friendly single child task creation. Accepts flat params: "
+            "content (required), plus optional priority, labels, projectId, "
+            "parentId. Returns warning when sync IDs are missing."
+        ),
+    )
+    def todoist_add_child_task_hook(
+        content: str,
+        priority: str | int | None = None,
+        labels: list[str] | None = None,
+        projectId: str | None = None,
+        parentId: str | None = None,
+    ) -> str:
+        if not projectId or not parentId:
+            return json.dumps({"warning": "No Todoist sync ID — skipping child task creation"})
+        if not content:
+            return json.dumps({"successes": [], "failures": [{"error": "Missing 'content'"}]})
+        task: TaskInput = {"content": content}
+        if priority is not None:
+            task["priority"] = priority
+        if labels is not None:
+            task["labels"] = labels
+        task["projectId"] = projectId
+        task["parentId"] = parentId
+        client = get_client()
+        try:
+            payload = _build_task_payload(task)
+            result = client.post("/tasks", json=payload)
+            if not isinstance(result, dict):
+                return json.dumps(
+                    {"successes": [], "failures": [{"error": "Unexpected response type"}]}
+                )
+            return json.dumps(
+                {"successes": [TodoistTask.from_api(result).to_dict()], "failures": []}
+            )
+        except Exception as exc:
+            return json.dumps(
+                {"successes": [], "failures": [{"content": content, "error": str(exc)}]}
+            )
+
+    @app.tool(
+        description=(
             "Verify that a Todoist task is completed. Fetches the task "
             "and checks its completion status. Returns JSON with "
             "verified (bool), task_id, and status."

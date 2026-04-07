@@ -566,3 +566,75 @@ class TestUncompleteTasks:
         result = json.loads(tool.fn(ids=[]))
 
         assert result == {"successes": [], "failures": []}
+
+
+# -- todoist_add_child_task_hook -----------------------------------------------
+
+
+class TestAddChildTaskHook:
+    def _get_tool(self, mock_client: MagicMock) -> Any:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["todoist_add_child_task_hook"]
+
+    def test_happy_path(self, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _api_task(id="child1", content="Sub-task", priority=2)
+        tool = self._get_tool(mock_client)
+        result = json.loads(
+            tool.fn(
+                content="Sub-task",
+                priority="high",
+                labels=["dev"],
+                projectId="proj1",
+                parentId="parent1",
+            )
+        )
+
+        assert len(result["successes"]) == 1
+        assert result["successes"][0]["id"] == "child1"
+        assert result["failures"] == []
+        mock_client.post.assert_called_once()
+
+    def test_null_parent_id_returns_warning(self, mock_client: MagicMock) -> None:
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(content="Task", projectId="proj1", parentId=None))
+
+        assert "warning" in result
+        assert "skipping" in result["warning"].lower()
+        mock_client.post.assert_not_called()
+
+    def test_null_project_id_returns_warning(self, mock_client: MagicMock) -> None:
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(content="Task", projectId=None, parentId="parent1"))
+
+        assert "warning" in result
+        assert "skipping" in result["warning"].lower()
+        mock_client.post.assert_not_called()
+
+    def test_empty_content_returns_failure(self, mock_client: MagicMock) -> None:
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(content="", projectId="proj1", parentId="parent1"))
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 1
+        assert "Missing 'content'" in result["failures"][0]["error"]
+
+    def test_api_error_returns_failure(self, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = RuntimeError("API timeout")
+        tool = self._get_tool(mock_client)
+        result = json.loads(
+            tool.fn(
+                content="Task",
+                projectId="proj1",
+                parentId="parent1",
+            )
+        )
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 1
+        assert "API timeout" in result["failures"][0]["error"]
+        assert result["failures"][0]["content"] == "Task"
