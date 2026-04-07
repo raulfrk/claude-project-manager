@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import get_client
 
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
 
 def register(app: FastMCP) -> None:
-    @app.tool(description="List Jira projects visible to the configured user, filtered by whitelist.")
+    @app.tool(
+        description="List Jira projects visible to the configured user, filtered by whitelist."
+    )
     def jira_list_projects() -> str:
         client = get_client()
         cfg = client._config
@@ -19,13 +23,16 @@ def register(app: FastMCP) -> None:
         if cfg.allowed_project_keys:
             allowed = set(cfg.allowed_project_keys)
             all_projects = [
-                p for p in all_projects
-                if isinstance(p, dict) and p.get("key") in allowed
+                p for p in all_projects if isinstance(p, dict) and p.get("key") in allowed
             ]
         else:
-            return json.dumps({
-                "error": "No projects in whitelist. Run jira_init to configure allowed project keys.",
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "No projects in whitelist. Run jira_init to configure allowed project keys."
+                    ),
+                }
+            )
         return json.dumps(all_projects)
 
     @app.tool(description="Get details for a single Jira project by key.")

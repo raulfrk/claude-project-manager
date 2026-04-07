@@ -9,7 +9,6 @@ import pytest
 
 from hook_transport.http_hook_handler import create_hook_app
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -82,7 +81,9 @@ async def test_hook_missing_tool_field(client):
 
 @pytest.mark.anyio
 async def test_hook_malformed_json(client):
-    resp = await client.post("/hook", content=b"not json", headers={"content-type": "application/json"})
+    resp = await client.post(
+        "/hook", content=b"not json", headers={"content-type": "application/json"}
+    )
     assert resp.status_code == 400
     assert resp.json()["ok"] is False
 

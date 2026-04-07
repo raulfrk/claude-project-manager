@@ -74,7 +74,13 @@ def register(app: FastMCP) -> None:
         sess_dir = storage.sessions_dir(cfg, name)
         if not sess_dir.is_dir():
             return json.dumps(
-                {"focus": focus, "sessions_read": 0, "decisions": [], "questions": [], "insights": []},
+                {
+                    "focus": focus,
+                    "sessions_read": 0,
+                    "decisions": [],
+                    "questions": [],
+                    "insights": [],
+                },
                 indent=2,
             )
 

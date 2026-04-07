@@ -8,16 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from server.lib import state, storage
+from server.lib import storage
 from server.lib.models import (
     ProjConfig,
     ProjectDates,
     ProjectEntry,
-    ProjectIndex,
     ProjectMeta,
     RepoEntry,
 )
-
 from tests.conftest import call_tool
 
 
@@ -77,8 +75,10 @@ def base_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjConfig:
 @pytest.fixture()
 def app_factory():
     """Return a factory to create a fresh MCP app."""
+
     def _make():
         from mcp.server.fastmcp import FastMCP
+
         from server.tools import config, projects, todos
 
         app = FastMCP("test-proj")
@@ -86,6 +86,7 @@ def app_factory():
         projects.register(app)
         todos.register(app)
         return app
+
     return _make
 
 

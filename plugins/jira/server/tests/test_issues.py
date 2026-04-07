@@ -22,9 +22,7 @@ def issue_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraSearch:
-    def test_passes_jql_and_params(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_passes_jql_and_params(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         search_result = {"issues": [{"key": "PROJ-1"}], "total": 1}
         mock_jira_client.get.return_value = search_result
 
@@ -36,14 +34,15 @@ class TestJiraSearch:
                 "jql": "project = PROJ",
                 "maxResults": 10,
                 "startAt": 5,
-                "fields": "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks",
+                "fields": (
+                    "summary,description,priority,assignee,labels,"
+                    "duedate,status,issuetype,parent,subtasks"
+                ),
             },
         )
         assert json.loads(result) == search_result
 
-    def test_uses_default_params(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_uses_default_params(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
         issue_tools["jira_search"](jql="status = Open")
@@ -54,9 +53,7 @@ class TestJiraSearch:
 
 
 class TestJiraGetIssue:
-    def test_fetches_issue_by_key(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_fetches_issue_by_key(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         issue_data = {"key": "PROJ-42", "fields": {"summary": "Fix bug"}}
         mock_jira_client.get.return_value = issue_data
 
@@ -80,9 +77,7 @@ class TestJiraGetIssueComments:
 
 
 class TestJiraGetEpicIssues:
-    def test_searches_with_parent_jql(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_searches_with_parent_jql(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         epic_result = {"issues": [{"key": "PROJ-10"}], "total": 1}
         mock_jira_client.get.return_value = epic_result
 
@@ -95,9 +90,7 @@ class TestJiraGetEpicIssues:
         assert params["maxResults"] == 25
         assert json.loads(result) == epic_result
 
-    def test_default_max_results(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_default_max_results(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
         issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
@@ -181,10 +174,11 @@ class TestJiraGetUserIssues:
 
 
 class TestJiraCreateIssue:
-    def test_create_issue_minimal(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
-        mock_jira_client.post.return_value = {"key": "PROJ-1", "self": "https://jira.example.com/rest/api/2/issue/10001"}
+    def test_create_issue_minimal(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.post.return_value = {
+            "key": "PROJ-1",
+            "self": "https://jira.example.com/rest/api/2/issue/10001",
+        }
 
         result = issue_tools["jira_create_issue"](project_key="PROJ", summary="New task")
 
@@ -199,12 +193,18 @@ class TestJiraCreateIssue:
             },
         )
         parsed = json.loads(result)
-        assert parsed == {"key": "PROJ-1", "self": "https://jira.example.com/rest/api/2/issue/10001"}
+        assert parsed == {
+            "key": "PROJ-1",
+            "self": "https://jira.example.com/rest/api/2/issue/10001",
+        }
 
     def test_create_issue_with_epic_link(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        mock_jira_client.post.return_value = {"key": "PROJ-2", "self": "https://jira.example.com/rest/api/2/issue/10002"}
+        mock_jira_client.post.return_value = {
+            "key": "PROJ-2",
+            "self": "https://jira.example.com/rest/api/2/issue/10002",
+        }
 
         result = issue_tools["jira_create_issue"](
             project_key="PROJ", summary="Child task", parent_key="PROJ-100"
@@ -216,10 +216,11 @@ class TestJiraCreateIssue:
         parsed = json.loads(result)
         assert parsed["key"] == "PROJ-2"
 
-    def test_create_issue_all_fields(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
-        mock_jira_client.post.return_value = {"key": "PROJ-3", "self": "https://jira.example.com/rest/api/2/issue/10003"}
+    def test_create_issue_all_fields(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.post.return_value = {
+            "key": "PROJ-3",
+            "self": "https://jira.example.com/rest/api/2/issue/10003",
+        }
 
         result = issue_tools["jira_create_issue"](
             project_key="PROJ",
@@ -247,9 +248,7 @@ class TestJiraCreateIssue:
         parsed = json.loads(result)
         assert parsed["key"] == "PROJ-3"
 
-    def test_create_issue_api_error(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_create_issue_api_error(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.post.side_effect = RuntimeError("Jira API error 400: bad request")
 
         result = issue_tools["jira_create_issue"](project_key="PROJ", summary="Will fail")
@@ -260,26 +259,26 @@ class TestJiraCreateIssue:
 
 
 class TestJiraBulkCreateIssues:
-    def test_posts_bulk_payload(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_posts_bulk_payload(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         bulk_response = {
             "issues": [{"id": "10001", "key": "PROJ-100"}],
             "errors": [],
         }
         mock_jira_client.post.return_value = bulk_response
 
-        payload = json.dumps({
-            "issueUpdates": [
-                {
-                    "fields": {
-                        "project": {"key": "PROJ"},
-                        "summary": "New issue",
-                        "issuetype": {"name": "Task"},
+        payload = json.dumps(
+            {
+                "issueUpdates": [
+                    {
+                        "fields": {
+                            "project": {"key": "PROJ"},
+                            "summary": "New issue",
+                            "issuetype": {"name": "Task"},
+                        }
                     }
-                }
-            ]
-        })
+                ]
+            }
+        )
 
         result = issue_tools["jira_bulk_create_issues"](issues_json=payload)
 
@@ -319,17 +318,17 @@ class TestJiraBulkCreateIssues:
 
 
 class TestJiraBulkUpdateIssues:
-    def test_updates_multiple_issues(
-        self, mock_jira_client: MagicMock, issue_tools: dict
-    ) -> None:
+    def test_updates_multiple_issues(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.put.return_value = None
 
-        payload = json.dumps({
-            "updates": [
-                {"key": "PROJ-1", "fields": {"summary": "Updated 1"}},
-                {"key": "PROJ-2", "fields": {"priority": {"name": "High"}}},
-            ]
-        })
+        payload = json.dumps(
+            {
+                "updates": [
+                    {"key": "PROJ-1", "fields": {"summary": "Updated 1"}},
+                    {"key": "PROJ-2", "fields": {"priority": {"name": "High"}}},
+                ]
+            }
+        )
 
         result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
 
@@ -361,9 +360,7 @@ class TestJiraBulkUpdateIssues:
     def test_missing_updates_returns_error(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        result = issue_tools["jira_bulk_update_issues"](
-            updates_json=json.dumps({"foo": "bar"})
-        )
+        result = issue_tools["jira_bulk_update_issues"](updates_json=json.dumps({"foo": "bar"}))
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -372,11 +369,13 @@ class TestJiraBulkUpdateIssues:
     def test_missing_key_recorded_as_failure(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        payload = json.dumps({
-            "updates": [
-                {"fields": {"summary": "No key"}},
-            ]
-        })
+        payload = json.dumps(
+            {
+                "updates": [
+                    {"fields": {"summary": "No key"}},
+                ]
+            }
+        )
 
         result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
 
@@ -387,11 +386,13 @@ class TestJiraBulkUpdateIssues:
     def test_no_fields_recorded_as_failure(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        payload = json.dumps({
-            "updates": [
-                {"key": "PROJ-1", "fields": {}},
-            ]
-        })
+        payload = json.dumps(
+            {
+                "updates": [
+                    {"key": "PROJ-1", "fields": {}},
+                ]
+            }
+        )
 
         result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
 
@@ -407,12 +408,14 @@ class TestJiraBulkUpdateIssues:
             None,
         ]
 
-        payload = json.dumps({
-            "updates": [
-                {"key": "PROJ-1", "fields": {"summary": "Fails"}},
-                {"key": "PROJ-2", "fields": {"summary": "Works"}},
-            ]
-        })
+        payload = json.dumps(
+            {
+                "updates": [
+                    {"key": "PROJ-1", "fields": {"summary": "Fails"}},
+                    {"key": "PROJ-2", "fields": {"summary": "Works"}},
+                ]
+            }
+        )
 
         result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
 

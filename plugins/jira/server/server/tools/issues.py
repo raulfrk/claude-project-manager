@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import JsonValue, get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
+_ISSUE_FIELDS = (
+    "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks"
+)
 
 
 def register(app: FastMCP) -> None:
@@ -19,7 +25,7 @@ def register(app: FastMCP) -> None:
                 "jql": jql,
                 "maxResults": max_results,
                 "startAt": start_at,
-                "fields": "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks",
+                "fields": _ISSUE_FIELDS,
             },
         )
         return json.dumps(data)
@@ -45,7 +51,7 @@ def register(app: FastMCP) -> None:
             params={
                 "jql": jql,
                 "maxResults": max_results,
-                "fields": "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks",
+                "fields": _ISSUE_FIELDS,
             },
         )
         return json.dumps(data)
@@ -84,7 +90,7 @@ def register(app: FastMCP) -> None:
             params={
                 "jql": jql,
                 "maxResults": max_results,
-                "fields": "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks",
+                "fields": _ISSUE_FIELDS,
             },
         )
         return json.dumps(data)
@@ -127,6 +133,8 @@ def register(app: FastMCP) -> None:
             fields["components"] = [{"name": c.strip()} for c in components.split(",")]
         try:
             data = client.post("/rest/api/2/issue", json_body={"fields": fields})
+            if not isinstance(data, dict):
+                return json.dumps({"error": f"Unexpected response type: {type(data).__name__}"})
             return json.dumps({"key": data["key"], "self": data["self"]})
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
@@ -187,6 +195,6 @@ def register(app: FastMCP) -> None:
                     continue
                 client.put(f"/rest/api/2/issue/{key}", json_body={"fields": fields})
                 successes.append({"key": key, "status": "updated"})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

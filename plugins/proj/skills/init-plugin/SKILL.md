@@ -18,7 +18,7 @@ Call `mcp__proj__config_load`. If already configured:
 Auto-detect which plugins are available by attempting to call their MCP tools. Do NOT ask the user whether plugins are installed — detect programmatically.
 
 Check each plugin by calling a lightweight tool from its server:
-- **perms**: call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"` — if it returns a result, perms is installed
+- **sandbox**: call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"` — if it returns a result, sandbox is installed
 - **worktree**: call `mcp__plugin_worktree_worktree__wt_list_repos` — if it returns a result, worktree is installed
 - **hooks**: call `mcp__plugin_hooks_hooks__hooks_list_tool` — if it returns a result, hooks is installed
 - **todoist**: call `mcp__plugin_todoist_todoist__todoist_find_projects` with `name=""` — if it returns a result (even empty), todoist plugin is installed
@@ -30,7 +30,7 @@ If a tool call fails (tool not found, connection error), that plugin is not inst
 
 Report the detection results:
 ```
-Detected plugins: perms, worktree, hooks, todoist, zoxide
+Detected plugins: sandbox, worktree, hooks, todoist, zoxide
 Not found: trello, jira
 ```
 
@@ -80,7 +80,7 @@ Present questions in logical groups. Within each group, show all questions toget
   - If set, `/proj:init` uses `<base>/<project-name>` as the content path when no explicit path is given.
   - Store as `projects_base_dir` (null if left blank)
 
-### Group B: Permissions & sandbox (only if perms plugin detected)
+### Group B: Permissions & sandbox (only if sandbox plugin detected)
 - **Permissions** — "Auto-grant Claude read/edit permissions for project directories? [yes]"
   - If enabled, Claude auto-adds Read/Edit permissions for each project directory on `/proj:init`
 - **MCP auto-allow** — "Auto-allow plugin MCP tools so Claude never prompts for permission? [yes]"
@@ -104,6 +104,8 @@ For each detected sync plugin, ask its configuration questions as a sub-group:
 - If yes: "Auto-sync on every project command? [yes]"
 - If yes: "Default Trello board ID? (leave blank to set later)"
 - If yes: "On delete action — archive or delete Trello cards? [archive]"
+- If yes: "Trello projects list name? [Projects]" — the Trello list where project cards are created. Empty input uses default "Projects".
+- If yes: "Trello tasks list name? [proj-tasks]" — the Trello list where standalone task cards are created. Empty input uses default "proj-tasks".
 
 **Jira** (only if jira plugin detected):
 - "Enable Jira sync? [no]"
@@ -138,14 +140,14 @@ Configuration summary:
   Core:
     tracking_dir: ~/projects/tracking
     projects_base_dir: ~/projects
-  Detected plugins: perms, worktree, hooks, todoist, zoxide
+  Detected plugins: sandbox, worktree, hooks, todoist, zoxide
   Permissions:
     auto_grant: yes
     auto_allow_mcps: yes
     sandbox: yes
   Sync:
     todoist: enabled (auto-sync, server: claude_ai_Todoist)
-    trello: disabled (not installed)
+    trello: disabled (not installed)  [or: enabled (auto-sync, board: <id>, on_delete: archive, projects_list: Projects, tasks_list: proj-tasks)]
     jira: disabled (not installed)
   Git:
     integration: yes
@@ -168,13 +170,13 @@ Call `mcp__proj__config_init` with all collected values including:
 - Core paths: `tracking_dir`, `projects_base_dir`
 - Permissions: `auto_grant_permissions`, `auto_allow_mcps`
 - Plugin flags: `sandbox_integration` (auto-set from detection), `worktree_integration` (auto-set from detection), `zoxide_integration`
-- Sync: `todoist_enabled`, `todoist_auto_sync`, `todoist_mcp_server`, `trello_enabled`, `trello_auto_sync`, `trello_default_board_id`, `trello_on_delete`, `jira_enabled`, `jira_default_user`
+- Sync: `todoist_enabled`, `todoist_auto_sync`, `todoist_mcp_server`, `trello_enabled`, `trello_auto_sync`, `trello_default_board_id`, `trello_on_delete`, `trello_list_projects`, `trello_list_tasks`, `jira_enabled`, `jira_default_user`
 - Git: `git_integration`, `git_tracking_enabled`, `git_tracking_github_enabled`, `git_tracking_github_repo_format`
 - Extras: `team_mode_enabled`, `team_mode_max_agents`, `team_mode_trust_level`, `default_priority`, `archive_purge_after_days`
 
 Omit `todoist_mcp_server` when `todoist_enabled: false`.
 
-## Step 7: Permission setup (if perms plugin detected)
+## Step 7: Permission setup (if sandbox plugin detected)
 
 ### 7a. MCP auto-allow
 Build the server list and call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` once:
@@ -207,7 +209,7 @@ Parse `permissions_allow` from the result.
 ### 7e. Persist root paths
 - Call `config_update` with `permissions_projects_root=<projects_root>` and `permissions_tracking_root=<tracking_root>`
 
-If perms plugin is not detected, skip all of step 7 with: "Perms plugin not detected — skipping permission and sandbox setup."
+If sandbox plugin is not detected, skip all of step 7 with: "Sandbox plugin not detected — skipping permission and sandbox setup."
 
 ## Step 8: Hook setup (if hooks plugin detected)
 
@@ -223,12 +225,12 @@ Inspect the hooks list result.
 - If no hooks registered: warn "No hooks registered. Will attempt to register default hooks for detected plugins."
 
 For each detected and enabled plugin, register its default hooks by calling `mcp__plugin_hooks_hooks__hooks_register_tool` for each hook entry from the plugin's `default-hooks.yaml`. Only register hooks whose conditions match enabled integrations:
-- **proj** hooks: register if `git_tracking.enabled` (tracking flush hooks) or `sandbox_integration` (perms sync hook)
+- **proj** hooks: register if `git_tracking.enabled` (tracking flush hooks) or `sandbox_integration` (sandbox sync hook)
 - **todoist** hooks: register if `todoist_enabled`
 - **trello** hooks: register if `trello_enabled`
 - **zoxide** hooks: register if `zoxide_integration`
-- **worktree** hooks: register if `worktree_integration` (perms hooks) or `zoxide_integration` (zoxide hooks)
-- **perms** hooks: register if `sandbox_integration`
+- **worktree** hooks: register if `worktree_integration` (sandbox hooks) or `zoxide_integration` (zoxide hooks)
+- **sandbox** hooks: register if `sandbox_integration`
 
 Report how many hooks were registered: "Registered N default hooks for: proj, todoist, zoxide"
 
@@ -252,7 +254,7 @@ Show a summary of what was set up:
 ```
 Setup complete:
   Config: ~/.claude/proj.yaml
-  Plugins: perms, worktree, hooks, todoist, zoxide
+  Plugins: sandbox, worktree, hooks, todoist, zoxide
   MCP rules: 7 servers auto-allowed
   Sandbox: initialized (3 paths)
   Hooks: 12 registered
@@ -274,7 +276,7 @@ Suggested next: `1. /proj:init` -- create your first project | `2. /proj:load` -
 - **Config init failure**: displays error from `config_init` and stops.
 - **Plugin detection failure**: treats plugin as not installed, continues with others.
 - **Credential init failure**: displays error from the init tool and continues to the next plugin (non-blocking).
-- **Perms plugin not detected**: skips all permission/sandbox setup with a note.
+- **Sandbox plugin not detected**: skips all permission/sandbox setup with a note.
 - **Hooks plugin not detected**: skips hook registration with a note.
 - **Hooks server unreachable**: warns user with options to continue or stop.
 - **No hooks registered**: attempts to register default hooks for detected plugins.

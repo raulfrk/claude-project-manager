@@ -3,7 +3,6 @@ set -euo pipefail
 DIR="$(cd "$1" && pwd)"
 SERVER="$2"
 export UV_LINK_MODE=copy
-export UV_PROJECT_ENVIRONMENT="$DIR/.venv"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$DIR/.uv-cache}"
 
 # Ensure _shared (claude-hook-transport) is available and up-to-date.
@@ -46,5 +45,14 @@ else
   fi
 fi
 
-test -f "$DIR/.venv/bin/python" || uv sync --frozen --directory "$DIR"
+# Use shared marketplace venv if available, otherwise fall back to per-plugin venv
+SHARED_VENV="$HOME/.claude/plugins/marketplaces/$MARKETPLACE_NAME/.venv"
+if [ -f "$SHARED_VENV/bin/python" ]; then
+  export UV_PROJECT_ENVIRONMENT="$SHARED_VENV"
+else
+  echo "Shared venv not found, falling back to per-plugin venv" >&2
+  export UV_PROJECT_ENVIRONMENT="$DIR/.venv"
+  test -f "$DIR/.venv/bin/python" || uv sync --frozen --directory "$DIR"
+fi
+
 exec uv --directory "$DIR" run --frozen --no-sync "$SERVER"

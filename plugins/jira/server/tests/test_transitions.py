@@ -20,9 +20,7 @@ def transition_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetTransitions:
-    def test_fetches_transitions(
-        self, mock_jira_client: MagicMock, transition_tools: dict
-    ) -> None:
+    def test_fetches_transitions(self, mock_jira_client: MagicMock, transition_tools: dict) -> None:
         data = {"transitions": [{"id": "11", "name": "To Do"}, {"id": "21", "name": "In Progress"}]}
         mock_jira_client.get.return_value = data
 
@@ -47,9 +45,7 @@ class TestJiraTransitionIssue:
     ) -> None:
         mock_jira_client.post.return_value = None
 
-        result = transition_tools["jira_transition_issue"](
-            issue_key="PROJ-42", transition_id="21"
-        )
+        result = transition_tools["jira_transition_issue"](issue_key="PROJ-42", transition_id="21")
 
         mock_jira_client.post.assert_called_once_with(
             "/rest/api/2/issue/PROJ-42/transitions",

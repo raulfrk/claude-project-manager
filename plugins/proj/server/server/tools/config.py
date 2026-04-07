@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import Priority
-from server.lib.models import ProjConfig, QualityLevel, ResilienceConfig, SmartGateConfig, TeamModeConfig
+from server.lib.models import (
+    ContextInjectionConfig,
+    ContextInjectionSectionsConfig,
+    ProjConfig,
+    QualityLevel,
+    ResilienceConfig,
+    SmartGateConfig,
+    TeamModeConfig,
+)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -52,7 +60,9 @@ def register(app: FastMCP) -> None:
     """Register config_load, config_init, and config_update tools with the MCP app."""
 
     @app.tool(
-        description="Check if proj plugin is configured. Returns config summary or setup instructions."  # noqa: E501
+        description=(
+            "Check if proj plugin is configured. Returns config summary or setup instructions."
+        )
     )
     def config_load() -> str:
         if not storage.config_exists():
@@ -76,6 +86,8 @@ def register(app: FastMCP) -> None:
             f"  trello.auto_sync: {cfg.trello.auto_sync}\n"
             f"  trello.default_board_id: {cfg.trello.default_board_id or '(not set)'}\n"
             f"  trello.on_delete: {cfg.trello.on_delete}\n"
+            f"  trello.list_mappings.projects: {cfg.trello.list_mappings.projects}\n"
+            f"  trello.list_mappings.tasks: {cfg.trello.list_mappings.tasks}\n"
             f"  trello.list_mappings.active: {cfg.trello.list_mappings.active or '(not set)'}\n"
             f"  trello.list_mappings.pending: {cfg.trello.list_mappings.pending or '(not set)'}\n"
             f"  trello.list_mappings.archived: {cfg.trello.list_mappings.archived or '(not set)'}\n"
@@ -103,6 +115,13 @@ def register(app: FastMCP) -> None:
             f"    critical_path_patterns: {cfg.smart_gate.critical_path_patterns}\n"
             f"  quality_level: {cfg.quality_level}\n"
             f"  worktree_isolation: {cfg.worktree_isolation}\n"
+            f"  context_injection:\n"
+            f"    enabled: {cfg.context_injection.enabled}\n"
+            f"    budget: {cfg.context_injection.budget}\n"
+            f"    recency_window: {cfg.context_injection.recency_window}h\n"
+            f"    sections.notes: {cfg.context_injection.sections.notes}%\n"
+            f"    sections.decisions: {cfg.context_injection.sections.decisions}%\n"
+            f"    sections.knowledge: {cfg.context_injection.sections.knowledge}%\n"
             f"  config_path: {storage.config_path()}"
         )
 
@@ -122,6 +141,8 @@ def register(app: FastMCP) -> None:
         trello_auto_sync: bool = True,
         trello_default_board_id: str = "",
         trello_on_delete: str = "archive",
+        trello_list_projects: str = "Projects",
+        trello_list_tasks: str = "proj-tasks",
         trello_list_active: str = "",
         trello_list_pending: str = "",
         trello_list_archived: str = "",
@@ -147,6 +168,12 @@ def register(app: FastMCP) -> None:
         quality_level: str = "balanced",
         smart_gate_enabled: bool = True,
         worktree_isolation: bool = False,
+        context_injection_enabled: bool = True,
+        context_injection_budget: int = 2000,
+        context_injection_recency_window: int = 24,
+        context_injection_notes_pct: int = 40,
+        context_injection_decisions_pct: int = 35,
+        context_injection_knowledge_pct: int = 25,
         permissions_projects_root: str | None = None,
         permissions_tracking_root: str | None = None,
     ) -> str:
@@ -178,6 +205,8 @@ def register(app: FastMCP) -> None:
         cfg.trello.auto_sync = trello_auto_sync
         cfg.trello.default_board_id = trello_default_board_id
         cfg.trello.on_delete = trello_on_delete
+        cfg.trello.list_mappings.projects = trello_list_projects
+        cfg.trello.list_mappings.tasks = trello_list_tasks
         cfg.trello.list_mappings.active = trello_list_active
         cfg.trello.list_mappings.pending = trello_list_pending
         cfg.trello.list_mappings.archived = trello_list_archived
@@ -207,6 +236,16 @@ def register(app: FastMCP) -> None:
         cfg.quality_level = quality_level
         cfg.smart_gate = SmartGateConfig(enabled=smart_gate_enabled)
         cfg.worktree_isolation = worktree_isolation
+        cfg.context_injection = ContextInjectionConfig(
+            enabled=context_injection_enabled,
+            budget=context_injection_budget,
+            recency_window=context_injection_recency_window,
+            sections=ContextInjectionSectionsConfig(
+                notes=context_injection_notes_pct,
+                decisions=context_injection_decisions_pct,
+                knowledge=context_injection_knowledge_pct,
+            ),
+        )
         storage.save_config(cfg)
 
         # Set file permissions to 600
@@ -227,6 +266,8 @@ def register(app: FastMCP) -> None:
         trello_auto_sync: bool | None = None,
         trello_default_board_id: str | None = None,
         trello_on_delete: str | None = None,
+        trello_list_projects: str | None = None,
+        trello_list_tasks: str | None = None,
         trello_list_active: str | None = None,
         trello_list_pending: str | None = None,
         trello_list_archived: str | None = None,
@@ -255,11 +296,19 @@ def register(app: FastMCP) -> None:
         smart_gate_light_review_threshold: int | None = None,
         smart_gate_critical_path_patterns: list[str] | None = None,
         worktree_isolation: bool | None = None,
+        context_injection_enabled: bool | None = None,
+        context_injection_budget: int | None = None,
+        context_injection_recency_window: int | None = None,
+        context_injection_notes_pct: int | None = None,
+        context_injection_decisions_pct: int | None = None,
+        context_injection_knowledge_pct: int | None = None,
         permissions_projects_root: str | None = None,
         permissions_tracking_root: str | None = None,
     ) -> str:
         if default_priority is not None and default_priority not in (
-            Priority.LOW, Priority.MEDIUM, Priority.HIGH
+            Priority.LOW,
+            Priority.MEDIUM,
+            Priority.HIGH,
         ):
             return (
                 f"Invalid default_priority '{default_priority}'. "
@@ -270,52 +319,62 @@ def register(app: FastMCP) -> None:
             ("tracking_dir", tracking_dir),
             ("projects_base_dir", projects_base_dir),
         ):
-            if path_value is not None:
-                if not path_value or "\x00" in path_value:
-                    return (
-                        f"Invalid {field_name}: must be a non-empty string without null bytes."
-                    )
+            if path_value is not None and (not path_value or "\x00" in path_value):
+                return f"Invalid {field_name}: must be a non-empty string without null bytes."
 
-        if todoist_mcp_server is not None:
-            if not todoist_mcp_server or "\x00" in todoist_mcp_server:
-                return (
-                    "Invalid todoist_mcp_server: must be a non-empty string without null bytes."
-                )
+        if todoist_mcp_server is not None and (
+            not todoist_mcp_server or "\x00" in todoist_mcp_server
+        ):
+            return "Invalid todoist_mcp_server: must be a non-empty string without null bytes."
 
-        if trello_on_delete is not None and trello_on_delete not in ("archive", "delete"):
+        if trello_on_delete is not None and trello_on_delete not in (
+            "archive",
+            "delete",
+        ):
             return "Invalid trello_on_delete: must be 'archive' or 'delete'."
 
-        if git_tracking_github_repo_format is not None:
-            if not git_tracking_github_repo_format or "\x00" in git_tracking_github_repo_format:
-                return "Invalid git_tracking_github_repo_format: must be a non-empty string without null bytes."
+        if git_tracking_github_repo_format is not None and (
+            not git_tracking_github_repo_format or "\x00" in git_tracking_github_repo_format
+        ):
+            return (
+                "Invalid git_tracking_github_repo_format:"
+                " must be a non-empty string without null bytes."
+            )
 
-        if archive_destination is not None:
-            if not archive_destination or "\x00" in archive_destination:
-                return "Invalid archive_destination: must be a non-empty string without null bytes."
+        if archive_destination is not None and (
+            not archive_destination or "\x00" in archive_destination
+        ):
+            return "Invalid archive_destination: must be a non-empty string without null bytes."
 
-        if archive_purge_after_days is not None:
-            if not isinstance(archive_purge_after_days, int) or archive_purge_after_days <= 0:
-                return "Invalid archive_purge_after_days: must be a positive integer."
+        if archive_purge_after_days is not None and (
+            not isinstance(archive_purge_after_days, int) or archive_purge_after_days <= 0
+        ):
+            return "Invalid archive_purge_after_days: must be a positive integer."
 
-        if archive_trash_grace_days is not None:
-            if not isinstance(archive_trash_grace_days, int) or archive_trash_grace_days <= 0:
-                return "Invalid archive_trash_grace_days: must be a positive integer."
+        if archive_trash_grace_days is not None and (
+            not isinstance(archive_trash_grace_days, int) or archive_trash_grace_days <= 0
+        ):
+            return "Invalid archive_trash_grace_days: must be a positive integer."
 
-        if team_mode_max_agents is not None:
-            if not isinstance(team_mode_max_agents, int) or team_mode_max_agents <= 0:
-                return "Invalid team_mode_max_agents: must be a positive integer."
+        if team_mode_max_agents is not None and (
+            not isinstance(team_mode_max_agents, int) or team_mode_max_agents <= 0
+        ):
+            return "Invalid team_mode_max_agents: must be a positive integer."
 
-        if team_mode_trust_level is not None:
-            if not isinstance(team_mode_trust_level, int) or team_mode_trust_level not in (0, 1, 2, 3):
-                return "Invalid team_mode_trust_level: must be 0, 1, 2, or 3."
+        if team_mode_trust_level is not None and (
+            not isinstance(team_mode_trust_level, int) or team_mode_trust_level not in (0, 1, 2, 3)
+        ):
+            return "Invalid team_mode_trust_level: must be 0, 1, 2, or 3."
 
-        if resilience_failure_threshold is not None:
-            if not isinstance(resilience_failure_threshold, int) or resilience_failure_threshold <= 0:
-                return "Invalid resilience_failure_threshold: must be a positive integer."
+        if resilience_failure_threshold is not None and (
+            not isinstance(resilience_failure_threshold, int) or resilience_failure_threshold <= 0
+        ):
+            return "Invalid resilience_failure_threshold: must be a positive integer."
 
-        if resilience_recovery_timeout is not None:
-            if not isinstance(resilience_recovery_timeout, int) or resilience_recovery_timeout <= 0:
-                return "Invalid resilience_recovery_timeout: must be a positive integer."
+        if resilience_recovery_timeout is not None and (
+            not isinstance(resilience_recovery_timeout, int) or resilience_recovery_timeout <= 0
+        ):
+            return "Invalid resilience_recovery_timeout: must be a positive integer."
 
         _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level is not None and quality_level not in _valid_quality:
@@ -324,13 +383,44 @@ def register(app: FastMCP) -> None:
                 f"Must be one of: {', '.join(_valid_quality)}."
             )
 
-        if smart_gate_auto_execute_threshold is not None:
-            if not isinstance(smart_gate_auto_execute_threshold, int) or smart_gate_auto_execute_threshold < 0:
-                return "Invalid smart_gate_auto_execute_threshold: must be a non-negative integer."
+        if smart_gate_auto_execute_threshold is not None and (
+            not isinstance(smart_gate_auto_execute_threshold, int)
+            or smart_gate_auto_execute_threshold < 0
+        ):
+            return "Invalid smart_gate_auto_execute_threshold: must be a non-negative integer."
 
-        if smart_gate_light_review_threshold is not None:
-            if not isinstance(smart_gate_light_review_threshold, int) or smart_gate_light_review_threshold < 0:
-                return "Invalid smart_gate_light_review_threshold: must be a non-negative integer."
+        if smart_gate_light_review_threshold is not None and (
+            not isinstance(smart_gate_light_review_threshold, int)
+            or smart_gate_light_review_threshold < 0
+        ):
+            return "Invalid smart_gate_light_review_threshold: must be a non-negative integer."
+
+        if context_injection_budget is not None and (
+            not isinstance(context_injection_budget, int) or context_injection_budget <= 0
+        ):
+            return "Invalid context_injection_budget: must be a positive integer."
+
+        if context_injection_recency_window is not None and (
+            not isinstance(context_injection_recency_window, int)
+            or context_injection_recency_window <= 0
+        ):
+            return "Invalid context_injection_recency_window: must be a positive integer."
+
+        for _pct_name, _pct_val in (
+            ("context_injection_notes_pct", context_injection_notes_pct),
+            (
+                "context_injection_decisions_pct",
+                context_injection_decisions_pct,
+            ),
+            (
+                "context_injection_knowledge_pct",
+                context_injection_knowledge_pct,
+            ),
+        ):
+            if _pct_val is not None and (
+                not isinstance(_pct_val, int) or _pct_val < 0 or _pct_val > 100
+            ):
+                return f"Invalid {_pct_name}: must be an integer between 0 and 100."
 
         cfg = require_config()
         if tracking_dir is not None:
@@ -359,6 +449,10 @@ def register(app: FastMCP) -> None:
             cfg.trello.default_board_id = trello_default_board_id
         if trello_on_delete is not None:
             cfg.trello.on_delete = trello_on_delete
+        if trello_list_projects is not None:
+            cfg.trello.list_mappings.projects = trello_list_projects
+        if trello_list_tasks is not None:
+            cfg.trello.list_mappings.tasks = trello_list_tasks
         if trello_list_active is not None:
             cfg.trello.list_mappings.active = trello_list_active
         if trello_list_pending is not None:
@@ -415,5 +509,17 @@ def register(app: FastMCP) -> None:
             cfg.smart_gate.critical_path_patterns = smart_gate_critical_path_patterns
         if worktree_isolation is not None:
             cfg.worktree_isolation = worktree_isolation
+        if context_injection_enabled is not None:
+            cfg.context_injection.enabled = context_injection_enabled
+        if context_injection_budget is not None:
+            cfg.context_injection.budget = context_injection_budget
+        if context_injection_recency_window is not None:
+            cfg.context_injection.recency_window = context_injection_recency_window
+        if context_injection_notes_pct is not None:
+            cfg.context_injection.sections.notes = context_injection_notes_pct
+        if context_injection_decisions_pct is not None:
+            cfg.context_injection.sections.decisions = context_injection_decisions_pct
+        if context_injection_knowledge_pct is not None:
+            cfg.context_injection.sections.knowledge = context_injection_knowledge_pct
         storage.save_config(cfg)
         return "Configuration updated."

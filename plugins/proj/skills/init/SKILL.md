@@ -104,7 +104,7 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      - (If second answer is no, pass `mcp_servers=[]`)
    - Store the decisions in `mcp__proj__proj_set_permissions`
    - **Note**: When `permissions.projects_root` is set in config, `proj_setup_permissions` skips per-repo sandbox path additions (root already covers all project repos). It only ensures MCP wildcards are present.
-   - If `proj_setup_permissions` returns an error (e.g. perms plugin not available), warn: "Permissions could not be set automatically. Install the perms plugin when available." and continue.
+   - If `proj_setup_permissions` returns an error (e.g. sandbox plugin not available), warn: "Permissions could not be set automatically. Install the sandbox plugin when available." and continue.
 
 **7.** CLAUDE.md — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
    Ask: "Create a CLAUDE.md in '<label>' (`<path>`) to help Claude understand the project context? [yes]"

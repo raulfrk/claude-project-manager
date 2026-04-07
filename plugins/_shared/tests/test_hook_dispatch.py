@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -20,6 +18,9 @@ from hook_dispatch.dispatch import (
     enable_hook_dispatch,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,9 @@ async def test_wraps_sync_function(mock_mcp):
     def my_sync_tool(x: int) -> str:
         return f"result-{x}"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None) as mock_dispatch:
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
         result = await mock_mcp._registered_tools["my_sync_tool"](42)
 
     assert result == "result-42"
@@ -86,7 +89,9 @@ async def test_wraps_async_function(mock_mcp):
     async def my_async_tool(x: int) -> str:
         return f"async-{x}"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None) as mock_dispatch:
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
         result = await mock_mcp._registered_tools["my_async_tool"](10)
 
     assert result == "async-10"
@@ -155,9 +160,14 @@ async def test_tool_exception_propagates_no_dispatch(mock_mcp):
     async def failing_tool() -> str:
         raise ValueError("boom")
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock) as mock_dispatch:
-        with pytest.raises(ValueError, match="boom"):
-            await mock_mcp._registered_tools["failing_tool"]()
+    with (
+        patch(
+            "hook_dispatch.dispatch._dispatch_hook",
+            new_callable=AsyncMock,
+        ) as mock_dispatch,
+        pytest.raises(ValueError, match="boom"),
+    ):
+        await mock_mcp._registered_tools["failing_tool"]()
 
     mock_dispatch.assert_not_awaited()
 
@@ -199,7 +209,9 @@ async def test_custom_tool_name_dispatched(mock_mcp):
     async def internal_fn() -> str:
         return "custom"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None) as mock_dispatch:
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
         result = await mock_mcp._registered_tools["custom_name"]()
 
     assert result == "custom"
@@ -232,7 +244,9 @@ async def test_non_excluded_tool_dispatches(mock_mcp):
     async def allowed_fn() -> str:
         return "allowed"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None) as mock_dispatch:
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
         result = await mock_mcp._registered_tools["allowed_tool"]()
 
     assert result == "allowed"
@@ -250,7 +264,9 @@ async def test_tool_without_parens(mock_mcp):
     async def bare_tool() -> str:
         return "bare"
 
-    with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None) as mock_dispatch:
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
         result = await mock_mcp._registered_tools["bare_tool"]()
 
     assert result == "bare"
@@ -314,17 +330,24 @@ async def test_dispatch_payload_format_unix(mock_mcp, tmp_path, monkeypatch):
     async def payload_tool() -> dict:
         return {"status": "ok"}
 
-    with patch("pathlib.Path.home", return_value=tmp_path):
-        with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls,
+    ):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+            "top_level": False,
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
 
-            await mock_mcp._registered_tools["payload_tool"]()
+        await mock_mcp._registered_tools["payload_tool"]()
 
     mock_client.post.assert_awaited_once()
     url, kwargs = mock_client.post.call_args[0][0], mock_client.post.call_args[1]
@@ -348,7 +371,12 @@ async def test_dispatch_payload_format_tcp(mock_mcp, monkeypatch):
 
     with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
+        mock_resp.json.return_value = {
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+            "top_level": False,
+        }
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -377,35 +405,47 @@ async def test_lazy_resolution_reads_fresh_registry(mock_mcp, tmp_path, monkeypa
         return "ok"
 
     call_count = 0
-    captured_uds: list[str] = []
 
     def fake_resolve(port):
         nonlocal call_count
         call_count += 1
         path = registry_file.read_text().strip()
         import httpx as _httpx
+
         return "http://localhost/hook", _httpx.AsyncHTTPTransport(uds=path)
 
-    with patch("hook_dispatch.dispatch._resolve_hooks_transport", side_effect=fake_resolve):
-        with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_cls:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"hooks_fired": 0, "errors": [], "results": [], "top_level": False}
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
+    with (
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            side_effect=fake_resolve,
+        ),
+        patch(
+            "hook_dispatch.dispatch.httpx.AsyncClient",
+        ) as mock_cls,
+    ):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+            "top_level": False,
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_cls.return_value = mock_client
 
-            # First call: registry points to 11111
-            await mock_mcp._registered_tools["refreshable_tool"]()
-            assert call_count == 1
+        # First call: registry points to 11111
+        await mock_mcp._registered_tools["refreshable_tool"]()
+        assert call_count == 1
 
-            # Simulate hooks server restart — registry now points to 22222
-            registry_file.write_text("/tmp/claude-hooks-hooks-22222.sock")
+        # Simulate hooks server restart — registry now points to 22222
+        registry_file.write_text("/tmp/claude-hooks-hooks-22222.sock")
 
-            # Second call: must re-resolve, picking up the new path
-            await mock_mcp._registered_tools["refreshable_tool"]()
-            assert call_count == 2
+        # Second call: must re-resolve, picking up the new path
+        await mock_mcp._registered_tools["refreshable_tool"]()
+        assert call_count == 2
 
 
 # ── _resolve_hooks_transport registry tests ─────────────────────────────────
@@ -475,7 +515,7 @@ class TestResolveHooksTransport:
         """TCP mode respects the hooks_port argument."""
         monkeypatch.setenv("HOOK_TRANSPORT", "tcp")
 
-        url, transport = _resolve_hooks_transport(19200)
+        url, _transport = _resolve_hooks_transport(19200)
 
         assert url == "http://127.0.0.1:19200/hook"
 
@@ -488,15 +528,25 @@ class TestDispatchHookReturn:
     async def test_returns_dict_on_success(self):
         """_dispatch_hook returns parsed JSON dict from hooks server."""
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hooks_fired": 1, "errors": [], "results": [{"hook_id": "h1", "result": "ok"}], "top_level": True}
+        mock_resp.json.return_value = {
+            "hooks_fired": 1,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "ok"}],
+            "top_level": True,
+        }
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
-            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-                result = await _dispatch_hook("my_tool", "result", 19100)
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert isinstance(result, dict)
         assert result["hooks_fired"] == 1
@@ -509,9 +559,14 @@ class TestDispatchHookReturn:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
-            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-                result = await _dispatch_hook("my_tool", "result", 19100)
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert result is not None
         assert "_error" in result
@@ -527,9 +582,14 @@ class TestDispatchHookReturn:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("hook_dispatch.dispatch._resolve_hooks_transport", return_value=("http://localhost/hook", None)):
-            with patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client):
-                result = await _dispatch_hook("my_tool", "result", 19100)
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
 
         assert result is not None
         assert "_error" in result
@@ -544,7 +604,12 @@ class TestBuildHooksField:
         assert _build_hooks_field(None, "tool") is None
 
     def test_returns_none_when_not_top_level(self):
-        response = {"hooks_fired": 2, "errors": [], "results": [{"hook_id": "h1", "result": "x"}], "top_level": False}
+        response = {
+            "hooks_fired": 2,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "x"}],
+            "top_level": False,
+        }
         assert _build_hooks_field(response, "tool") is None
 
     def test_returns_none_when_zero_hooks_no_errors(self):
@@ -552,7 +617,12 @@ class TestBuildHooksField:
         assert _build_hooks_field(response, "tool") is None
 
     def test_returns_field_when_hooks_fired(self):
-        response = {"hooks_fired": 1, "errors": [], "results": [{"hook_id": "h1", "result": "ok"}], "top_level": True}
+        response = {
+            "hooks_fired": 1,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "ok"}],
+            "top_level": True,
+        }
         field = _build_hooks_field(response, "tool")
         assert field is not None
         assert field["hooks_fired"] == 1
@@ -562,7 +632,12 @@ class TestBuildHooksField:
 
     def test_returns_field_on_error_case(self):
         """Error dict (_error key) always triggers injection regardless of top_level."""
-        response = {"_error": "hooks server unreachable", "hooks_fired": 0, "errors": [], "results": []}
+        response = {
+            "_error": "hooks server unreachable",
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+        }
         field = _build_hooks_field(response, "tool")
         assert field is not None
         assert "hooks server unreachable" in field["errors"]
@@ -600,7 +675,8 @@ class TestBuildHooksField:
             "top_level": True,
             "cascade_errors": [
                 "[trigger_a \u2192 hook-a \u2192 target_b] target_c failed",
-                "[trigger_a \u2192 hook-a \u2192 target_b \u2192 hook-b \u2192 target_c] deeper error",
+                "[trigger_a \u2192 hook-a \u2192 target_b"
+                " \u2192 hook-b \u2192 target_c] deeper error",
             ],
         }
         field = _build_hooks_field(response, "tool")
@@ -699,7 +775,11 @@ class TestWrapInjectsHooks:
             "results": [{"hook_id": "h1", "result": "synced"}],
             "top_level": True,
         }
-        with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=fire_response):
+        with patch(
+            "hook_dispatch.dispatch._dispatch_hook",
+            new_callable=AsyncMock,
+            return_value=fire_response,
+        ):
             result = await mock_mcp._registered_tools["hooked_tool"]()
 
         parsed = json.loads(result)
@@ -718,7 +798,11 @@ class TestWrapInjectsHooks:
             return json.dumps({"status": "clean"})
 
         fire_response = {"hooks_fired": 0, "errors": [], "results": [], "top_level": True}
-        with patch("hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=fire_response):
+        with patch(
+            "hook_dispatch.dispatch._dispatch_hook",
+            new_callable=AsyncMock,
+            return_value=fire_response,
+        ):
             result = await mock_mcp._registered_tools["unhooked_tool"]()
 
         parsed = json.loads(result)

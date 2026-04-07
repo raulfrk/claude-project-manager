@@ -32,7 +32,7 @@ def load_config() -> JiraConfig:
     3. JIRA_PAT and JIRA_BASE_URL env vars
     4. Raise an error with setup instructions
     """
-    global _cached_config  # noqa: PLW0603
+    global _cached_config
     if _cached_config is not None:
         return _cached_config
 
@@ -60,7 +60,6 @@ def load_config() -> JiraConfig:
         return _cached_config
 
     msg = (
-        "Jira config not found. "
-        "Create ~/.claude/jira.yaml or set JIRA_PAT/JIRA_BASE_URL env vars."
+        "Jira config not found. Create ~/.claude/jira.yaml or set JIRA_PAT/JIRA_BASE_URL env vars."
     )
     raise ValueError(msg)

@@ -100,11 +100,14 @@ class TestProjInitHooksSync:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("httpx.HTTPTransport") as mock_transport, \
-             patch("httpx.Client", return_value=mock_client):
+        with (
+            patch("httpx.HTTPTransport"),
+            patch("httpx.Client", return_value=mock_client),
+        ):
             result = self._call_proj_init("hooktest", tmp_path)
 
         import json
+
         data = json.loads(result)
         assert "project_name" in data
         assert data["project_name"] == "hooktest"
@@ -123,6 +126,7 @@ class TestProjInitHooksSync:
             result = self._call_proj_init("nohooks", tmp_path)
 
         import json
+
         data = json.loads(result)
         assert "project_name" in data
         assert data["project_name"] == "nohooks"
@@ -399,10 +403,30 @@ class TestProjArchivePreflight:
 
         _run_proj_init("myapp", str(tmp_path))
         todos = [
-            Todo(id="1", title="Open task", status="pending", created="2026-01-01", updated="2026-01-01"),
-            Todo(id="2", title="Done task", status="done", created="2026-01-01", updated="2026-01-01"),
-            Todo(id="3", title="In progress", status="in_progress", created="2026-01-01", updated="2026-01-01"),
-            Todo(id="4", title="Cancelled", status="cancelled", created="2026-01-01", updated="2026-01-01"),
+            Todo(
+                id="1",
+                title="Open task",
+                status="pending",
+                created="2026-01-01",
+                updated="2026-01-01",
+            ),
+            Todo(
+                id="2", title="Done task", status="done", created="2026-01-01", updated="2026-01-01"
+            ),
+            Todo(
+                id="3",
+                title="In progress",
+                status="in_progress",
+                created="2026-01-01",
+                updated="2026-01-01",
+            ),
+            Todo(
+                id="4",
+                title="Cancelled",
+                status="cancelled",
+                created="2026-01-01",
+                updated="2026-01-01",
+            ),
         ]
         storage.save_todos(cfg, "myapp", todos)
         data = json.loads(self._call_preflight(cfg, "myapp"))
@@ -469,7 +493,10 @@ class TestProjInitValidation:
         # Result is JSON - check for error in result field or parse as error message
         try:
             data = json.loads(result)
-            assert "path traversal" in data.get("error", "").lower() or "path traversal" in data.get("result", "").lower()
+            assert (
+                "path traversal" in data.get("error", "").lower()
+                or "path traversal" in data.get("result", "").lower()
+            )
         except json.JSONDecodeError:
             assert "path traversal" in result.lower() or ".." in result
 
@@ -507,15 +534,15 @@ class TestProjInitValidation:
         except json.JSONDecodeError:
             assert "." in result or "reserved" in result.lower()
 
-    def test_no_directory_created_on_invalid_name(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
+    def test_no_directory_created_on_invalid_name(self, cfg: ProjConfig, tmp_path: Path) -> None:
         tracking_root = Path(cfg.tracking_dir)
         self._call_proj_init("../../evil", tmp_path)
         # No directory should have been created under the tracking root
         assert not any(tracking_root.iterdir()) if tracking_root.exists() else True
 
-    def test_valid_init_returns_json_with_project_name(self, cfg: ProjConfig, tmp_path: Path) -> None:
+    def test_valid_init_returns_json_with_project_name(
+        self, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         """Test that proj_init returns JSON with project_name field."""
         import json
 

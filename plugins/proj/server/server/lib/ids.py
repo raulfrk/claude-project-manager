@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from server.lib.models import ProjectMeta, Todo
 
 
-def next_todo_id(meta: ProjectMeta, parent: "Todo | None" = None) -> str:
+def next_todo_id(meta: ProjectMeta, parent: Todo | None = None) -> str:
     """Return the next todo ID and increment the counter in meta or parent.
 
     For root todos (no parent): returns str(meta.next_todo_id) e.g. "1", "2", "3".

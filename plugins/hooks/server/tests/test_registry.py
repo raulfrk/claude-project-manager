@@ -6,12 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import yaml
-
-from server.lib.models import Hook, HookRegistry
-from server.lib.storage import load, save
+from server.lib.storage import load
 from server.tools.registry import hooks_list, hooks_register, hooks_unregister
-
 
 # ── hooks_register ───────────────────────────────────────────────────────────
 

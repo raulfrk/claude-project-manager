@@ -17,10 +17,14 @@ class TestLoad:
 
     def test_load_valid_file(self, tmp_path: Path) -> None:
         path = tmp_path / "settings.json"
-        path.write_text(json.dumps({
-            "permissions": {"allow": ["mcp__proj__*"]},
-            "sandbox": {"enabled": True, "filesystem": {"allowWrite": ["/tmp/test"]}},
-        }))
+        path.write_text(
+            json.dumps(
+                {
+                    "permissions": {"allow": ["mcp__proj__*"]},
+                    "sandbox": {"enabled": True, "filesystem": {"allowWrite": ["/tmp/test"]}},
+                }
+            )
+        )
         settings = storage.load()
         assert "mcp__proj__*" in settings.permissions.allow
         assert settings.sandbox.enabled is True
@@ -51,7 +55,10 @@ class TestSave:
 
     def test_save_roundtrip_preserves_unknown_keys(self, tmp_path: Path) -> None:
         path = tmp_path / "settings.json"
-        original = {"customKey": "value", "permissions": {"allow": ["mcp__x__*"], "ask": ["Edit(*)"]}}
+        original = {
+            "customKey": "value",
+            "permissions": {"allow": ["mcp__x__*"], "ask": ["Edit(*)"]},
+        }
         path.write_text(json.dumps(original))
         settings = storage.load()
         settings.permissions.allow.append("mcp__new__*")
@@ -68,6 +75,7 @@ class TestHelpers:
 
     def test_allow_entries_rejects_relative_path(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="absolute"):
             storage.allow_entries_for_path("relative/path")
 
@@ -76,15 +84,18 @@ class TestHelpers:
 
     def test_mcp_allow_entry_rejects_empty(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="empty"):
             storage.mcp_allow_entry("")
 
     def test_mcp_allow_entry_rejects_double_underscore(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="__"):
             storage.mcp_allow_entry("evil__name")
 
     def test_mcp_allow_entry_rejects_wildcard(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="\\*"):
             storage.mcp_allow_entry("evil*")

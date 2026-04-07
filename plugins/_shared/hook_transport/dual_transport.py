@@ -10,6 +10,7 @@ Set ``HOOK_TRANSPORT=tcp`` to fall back to TCP on 127.0.0.1.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import inspect
 import logging
 import os
@@ -53,15 +54,13 @@ def _write_socket_registry(plugin_name: str, sock_path: str) -> None:
 
 def _delete_socket_registry(plugin_name: str) -> None:
     """Remove the registry file on shutdown. Swallows errors silently."""
-    try:
+    with contextlib.suppress(FileNotFoundError, PermissionError):
         (_SOCKET_REGISTRY_DIR / plugin_name).unlink()
-    except (FileNotFoundError, PermissionError):
-        pass
 
 
 def _cleanup_stale_socket(path: str) -> None:
     """Remove a stale socket file if it exists and nothing is listening on it."""
-    if not os.path.exists(path):
+    if not Path(path).exists():
         return
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
@@ -72,7 +71,7 @@ def _cleanup_stale_socket(path: str) -> None:
     except ConnectionRefusedError:
         # Nobody listening — stale socket, safe to remove
         logger.info("Removing stale socket: %s", path)
-        os.unlink(path)
+        Path(path).unlink()
     except FileNotFoundError:
         pass  # Race condition: file disappeared between exists() and connect()
     finally:
@@ -83,10 +82,8 @@ def _register_socket_cleanup(path: str) -> None:
     """Register atexit handler to remove the socket file on shutdown."""
 
     def _cleanup() -> None:
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
+        with contextlib.suppress(FileNotFoundError):
+            Path(path).unlink()
 
     atexit.register(_cleanup)
 
@@ -115,8 +112,7 @@ async def _start_http(server: uvicorn.Server, label: str) -> None:
         else:
             hint = ""
         logger.warning(
-            "HTTP hook server %s failed to start (%s: %s)%s "
-            "— falling back to stdio-only transport",
+            "HTTP hook server %s failed to start (%s: %s)%s — falling back to stdio-only transport",
             label,
             exc_name,
             exc,
@@ -178,10 +174,10 @@ async def _run_dual_async(
 
         # Run stdio transport (blocks until stdin closes)
         async with stdio_server() as (read_stream, write_stream):
-            await mcp_instance._mcp_server.run(  # noqa: SLF001
+            await mcp_instance._mcp_server.run(
                 read_stream,
                 write_stream,
-                mcp_instance._mcp_server.create_initialization_options(),  # noqa: SLF001
+                mcp_instance._mcp_server.create_initialization_options(),
             )
 
         # Stdio ended — gracefully shut down HTTP server

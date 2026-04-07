@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -21,18 +22,21 @@ from server.lib.models import (
 )
 from server.tools.config import require_config, require_project
 
+logger = logging.getLogger(__name__)
+
 
 def _resolve_list_mappings(cfg: ProjConfig, meta: ProjectMeta) -> TrelloListMappings:
     """Resolve effective Trello list mappings: per-project override falls back to global."""
 
-    assert isinstance(cfg, ProjConfig)
+    if not isinstance(cfg, ProjConfig):
+        raise TypeError(f"Expected ProjConfig, got {type(cfg).__name__}")
     if meta.trello.list_mappings is not None:
         return meta.trello.list_mappings
     return cfg.trello.list_mappings
 
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-    from server.lib.models import ProjConfig
 
 
 def _resolve_hooks_socket_path() -> str:
@@ -47,7 +51,7 @@ def _resolve_hooks_socket_path() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    return "/tmp/claude-hooks-hooks.sock"
+    return "/tmp/claude-hooks-hooks.sock"  # noqa: S108
 
 
 def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
@@ -63,9 +67,23 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_init, proj_list, proj_list_full, proj_get, proj_get_active, proj_update_meta, proj_archive_preflight, proj_archive, proj_add_repo, proj_remove_repo, proj_set_permissions, proj_load_session, and proj_migrate_dirs tools with the MCP app."""
+    """Register project management tools with the MCP app.
 
-    @app.tool(description="Initialize tracking for a new project. Accepts multiple directories via the dirs parameter (list of {path, label} dicts). The legacy path parameter is kept for backward compatibility and creates a single directory with label 'code'.")
+    Registers proj_init, proj_list, proj_list_full, proj_get,
+    proj_get_active, proj_update_meta, proj_archive_preflight,
+    proj_archive, proj_add_repo, proj_remove_repo,
+    proj_set_permissions, proj_load_session, and proj_migrate_dirs.
+    """
+
+    @app.tool(
+        description=(
+            "Initialize tracking for a new project. Accepts multiple"
+            " directories via the dirs parameter (list of"
+            " {path, label} dicts). The legacy path parameter is"
+            " kept for backward compatibility and creates a single"
+            " directory with label 'code'."
+        )
+    )
     def proj_init(
         name: str,
         path: str | None = None,
@@ -99,7 +117,15 @@ def register(app: FastMCP) -> None:
                 if not d_label:
                     return json.dumps({"error": "Each directory entry must have a 'label'."})
                 if d_label in labels_seen:
-                    return json.dumps({"error": f"Duplicate label '{d_label}'. Each directory must have a unique label."})
+                    return json.dumps(
+                        {
+                            "error": (
+                                f"Duplicate label '{d_label}'."
+                                " Each directory must have a"
+                                " unique label."
+                            )
+                        }
+                    )
                 labels_seen.add(d_label)
                 resolved = str(Path(d_path).expanduser().resolve())
                 repo_entries.append(RepoEntry(label=d_label, path=resolved))
@@ -110,12 +136,18 @@ def register(app: FastMCP) -> None:
             elif cfg.projects_base_dir:
                 resolved_path = str((Path(cfg.projects_base_dir).expanduser() / name).resolve())
             else:
-                return json.dumps({
-                    "error": (
-                        f"No path provided for project '{name}' and no projects_base_dir configured. "
-                        "Provide an explicit path or set projects_base_dir via /proj:init-plugin."
-                    )
-                })
+                return json.dumps(
+                    {
+                        "error": (
+                            f"No path provided for project"
+                            f" '{name}' and no"
+                            " projects_base_dir configured. "
+                            "Provide an explicit path or set"
+                            " projects_base_dir via"
+                            " /proj:init-plugin."
+                        )
+                    }
+                )
             repo_entries.append(RepoEntry(label="code", path=resolved_path))
 
         if not repo_entries:
@@ -151,6 +183,7 @@ def register(app: FastMCP) -> None:
         # Initialize git tracking for tracking directory if enabled
         if cfg.git_tracking.enabled:
             from server.lib.tracking_git import ensure_git_repo, tracking_commit
+
             root_tracking = Path(cfg.tracking_dir).expanduser()
             if ensure_git_repo(root_tracking):
                 tracking_commit(root_tracking, f"[{name}] Initial commit: project '{name}'")
@@ -161,6 +194,7 @@ def register(app: FastMCP) -> None:
         # Best-effort hook auto-discovery
         try:
             import httpx
+
             sock_path = _resolve_hooks_socket_path()
             transport = httpx.HTTPTransport(uds=sock_path)
             with httpx.Client(transport=transport, timeout=5.0) as client:
@@ -168,19 +202,21 @@ def register(app: FastMCP) -> None:
                     "http://localhost/hook",
                     json={"tool": "hooks_sync_tool", "params": {}},
                 )
-        except Exception:  # noqa: BLE001
-            pass  # hooks server not running — ignore silently
+        except Exception:
+            logger.debug("Hooks server sync failed", exc_info=True)
 
         first_repo = str(repo_entries[0].path) if repo_entries else ""
-        return json.dumps({
-            "result": f"Initialized project '{name}' at {tracking}",
-            "project_name": name,
-            "repo_path": first_repo,
-            "paths": [r.path for r in repo_entries],
-            "mcp_servers": [],
-            "todoist_project_id": meta.todoist_project_id,
-            "trello_card_id": meta.trello_card_id,
-        })
+        return json.dumps(
+            {
+                "result": f"Initialized project '{name}' at {tracking}",
+                "project_name": name,
+                "repo_path": first_repo,
+                "paths": [r.path for r in repo_entries],
+                "mcp_servers": [],
+                "todoist_project_id": meta.todoist_project_id,
+                "trello_card_id": meta.trello_card_id,
+            }
+        )
 
     @app.tool(description="List all projects.")
     def proj_list(include_archived: bool = False) -> str:
@@ -216,15 +252,14 @@ def register(app: FastMCP) -> None:
 
         valid_integrations = {"todoist", "trello", "jira"}
         if integration_filter and integration_filter not in valid_integrations:
-            return json.dumps({
-                "error": f"Unknown integration '{integration_filter}'. "
-                f"Valid values: {', '.join(sorted(valid_integrations))}",
-            })
+            return json.dumps(
+                {
+                    "error": f"Unknown integration '{integration_filter}'. "
+                    f"Valid values: {', '.join(sorted(valid_integrations))}",
+                }
+            )
 
-        entries = [
-            p for p in index.projects.values()
-            if include_archived or not p.archived
-        ]
+        entries = [p for p in index.projects.values() if include_archived or not p.archived]
 
         projects: list[dict[str, JsonValue]] = []
         warnings: list[str] = []
@@ -238,11 +273,11 @@ def register(app: FastMCP) -> None:
             # Apply integration filter
             if integration_filter:
                 has_integration = False
-                if integration_filter == "todoist" and meta.todoist_project_id:
-                    has_integration = True
-                elif integration_filter == "trello" and meta.trello_card_id:
-                    has_integration = True
-                elif integration_filter == "jira" and meta.jira_issue_key:
+                if (
+                    (integration_filter == "todoist" and meta.todoist_project_id)
+                    or (integration_filter == "trello" and meta.trello_card_id)
+                    or (integration_filter == "jira" and meta.jira_issue_key)
+                ):
                     has_integration = True
                 if not has_integration:
                     continue
@@ -254,19 +289,23 @@ def register(app: FastMCP) -> None:
                 "jira": meta.jira_issue_key,
             }
 
-            projects.append({
-                "name": meta.name,
-                "description": meta.description,
-                "status": meta.status,
-                "priority": meta.priority,
-                "tags": meta.tags,
-                "repos": [r.to_dict() for r in meta.repos],
-                "dates": meta.dates.to_dict(),
-                "archived": entry.archived,
-                "integrations": {k: v for k, v in integrations.items() if v},
-            })
+            projects.append(
+                {
+                    "name": meta.name,
+                    "description": meta.description,
+                    "status": meta.status,
+                    "priority": meta.priority,
+                    "tags": meta.tags,
+                    "repos": [r.to_dict() for r in meta.repos],
+                    "dates": meta.dates.to_dict(),
+                    "archived": entry.archived,
+                    "integrations": {k: v for k, v in integrations.items() if v},
+                }
+            )
 
-        return json.dumps({"projects": projects, "count": len(projects), "warnings": warnings}, indent=2)
+        return json.dumps(
+            {"projects": projects, "count": len(projects), "warnings": warnings}, indent=2
+        )
 
     @app.tool(description="Get full details of a project (defaults to active project).")
     def proj_get(name: str | None = None) -> str:
@@ -360,11 +399,11 @@ def register(app: FastMCP) -> None:
                 target_list = status_list_map.get(status, "")
                 if target_list:
                     trello_move_hint = (
-                        f"\ntrello_move: {{\"card_id\": \"{meta.trello_card_id}\", "
-                        f"\"target_list\": \"{target_list}\"}}"
+                        f'\ntrello_move: {{"card_id": "{meta.trello_card_id}", '
+                        f'"target_list": "{target_list}"}}'
                     )
-            except Exception:  # noqa: BLE001
-                pass  # Update succeeds even if hint generation fails
+            except Exception:
+                logger.debug("Trello move hint generation failed", exc_info=True)
 
         result_dict: dict[str, JsonValue] = {
             "result": f"Updated project '{project_name}'.",
@@ -373,9 +412,15 @@ def register(app: FastMCP) -> None:
         if trello_move_hint:
             # Parse the trello_move hint to extract card_id and target_list
             import re
-            match = re.search(r'trello_move: \{"card_id": "([^"]+)", "target_list": "([^"]+)"\}', trello_move_hint)
+
+            match = re.search(
+                r'trello_move: \{"card_id": "([^"]+)", "target_list": "([^"]+)"\}', trello_move_hint
+            )
             if match:
-                result_dict["trello_move"] = {"card_id": match.group(1), "target_list": match.group(2)}
+                result_dict["trello_move"] = {
+                    "card_id": match.group(1),
+                    "target_list": match.group(2),
+                }
         return json.dumps(result_dict)
 
     @app.tool(
@@ -458,9 +503,10 @@ def register(app: FastMCP) -> None:
 
         # Revoke all permissions granted by setup_permissions
         revoke_summary = ""
+        meta = storage.load_meta(cfg, project_name)
         try:
             from server.tools.perms_grant import revoke_all_permissions
-            meta = storage.load_meta(cfg, project_name)
+
             counts = revoke_all_permissions(meta, cfg)
             total = sum(counts.values())
             if total > 0:
@@ -470,8 +516,8 @@ def register(app: FastMCP) -> None:
                 if counts["mcp_rules"]:
                     parts.append(f"{counts['mcp_rules']} MCP")
                 revoke_summary = f" Revoked {total} permission rule(s) ({', '.join(parts)})."
-        except Exception:  # noqa: BLE001
-            pass  # Archive succeeds even if revocation fails
+        except Exception:
+            logger.debug("Permission revocation failed during archive", exc_info=True)
 
         # Build trello_move hint if project has a Trello card and archived list mapping
         trello_move_hint = ""
@@ -482,11 +528,11 @@ def register(app: FastMCP) -> None:
                 mappings = _resolve_list_mappings(cfg, meta)
                 if mappings.archived:
                     trello_move_hint = (
-                        f"\ntrello_move: {{\"card_id\": \"{meta.trello_card_id}\", "
-                        f"\"target_list\": \"{mappings.archived}\"}}"
+                        f'\ntrello_move: {{"card_id": "{meta.trello_card_id}", '
+                        f'"target_list": "{mappings.archived}"}}'
                     )
-        except Exception:  # noqa: BLE001
-            pass  # Archive succeeds even if hint generation fails
+        except Exception:
+            logger.debug("Trello move hint generation failed during archive", exc_info=True)
 
         # Build trash info hint
         trash_hint = ""
@@ -499,12 +545,14 @@ def register(app: FastMCP) -> None:
                 f"\nTracking data moved to {trash_loc}/ "
                 f"(permanent deletion after {expiry}, {grace}-day grace period)."
             )
-        except Exception:  # noqa: BLE001
-            pass  # Archive succeeds even if hint generation fails
+        except Exception:
+            logger.debug("Trash info hint generation failed during archive", exc_info=True)
 
         # Build result dict with repo paths
         result_dict = {
-            "result": f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}",
+            "result": (
+                f"Archived project '{project_name}'.{revoke_summary}{trash_hint}{trello_move_hint}"
+            ),
             "project_name": project_name,
             "repo_path": meta.repos[0].path if meta.repos else "",
             "paths": [r.path for r in meta.repos],
@@ -520,9 +568,15 @@ def register(app: FastMCP) -> None:
 
         cfg = require_config()
         if cfg.archive.purge_after_days is None:
-            return json.dumps({
-                "error": "Purge not configured. Set archive.purge_after_days via config_update or /proj:init-plugin."
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "Purge not configured. Set"
+                        " archive.purge_after_days via"
+                        " config_update or /proj:init-plugin."
+                    )
+                }
+            )
 
         index = storage.load_index(cfg)
         today = date.today()
@@ -533,13 +587,24 @@ def register(app: FastMCP) -> None:
             archive_dt = date.fromisoformat(entry.archive_date)
             days_since = (today - archive_dt).days
             if days_since >= cfg.archive.purge_after_days:
-                candidates.append({"name": name, "archive_date": entry.archive_date, "days_since": days_since})
+                candidates.append(
+                    {"name": name, "archive_date": entry.archive_date, "days_since": days_since}
+                )
 
         if not candidates:
-            return json.dumps({"result": "No projects eligible for purge.", "candidates": [], "purged": []})
+            return json.dumps(
+                {"result": "No projects eligible for purge.", "candidates": [], "purged": []}
+            )
 
         if not confirm:
-            return json.dumps({"result": "Purge candidates listed.", "candidates": candidates, "count": len(candidates), "dry_run": True})
+            return json.dumps(
+                {
+                    "result": "Purge candidates listed.",
+                    "candidates": candidates,
+                    "count": len(candidates),
+                    "dry_run": True,
+                }
+            )
 
         # Actually purge — move to .trash/ instead of immediate deletion
         import tarfile
@@ -560,13 +625,16 @@ def register(app: FastMCP) -> None:
             tracking_path = Path(cfg.tracking_dir).expanduser() / name
             if tracking_path.exists():
                 # Create a tarball backup before purging
-                backup_path = backup_dir / f"{name}-{datetime.now().strftime('%Y%m%dT%H%M%S')}.tar.gz"
+                backup_path = (
+                    backup_dir / f"{name}-{datetime.now().strftime('%Y%m%dT%H%M%S')}.tar.gz"
+                )
                 try:
                     with tarfile.open(backup_path, "w:gz") as tar:
                         tar.add(str(tracking_path), arcname=name)
                     backup_paths.append(str(backup_path))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # Backup failed — skip purge for this project to avoid data loss
+                    logger.debug("Backup failed for project %s", name, exc_info=True)
                     continue
 
                 timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -592,7 +660,8 @@ def register(app: FastMCP) -> None:
                     if mtime < cutoff:
                         bf.unlink()
                         expired_backups += 1
-                except Exception:  # noqa: BLE001
+                except Exception:
+                    logger.debug("Failed to clean expired backup %s", bf, exc_info=True)
                     continue
 
         # Sweep .trash/ for entries older than trash_grace_days
@@ -618,15 +687,21 @@ def register(app: FastMCP) -> None:
         sweep_note = f" Swept {swept} expired trash entries." if swept else ""
         backup_note = f" Backups: {', '.join(backup_paths)}." if backup_paths else ""
         expired_note = f" Removed {expired_backups} expired backup(s)." if expired_backups else ""
-        result_msg = f"Purged {len(purged)} projects: {', '.join(purged)}{backup_note}{expired_note}{sweep_note}"
-        return json.dumps({
-            "result": result_msg,
-            "purged": purged,
-            "count": len(purged),
-            "backups": backup_paths,
-            "expired_backups_removed": expired_backups,
-            "trash_swept": swept,
-        })
+        result_msg = (
+            f"Purged {len(purged)} projects:"
+            f" {', '.join(purged)}"
+            f"{backup_note}{expired_note}{sweep_note}"
+        )
+        return json.dumps(
+            {
+                "result": result_msg,
+                "purged": purged,
+                "count": len(purged),
+                "backups": backup_paths,
+                "expired_backups_removed": expired_backups,
+                "trash_swept": swept,
+            }
+        )
 
     @app.tool(description="Add a repository path to a project.")
     def proj_add_repo(
@@ -645,29 +720,39 @@ def register(app: FastMCP) -> None:
         if any(r.path == abs_path for r in meta.repos):
             return json.dumps({"error": f"Repo at '{abs_path}' already registered."})
         if any(r.label == label for r in meta.repos):
-            return json.dumps({"error": f"Label '{label}' already in use. Choose a different label."})
+            return json.dumps(
+                {"error": f"Label '{label}' already in use. Choose a different label."}
+            )
         if not Path(abs_path).is_dir():
             return json.dumps({"error": f"Path '{abs_path}' does not exist or is not a directory."})
-        meta.repos.append(RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference))
+        meta.repos.append(
+            RepoEntry(label=label, path=abs_path, claudemd=claudemd, reference=reference)
+        )
         storage.save_meta(cfg, meta)
 
         # Build paths list for hooks (writable repos only, not references)
         paths = [r.path for r in meta.repos if not r.reference]
         if reference:
-            result_msg = f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
+            result_msg = (
+                f"Added reference repo '{label}' at {abs_path} to project '{name}' (read-only)."
+            )
         else:
             result_msg = f"Added repo '{label}' at {abs_path} to project '{name}'."
-        return json.dumps({
-            "result": result_msg,
-            "paths": paths,
-            "path": abs_path,
-            "project_name": name,
-            "mcp_servers": [],
-            "todoist_project_id": meta.todoist_project_id,
-            "trello_card_id": meta.trello_card_id,
-        })
+        return json.dumps(
+            {
+                "result": result_msg,
+                "paths": paths,
+                "path": abs_path,
+                "project_name": name,
+                "mcp_servers": [],
+                "todoist_project_id": meta.todoist_project_id,
+                "trello_card_id": meta.trello_card_id,
+            }
+        )
 
-    @app.tool(description="Remove a repository from a project by label (cannot remove the last repo).")
+    @app.tool(
+        description="Remove a repository from a project by label (cannot remove the last repo)."
+    )
     def proj_remove_repo(
         label: str,
         project_name: str | None = None,
@@ -681,21 +766,31 @@ def register(app: FastMCP) -> None:
         if found is None:
             return json.dumps({"error": f"No repo with label '{label}' found in project '{name}'."})
         if len(meta.repos) <= 1:
-            return json.dumps({"error": "Cannot remove the last repo from a project. Use /proj:archive to remove the entire project instead."})
+            return json.dumps(
+                {
+                    "error": (
+                        "Cannot remove the last repo from a project."
+                        " Use /proj:archive to remove the entire"
+                        " project instead."
+                    )
+                }
+            )
         meta.repos.remove(found)
         storage.save_meta(cfg, meta)
         # Build paths list for hooks (writable repos only, not references)
         paths = [r.path for r in meta.repos if not r.reference]
         ref_note = " (reference, read-only)" if found.reference else ""
         result_msg = f"Removed repo '{label}' at {found.path}{ref_note} from project '{name}'."
-        return json.dumps({
-            "result": result_msg,
-            "paths": paths,
-            "project_name": name,
-            "mcp_servers": [],
-            "todoist_project_id": meta.todoist_project_id,
-            "trello_card_id": meta.trello_card_id,
-        })
+        return json.dumps(
+            {
+                "result": result_msg,
+                "paths": paths,
+                "project_name": name,
+                "mcp_servers": [],
+                "todoist_project_id": meta.todoist_project_id,
+                "trello_card_id": meta.trello_card_id,
+            }
+        )
 
     @app.tool(description="Set per-project permissions override (null = use global config).")
     def proj_set_permissions(auto_grant: bool | None, project_name: str | None = None) -> str:
@@ -707,15 +802,15 @@ def register(app: FastMCP) -> None:
         meta.permissions = ProjectPermissions(auto_grant=auto_grant)
         storage.save_meta(cfg, meta)
         auto_grant_state = str(auto_grant) if auto_grant is not None else "use global default"
-        return json.dumps({
-            "result": f"Set permissions.auto_grant={auto_grant_state} for project '{name}'.",
-            "project_name": name,
-            "auto_grant": auto_grant,
-        })
+        return json.dumps(
+            {
+                "result": f"Set permissions.auto_grant={auto_grant_state} for project '{name}'.",
+                "project_name": name,
+                "auto_grant": auto_grant,
+            }
+        )
 
-    @app.tool(
-        description="Set the active project for this session only (not persisted globally)."
-    )
+    @app.tool(description="Set the active project for this session only (not persisted globally).")
     def proj_load_session(name: str) -> str:
         """Load a project into session context without changing the persisted active project."""
         import difflib
@@ -731,28 +826,38 @@ def register(app: FastMCP) -> None:
             if len(matches) == 1:
                 name = matches[0]
             else:
-                return json.dumps({"error": f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"})
+                return json.dumps(
+                    {"error": f"Ambiguous match. Did you mean one of: {', '.join(matches)}?"}
+                )
         state.set_session_active(name)
         meta = storage.load_meta(cfg, name)
         msg = f"Loaded project '{name}' for this session."
         # Detect old single-path format
         raw = storage._load_yaml(storage.meta_path(cfg, name))
         if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
-            msg += "\n\n⚠️ Project uses legacy single-path format. Run `/proj:migrate-dirs` to upgrade to multi-dir format."
+            msg += (
+                "\n\n⚠️ Project uses legacy single-path format."
+                " Run `/proj:migrate-dirs` to upgrade"
+                " to multi-dir format."
+            )
         # Include paths/mcp_servers for hooks (auto-repair on load)
         paths = [r.path for r in meta.repos if not r.reference]
         if cfg.tracking_dir:
             paths.append(str(Path(cfg.tracking_dir).expanduser().resolve()))
-        return json.dumps({
-            "message": msg,
-            "project_name": name,
-            "paths": paths,
-            "mcp_servers": [],
-            "todoist_project_id": meta.todoist_project_id or "",
-            "trello_card_id": meta.trello_card_id or "",
-        })
+        return json.dumps(
+            {
+                "message": msg,
+                "project_name": name,
+                "paths": paths,
+                "mcp_servers": [],
+                "todoist_project_id": meta.todoist_project_id or "",
+                "trello_card_id": meta.trello_card_id or "",
+            }
+        )
 
-    def _migrate_single_dir(cfg: ProjConfig, project_name: str, label: str, dry_run: bool, timestamp: str) -> dict[str, JsonValue]:
+    def _migrate_single_dir(
+        cfg: ProjConfig, project_name: str, label: str, dry_run: bool, timestamp: str
+    ) -> dict[str, JsonValue]:
         """Migrate one project from single-path to multi-repo format. Returns result dict."""
         meta_p = storage.meta_path(cfg, project_name)
         if not meta_p.exists():
@@ -762,18 +867,33 @@ def register(app: FastMCP) -> None:
         path_val = raw.get("path")
         repos_val = raw.get("repos", [])
 
-        if not isinstance(path_val, str) or not path_val or (isinstance(repos_val, list) and repos_val):
+        if (
+            not isinstance(path_val, str)
+            or not path_val
+            or (isinstance(repos_val, list) and repos_val)
+        ):
             return {"project": project_name, "migrated": False, "reason": "already multi-dir"}
 
         if dry_run:
-            return {"project": project_name, "migrated": False, "dry_run": True, "old_path": path_val, "new_label": label}
+            return {
+                "project": project_name,
+                "migrated": False,
+                "dry_run": True,
+                "old_path": path_val,
+                "new_label": label,
+            }
 
         # Backup
         backup_path = meta_p.with_name(f"meta.yaml.bak-{timestamp}")
         shutil.copy2(meta_p, backup_path)
 
         try:
-            new_repo: dict[str, JsonValue] = {"label": label, "path": path_val, "claudemd": False, "reference": False}
+            new_repo: dict[str, JsonValue] = {
+                "label": label,
+                "path": path_val,
+                "claudemd": False,
+                "reference": False,
+            }
             raw["repos"] = [new_repo]
             del raw["path"]
             storage._write_yaml(meta_p, raw)
@@ -784,7 +904,13 @@ def register(app: FastMCP) -> None:
 
         return {"project": project_name, "migrated": True, "label": label, "old_path": path_val}
 
-    @app.tool(description="Migrate projects from legacy single-path format to multi-dir repos format. Defaults to all non-archived projects.")
+    @app.tool(
+        description=(
+            "Migrate projects from legacy single-path format to"
+            " multi-dir repos format. Defaults to all"
+            " non-archived projects."
+        )
+    )
     def proj_migrate_dirs(
         label: str = "code",
         project_name: str | None = None,
@@ -820,4 +946,6 @@ def register(app: FastMCP) -> None:
         skipped = [r for r in results if not r.get("migrated") and not r.get("error")]
         errors = [r for r in results if r.get("error")]
 
-        return json.dumps({"migrated": migrated, "skipped": skipped, "errors": errors, "dry_run": dry_run})
+        return json.dumps(
+            {"migrated": migrated, "skipped": skipped, "errors": errors, "dry_run": dry_run}
+        )

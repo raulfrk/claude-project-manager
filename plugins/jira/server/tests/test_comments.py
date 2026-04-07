@@ -20,9 +20,7 @@ def comment_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraAddComment:
-    def test_posts_comment(
-        self, mock_jira_client: MagicMock, comment_tools: dict
-    ) -> None:
+    def test_posts_comment(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.post.return_value = {"id": "100", "body": "Hello"}
 
         result = comment_tools["jira_add_comment"](issue_key="PROJ-1", body="Hello")
@@ -32,9 +30,7 @@ class TestJiraAddComment:
         )
         assert json.loads(result) == {"id": "100", "body": "Hello"}
 
-    def test_api_error_propagates(
-        self, mock_jira_client: MagicMock, comment_tools: dict
-    ) -> None:
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.post.side_effect = RuntimeError("Jira API error 403: forbidden")
 
         with pytest.raises(RuntimeError, match="403"):
@@ -42,9 +38,7 @@ class TestJiraAddComment:
 
 
 class TestJiraUpdateComment:
-    def test_puts_updated_body(
-        self, mock_jira_client: MagicMock, comment_tools: dict
-    ) -> None:
+    def test_puts_updated_body(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.put.return_value = {"id": "100", "body": "Updated"}
 
         result = comment_tools["jira_update_comment"](
@@ -56,9 +50,7 @@ class TestJiraUpdateComment:
         )
         assert json.loads(result) == {"id": "100", "body": "Updated"}
 
-    def test_api_error_propagates(
-        self, mock_jira_client: MagicMock, comment_tools: dict
-    ) -> None:
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.put.side_effect = RuntimeError("Jira API error 404: not found")
 
         with pytest.raises(RuntimeError, match="404"):
@@ -73,22 +65,16 @@ class TestJiraDeleteComment:
     ) -> None:
         mock_jira_client.delete.return_value = None
 
-        result = comment_tools["jira_delete_comment"](
-            issue_key="PROJ-1", comment_id="100"
-        )
+        result = comment_tools["jira_delete_comment"](issue_key="PROJ-1", comment_id="100")
 
-        mock_jira_client.delete.assert_called_once_with(
-            "/rest/api/2/issue/PROJ-1/comment/100"
-        )
+        mock_jira_client.delete.assert_called_once_with("/rest/api/2/issue/PROJ-1/comment/100")
         assert json.loads(result) == {
             "deleted": True,
             "issue_key": "PROJ-1",
             "comment_id": "100",
         }
 
-    def test_api_error_propagates(
-        self, mock_jira_client: MagicMock, comment_tools: dict
-    ) -> None:
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.delete.side_effect = RuntimeError("Jira API error 404: not found")
 
         with pytest.raises(RuntimeError, match="404"):

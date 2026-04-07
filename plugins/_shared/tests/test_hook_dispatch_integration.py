@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 
 from hook_dispatch import enable_hook_dispatch
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -231,7 +230,7 @@ async def test_e2e_sync_tool_dispatches():
         return a + b
 
     with _patch_client_factory(_capturing_transport(captured)):
-        result = await mcp._tool_manager.call_tool("sync_add", {"a": 3, "b": 4})
+        await mcp._tool_manager.call_tool("sync_add", {"a": 3, "b": 4})
 
     assert len(captured) == 1
     source = json.loads(captured[0]["params"]["source_result"])
@@ -253,9 +252,8 @@ async def test_e2e_exception_no_dispatch():
     async def boom() -> str:
         raise RuntimeError("kaboom")
 
-    with _patch_client_factory(_capturing_transport(captured)):
-        with pytest.raises(Exception):
-            await mcp._tool_manager.call_tool("boom", {})
+    with _patch_client_factory(_capturing_transport(captured)), pytest.raises(RuntimeError):
+        await mcp._tool_manager.call_tool("boom", {})
 
     assert len(captured) == 0
 

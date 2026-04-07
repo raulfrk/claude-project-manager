@@ -13,7 +13,6 @@ from server.lib import state, storage
 from server.lib.models import ArchiveConfig, ProjConfig, ProjectEntry
 from tests.conftest import call_tool, setup_project
 
-
 # ── Model tests ──────────────────────────────────────────────────────────────
 
 
@@ -139,7 +138,9 @@ class TestProjPurgeArchive:
         # Not eligible: archived but too recent
         self._setup_archived_project(cfg, "recent-proj", tmp_path, archive_date=recent_date)
         # Not eligible: archived but not purgeable
-        self._setup_archived_project(cfg, "protected-proj", tmp_path, archive_date=old_date, purgeable=False)
+        self._setup_archived_project(
+            cfg, "protected-proj", tmp_path, archive_date=old_date, purgeable=False
+        )
         # Not eligible: not archived (active project)
         setup_project(cfg, "active-proj", str(tmp_path / "active-proj"))
 

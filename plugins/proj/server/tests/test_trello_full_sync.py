@@ -9,8 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from server.tools.trello_full_sync import _build_push_ops, _call_trello_tool
-
+from server.tools.trello_full_sync import _call_trello_tool
 
 # ── _call_trello_tool envelope unwrapping ────────────────────────────────────
 
@@ -47,9 +46,12 @@ def test_envelope_unwrap_json_list() -> None:
     inner = [{"id": "cl1", "name": "Tasks"}]
     payload = {"ok": True, "result": json.dumps(inner)}
 
-    with _patch_trello_call(payload), patch(
-        "server.tools.trello_full_sync._resolve_trello_socket",
-        return_value="/tmp/fake.sock",
+    with (
+        _patch_trello_call(payload),
+        patch(
+            "server.tools.trello_full_sync._resolve_trello_socket",
+            return_value="/tmp/fake.sock",
+        ),
     ):
         result = _call_trello_tool("get_card_checklists", {"card_id": "abc"})
 
@@ -61,9 +63,12 @@ def test_envelope_unwrap_json_dict() -> None:
     inner = {"id": "123", "name": "My Card"}
     payload = {"ok": True, "result": json.dumps(inner)}
 
-    with _patch_trello_call(payload), patch(
-        "server.tools.trello_full_sync._resolve_trello_socket",
-        return_value="/tmp/fake.sock",
+    with (
+        _patch_trello_call(payload),
+        patch(
+            "server.tools.trello_full_sync._resolve_trello_socket",
+            return_value="/tmp/fake.sock",
+        ),
     ):
         result = _call_trello_tool("get_card", {"card_id": "123"})
 
@@ -74,21 +79,27 @@ def test_envelope_error_raises() -> None:
     """Error envelope raises RuntimeError."""
     payload = {"ok": False, "error": "not found"}
 
-    with _patch_trello_call(payload), patch(
-        "server.tools.trello_full_sync._resolve_trello_socket",
-        return_value="/tmp/fake.sock",
+    with (
+        _patch_trello_call(payload),
+        patch(
+            "server.tools.trello_full_sync._resolve_trello_socket",
+            return_value="/tmp/fake.sock",
+        ),
+        pytest.raises(RuntimeError, match="not found"),
     ):
-        with pytest.raises(RuntimeError, match="not found"):
-            _call_trello_tool("get_card", {"card_id": "bad"})
+        _call_trello_tool("get_card", {"card_id": "bad"})
 
 
 def test_envelope_plain_string_result() -> None:
     """Non-JSON string result is returned as-is."""
     payload = {"ok": True, "result": "some-plain-text"}
 
-    with _patch_trello_call(payload), patch(
-        "server.tools.trello_full_sync._resolve_trello_socket",
-        return_value="/tmp/fake.sock",
+    with (
+        _patch_trello_call(payload),
+        patch(
+            "server.tools.trello_full_sync._resolve_trello_socket",
+            return_value="/tmp/fake.sock",
+        ),
     ):
         result = _call_trello_tool("some_tool", {})
 
@@ -107,4 +118,4 @@ def test_no_camel_case_params_in_source() -> None:
     camel_keys = ["cardId", "boardId", "listId", "checklistId", "checkItemId"]
     for key in camel_keys:
         matches = re.findall(rf'"{key}"', content)
-        assert not matches, f"Found camelCase key \"{key}\" in trello_full_sync.py"
+        assert not matches, f'Found camelCase key "{key}" in trello_full_sync.py'

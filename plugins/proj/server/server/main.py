@@ -1,13 +1,33 @@
 """proj MCP server entrypoint."""
 
+import logging
 import os
-
-from mcp.server.fastmcp import FastMCP
 
 from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
+from mcp.server.fastmcp import FastMCP
+
 from server.lib import state
-from server.tools import config, content, context, decisions, digest, explore, git, jira_sync, knowledge, migrate, perms_grant, perms_sync, projects, todoist_full_sync, trello_full_sync, trello_sync, todos, tracking_git
+from server.tools import (
+    config,
+    content,
+    context,
+    decisions,
+    digest,
+    explore,
+    git,
+    jira_sync,
+    knowledge,
+    migrate,
+    perms_grant,
+    perms_sync,
+    projects,
+    todoist_full_sync,
+    todos,
+    tracking_git,
+    trello_full_sync,
+    trello_sync,
+)
 from server.tools.context import ctx_detect_project_name
 
 mcp = FastMCP("proj")
@@ -42,7 +62,7 @@ def main() -> None:
             if detected:
                 state.set_session_active(detected)
         except Exception:
-            pass  # graceful no-op: missing config, untracked dir, etc.
+            logging.getLogger(__name__).debug("Auto-detect active project failed", exc_info=True)
     run_dual(mcp, "proj", default_port=19102)
 
 

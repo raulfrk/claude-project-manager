@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from starlette.applications import Starlette
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+    from starlette.requests import Request
 
 logger = logging.getLogger("hook_transport.handler")
 
@@ -56,7 +55,7 @@ def create_hook_app(mcp_instance: FastMCP) -> Starlette:
         POST /hook  — accepts {"tool": str, "params": dict}, dispatches to tool
         GET  /health — returns {"status": "ok", "tools": [...]}
     """
-    tm = mcp_instance._tool_manager  # noqa: SLF001
+    tm = mcp_instance._tool_manager
 
     async def handle_hook(request: Request) -> JSONResponse:
         try:
@@ -65,15 +64,21 @@ def create_hook_app(mcp_instance: FastMCP) -> Starlette:
             return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
 
         if not isinstance(body, dict):
-            return JSONResponse({"ok": False, "error": "Body must be a JSON object"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "Body must be a JSON object"}, status_code=400
+            )
 
         tool_name = body.get("tool")
         if not tool_name or not isinstance(tool_name, str):
-            return JSONResponse({"ok": False, "error": "Missing or invalid 'tool' field"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "Missing or invalid 'tool' field"}, status_code=400
+            )
 
         params = body.get("params", {})
         if not isinstance(params, dict):
-            return JSONResponse({"ok": False, "error": "'params' must be a JSON object"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "'params' must be a JSON object"}, status_code=400
+            )
 
         tool = tm.get_tool(tool_name)
         if tool is None:

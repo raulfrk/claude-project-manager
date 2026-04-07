@@ -47,7 +47,7 @@ def proj_yaml(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def write_yaml(tmp_path: Path):  # noqa: ARG001
+def write_yaml(tmp_path: Path):
     """Return a helper that writes arbitrary data to a YAML path."""
 
     def _write(path: Path, data: Any) -> Path:

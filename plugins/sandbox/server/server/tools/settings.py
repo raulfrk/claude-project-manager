@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.storage import allow_entries_for_path, mcp_allow_entry, skill_allow_entry
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def _resolve_path(path: str) -> str:
@@ -19,9 +21,7 @@ def _resolve_path(path: str) -> str:
         # Symlink traversal — log but proceed
         import logging
 
-        logging.getLogger(__name__).warning(
-            "Path resolved via symlink: %s -> %s", path, resolved
-        )
+        logging.getLogger(__name__).warning("Path resolved via symlink: %s -> %s", path, resolved)
     return resolved
 
 
@@ -347,26 +347,22 @@ def sandbox_batch_revoke(
     )
 
 
-def sandbox_list(format: str = "text") -> str:  # noqa: A002
+def sandbox_list(format: str = "text") -> str:
     """List current sandbox configuration from settings.json."""
     settings = storage.load()
 
     if format == "json":
-        return json.dumps({
-            "write_paths": settings.sandbox.filesystem.allow_write,
-            "mcp_allow": [
-                r for r in settings.permissions.allow if r.startswith("mcp__")
-            ],
-            "skill_allow": [
-                r for r in settings.permissions.allow if r.startswith("Skill(")
-            ],
-            "edit_rules": [
-                r for r in settings.permissions.allow if r.startswith("Edit(")
-            ],
-            "domains": settings.sandbox.network.allowed_domains,
-            "deny": settings.permissions.deny,
-            "sandbox_enabled": settings.sandbox.enabled,
-        })
+        return json.dumps(
+            {
+                "write_paths": settings.sandbox.filesystem.allow_write,
+                "mcp_allow": [r for r in settings.permissions.allow if r.startswith("mcp__")],
+                "skill_allow": [r for r in settings.permissions.allow if r.startswith("Skill(")],
+                "edit_rules": [r for r in settings.permissions.allow if r.startswith("Edit(")],
+                "domains": settings.sandbox.network.allowed_domains,
+                "deny": settings.permissions.deny,
+                "sandbox_enabled": settings.sandbox.enabled,
+            }
+        )
 
     lines: list[str] = []
     lines.append("## Sandbox Configuration")
@@ -418,21 +414,29 @@ def sandbox_check(
     if path:
         abs_path = _resolve_path(path)
         present = abs_path in settings.sandbox.filesystem.allow_write
-        results.append({"type": "path", "value": abs_path, "status": "present" if present else "missing"})
+        results.append(
+            {"type": "path", "value": abs_path, "status": "present" if present else "missing"}
+        )
 
     if server:
         entry = mcp_allow_entry(server)
         present = entry in settings.permissions.allow
-        results.append({"type": "server", "value": server, "status": "present" if present else "missing"})
+        results.append(
+            {"type": "server", "value": server, "status": "present" if present else "missing"}
+        )
 
     if domain:
         present = domain in settings.sandbox.network.allowed_domains
-        results.append({"type": "domain", "value": domain, "status": "present" if present else "missing"})
+        results.append(
+            {"type": "domain", "value": domain, "status": "present" if present else "missing"}
+        )
 
     if skill:
         entry = skill_allow_entry(skill)
         present = entry in settings.permissions.allow
-        results.append({"type": "skill", "value": skill, "status": "present" if present else "missing"})
+        results.append(
+            {"type": "skill", "value": skill, "status": "present" if present else "missing"}
+        )
 
     return json.dumps({"results": results})
 
@@ -443,7 +447,8 @@ def sandbox_reconcile(
     stale_servers: list[str] | None = None,
     expected_skill_prefixes: list[str] | None = None,
 ) -> str:
-    """Sync expected vs actual MCP servers, paths, and skill prefixes. Removes stale, adds missing."""
+    """Sync expected vs actual MCP servers, paths, and skill
+    prefixes. Removes stale, adds missing."""
     settings = storage.load()
     added = 0
     removed = 0

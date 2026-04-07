@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
@@ -22,9 +24,7 @@ def register(app: FastMCP) -> None:
             "fields_json is an optional JSON string of fields to set during the transition."
         ),
     )
-    def jira_transition_issue(
-        issue_key: str, transition_id: str, fields_json: str = "{}"
-    ) -> str:
+    def jira_transition_issue(issue_key: str, transition_id: str, fields_json: str = "{}") -> str:
         client = get_client()
         try:
             fields = json.loads(fields_json)

@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
-
-from server.lib.models import ArchiveConfig, GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta, TeamModeConfig, Todo, TodoistSync
+from server.lib.models import (
+    ArchiveConfig,
+    GitTracking,
+    ProjConfig,
+    ProjectGitTrackingConfig,
+    ProjectMeta,
+    TeamModeConfig,
+    Todo,
+    TodoistSync,
+)
 
 
 class TestTodoistSyncModel:
@@ -16,9 +23,7 @@ class TestTodoistSyncModel:
         assert result.auto_sync is False
 
     def test_from_dict_with_mcp_server_preserves_value(self) -> None:
-        result = TodoistSync.from_dict(
-            {"enabled": True, "auto_sync": True, "mcp_server": "sentry"}
-        )
+        result = TodoistSync.from_dict({"enabled": True, "auto_sync": True, "mcp_server": "sentry"})
 
         assert result.mcp_server == "sentry"
 
@@ -148,7 +153,12 @@ class TestProjConfigArchiveBackwardCompat:
         cfg = ProjConfig()
         d = cfg.to_dict()
         assert "archive" in d
-        assert d["archive"] == {"destination": "~/projects/archived", "purge_after_days": None, "trash_grace_days": 7, "backup_retention_days": 30}
+        assert d["archive"] == {
+            "destination": "~/projects/archived",
+            "purge_after_days": None,
+            "trash_grace_days": 7,
+            "backup_retention_days": 30,
+        }
 
 
 class TestGitTracking:
@@ -159,7 +169,9 @@ class TestGitTracking:
         assert gt.github_repo_format == "tracking"
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
-        gt = GitTracking(enabled=True, github_enabled=True, github_repo_format="custom-{project-name}")
+        gt = GitTracking(
+            enabled=True, github_enabled=True, github_repo_format="custom-{project-name}"
+        )
         data = gt.to_dict()
         gt2 = GitTracking.from_dict(data)
         assert gt2.enabled is True
@@ -182,7 +194,9 @@ class TestProjectGitTrackingConfig:
         assert pgt.github_repo_format is None
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
-        pgt = ProjectGitTrackingConfig(enabled=True, github_enabled=False, github_repo_format="custom-{project-name}")
+        pgt = ProjectGitTrackingConfig(
+            enabled=True, github_enabled=False, github_repo_format="custom-{project-name}"
+        )
         data = pgt.to_dict()
         pgt2 = ProjectGitTrackingConfig.from_dict(data)
         assert pgt2.enabled is True
@@ -251,7 +265,9 @@ class TestProjConfigTeamModeBackwardCompat:
         assert cfg.team_mode.trust_level == 1
 
     def test_from_dict_with_team_mode_key_preserves_value(self) -> None:
-        cfg = ProjConfig.from_dict({"team_mode": {"enabled": False, "max_agents": 2, "trust_level": 3}})
+        cfg = ProjConfig.from_dict(
+            {"team_mode": {"enabled": False, "max_agents": 2, "trust_level": 3}}
+        )
         assert cfg.team_mode.enabled is False
         assert cfg.team_mode.max_agents == 2
         assert cfg.team_mode.trust_level == 3

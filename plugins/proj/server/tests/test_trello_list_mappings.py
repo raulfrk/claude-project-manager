@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +13,14 @@ from server.lib.models import (
     ProjConfig,
     ProjectDates,
     ProjectEntry,
-    ProjectIndex,
     ProjectMeta,
     ProjectTrelloConfig,
     RepoEntry,
     TrelloListMappings,
     TrelloSync,
 )
-from server.tools.trello_sync import TrelloSyncPlan, compute_diff
+from server.tools.trello_sync import TrelloSyncPlan
 from tests.conftest import call_tool
-
 
 # ── Model tests ──────────────────────────────────────────────────────────────
 
@@ -43,11 +40,18 @@ class TestTrelloListMappingsModel:
         assert d["active"] == "Active"
         assert d["pending"] == "On Hold"
         assert d["archived"] == "Archived"
-        assert d["created"] == "Backlog"
         assert d["done"] == "Done"
+        assert d["tasks"] == "proj-tasks"
+        assert d["projects"] == "Projects"
 
     def test_from_dict_with_status_fields(self) -> None:
-        data = {"created": "Todo", "done": "Complete", "active": "In Progress", "pending": "Waiting", "archived": "Done"}
+        data = {
+            "created": "Todo",
+            "done": "Complete",
+            "active": "In Progress",
+            "pending": "Waiting",
+            "archived": "Done",
+        }
         lm = TrelloListMappings.from_dict(data)
         assert lm.created == "Todo"
         assert lm.done == "Complete"
@@ -64,11 +68,12 @@ class TestTrelloListMappingsModel:
 
     def test_roundtrip(self) -> None:
         original = TrelloListMappings(
-            created="Todo", done="Complete",
-            active="Active", pending="Paused", archived="Archive",
+            done="Complete",
+            active="Active",
+            pending="Paused",
+            archived="Archive",
         )
         restored = TrelloListMappings.from_dict(original.to_dict())
-        assert restored.created == original.created
         assert restored.done == original.done
         assert restored.active == original.active
         assert restored.pending == original.pending
@@ -98,7 +103,13 @@ class TestTrelloSyncModelWithListMappings:
         data = {
             "enabled": True,
             "default_board_id": "board1",
-            "list_mappings": {"created": "Backlog", "done": "Done", "active": "Active", "pending": "Waiting", "archived": "Archive"},
+            "list_mappings": {
+                "created": "Backlog",
+                "done": "Done",
+                "active": "Active",
+                "pending": "Waiting",
+                "archived": "Archive",
+            },
         }
         ts = TrelloSync.from_dict(data)
         assert ts.list_mappings.active == "Active"
@@ -109,7 +120,9 @@ class TestTrelloSyncModelWithListMappings:
         original = TrelloSync(
             enabled=True,
             default_board_id="b1",
-            list_mappings=TrelloListMappings(active="In Progress", pending="Blocked", archived="Done"),
+            list_mappings=TrelloListMappings(
+                active="In Progress", pending="Blocked", archived="Done"
+            ),
         )
         restored = TrelloSync.from_dict(original.to_dict())
         assert restored.list_mappings.active == "In Progress"
@@ -120,7 +133,9 @@ class TestTrelloSyncModelWithListMappings:
 class TestProjectTrelloConfigListMappings:
     def test_per_project_override_roundtrip(self) -> None:
         ptc = ProjectTrelloConfig(
-            list_mappings=TrelloListMappings(active="Active", pending="Paused", archived="Archived"),
+            list_mappings=TrelloListMappings(
+                active="Active", pending="Paused", archived="Archived"
+            ),
         )
         d = ptc.to_dict()
         restored = ProjectTrelloConfig.from_dict(d)
@@ -377,7 +392,9 @@ class TestArchiveTrelloMoveHint:
         project_trello = ProjectTrelloConfig(
             list_mappings=TrelloListMappings(archived="ProjectArchive"),
         )
-        _setup_project_with_trello(cfg, tmp_path, trello_card_id="card_99", project_trello=project_trello)
+        _setup_project_with_trello(
+            cfg, tmp_path, trello_card_id="card_99", project_trello=project_trello
+        )
 
         result = await call_tool(mcp_app, "proj_archive", name="myapp")
 
@@ -514,7 +531,9 @@ class TestUpdateMetaTrelloMoveHint:
         project_trello = ProjectTrelloConfig(
             list_mappings=TrelloListMappings(active="ProjectActive"),
         )
-        meta = _setup_project_with_trello(cfg, tmp_path, trello_card_id="card_7", project_trello=project_trello)
+        meta = _setup_project_with_trello(
+            cfg, tmp_path, trello_card_id="card_7", project_trello=project_trello
+        )
         meta.status = "paused"
         storage.save_meta(cfg, meta)
 
@@ -525,195 +544,14 @@ class TestUpdateMetaTrelloMoveHint:
         assert "GlobalActive" not in result
 
 
-# ── Trello sync list mismatch detection tests ────────────────────────────────
+# ── TrelloSyncPlan basic tests ─────────────────────────────────────────────
 
 
-class TestTrelloSyncListMismatch:
-    def _setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ProjConfig, str]:
-        config_path = tmp_path / "proj.yaml"
-        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
-        monkeypatch.delenv("PROJ_CONFIG", raising=False)
-
-        cfg = ProjConfig(
-            tracking_dir=str(tmp_path / "tracking"),
-            trello=TrelloSync(
-                enabled=True,
-                default_board_id="board123",
-                list_mappings=TrelloListMappings(active="Active", pending="On Hold"),
-            ),
-        )
-        storage.save_config(cfg)
-
-        now = datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat()
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True)
-        (proj_dir / "todos.yaml").write_text("todos: []\n")
-        (proj_dir / "archive.yaml").write_text("todos: []\n")
-        meta = ProjectMeta(
-            name="myapp",
-            status="active",
-            repos=[RepoEntry(label="code", path=str(tmp_path))],
-            dates=ProjectDates(created=now, last_updated=now),
-            trello_card_id="card_abc",
-        )
-        storage.save_meta(cfg, meta)
-        index = ProjectIndex(
-            projects={"myapp": ProjectEntry(name="myapp", tracking_dir=str(proj_dir), created=now)},
-        )
-        storage.save_index(cfg, index)
-        return cfg, "myapp"
-
-    def test_list_mismatch_detected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        cfg, name = self._setup(tmp_path, monkeypatch)
-
-        # Card is in "On Hold" but project status is "active" (expected: "Active")
-        trello_card = json.dumps({
-            "checklists": [],
-            "list": {"name": "On Hold"},
-        })
-
-        plan = compute_diff(trello_card, cfg, name)
-
-        assert len(plan.list_mismatches) == 1
-        assert plan.list_mismatches[0]["current_list"] == "On Hold"
-        assert plan.list_mismatches[0]["expected_list"] == "Active"
-        assert plan.list_mismatches[0]["project_status"] == "active"
-
-    def test_no_mismatch_when_list_matches(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        cfg, name = self._setup(tmp_path, monkeypatch)
-
-        # Card is in "Active" and project status is "active" (expected: "Active")
-        trello_card = json.dumps({
-            "checklists": [],
-            "list": {"name": "Active"},
-        })
-
-        plan = compute_diff(trello_card, cfg, name)
-
-        assert len(plan.list_mismatches) == 0
-
-    def test_no_mismatch_when_no_mapping_configured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        config_path = tmp_path / "proj.yaml"
-        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
-        monkeypatch.delenv("PROJ_CONFIG", raising=False)
-
-        cfg = ProjConfig(
-            tracking_dir=str(tmp_path / "tracking"),
-            trello=TrelloSync(enabled=True, default_board_id="board123"),
-        )
-        storage.save_config(cfg)
-
-        now = datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat()
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True)
-        (proj_dir / "todos.yaml").write_text("todos: []\n")
-        (proj_dir / "archive.yaml").write_text("todos: []\n")
-        meta = ProjectMeta(
-            name="myapp",
-            status="active",
-            repos=[RepoEntry(label="code", path=str(tmp_path))],
-            dates=ProjectDates(created=now, last_updated=now),
-            trello_card_id="card_abc",
-        )
-        storage.save_meta(cfg, meta)
-        index = ProjectIndex(
-            projects={"myapp": ProjectEntry(name="myapp", tracking_dir=str(proj_dir), created=now)},
-        )
-        storage.save_index(cfg, index)
-
-        trello_card = json.dumps({
-            "checklists": [],
-            "list": {"name": "SomeList"},
-        })
-
-        plan = compute_diff(trello_card, cfg, "myapp")
-
-        # No mapping for active -> no mismatch reported
-        assert len(plan.list_mismatches) == 0
-
-    def test_mismatch_uses_idList_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        cfg, name = self._setup(tmp_path, monkeypatch)
-
-        # Card uses idList instead of list.name
-        trello_card = json.dumps({
-            "checklists": [],
-            "idList": "list_xyz",
-        })
-
-        plan = compute_diff(trello_card, cfg, name)
-
-        # idList value doesn't match "Active" -> mismatch
-        assert len(plan.list_mismatches) == 1
-        assert plan.list_mismatches[0]["current_list"] == "list_xyz"
-
-    def test_list_mismatch_in_plan_to_dict(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        cfg, name = self._setup(tmp_path, monkeypatch)
-
-        trello_card = json.dumps({
-            "checklists": [],
-            "list": {"name": "Wrong List"},
-        })
-
-        plan = compute_diff(trello_card, cfg, name)
-        d = plan.to_dict()
-
-        assert "list_mismatches" in d
-        assert d["summary"]["list_mismatch_count"] == 1  # type: ignore[index]
-
-    def test_list_mismatch_per_project_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        config_path = tmp_path / "proj.yaml"
-        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
-        monkeypatch.delenv("PROJ_CONFIG", raising=False)
-
-        cfg = ProjConfig(
-            tracking_dir=str(tmp_path / "tracking"),
-            trello=TrelloSync(
-                enabled=True,
-                default_board_id="board123",
-                list_mappings=TrelloListMappings(active="GlobalActive"),
-            ),
-        )
-        storage.save_config(cfg)
-
-        now = datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat()
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True)
-        (proj_dir / "todos.yaml").write_text("todos: []\n")
-        (proj_dir / "archive.yaml").write_text("todos: []\n")
-        meta = ProjectMeta(
-            name="myapp",
-            status="active",
-            repos=[RepoEntry(label="code", path=str(tmp_path))],
-            dates=ProjectDates(created=now, last_updated=now),
-            trello_card_id="card_abc",
-            trello=ProjectTrelloConfig(
-                list_mappings=TrelloListMappings(active="ProjectActive"),
-            ),
-        )
-        storage.save_meta(cfg, meta)
-        index = ProjectIndex(
-            projects={"myapp": ProjectEntry(name="myapp", tracking_dir=str(proj_dir), created=now)},
-        )
-        storage.save_index(cfg, index)
-
-        # Card is in "GlobalActive" but per-project expects "ProjectActive"
-        trello_card = json.dumps({
-            "checklists": [],
-            "list": {"name": "GlobalActive"},
-        })
-
-        plan = compute_diff(trello_card, cfg, "myapp")
-
-        assert len(plan.list_mismatches) == 1
-        assert plan.list_mismatches[0]["expected_list"] == "ProjectActive"
-
-
-class TestTrelloSyncPlanIsEmptyWithMismatches:
-    def test_not_empty_with_list_mismatches(self) -> None:
-        plan = TrelloSyncPlan()
-        plan.list_mismatches.append({"card_id": "c1", "current_list": "A", "expected_list": "B", "project_status": "active"})
-        assert not plan.is_empty()
-
-    def test_empty_without_mismatches(self) -> None:
+class TestTrelloSyncPlanBasic:
+    def test_empty_plan(self) -> None:
         plan = TrelloSyncPlan()
         assert plan.is_empty()
+
+    def test_not_empty_with_push_create(self) -> None:
+        plan = TrelloSyncPlan(push_create_card=[{"todo_id": "1"}])
+        assert not plan.is_empty()

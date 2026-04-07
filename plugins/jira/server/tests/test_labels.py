@@ -33,9 +33,7 @@ class TestJiraGetLabels:
         )
         assert json.loads(result) == data
 
-    def test_custom_max_results(
-        self, mock_jira_client: MagicMock, label_tools: dict
-    ) -> None:
+    def test_custom_max_results(self, mock_jira_client: MagicMock, label_tools: dict) -> None:
         mock_jira_client.get.return_value = {"values": [], "total": 0}
 
         label_tools["jira_get_labels"](max_results=10)

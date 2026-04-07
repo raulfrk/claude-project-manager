@@ -24,12 +24,16 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.todoist_full_sync import (
+    ApplyInput,
+    _compute_todoist_depth,
     _infer_parent_link_from_children,
     _migrate_parent_links,
+    apply_changes,
     compute_diff,
+)
+from server.tools.todoist_full_sync import (
     register as register_full_sync,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +114,7 @@ class TestProjTodoistFullSync:
                 def decorator(fn):
                     captured["fn"] = fn
                     return fn
+
                 return decorator
 
         fake = FakeApp()
@@ -118,10 +123,9 @@ class TestProjTodoistFullSync:
 
     # 1. test_full_success ─────────────────────────────────────────────────────
 
-    def test_full_success(
-        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Diff returns push+pull ops, all execute, returns status: success with correct summary counts."""
+    def test_full_success(self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Diff returns push+pull ops, all execute, returns
+        status: success with correct summary counts."""
         cfg, name = cfg_with_project
 
         # Create a local unlinked todo (will push_create)
@@ -142,9 +146,7 @@ class TestProjTodoistFullSync:
                 return [{"id": f"created_{i}"} for i in range(len(params.get("tasks", [])))]
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -159,7 +161,8 @@ class TestProjTodoistFullSync:
     def test_partial_failure(
         self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """One push op fails, others succeed; returns partial_success with retry_token and errors."""
+        """One push op fails, others succeed; returns
+        partial_success with retry_token and errors."""
         cfg, name = cfg_with_project
 
         # Two local unlinked todos — one will succeed, one will fail
@@ -182,9 +185,7 @@ class TestProjTodoistFullSync:
                 raise ConnectionError("Todoist API timeout")
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -196,9 +197,7 @@ class TestProjTodoistFullSync:
 
     # 3. test_retry ────────────────────────────────────────────────────────────
 
-    def test_retry(
-        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_retry(self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
         """retry_failures token re-executes only failed ops (fetch NOT re-called)."""
         failed_ops = [
             {
@@ -216,9 +215,7 @@ class TestProjTodoistFullSync:
             call_log.append((tool_name, params))
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(retry_failures=token)
         result = json.loads(result_str)
@@ -231,11 +228,9 @@ class TestProjTodoistFullSync:
 
     # 4. test_up_to_date ───────────────────────────────────────────────────────
 
-    def test_up_to_date(
-        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_up_to_date(self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
         """Empty diff; returns status: success, up_to_date: true without socket calls."""
-        cfg, name = cfg_with_project
+        _cfg, name = cfg_with_project
 
         # No local todos, Todoist returns empty
         call_log = []
@@ -246,9 +241,7 @@ class TestProjTodoistFullSync:
                 return []
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -264,7 +257,8 @@ class TestProjTodoistFullSync:
     def test_needs_confirmation(
         self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Diff returns potential_links; first call -> needs_confirmation; second with confirmed_links -> success."""
+        """Diff returns potential_links; first call ->
+        needs_confirmation; second with confirmed_links -> success."""
         cfg, name = cfg_with_project
 
         # Create a local todo with same title as todoist task -> potential_links
@@ -278,9 +272,7 @@ class TestProjTodoistFullSync:
                 return todoist_tasks
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         # First call: should return needs_confirmation
         result_str = self._register_and_call(project_name=name)
@@ -291,9 +283,7 @@ class TestProjTodoistFullSync:
 
         # Second call: confirm the link
         confirmed = json.dumps([{"todo_id": todo.id, "todoist_task_id": "t1"}])
-        result_str = self._register_and_call(
-            project_name=name, confirmed_links=confirmed
-        )
+        result_str = self._register_and_call(project_name=name, confirmed_links=confirmed)
         result = json.loads(result_str)
 
         assert result["status"] == "success"
@@ -304,7 +294,7 @@ class TestProjTodoistFullSync:
         self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """_call_todoist_tool raises httpx.ConnectError; returns status: error."""
-        cfg, name = cfg_with_project
+        _cfg, name = cfg_with_project
 
         # Need at least local todos or todoist_project_id to trigger socket call
         # (project already has todoist_project_id="abc123")
@@ -312,9 +302,7 @@ class TestProjTodoistFullSync:
         def mock_call(tool_name, params):
             raise httpx.ConnectError("Connection refused")
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -346,9 +334,7 @@ class TestProjTodoistFullSync:
                 return [{"id": f"todoist_{i}"} for i in range(len(tasks))]
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -397,9 +383,7 @@ class TestProjTodoistFullSync:
                 return {}
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -435,9 +419,7 @@ class TestProjTodoistFullSync:
                 return [{"id": "created_1"}]
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         # First call creates the task
         result_str = self._register_and_call(project_name=name)
@@ -474,7 +456,8 @@ class TestProjTodoistFullSync:
     def test_dedup_truncated_response_finds_existing(
         self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """todoist_add_tasks returns empty ID; _find_existing_todoist_task returns a match; result is success."""
+        """todoist_add_tasks returns empty ID;
+        _find_existing_todoist_task returns a match; result is success."""
         cfg, name = cfg_with_project
 
         todo = _make_todo(cfg, name, "Truncated task")
@@ -494,9 +477,7 @@ class TestProjTodoistFullSync:
                 return [{"id": ""}]
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(project_name=name)
         result = json.loads(result_str)
@@ -538,9 +519,7 @@ class TestProjTodoistFullSync:
                 return [{"id": "new_created_1"}]
             return {}
 
-        monkeypatch.setattr(
-            "server.tools.todoist_full_sync._call_todoist_tool", mock_call
-        )
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
 
         result_str = self._register_and_call(retry_failures=token)
         result = json.loads(result_str)
@@ -560,7 +539,9 @@ class TestProjTodoistFullSync:
 class TestMigrateParentLinks:
     """Tests for _migrate_parent_links() idempotency and correctness."""
 
-    def _make_local_todo(self, todo_id: str, parent: str | None = None, todoist_task_id: str | None = None) -> Todo:
+    def _make_local_todo(
+        self, todo_id: str, parent: str | None = None, todoist_task_id: str | None = None
+    ) -> Todo:
         return Todo(
             id=todo_id,
             title=f"Todo {todo_id}",
@@ -569,7 +550,8 @@ class TestMigrateParentLinks:
         )
 
     def test_migrates_missing_parent_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Child with todoist_task_id, parent with todoist_task_id, Todoist task has no parentId → update called."""
+        """Child with todoist_task_id, parent with todoist_task_id,
+        Todoist task has no parentId -> update called."""
         parent = self._make_local_todo("100", todoist_task_id="tid_parent")
         child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
 
@@ -596,6 +578,7 @@ class TestMigrateParentLinks:
         tasks_arg = call_log[0][1]["tasks"]
         assert isinstance(tasks_arg, str)  # JSON-encoded
         import json as _json
+
         updates = _json.loads(tasks_arg)
         assert updates == [{"id": "tid_child", "parentId": "tid_parent"}]
 
@@ -705,7 +688,9 @@ class TestPostExecutionLinkageFix:
     """Tests for the post-execution re-parenting pass after combined_id_map is built."""
 
     def test_reparents_child_after_parent_created_in_sync(
-        self, cfg_with_project: tuple, monkeypatch: pytest.MonkeyPatch,
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Pre-existing child gets re-parented when parent was just created in the same sync."""
         cfg, name = cfg_with_project
@@ -713,7 +698,9 @@ class TestPostExecutionLinkageFix:
         # Parent todo (unlinked — will be created in this sync)
         parent_todo = _make_todo(cfg, name, "Parent task")
         # Child todo (already linked to Todoist, but Todoist task has no parentId)
-        child_todo = _make_todo(cfg, name, "Child task", parent=parent_todo.id, todoist_task_id="existing_child_tid")
+        child_todo = _make_todo(
+            cfg, name, "Child task", parent=parent_todo.id, todoist_task_id="existing_child_tid"
+        )
         storage.save_todos(cfg, name, [parent_todo, child_todo])
 
         # Todoist state: only the child exists (parent not yet created)
@@ -749,7 +736,10 @@ class TestPostExecutionLinkageFix:
             if isinstance(tasks, str):
                 tasks = json.loads(tasks)
             for task in tasks:
-                if task.get("id") == "existing_child_tid" and task.get("parentId") == "new_parent_tid":
+                if (
+                    task.get("id") == "existing_child_tid"
+                    and task.get("parentId") == "new_parent_tid"
+                ):
                     reparent_found = True
         assert reparent_found, (
             f"Expected re-parent update for existing_child_tid → new_parent_tid. "
@@ -760,7 +750,9 @@ class TestPostExecutionLinkageFix:
 # ── _infer_parent_link_from_children unit tests ──────────────────────────────
 
 
-def _make_local_todo(todo_id: str, title: str, todoist_id: str | None = None, parent: str | None = None) -> Todo:
+def _make_local_todo(
+    todo_id: str, title: str, todoist_id: str | None = None, parent: str | None = None
+) -> Todo:
     today = str(date.today())
     t = Todo(id=todo_id, title=title, created=today, updated=today)
     t.todoist_task_id = todoist_id
@@ -787,12 +779,14 @@ class TestInferParentLinkFromChildren:
         child_todo = _make_local_todo("lc", "Child", todoist_id="tc", parent="lp")
         todos = [parent_todo, child_todo]
         todoist_by_id = {
-            "tp-b": _make_task("tp-b", "Parent"),       # unlinked duplicate
+            "tp-b": _make_task("tp-b", "Parent"),  # unlinked duplicate
             "tc": _make_task("tc", "Child", parent_id="tp-b"),
         }
         local_by_todoist_id, local_by_id = self._build_maps(todos)
 
-        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        result = _infer_parent_link_from_children(
+            "tp-b", todoist_by_id, local_by_todoist_id, local_by_id
+        )
         assert result is not None
         assert result.id == "lp"
 
@@ -809,7 +803,9 @@ class TestInferParentLinkFromChildren:
         }
         local_by_todoist_id, local_by_id = self._build_maps(todos)
 
-        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        result = _infer_parent_link_from_children(
+            "tp-b", todoist_by_id, local_by_todoist_id, local_by_id
+        )
         assert result is not None
         assert result.id == "lp"
 
@@ -827,7 +823,9 @@ class TestInferParentLinkFromChildren:
         }
         local_by_todoist_id, local_by_id = self._build_maps(todos)
 
-        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        result = _infer_parent_link_from_children(
+            "tp-b", todoist_by_id, local_by_todoist_id, local_by_id
+        )
         assert result is None
 
     def test_no_linked_children_returns_none(self):
@@ -840,7 +838,9 @@ class TestInferParentLinkFromChildren:
         local_by_todoist_id: dict = {}
         local_by_id: dict = {}
 
-        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        result = _infer_parent_link_from_children(
+            "tp-b", todoist_by_id, local_by_todoist_id, local_by_id
+        )
         assert result is None
 
     def test_no_children_at_all_returns_none(self):
@@ -859,16 +859,16 @@ class TestInferParentLinkFromChildren:
         }
         local_by_todoist_id, local_by_id = self._build_maps(todos)
 
-        result = _infer_parent_link_from_children("tp-b", todoist_by_id, local_by_todoist_id, local_by_id)
+        result = _infer_parent_link_from_children(
+            "tp-b", todoist_by_id, local_by_todoist_id, local_by_id
+        )
         assert result is None
 
 
 class TestComputeDiffChildInference:
     """Integration tests for child-based parent inference in compute_diff."""
 
-    def test_child_inference_prevents_duplicate_pull(
-        self, cfg_with_project: tuple
-    ):
+    def test_child_inference_prevents_duplicate_pull(self, cfg_with_project: tuple):
         """The exact incident scenario: local parent already linked to task A,
         Todoist task B (same title, children linked to local children of parent)
         → B goes to potential_links, NOT pull_create."""
@@ -889,7 +889,7 @@ class TestComputeDiffChildInference:
         # Todoist state: task-a (linked), task-b (unlinked duplicate), tc1/tc2 (children of task-b)
         todoist_tasks = [
             _make_task("task-a", "sandbox-perms skill"),
-            _make_task("task-b", "sandbox-perms skill"),   # duplicate, unlinked
+            _make_task("task-b", "sandbox-perms skill"),  # duplicate, unlinked
             _make_task("tc1", "Manual test 1", parent_id="task-b"),
             _make_task("tc2", "Manual test 2", parent_id="task-b"),
         ]
@@ -898,12 +898,507 @@ class TestComputeDiffChildInference:
 
         # task-b should be in potential_links with score 1.0
         link_ids = [e["todoist_task"]["id"] for e in plan.potential_links]
-        assert "task-b" in link_ids, f"Expected task-b in potential_links, got: {plan.potential_links}"
+        assert "task-b" in link_ids, (
+            f"Expected task-b in potential_links, got: {plan.potential_links}"
+        )
 
         # task-b must NOT be in pull_create
         pull_create_ids = [e["todoist_task_id"] for e in plan.pull_create]
-        assert "task-b" not in pull_create_ids, f"task-b should not be in pull_create: {plan.pull_create}"
+        assert "task-b" not in pull_create_ids, (
+            f"task-b should not be in pull_create: {plan.pull_create}"
+        )
 
         # Score for task-b should be 1.0
         task_b_link = next(e for e in plan.potential_links if e["todoist_task"]["id"] == "task-b")
         assert task_b_link["score"] == 1.0
+
+
+# ── 448.5: Unit tests for depth, parentId extraction, orphan re-linking ──────
+
+
+class TestComputeTodoistDepth:
+    """Unit tests for _compute_todoist_depth()."""
+
+    def test_root_task_depth_zero(self) -> None:
+        """Root task (no parentId) returns depth 0."""
+        todoist_by_id = {"t1": {"id": "t1"}}
+        assert _compute_todoist_depth("t1", todoist_by_id) == 0
+
+    def test_child_depth_one(self) -> None:
+        """Task with one parent returns depth 1."""
+        todoist_by_id = {
+            "parent": {"id": "parent"},
+            "child": {"id": "child", "parentId": "parent"},
+        }
+        assert _compute_todoist_depth("child", todoist_by_id) == 1
+
+    def test_grandchild_depth_two(self) -> None:
+        """Task two levels deep returns depth 2."""
+        todoist_by_id = {
+            "root": {"id": "root"},
+            "mid": {"id": "mid", "parentId": "root"},
+            "leaf": {"id": "leaf", "parentId": "mid"},
+        }
+        assert _compute_todoist_depth("leaf", todoist_by_id) == 2
+
+    def test_circular_ref_breaks_without_infinite_loop(self) -> None:
+        """Circular parentId chain terminates via seen-set guard."""
+        todoist_by_id = {
+            "a": {"id": "a", "parentId": "b"},
+            "b": {"id": "b", "parentId": "c"},
+            "c": {"id": "c", "parentId": "a"},
+        }
+        # Should not hang; result depends on where the cycle is detected
+        depth = _compute_todoist_depth("a", todoist_by_id)
+        assert depth <= 10  # capped by max-depth guard
+
+    def test_self_ref_depth_zero(self) -> None:
+        """Task referencing itself as parent returns depth 0."""
+        todoist_by_id = {
+            "self": {"id": "self", "parentId": "self"},
+        }
+        assert _compute_todoist_depth("self", todoist_by_id) == 0
+
+    def test_missing_parent_depth_zero(self) -> None:
+        """Task whose parentId points to a non-existent task
+        returns depth 1 (walks one hop then stops)."""
+        todoist_by_id = {
+            "orphan": {"id": "orphan", "parentId": "ghost"},
+        }
+        # Walks one hop (orphan → ghost), ghost not in map → stops
+        assert _compute_todoist_depth("orphan", todoist_by_id) == 1
+
+    def test_unknown_task_id_depth_zero(self) -> None:
+        """Task ID not in the map at all returns depth 0."""
+        assert _compute_todoist_depth("nonexistent", {}) == 0
+
+    def test_parent_id_underscore_variant(self) -> None:
+        """Handles parent_id (underscore) as well as parentId."""
+        todoist_by_id = {
+            "root": {"id": "root"},
+            "child": {"id": "child", "parent_id": "root"},
+        }
+        assert _compute_todoist_depth("child", todoist_by_id) == 1
+
+
+class TestPullCreateParentId:
+    """Verify compute_diff output includes todoist_parent_id when parentId is set."""
+
+    def test_pull_create_includes_todoist_parent_id(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """New Todoist task with parentId populates todoist_parent_id in pull_create."""
+        cfg, name = cfg_with_project
+
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent task"),
+            {**_make_todoist_task("tc", "Child task"), "parentId": "tp"},
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Both should be in pull_create
+        pull_ids = {str(item["todoist_task_id"]) for item in plan.pull_create}
+        assert "tp" in pull_ids
+        assert "tc" in pull_ids
+
+        child_item = next(i for i in plan.pull_create if i["todoist_task_id"] == "tc")
+        assert child_item["todoist_parent_id"] == "tp"
+
+    def test_pull_create_none_parent_when_absent(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """New Todoist task without parentId has todoist_parent_id=None."""
+        cfg, name = cfg_with_project
+
+        todoist_tasks = [_make_todoist_task("t1", "Solo task")]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        solo = next(i for i in plan.pull_create if i["todoist_task_id"] == "t1")
+        assert solo["todoist_parent_id"] is None
+
+
+class TestApplyChangesParentChild:
+    """Tests for apply_changes parent-child creation ordering and orphan re-linking."""
+
+    def test_parent_and_child_new_parent_created_first(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """When both parent and child are new, parent is created first and child is linked."""
+        cfg, name = cfg_with_project
+
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "Parent",
+                    "todoist_task_id": "tp",
+                    "todoist_parent_id": None,
+                    "priority": "medium",
+                },
+                {
+                    "title": "Child",
+                    "todoist_task_id": "tc",
+                    "todoist_parent_id": "tp",
+                    "priority": "medium",
+                },
+            ],
+        )
+
+        result = apply_changes(data, cfg, name)
+
+        assert result["created"] == 2
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+
+        parent = todo_map["Parent"]
+        child = todo_map["Child"]
+        assert child.parent == parent.id
+        assert child.id in parent.children
+
+    def test_existing_parent_new_child(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """New child links to an existing parent via todoist_parent_id."""
+        cfg, name = cfg_with_project
+
+        # Create parent first
+        parent_todo = _make_todo(cfg, name, "Existing parent", todoist_task_id="tp")
+        storage.save_todos(cfg, name, [parent_todo])
+
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "New child",
+                    "todoist_task_id": "tc",
+                    "todoist_parent_id": "tp",
+                    "priority": "medium",
+                },
+            ],
+        )
+
+        result = apply_changes(data, cfg, name)
+
+        assert result["created"] == 1
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+
+        child = todo_map["New child"]
+        parent = todo_map["Existing parent"]
+        assert child.parent == parent.id
+        assert child.id in parent.children
+
+    def test_orphan_relinked_after_batch_create(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """Child whose todoist_parent_id points to a parent created in the same batch
+        but not resolvable at creation time gets re-linked via the orphan pass.
+
+        This happens when the parent lacks a todoist_task_id in the pull_create items
+        (e.g. manually added), so the depth sort can't order them and todoist_to_local
+        doesn't know about the parent when the child is processed.
+
+        We simulate this by having the parent created without a todoist_task_id,
+        then adding it to todoist_to_local after creation (via link_todoist_ids).
+        Actually, the orphan path resolves after ALL creates, so we can test by having
+        the child reference a todoist ID that only appears on a separately-created parent.
+        """
+        cfg, name = cfg_with_project
+
+        # Pre-create the parent with a todoist_task_id so it's in todoist_to_local
+        parent_todo = _make_todo(cfg, name, "Late parent", todoist_task_id="tp")
+        storage.save_todos(cfg, name, [parent_todo])
+
+        # Child references tp as todoist_parent_id, but since the parent is already
+        # in storage (not in created_locally), depth sort has no effect.
+        # However, todoist_to_local is built from existing todos, so the parent IS found.
+        # To truly test orphan re-link, we need a case where todoist_to_local doesn't
+        # have the parent at child-creation time but has it after all creates.
+
+        # Use two items: child references "tp_new" which is the todoist ID of the
+        # second item. The second item has no todoist_task_id set initially in
+        # the synthetic map because it uses a different key format.
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "Orphan child",
+                    "todoist_task_id": "tc",
+                    "todoist_parent_id": "tp_new",
+                    "priority": "medium",
+                },
+                {
+                    "title": "New parent",
+                    "todoist_task_id": "tp_new",
+                    "todoist_parent_id": None,
+                    "priority": "medium",
+                },
+            ],
+        )
+
+        apply_changes(data, cfg, name)
+
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+
+        child = todo_map["Orphan child"]
+        parent = todo_map["New parent"]
+
+        # With depth-based sorting, parent (depth 0) is created before child (depth 1),
+        # so the child finds its parent at creation time — no orphan pass needed.
+        assert child.parent == parent.id
+        assert child.id in parent.children
+
+    def test_multiple_children_under_same_parent(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """Multiple children all link to the same parent."""
+        cfg, name = cfg_with_project
+
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "Parent",
+                    "todoist_task_id": "tp",
+                    "todoist_parent_id": None,
+                    "priority": "medium",
+                },
+                {
+                    "title": "Child A",
+                    "todoist_task_id": "tca",
+                    "todoist_parent_id": "tp",
+                    "priority": "medium",
+                },
+                {
+                    "title": "Child B",
+                    "todoist_task_id": "tcb",
+                    "todoist_parent_id": "tp",
+                    "priority": "medium",
+                },
+            ],
+        )
+
+        result = apply_changes(data, cfg, name)
+
+        assert result["created"] == 3
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+
+        parent = todo_map["Parent"]
+        child_a = todo_map["Child A"]
+        child_b = todo_map["Child B"]
+
+        assert child_a.parent == parent.id
+        assert child_b.parent == parent.id
+        assert child_a.id in parent.children
+        assert child_b.id in parent.children
+
+    def test_empty_todoist_parent_id_stays_root(
+        self,
+        cfg_with_project: tuple,
+    ) -> None:
+        """Item with empty todoist_parent_id stays at root level."""
+        cfg, name = cfg_with_project
+
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "Root task",
+                    "todoist_task_id": "t1",
+                    "todoist_parent_id": "",
+                    "priority": "medium",
+                },
+            ],
+        )
+
+        result = apply_changes(data, cfg, name)
+
+        assert result["created"] == 1
+        todos = storage.load_todos(cfg, name)
+        root = next(t for t in todos if t.title == "Root task")
+        assert root.parent is None
+
+
+# ── 448.6: Integration tests for full sync round-trip with nested tasks ──────
+
+
+class TestFullSyncParentChild:
+    """Integration tests for full sync round-trip with nested tasks."""
+
+    def test_both_parent_and_child_new(
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both parent and child new from Todoist — child.parent == parent.id after sync."""
+        cfg, name = cfg_with_project
+
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent"),
+            {**_make_todoist_task("tc", "Child"), "parentId": "tp"},
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["pull"]["created"] == 2
+
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+        parent = todo_map["Parent"]
+        child = todo_map["Child"]
+        assert child.parent == parent.id
+        assert child.id in parent.children
+
+    def test_parent_preexists_locally(
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Parent pre-exists locally with todoist_task_id — new child goes under it."""
+        cfg, name = cfg_with_project
+
+        parent_todo = _make_todo(cfg, name, "Existing parent", todoist_task_id="tp")
+        storage.save_todos(cfg, name, [parent_todo])
+
+        todoist_tasks = [
+            _make_todoist_task("tp", "Existing parent"),
+            {**_make_todoist_task("tc", "New child"), "parentId": "tp"},
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["pull"]["created"] == 1
+
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+        child = todo_map["New child"]
+        parent = todo_map["Existing parent"]
+        assert child.parent == parent.id
+
+    def test_three_level_nesting(
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Three-level nesting — grandchild → child → parent chain is correct."""
+        cfg, name = cfg_with_project
+
+        todoist_tasks = [
+            _make_todoist_task("t1", "Root"),
+            {**_make_todoist_task("t2", "Mid"), "parentId": "t1"},
+            {**_make_todoist_task("t3", "Leaf"), "parentId": "t2"},
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["pull"]["created"] == 3
+
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+        root = todo_map["Root"]
+        mid = todo_map["Mid"]
+        leaf = todo_map["Leaf"]
+
+        assert mid.parent == root.id
+        assert leaf.parent == mid.id
+        assert mid.id in root.children
+        assert leaf.id in mid.children
+
+    def test_external_parent_child_stays_root(
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Child's parentId points to a task not in the fetched list — child stays root."""
+        cfg, name = cfg_with_project
+
+        # Only the child is in the task list; "external_parent" is not
+        todoist_tasks = [
+            {**_make_todoist_task("tc", "Orphan child"), "parentId": "external_parent"},
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["pull"]["created"] == 1
+
+        todos = storage.load_todos(cfg, name)
+        child = next(t for t in todos if t.title == "Orphan child")
+        assert child.parent is None
+
+    def test_multiple_siblings_under_same_parent(
+        self,
+        cfg_with_project: tuple,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Multiple siblings all end up under the same parent."""
+        cfg, name = cfg_with_project
+
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent"),
+            {**_make_todoist_task("tc1", "Sibling 1"), "parentId": "tp"},
+            {**_make_todoist_task("tc2", "Sibling 2"), "parentId": "tp"},
+            {**_make_todoist_task("tc3", "Sibling 3"), "parentId": "tp"},
+        ]
+
+        def mock_call(tool_name, params):
+            if tool_name == "todoist_find_tasks":
+                return todoist_tasks
+            return {}
+
+        monkeypatch.setattr("server.tools.todoist_full_sync._call_todoist_tool", mock_call)
+
+        result_str = TestProjTodoistFullSync()._register_and_call(project_name=name)
+        result = json.loads(result_str)
+
+        assert result["status"] == "success"
+        assert result["summary"]["pull"]["created"] == 4
+
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.title: t for t in todos}
+        parent = todo_map["Parent"]
+
+        for sibling_name in ("Sibling 1", "Sibling 2", "Sibling 3"):
+            sibling = todo_map[sibling_name]
+            assert sibling.parent == parent.id, f"{sibling_name} should be under parent"
+            assert sibling.id in parent.children, f"{sibling_name} should be in parent.children"

@@ -43,7 +43,7 @@ def _resolve_priority(value: str | int | None) -> int | None:
 def _to_json_value(val: str | int | float | bool | list[str] | None) -> JsonValue:
     """Convert a TaskInput value to a JsonValue, handling list[str] invariance."""
     if isinstance(val, list):
-        return [v for v in val]  # list[str] → list[JsonValue]
+        return list(val)  # list[str] → list[JsonValue]
     return val
 
 
@@ -55,10 +55,7 @@ def _build_task_payload(task: TaskInput) -> JsonObject:
     if "description" in task:
         payload["description"] = _to_json_value(task["description"])
     raw_priority = task.get("priority")
-    if isinstance(raw_priority, (str, int)):
-        priority = _resolve_priority(raw_priority)
-    else:
-        priority = None
+    priority = _resolve_priority(raw_priority) if isinstance(raw_priority, (str, int)) else None
     if priority is not None:
         payload["priority"] = priority
     if "labels" in task:
@@ -72,7 +69,7 @@ def _build_task_payload(task: TaskInput) -> JsonObject:
     return payload
 
 
-def register(app: FastMCP) -> None:  # noqa: C901
+def register(app: FastMCP) -> None:
     """Register task tools on *app*."""
 
     @app.tool(
@@ -98,12 +95,14 @@ def register(app: FastMCP) -> None:  # noqa: C901
                     failures.append({"index": idx, "error": "Unexpected response type"})
                     continue
                 successes.append(TodoistTask.from_api(result).to_dict())
-            except Exception as exc:  # noqa: BLE001
-                failures.append({
-                    "index": idx,
-                    "content": str(task.get("content", "")),
-                    "error": str(exc),
-                })
+            except Exception as exc:
+                failures.append(
+                    {
+                        "index": idx,
+                        "content": str(task.get("content", "")),
+                        "error": str(exc),
+                    }
+                )
         return json.dumps({"successes": successes, "failures": failures})
 
     @app.tool(
@@ -117,7 +116,7 @@ def register(app: FastMCP) -> None:  # noqa: C901
         try:
             client.close_task(id)
             return json.dumps({"successes": [{"id": id}], "failures": []})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return json.dumps({"successes": [], "failures": [{"id": id, "error": str(exc)}]})
 
     @app.tool(
@@ -151,9 +150,13 @@ def register(app: FastMCP) -> None:  # noqa: C901
             payload = _build_task_payload(task)
             result = client.post(f"/tasks/{id}", json=payload)
             if not isinstance(result, dict):
-                return json.dumps({"successes": [], "failures": [{"id": id, "error": "Unexpected response type"}]})
-            return json.dumps({"successes": [TodoistTask.from_api(result).to_dict()], "failures": []})
-        except Exception as exc:  # noqa: BLE001
+                return json.dumps(
+                    {"successes": [], "failures": [{"id": id, "error": "Unexpected response type"}]}
+                )
+            return json.dumps(
+                {"successes": [TodoistTask.from_api(result).to_dict()], "failures": []}
+            )
+        except Exception as exc:
             return json.dumps({"successes": [], "failures": [{"id": id, "error": str(exc)}]})
 
     @app.tool(
@@ -168,18 +171,22 @@ def register(app: FastMCP) -> None:  # noqa: C901
         try:
             task = client.get(f"/tasks/{todoist_task_id}")
             is_completed = task.get("is_completed", False) if isinstance(task, dict) else False
-            return json.dumps({
-                "verified": is_completed,
-                "task_id": todoist_task_id,
-                "status": "completed" if is_completed else "open",
-            })
-        except Exception as exc:  # noqa: BLE001
-            return json.dumps({
-                "verified": False,
-                "task_id": todoist_task_id,
-                "status": "error",
-                "error": str(exc),
-            })
+            return json.dumps(
+                {
+                    "verified": is_completed,
+                    "task_id": todoist_task_id,
+                    "status": "completed" if is_completed else "open",
+                }
+            )
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "verified": False,
+                    "task_id": todoist_task_id,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
 
     @app.tool(
         description=(
@@ -195,7 +202,7 @@ def register(app: FastMCP) -> None:  # noqa: C901
             try:
                 client.close_task(task_id)
                 successes.append({"id": task_id})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failures.append({"id": task_id, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
 
@@ -251,12 +258,14 @@ def register(app: FastMCP) -> None:  # noqa: C901
                     failures.append({"index": idx, "error": "Unexpected response type"})
                     continue
                 successes.append(TodoistTask.from_api(result).to_dict())
-            except Exception as exc:  # noqa: BLE001
-                failures.append({
-                    "index": idx,
-                    "id": str(task.get("id", "")),
-                    "error": str(exc),
-                })
+            except Exception as exc:
+                failures.append(
+                    {
+                        "index": idx,
+                        "id": str(task.get("id", "")),
+                        "error": str(exc),
+                    }
+                )
         return json.dumps({"successes": successes, "failures": failures})
 
     @app.tool(description="Delete a single Todoist task by ID.")
@@ -279,6 +288,6 @@ def register(app: FastMCP) -> None:  # noqa: C901
             try:
                 client.reopen_task(task_id)
                 successes.append({"id": task_id})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failures.append({"id": task_id, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

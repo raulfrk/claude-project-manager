@@ -39,7 +39,7 @@ Do not proceed with any further steps.
   - Create a new card with `name` = project name and `idLabels` = the `proj` label ID.
   - Record the returned card ID for linking by downstream sub-skills.
 
-Return the board ID, card ID, and label ID for use by downstream sub-skills (trello-fetch).
+Return the board ID, card ID, and label ID for use by the trello-sync skill.
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Return the board ID, card ID, and label ID for use by downstream sub-skills (tre
 
 ## Output
 
-Returns board ID, card ID, and label ID for use by downstream sub-skills (trello-fetch).
+Returns board ID, card ID, and label ID for use by the trello-sync skill.
 
 ## Notes
 

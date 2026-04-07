@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from server.lib._types import JsonValue
 from server.lib import storage
 from server.lib.conditions import resolve_condition_status, validate_condition_syntax
 from server.lib.dag import find_cycle_path, would_create_cycle
@@ -13,6 +12,8 @@ from server.lib.models import Hook
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib._types import JsonValue
 
 
 # ── Tool functions ────────────────────────────────────────────────────────────
@@ -41,36 +42,52 @@ def hooks_register(
     try:
         mapping: dict[str, JsonValue] = json.loads(param_mapping)
         if not isinstance(mapping, dict):
-            return json.dumps({
-                "result": f"Error: param_mapping must be a JSON object (dict), got {type(mapping).__name__}",
-                "hook_id": None,
-            })
+            return json.dumps(
+                {
+                    "result": (
+                        "Error: param_mapping must be a JSON object"
+                        f" (dict), got {type(mapping).__name__}"
+                    ),
+                    "hook_id": None,
+                }
+            )
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "result": f"Error: param_mapping is not valid JSON: {e}",
-            "hook_id": None,
-        })
+        return json.dumps(
+            {
+                "result": f"Error: param_mapping is not valid JSON: {e}",
+                "hook_id": None,
+            }
+        )
 
     # Validate feedback_mapping is valid JSON
     try:
         fb_mapping: dict[str, JsonValue] = json.loads(feedback_mapping)
         if not isinstance(fb_mapping, dict):
-            return json.dumps({
-                "result": f"Error: feedback_mapping must be a JSON object (dict), got {type(fb_mapping).__name__}",
-                "hook_id": None,
-            })
+            return json.dumps(
+                {
+                    "result": (
+                        "Error: feedback_mapping must be a JSON object"
+                        f" (dict), got {type(fb_mapping).__name__}"
+                    ),
+                    "hook_id": None,
+                }
+            )
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "result": f"Error: feedback_mapping is not valid JSON: {e}",
-            "hook_id": None,
-        })
+        return json.dumps(
+            {
+                "result": f"Error: feedback_mapping is not valid JSON: {e}",
+                "hook_id": None,
+            }
+        )
 
     # Validate: feedback requires blocking
     if (fb_mapping or feedback_tool) and not blocking and not verification:
-        return json.dumps({
-            "result": "Error: feedback_mapping/feedback_tool require blocking=true.",
-            "hook_id": None,
-        })
+        return json.dumps(
+            {
+                "result": "Error: feedback_mapping/feedback_tool require blocking=true.",
+                "hook_id": None,
+            }
+        )
 
     # Validate condition syntax
     if condition:
@@ -83,32 +100,38 @@ def hooks_register(
     # Duplicate detection
     existing = registry.find_duplicate(trigger_tool, target_tool, server)
     if existing is not None:
-        return json.dumps({
-            "result": (
-                f"Hook already exists: {existing.id}\n"
-                f"  trigger: {existing.trigger_tool}\n"
-                f"  target: {existing.target_tool}\n"
-                f"  server: {existing.server}"
-            ),
-            "hook_id": existing.id,
-        })
+        return json.dumps(
+            {
+                "result": (
+                    f"Hook already exists: {existing.id}\n"
+                    f"  trigger: {existing.trigger_tool}\n"
+                    f"  target: {existing.target_tool}\n"
+                    f"  server: {existing.server}"
+                ),
+                "hook_id": existing.id,
+            }
+        )
 
     # Circular dependency prevention (DAG check)
     if would_create_cycle(registry.hooks, trigger_tool, target_tool):
         cycle_path = find_cycle_path(registry.hooks, trigger_tool, target_tool)
         if cycle_path:
             cycle_str = " -> ".join(cycle_path)
-            return json.dumps({
-                "result": f"Error: registering this hook would create a cycle: {cycle_str}",
+            return json.dumps(
+                {
+                    "result": f"Error: registering this hook would create a cycle: {cycle_str}",
+                    "hook_id": None,
+                }
+            )
+        return json.dumps(
+            {
+                "result": (
+                    f"Error: registering hook {trigger_tool} -> {target_tool} "
+                    "would create a circular dependency."
+                ),
                 "hook_id": None,
-            })
-        return json.dumps({
-            "result": (
-                f"Error: registering hook {trigger_tool} -> {target_tool} "
-                "would create a circular dependency."
-            ),
-            "hook_id": None,
-        })
+            }
+        )
 
     # Generate next ID and create hook
     hook_id = registry.next_id()
@@ -153,10 +176,12 @@ def hooks_register(
     if feedback_tool is not None:
         lines.append(f"  feedback_tool: {feedback_tool}")
 
-    return json.dumps({
-        "result": "\n".join(lines),
-        "hook_id": hook_id,
-    })
+    return json.dumps(
+        {
+            "result": "\n".join(lines),
+            "hook_id": hook_id,
+        }
+    )
 
 
 def hooks_list(trigger_tool: str | None = None) -> str:
@@ -201,19 +226,23 @@ def hooks_unregister(hook_id: str) -> str:
     registry = storage.load()
 
     if not registry.find_by_id(hook_id):
-        return json.dumps({
-            "result": f"Hook {hook_id} not found — no changes made.",
-            "hook_id": hook_id,
-            "found": False,
-        })
+        return json.dumps(
+            {
+                "result": f"Hook {hook_id} not found — no changes made.",
+                "hook_id": hook_id,
+                "found": False,
+            }
+        )
 
     registry.remove_by_id(hook_id)
     target = storage.save(registry)
-    return json.dumps({
-        "result": f"Unregistered hook {hook_id} from {target}.",
-        "hook_id": hook_id,
-        "found": True,
-    })
+    return json.dumps(
+        {
+            "result": f"Unregistered hook {hook_id} from {target}.",
+            "hook_id": hook_id,
+            "found": True,
+        }
+    )
 
 
 # ── Registration ──────────────────────────────────────────────────────────────
@@ -226,7 +255,7 @@ def register(app: FastMCP) -> None:
         description=(
             "Register a hook that fires target_tool on a server when trigger_tool runs. "
             "param_mapping is a JSON string of key-value pairs supporting ${} template syntax "
-            "(e.g. '{\"path\": \"${result.path}\"}').  "
+            '(e.g. \'{"path": "${result.path}"}\').  '
             "blocking: if true, trigger waits for target to complete (default false). "
             "condition: optional expression to gate the hook. "
             "verification: if true, marks hook as a verification hook (always blocking). "

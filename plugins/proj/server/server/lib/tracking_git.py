@@ -3,21 +3,37 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from server.lib.models import ProjConfig, ProjectMeta
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from server.lib.models import ProjConfig, ProjectMeta
 
 
 def resolve_config(
-    cfg: ProjConfig, meta: ProjectMeta,
+    cfg: ProjConfig,
+    meta: ProjectMeta,
 ) -> tuple[bool, bool, str]:
     """Resolve effective (enabled, github_enabled, github_repo_format) from global + per-project.
 
     Per-project values of None fall through to global defaults.
     """
-    enabled = meta.git_tracking.enabled if meta.git_tracking.enabled is not None else cfg.git_tracking.enabled
-    github = meta.git_tracking.github_enabled if meta.git_tracking.github_enabled is not None else cfg.git_tracking.github_enabled
-    fmt = meta.git_tracking.github_repo_format if meta.git_tracking.github_repo_format is not None else cfg.git_tracking.github_repo_format
+    enabled = (
+        meta.git_tracking.enabled
+        if meta.git_tracking.enabled is not None
+        else cfg.git_tracking.enabled
+    )
+    github = (
+        meta.git_tracking.github_enabled
+        if meta.git_tracking.github_enabled is not None
+        else cfg.git_tracking.github_enabled
+    )
+    fmt = (
+        meta.git_tracking.github_repo_format
+        if meta.git_tracking.github_repo_format is not None
+        else cfg.git_tracking.github_repo_format
+    )
     return enabled, github, fmt
 
 
@@ -27,7 +43,11 @@ def _run(cmd: list[str], cwd: str | Path) -> tuple[int, str, str]:
     """
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=str(cwd), check=False,
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            check=False,
         )
         return result.returncode, result.stdout, result.stderr
     except (FileNotFoundError, subprocess.SubprocessError):
@@ -63,7 +83,7 @@ def tracking_commit(tracking_path: Path, message: str) -> str | None:
     if rc == 0:
         # No changes staged
         return None
-    rc, stdout, _ = _run(["git", "commit", "-m", message], tracking_path)
+    rc, _stdout, _ = _run(["git", "commit", "-m", message], tracking_path)
     if rc != 0:
         return None
     # Get the commit SHA

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import time
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import yaml
 
 from server.lib.backoff import exponential_backoff
-from server.lib.resilience import CircuitBreakerManager
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from server.lib.resilience import CircuitBreakerManager
 
 T = TypeVar("T")
 
@@ -19,10 +23,12 @@ class CircuitOpenError(Exception):
 
     def __init__(self, service: str) -> None:
         self.service = service
-        super().__init__(f"Circuit breaker OPEN for {service} — call skipped (graceful degradation)")
+        super().__init__(
+            f"Circuit breaker OPEN for {service} — call skipped (graceful degradation)"
+        )
 
 
-def retry_link(
+def retry_link[T](
     fn: Callable[[], T],
     *,
     max_retries: int = 3,
@@ -32,9 +38,12 @@ def retry_link(
     service: str | None = None,
 ) -> T:
     # If circuit breaker is active and circuit is open, skip the call
-    if circuit_breaker_manager is not None and service is not None:
-        if not circuit_breaker_manager.check(service):
-            raise CircuitOpenError(service)
+    if (
+        circuit_breaker_manager is not None
+        and service is not None
+        and not circuit_breaker_manager.check(service)
+    ):
+        raise CircuitOpenError(service)
 
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
@@ -69,7 +78,8 @@ def retry_link(
         f"retry_link exhausted {max_retries} retries: {last_exc}",
         stacklevel=2,
     )
-    assert last_exc is not None  # guaranteed: loop ran at least once
+    if last_exc is None:
+        raise RuntimeError("retry_link: loop body never executed")
     raise last_exc
 
 
@@ -83,6 +93,6 @@ def log_orphaned_resource(tracking_dir: str, context: dict[str, str]) -> None:
             raw = []
         if isinstance(raw, list):
             entries = raw
-    entries.append({**context, "timestamp": datetime.now(timezone.utc).isoformat()})
+    entries.append({**context, "timestamp": datetime.now(UTC).isoformat()})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.dump(entries, default_flow_style=False))

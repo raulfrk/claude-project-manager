@@ -204,13 +204,13 @@ class TestConcurrentWrites:
         def write_a() -> None:
             try:
                 storage.save_todos(tmp_cfg, "myapp", self._make_todos("A"))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(exc)
 
         def write_b() -> None:
             try:
                 storage.save_todos(tmp_cfg, "myapp", self._make_todos("B"))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(exc)
 
         t1 = threading.Thread(target=write_a)
@@ -235,7 +235,8 @@ class TestConcurrentWrites:
         assert len(parsed["todos"]) > 0, "At least one write must have persisted todos"
 
     def test_two_concurrent_writes_one_wins_completely(self, tmp_cfg: ProjConfig) -> None:
-        """After concurrent writes, file contains exactly one writer's complete data (no interleaving).
+        """After concurrent writes, file contains exactly one
+        writer's complete data (no interleaving).
 
         Because _write_yaml uses a single fixed .tmp path, two simultaneous writes
         may race: the loser's tmp.replace() will fail with FileNotFoundError after the
@@ -252,14 +253,14 @@ class TestConcurrentWrites:
             barrier.wait()
             try:
                 storage.save_todos(tmp_cfg, "myapp", self._make_todos("A", count=10))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(exc)
 
         def write_b() -> None:
             barrier.wait()
             try:
                 storage.save_todos(tmp_cfg, "myapp", self._make_todos("B", count=10))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(exc)
 
         t1 = threading.Thread(target=write_a)
@@ -302,7 +303,7 @@ class TestConcurrentWrites:
             for i in range(iterations):
                 try:
                     storage.save_todos(tmp_cfg, "myapp", self._make_todos(f"W{i}_", count=4))
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     write_errors.append(exc)
 
         def reader() -> None:
@@ -310,7 +311,7 @@ class TestConcurrentWrites:
                 try:
                     todos = storage.load_todos(tmp_cfg, "myapp")
                     read_results.append(todos)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     read_errors.append(exc)
 
         t_write = threading.Thread(target=writer)
@@ -384,13 +385,14 @@ class TestArchiveAndRemoveTodos:
                 raise OSError("simulated disk error on second rename")
             return original_replace(self, target)
 
-        with patch.object(Path, "replace", replace_side_effect):
-            with pytest.raises(OSError, match="simulated disk error"):
-                storage.archive_and_remove_todos(tmp_cfg, "myapp", remaining=[], to_archive=[todo])
+        with (
+            patch.object(Path, "replace", replace_side_effect),
+            pytest.raises(OSError, match="simulated disk error"),
+        ):
+            storage.archive_and_remove_todos(tmp_cfg, "myapp", remaining=[], to_archive=[todo])
 
         # Archive rename (call 1) succeeded — todo must be in archive.yaml
         archived = storage.load_archived_todos(tmp_cfg, "myapp")
         assert any(t.id == "42" for t in archived), (
             "Todo must be preserved in archive even when active-file rename fails"
         )
-

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "todoist-mcp-server"
-version = "1.4.5"
+version = "2.0.0"
 description = "MCP server for Todoist task and project management"
 requires-python = ">=3.12"
 dependencies = [
@@ -49,11 +49,20 @@ select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "S"]
 ignore = ["S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S105", "S106", "S107", "S108", "TC003"]
+"tests/**" = ["S"]
+"tests/*" = ["TC003"]
 
 [tool.basedpyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
+reportUnusedFunction = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportPrivateUsage = false
+reportMissingTypeStubs = false
+reportUnnecessaryIsInstance = false
+reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

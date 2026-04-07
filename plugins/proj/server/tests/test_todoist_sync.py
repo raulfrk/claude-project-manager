@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from pathlib import Path
 
@@ -16,7 +15,6 @@ from server.lib.models import (
     ProjectEntry,
     ProjectIndex,
     ProjectMeta,
-    ProjectTodoistConfig,
     RepoEntry,
     Todo,
     TodoistSync,
@@ -30,7 +28,6 @@ from server.tools.todoist_full_sync import (
     apply_changes,
     compute_diff,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -141,7 +138,6 @@ class TestHelpers:
         assert synced == "new desc"
 
 
-
 # ── Standalone function tests ────────────────────────────────────────────────
 
 
@@ -166,7 +162,9 @@ class TestComputeDiff:
         assert len(plan.push_create) == 1
         assert plan.push_create[0]["content"] == "Local only"
 
-    def test_push_create_includes_project_id(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_push_create_includes_project_id(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         """push_create entries include project_id when meta.todoist_project_id is set."""
         cfg, name = cfg_with_project
         todo = _make_todo(cfg, name, "Local todo with project")
@@ -176,7 +174,8 @@ class TestComputeDiff:
         assert plan.push_create[0]["project_id"] == "abc123"
 
     def test_push_create_omits_project_id_when_unset(
-        self, cfg_with_project: tuple[ProjConfig, str],
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
         """push_create entries omit project_id when meta.todoist_project_id is empty."""
         cfg, name = cfg_with_project
@@ -201,7 +200,8 @@ class TestPotentialLinks:
     """Tests for potential_links detection (todo 373.5)."""
 
     def test_matching_titles_detected_as_potential_link(
-        self, cfg_with_project: tuple[ProjConfig, str],
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
         """Unlinked local todo + Todoist task with similar title → potential_links."""
         cfg, name = cfg_with_project
@@ -218,7 +218,8 @@ class TestPotentialLinks:
         assert plan.push_create == []
 
     def test_dissimilar_titles_not_linked(
-        self, cfg_with_project: tuple[ProjConfig, str],
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
         """Unlinked local todo + Todoist task with dissimilar title → normal pull/push."""
         cfg, name = cfg_with_project
@@ -237,7 +238,8 @@ class TestTwoPhasePush:
     """Tests for two-phase push: roots first, then children (todo 374.6)."""
 
     def test_parent_in_phase1_child_in_phase2(
-        self, cfg_with_project: tuple[ProjConfig, str],
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
         """Unlinked parent → push_create; unlinked child → push_create_phase2."""
         cfg, name = cfg_with_project
@@ -263,11 +265,15 @@ class TestTwoPhasePush:
 class TestApplyChanges:
     def test_create_locally(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
-        data = ApplyInput(created_locally=[{
-            "title": "New",
-            "todoist_task_id": "t1",
-            "tags": [],
-        }])
+        data = ApplyInput(
+            created_locally=[
+                {
+                    "title": "New",
+                    "todoist_task_id": "t1",
+                    "tags": [],
+                }
+            ]
+        )
         counts = apply_changes(data, cfg, name)
         assert counts["created"] == 1
         todos = storage.load_todos(cfg, name)
@@ -306,5 +312,3 @@ class TestSyncPlan:
         d = plan.to_dict()
         assert d["summary"]["push_create_count"] == 1  # type: ignore[index]
         assert d["summary"]["pull_create_count"] == 0  # type: ignore[index]
-
-

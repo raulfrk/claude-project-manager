@@ -34,10 +34,13 @@ class TestGitMCPTools:
     async def test_detect_work_with_mock(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
-        with patch(
-            "server.tools.git._git_log",
-            return_value=["2026-01-01 abc1234 Fix bug (code)"],
-        ), patch("server.tools.git._active_branches", return_value=["main"]):
+        with (
+            patch(
+                "server.tools.git._git_log",
+                return_value=["2026-01-01 abc1234 Fix bug (code)"],
+            ),
+            patch("server.tools.git._active_branches", return_value=["main"]),
+        ):
             result = await call_tool(mcp_app, "git_detect_work", since_days=7)
         assert "Fix bug" in result
         assert "abc1234" in result
@@ -47,10 +50,13 @@ class TestGitMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         """Commits are returned as plain-text one-liners, not JSON objects."""
-        with patch(
-            "server.tools.git._git_log",
-            return_value=["2026-02-26 5af9a99 feat: initial skeleton (myapp)"],
-        ), patch("server.tools.git._active_branches", return_value=["main"]):
+        with (
+            patch(
+                "server.tools.git._git_log",
+                return_value=["2026-02-26 5af9a99 feat: initial skeleton (myapp)"],
+            ),
+            patch("server.tools.git._active_branches", return_value=["main"]),
+        ):
             result = await call_tool(mcp_app, "git_detect_work", since_days=7)
         # One-liner format: YYYY-MM-DD sha8 subject (repo)
         assert "2026-02-26 5af9a99 feat: initial skeleton (myapp)" in result
@@ -96,6 +102,7 @@ class TestGitMCPTools:
         meta.git_enabled = False
         storage.save_meta(cfg, meta)
         import json
+
         result = await call_tool(mcp_app, "proj_git_reconcile_todos")
         data = json.loads(result)
         assert data["git_enabled"] is False
@@ -105,10 +112,14 @@ class TestGitMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         import json
-        with patch(
-            "server.tools.git._git_log",
-            return_value=["2026-01-15 aaaaaaaa Add feature X (code)"],
-        ), patch("server.tools.git._active_branches", return_value=["main", "feat/x"]):
+
+        with (
+            patch(
+                "server.tools.git._git_log",
+                return_value=["2026-01-15 aaaaaaaa Add feature X (code)"],
+            ),
+            patch("server.tools.git._active_branches", return_value=["main", "feat/x"]),
+        ):
             result = await call_tool(mcp_app, "proj_git_reconcile_todos", since_days=7)
         data = json.loads(result)
         assert data["git_enabled"] is True
@@ -121,7 +132,9 @@ class TestGitMCPTools:
         assert suggestion["date"] == "2026-01-15"
         assert suggestion["repo"] == "code"
 
-    async def test_git_reconcile_todos_no_active_project(self, mcp_app: Any, cfg: ProjConfig) -> None:
+    async def test_git_reconcile_todos_no_active_project(
+        self, mcp_app: Any, cfg: ProjConfig
+    ) -> None:
         result = await call_tool(mcp_app, "proj_git_reconcile_todos")
         assert "No active project" in result
 

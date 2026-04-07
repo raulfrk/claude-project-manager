@@ -10,12 +10,10 @@ import pytest
 from server.lib.models import GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta
 from server.lib.tracking_git import (
     ensure_git_repo,
-    ensure_remote,
     is_git_repo,
     resolve_config,
     resolve_repo_name,
     tracking_commit,
-    tracking_push,
 )
 
 
@@ -95,14 +93,21 @@ class TestTrackingCommit:
         tracking_commit(target, "my custom message")
         result = subprocess.run(
             ["git", "log", "--oneline", "-1"],
-            cwd=target, capture_output=True, text=True, check=True,
+            cwd=target,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         assert "my custom message" in result.stdout
 
 
 class TestResolveConfig:
     def test_global_defaults_when_no_overrides(self) -> None:
-        cfg = ProjConfig(git_tracking=GitTracking(enabled=True, github_enabled=True, github_repo_format="tracking-{project-name}"))
+        cfg = ProjConfig(
+            git_tracking=GitTracking(
+                enabled=True, github_enabled=True, github_repo_format="tracking-{project-name}"
+            )
+        )
         meta = ProjectMeta(name="test")
         enabled, github, fmt = resolve_config(cfg, meta)
         assert enabled is True
@@ -110,16 +115,26 @@ class TestResolveConfig:
         assert fmt == "tracking-{project-name}"
 
     def test_per_project_overrides_global(self) -> None:
-        cfg = ProjConfig(git_tracking=GitTracking(enabled=True, github_enabled=True, github_repo_format="tracking-{project-name}"))
+        cfg = ProjConfig(
+            git_tracking=GitTracking(
+                enabled=True, github_enabled=True, github_repo_format="tracking-{project-name}"
+            )
+        )
         meta = ProjectMeta(name="test")
-        meta.git_tracking = ProjectGitTrackingConfig(enabled=False, github_enabled=False, github_repo_format="custom-{project-name}")
+        meta.git_tracking = ProjectGitTrackingConfig(
+            enabled=False, github_enabled=False, github_repo_format="custom-{project-name}"
+        )
         enabled, github, fmt = resolve_config(cfg, meta)
         assert enabled is False
         assert github is False
         assert fmt == "custom-{project-name}"
 
     def test_partial_override(self) -> None:
-        cfg = ProjConfig(git_tracking=GitTracking(enabled=True, github_enabled=False, github_repo_format="tracking-{project-name}"))
+        cfg = ProjConfig(
+            git_tracking=GitTracking(
+                enabled=True, github_enabled=False, github_repo_format="tracking-{project-name}"
+            )
+        )
         meta = ProjectMeta(name="test")
         meta.git_tracking = ProjectGitTrackingConfig(github_enabled=True)  # only override github
         enabled, github, fmt = resolve_config(cfg, meta)

@@ -33,7 +33,7 @@ _port_counter = 19200 + _worker_num * 10
 
 
 def _next_port() -> int:
-    global _port_counter  # noqa: PLW0603
+    global _port_counter
     with _port_counter_lock:
         port = _port_counter
         _port_counter += 1
@@ -64,10 +64,14 @@ def _wait_for_health(port: int, *, timeout: float = 15.0) -> None:
 
 
 _PROXY_VARS = (
-    "ALL_PROXY", "all_proxy",
-    "HTTP_PROXY", "http_proxy",
-    "HTTPS_PROXY", "https_proxy",
-    "SOCKS_PROXY", "socks_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "SOCKS_PROXY",
+    "socks_proxy",
 )
 
 
@@ -126,9 +130,7 @@ class TestE2EHookFire:
     """End-to-end tests firing hooks to a real perms server via HTTP."""
 
     @pytest.mark.asyncio
-    async def test_blocking_hook_returns_result(
-        self, sandbox_port: int, tmp_path: Path
-    ):
+    async def test_blocking_hook_returns_result(self, sandbox_port: int, tmp_path: Path):
         """Blocking hook → sandbox_list → result included in response."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"
@@ -200,9 +202,7 @@ class TestE2EHookFire:
         assert failures[0]["hook_id"] == "e2e-002"
 
     @pytest.mark.asyncio
-    async def test_nonblocking_returns_immediately(
-        self, sandbox_port: int, tmp_path: Path
-    ):
+    async def test_nonblocking_returns_immediately(self, sandbox_port: int, tmp_path: Path):
         """Non-blocking hook → hooks_fire returns immediately, results empty."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"
@@ -235,9 +235,7 @@ class TestE2EHookFire:
         assert data["errors"] == []
 
     @pytest.mark.asyncio
-    async def test_unknown_tool_returns_error(
-        self, sandbox_port: int, tmp_path: Path
-    ):
+    async def test_unknown_tool_returns_error(self, sandbox_port: int, tmp_path: Path):
         """Hook targeting non-existent tool → 404 error captured."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"
@@ -274,9 +272,7 @@ class TestE2EHookFire:
         assert "Unknown tool" in failures[0]["error"]
 
     @pytest.mark.asyncio
-    async def test_blocking_with_param_mapping(
-        self, sandbox_port: int, tmp_path: Path
-    ):
+    async def test_blocking_with_param_mapping(self, sandbox_port: int, tmp_path: Path):
         """Blocking hook with param_mapping resolves templates from source_result."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"
@@ -313,9 +309,7 @@ class TestE2EHookFire:
         assert data["results"][0]["result"] is not None
 
     @pytest.mark.asyncio
-    async def test_multiple_hooks_same_trigger(
-        self, sandbox_port: int, tmp_path: Path
-    ):
+    async def test_multiple_hooks_same_trigger(self, sandbox_port: int, tmp_path: Path):
         """Multiple hooks for the same trigger all fire correctly."""
         hooks_yaml = tmp_path / "hooks.yaml"
         failures_yaml = tmp_path / "failures.yaml"

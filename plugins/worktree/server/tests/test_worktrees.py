@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from server.lib import storage
-from server.lib.git import GitConflictError, GitError
+from server.lib.git import GitError
 from server.lib.models import BaseRepo, WorktreeConfig, WorktreeEntry
 from server.tools.worktrees import (
     create_worktree,
@@ -114,6 +114,52 @@ class TestCreateWorktree:
         data = json.loads(result)
         assert "Error" in data["result"]
         assert data["worktree_path"] is None
+
+    def test_reset_and_clean_called_after_create(self, real_git_repo: Path) -> None:
+        """reset_hard and clean_untracked are called after worktree creation."""
+        with (
+            patch("server.tools.worktrees.git.reset_hard") as mock_reset,
+            patch("server.tools.worktrees.git.clean_untracked") as mock_clean,
+        ):
+            result = create_worktree("myapp", "feature/clean")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert "Warnings" not in data["result"]
+        mock_reset.assert_called_once_with(data["worktree_path"])
+        mock_clean.assert_called_once_with(data["worktree_path"])
+
+    def test_reset_failure_warns(self, real_git_repo: Path) -> None:
+        """reset_hard failure produces a warning but still succeeds."""
+        with patch("server.tools.worktrees.git.reset_hard", side_effect=GitError("reset boom")):
+            result = create_worktree("myapp", "feature/reset-warn")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert "git reset --hard failed: reset boom" in data["result"]
+        assert data["worktree_path"] is not None
+
+    def test_clean_failure_warns(self, real_git_repo: Path) -> None:
+        """clean_untracked failure produces a warning but still succeeds."""
+        with patch(
+            "server.tools.worktrees.git.clean_untracked", side_effect=GitError("clean boom")
+        ):
+            result = create_worktree("myapp", "feature/clean-warn")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert "git clean -fd failed: clean boom" in data["result"]
+        assert data["worktree_path"] is not None
+
+    def test_both_reset_and_clean_fail_still_succeeds(self, real_git_repo: Path) -> None:
+        """Both reset_hard and clean_untracked fail -> warnings but success."""
+        with (
+            patch("server.tools.worktrees.git.reset_hard", side_effect=GitError("reset fail")),
+            patch("server.tools.worktrees.git.clean_untracked", side_effect=GitError("clean fail")),
+        ):
+            result = create_worktree("myapp", "feature/both-fail")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert "git reset --hard failed: reset fail" in data["result"]
+        assert "git clean -fd failed: clean fail" in data["result"]
+        assert data["worktree_path"] is not None
 
 
 class TestListWorktrees:
@@ -283,7 +329,9 @@ class TestMergeWorktree:
         _git(Path(wt_path), "commit", "-m", "add newfile")
 
         # Mock: rebase succeeds, but ff-only merge fails
-        with patch("server.tools.worktrees.git.merge_ff_only", side_effect=GitError("not a fast-forward")):
+        with patch(
+            "server.tools.worktrees.git.merge_ff_only", side_effect=GitError("not a fast-forward")
+        ):
             result = merge_worktree(wt_path, base_branch="main")
         data = json.loads(result)
         assert data["result"] == "ff_only_failed"
@@ -351,4 +399,3 @@ class TestMergeWorktree:
         data = json.loads(result)
         assert data["result"] == "error"
         assert "Cannot determine default branch" in data["message"]
-

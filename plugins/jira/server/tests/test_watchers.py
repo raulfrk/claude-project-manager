@@ -20,9 +20,7 @@ def watcher_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetWatchers:
-    def test_fetches_watchers(
-        self, mock_jira_client: MagicMock, watcher_tools: dict
-    ) -> None:
+    def test_fetches_watchers(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
         data = {"watchCount": 2, "watchers": [{"name": "alice"}, {"name": "bob"}]}
         mock_jira_client.get.return_value = data
 
@@ -33,9 +31,7 @@ class TestJiraGetWatchers:
 
 
 class TestJiraAddWatcher:
-    def test_adds_watcher(
-        self, mock_jira_client: MagicMock, watcher_tools: dict
-    ) -> None:
+    def test_adds_watcher(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
         mock_jira_client.post.return_value = None
 
         result = watcher_tools["jira_add_watcher"](issue_key="PROJ-42", username="alice")
@@ -47,9 +43,7 @@ class TestJiraAddWatcher:
 
 
 class TestJiraRemoveWatcher:
-    def test_removes_watcher(
-        self, mock_jira_client: MagicMock, watcher_tools: dict
-    ) -> None:
+    def test_removes_watcher(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
         mock_jira_client.delete.return_value = None
 
         result = watcher_tools["jira_remove_watcher"](issue_key="PROJ-42", username="alice")

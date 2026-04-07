@@ -1,8 +1,15 @@
 """Trello board tools."""
+
 from __future__ import annotations
+
 import json
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
+
 from server.lib.client import get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
 
 def register(app: FastMCP) -> None:
     @app.tool(description="List all boards for the authenticated user.")
@@ -12,7 +19,8 @@ def register(app: FastMCP) -> None:
         boards = raw if isinstance(raw, list) else []
         if client._config.allowed_board_ids:
             boards = [
-                b for b in boards
+                b
+                for b in boards
                 if isinstance(b, dict) and b.get("id") in client._config.allowed_board_ids
             ]
         return json.dumps(boards)
@@ -34,4 +42,3 @@ def register(app: FastMCP) -> None:
             params["desc"] = desc
         board = client.put(f"/boards/{board_id}", params=params)
         return json.dumps(board)
-

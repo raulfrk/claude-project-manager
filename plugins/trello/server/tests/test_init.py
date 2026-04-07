@@ -33,8 +33,10 @@ class TestTrelloInitSuccess:
         config_mod._cached_config = MagicMock()
         client_mod._cached_client = MagicMock()
 
-        with patch("server.tools.init.httpx.get", return_value=mock_resp) as mock_get, \
-             patch("server.tools.init.Path.expanduser", return_value=config_path):
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp) as mock_get,
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
             result = init_tools["trello_init"](
                 api_key="mykey",
                 token="mytoken",
@@ -56,6 +58,7 @@ class TestTrelloInitSuccess:
 
         # Verify config was written
         import yaml
+
         with config_path.open() as f:
             written = yaml.safe_load(f)
         assert written["api_key"] == "mykey"
@@ -94,8 +97,10 @@ class TestTrelloInitCacheClearing:
         config_mod._cached_config = MagicMock()
         client_mod._cached_client = MagicMock()
 
-        with patch("server.tools.init.httpx.get", return_value=mock_resp), \
-             patch("server.tools.init.Path.expanduser", return_value=config_path):
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp),
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
             init_tools["trello_init"](api_key="k", token="t")
 
         assert config_mod._cached_config is None

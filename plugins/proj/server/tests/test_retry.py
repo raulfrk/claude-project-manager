@@ -9,7 +9,6 @@ import yaml
 
 from server.lib.retry import log_orphaned_resource, retry_link
 
-
 # ---------------------------------------------------------------------------
 # retry_link
 # ---------------------------------------------------------------------------
@@ -90,9 +89,7 @@ class TestLogOrphanedResource:
     def test_appends_to_existing_file(self, tmp_path: Path):
         log_orphaned_resource(str(tmp_path), {"external_id": "a", "error": "e1"})
         log_orphaned_resource(str(tmp_path), {"external_id": "b", "error": "e2"})
-        entries = yaml.safe_load(
-            (tmp_path / ".orphaned-resources.yaml").read_text()
-        )
+        entries = yaml.safe_load((tmp_path / ".orphaned-resources.yaml").read_text())
         assert len(entries) == 2
         assert entries[0]["external_id"] == "a"
         assert entries[1]["external_id"] == "b"
@@ -107,7 +104,5 @@ class TestLogOrphanedResource:
 
     def test_creates_parent_dirs(self, tmp_path: Path):
         nested = tmp_path / "a" / "b" / "c"
-        log_orphaned_resource(
-            str(nested), {"external_id": "z", "error": "missing"}
-        )
+        log_orphaned_resource(str(nested), {"external_id": "z", "error": "missing"})
         assert (nested / ".orphaned-resources.yaml").exists()

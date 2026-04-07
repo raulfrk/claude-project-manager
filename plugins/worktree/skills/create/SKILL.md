@@ -17,7 +17,7 @@ Create a git worktree. Arguments: $ARGUMENTS (optional — repo label and/or bra
 **3.** Call `mcp__plugin_worktree_worktree__wt_create` with the provided values.
    If it returns an error, display the error message and stop.
 **4.** Call `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` with the new worktree path to grant read/edit permissions.
-   (If the perms server is unavailable, skip and continue.)
+   (If the sandbox server is unavailable, skip and continue.)
 **5.** Show the created worktree path and confirm success.
 
 ## Prerequisites
@@ -29,7 +29,7 @@ Create a git worktree. Arguments: $ARGUMENTS (optional — repo label and/or bra
 
 - **No repos configured**: displays "No repos configured. Run `/worktree:add-repo` to register one." and stops.
 - **Create error**: displays error from `wt_create` and stops.
-- **Perms server unavailable**: skips permission grant and continues.
+- **Sandbox server unavailable**: skips permission grant and continues.
 - **Missing arguments**: asks interactively for repo, branch, new branch flag, and path.
 
 ## Output

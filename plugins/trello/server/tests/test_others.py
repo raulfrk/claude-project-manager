@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
-
 from server.tools.attachments import register as register_attachments
 from server.tools.checklists import register as register_checklists
 from server.tools.comments import register as register_comments
@@ -108,9 +106,7 @@ class TestUpdateComment:
 
         result = tools["update_comment"]("a1", "Edited")
 
-        mock_trello_client.put.assert_called_once_with(
-            "/actions/a1", params={"text": "Edited"}
-        )
+        mock_trello_client.put.assert_called_once_with("/actions/a1", params={"text": "Edited"})
         assert json.loads(result) == updated
 
 

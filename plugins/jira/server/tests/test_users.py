@@ -20,9 +20,7 @@ def user_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraSearchUsers:
-    def test_returns_matching_users(
-        self, mock_jira_client: MagicMock, user_tools: dict
-    ) -> None:
+    def test_returns_matching_users(self, mock_jira_client: MagicMock, user_tools: dict) -> None:
         users = [{"key": "alice", "displayName": "Alice Smith"}]
         mock_jira_client.get.return_value = users
 
@@ -34,9 +32,7 @@ class TestJiraSearchUsers:
         )
         assert json.loads(result) == users
 
-    def test_custom_max_results(
-        self, mock_jira_client: MagicMock, user_tools: dict
-    ) -> None:
+    def test_custom_max_results(self, mock_jira_client: MagicMock, user_tools: dict) -> None:
         mock_jira_client.get.return_value = []
 
         user_tools["jira_search_users"](query="bob", max_results=10)

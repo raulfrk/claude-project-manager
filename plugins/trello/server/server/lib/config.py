@@ -32,7 +32,7 @@ def load_config() -> TrelloConfig:
     3. TRELLO_API_KEY and TRELLO_TOKEN env vars
     4. Raise an error with setup instructions
     """
-    global _cached_config  # noqa: PLW0603
+    global _cached_config
     if _cached_config is not None:
         return _cached_config
 

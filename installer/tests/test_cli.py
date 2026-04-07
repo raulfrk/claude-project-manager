@@ -1,0 +1,90 @@
+"""Tests for installer.cli — argument parsing."""
+
+from __future__ import annotations
+
+import pytest
+
+from installer.cli import build_parser
+
+
+class TestBuildParser:
+    """Tests for build_parser()."""
+
+    def test_default_flags(self):
+        """No flags produces default namespace."""
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.update is False
+        assert args.reinstall is False
+        assert args.uninstall is False
+        assert args.full_cleanup is False
+        assert args.plugins is None
+        assert args.skip_wizard is False
+        assert args.verbose is False
+
+    def test_update_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--update"])
+        assert args.update is True
+        assert args.reinstall is False
+        assert args.uninstall is False
+
+    def test_reinstall_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--reinstall"])
+        assert args.reinstall is True
+        assert args.update is False
+
+    def test_uninstall_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--uninstall"])
+        assert args.uninstall is True
+
+    def test_mutual_exclusion_update_reinstall(self):
+        """--update and --reinstall cannot be combined."""
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--update", "--reinstall"])
+
+    def test_mutual_exclusion_update_uninstall(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--update", "--uninstall"])
+
+    def test_mutual_exclusion_reinstall_uninstall(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--reinstall", "--uninstall"])
+
+    def test_full_cleanup_standalone(self):
+        """--full-cleanup alone is valid (main.py implies --uninstall)."""
+        parser = build_parser()
+        args = parser.parse_args(["--full-cleanup"])
+        assert args.full_cleanup is True
+        assert args.uninstall is False  # main.py sets this later
+
+    def test_plugins_single(self):
+        parser = build_parser()
+        args = parser.parse_args(["--plugins", "proj"])
+        assert args.plugins == ["proj"]
+
+    def test_plugins_multiple(self):
+        parser = build_parser()
+        args = parser.parse_args(["--plugins", "proj", "worktree", "sandbox"])
+        assert args.plugins == ["proj", "worktree", "sandbox"]
+
+    def test_skip_wizard(self):
+        parser = build_parser()
+        args = parser.parse_args(["--skip-wizard"])
+        assert args.skip_wizard is True
+
+    def test_verbose(self):
+        parser = build_parser()
+        args = parser.parse_args(["--verbose"])
+        assert args.verbose is True
+
+    def test_version_exits(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--version"])
+        assert exc_info.value.code == 0

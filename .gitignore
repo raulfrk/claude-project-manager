@@ -9,3 +9,9 @@ pytest-of-*/
 /.mcp.json
 !plugins/**/.mcp.json
 .claude/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+.basedpyright/
+.uv-cache/

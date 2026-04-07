@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import yaml
 
@@ -45,11 +44,13 @@ class TestCircuitBreakerDataclass:
         assert cb.last_status_code is None
 
     def test_from_dict_with_error_fields(self):
-        cb = CircuitBreaker.from_dict({
-            "service": "todoist",
-            "last_error": "rate limited",
-            "last_status_code": 429,
-        })
+        cb = CircuitBreaker.from_dict(
+            {
+                "service": "todoist",
+                "last_error": "rate limited",
+                "last_status_code": 429,
+            }
+        )
         assert cb.last_error == "rate limited"
         assert cb.last_status_code == 429
 
@@ -96,7 +97,7 @@ class TestCircuitBreakerManager:
         assert mgr.check("todoist") is False  # OPEN
 
         # Simulate time passing beyond recovery_timeout
-        past = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+        past = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
         mgr._breakers["todoist"].opened_at = past
         mgr._save()
 
@@ -107,9 +108,7 @@ class TestCircuitBreakerManager:
         mgr = CircuitBreakerManager(tmp_path, failure_threshold=1, recovery_timeout=0)
         mgr.record_failure("todoist", "error")
         # Force transition to HALF_OPEN
-        mgr._breakers["todoist"].opened_at = (
-            datetime.now(timezone.utc) - timedelta(seconds=10)
-        ).isoformat()
+        mgr._breakers["todoist"].opened_at = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
         mgr._save()
         mgr.check("todoist")  # transitions to HALF_OPEN
 
@@ -121,9 +120,7 @@ class TestCircuitBreakerManager:
         mgr = CircuitBreakerManager(tmp_path, failure_threshold=1, recovery_timeout=0)
         mgr.record_failure("todoist", "error")
         # Force transition to HALF_OPEN
-        mgr._breakers["todoist"].opened_at = (
-            datetime.now(timezone.utc) - timedelta(seconds=10)
-        ).isoformat()
+        mgr._breakers["todoist"].opened_at = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
         mgr._save()
         mgr.check("todoist")  # transitions to HALF_OPEN
         assert mgr._breakers["todoist"].state == "HALF_OPEN"

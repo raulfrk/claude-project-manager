@@ -75,7 +75,6 @@ class TestConfigMCPTools:
         assert "Invalid projects_base_dir" in result
 
 
-
 @pytest.mark.asyncio
 class TestProjectsMCPTools:
     async def test_proj_init(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
@@ -101,7 +100,9 @@ class TestProjectsMCPTools:
     ) -> None:
         result = await call_tool(mcp_app, "proj_init", name="newapp")
         data = _json.loads(result)
-        assert "No path provided" in data.get("error", "") or "projects_base_dir" in data.get("error", "")
+        assert "No path provided" in data.get("error", "") or "projects_base_dir" in data.get(
+            "error", ""
+        )
 
     async def test_proj_list(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         result = await call_tool(mcp_app, "proj_list")
@@ -190,13 +191,19 @@ class TestMultiDirInit:
         assert meta.repos[0].label == "code"
         assert meta.repos[1].label == "docs"
 
-    async def test_proj_init_dirs_and_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_proj_init_dirs_and_path_rejects(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         dirs = [{"path": str(tmp_path / "src"), "label": "code"}]
         result = await call_tool(mcp_app, "proj_init", name="bad", path=str(tmp_path), dirs=dirs)
         data = _json.loads(result)
-        assert "either" in data.get("error", "").lower() or "not both" in data.get("error", "").lower()
+        assert (
+            "either" in data.get("error", "").lower() or "not both" in data.get("error", "").lower()
+        )
 
-    async def test_proj_init_dirs_duplicate_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_proj_init_dirs_duplicate_label_rejects(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         dirs = [
             {"path": str(tmp_path / "a"), "label": "code"},
             {"path": str(tmp_path / "b"), "label": "code"},
@@ -205,19 +212,25 @@ class TestMultiDirInit:
         data = _json.loads(result)
         assert "Duplicate label" in data.get("error", "")
 
-    async def test_proj_init_dirs_missing_path_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_proj_init_dirs_missing_path_rejects(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         dirs = [{"path": "", "label": "code"}]
         result = await call_tool(mcp_app, "proj_init", name="nopath", dirs=dirs)
         data = _json.loads(result)
         assert "path" in data.get("error", "").lower()
 
-    async def test_proj_init_dirs_missing_label_rejects(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_proj_init_dirs_missing_label_rejects(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         dirs = [{"path": str(tmp_path), "label": ""}]
         result = await call_tool(mcp_app, "proj_init", name="nolabel", dirs=dirs)
         data = _json.loads(result)
         assert "label" in data.get("error", "").lower()
 
-    async def test_proj_init_legacy_path_still_works(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+    async def test_proj_init_legacy_path_still_works(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
         result = await call_tool(mcp_app, "proj_init", name="legacy", path=str(tmp_path))
         data = _json.loads(result)
         assert data.get("project_name") == "legacy"
@@ -279,7 +292,11 @@ class TestTodosMCPTools:
         result = await call_tool(mcp_app, "todo_check_executable", todo_id="1")
         # todo_check_executable returns JSON with error field for manual-tagged todos
         data = _json.loads(result)
-        assert "error" in data or "⚠️" in data.get("error", "") or "manual" in data.get("error", "").lower()
+        assert (
+            "error" in data
+            or "⚠️" in data.get("error", "")
+            or "manual" in data.get("error", "").lower()
+        )
 
     async def test_todo_check_executable_returns_todo_for_multi_tag_without_manual(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -462,9 +479,7 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Research me")
-        result = await call_tool(
-            mcp_app, "todo_set_content_flag", todo_id="1", has_research=True
-        )
+        result = await call_tool(mcp_app, "todo_set_content_flag", todo_id="1", has_research=True)
         data = _json.loads(result)
         assert data.get("todo_id") == "1"
         todos = storage.load_todos(project[0], "myapp")
@@ -677,7 +692,9 @@ class TestTodosMCPTools:
 
 @pytest.mark.asyncio
 class TestTodoUncomplete:
-    async def test_uncomplete_done_todo(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+    async def test_uncomplete_done_todo(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = project
         # Add a parent so completing child keeps it in active (not archived)
         await call_tool(mcp_app, "todo_add", title="Parent")
@@ -694,14 +711,18 @@ class TestTodoUncomplete:
         status = child.status.value if hasattr(child.status, "value") else child.status
         assert status == "pending"
 
-    async def test_uncomplete_pending_todo_returns_error(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+    async def test_uncomplete_pending_todo_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
         await call_tool(mcp_app, "todo_add", title="Pending task")
         result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1")
         data = _json.loads(result)
         assert "error" in data
         assert "not completed" in data["error"]
 
-    async def test_uncomplete_nonexistent_todo_returns_error(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+    async def test_uncomplete_nonexistent_todo_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
         result = await call_tool(mcp_app, "todo_uncomplete", todo_id="999")
         data = _json.loads(result)
         assert "error" in data
@@ -710,7 +731,9 @@ class TestTodoUncomplete:
 
 @pytest.mark.asyncio
 class TestNotFoundResponses:
-    async def test_todo_update_not_found(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
+    async def test_todo_update_not_found(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
         result = await call_tool(mcp_app, "todo_update", todo_id="nonexistent-999")
         data = _json.loads(result)
         assert data["status"] == "not_found"
@@ -718,7 +741,9 @@ class TestNotFoundResponses:
 
     async def test_proj_update_meta_not_found(self, mcp_app: Any, cfg: ProjConfig) -> None:
         state.set_session_active("nonexistent-project")
-        result = await call_tool(mcp_app, "proj_update_meta", name="nonexistent-project", status="active")
+        result = await call_tool(
+            mcp_app, "proj_update_meta", name="nonexistent-project", status="active"
+        )
         data = _json.loads(result)
         assert data["status"] == "not_found"
 
@@ -729,9 +754,7 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_requirements", todo_id="1", content="# Goals\nDo X"
-        )
+        await call_tool(mcp_app, "content_set_requirements", todo_id="1", content="# Goals\nDo X")
         result = await call_tool(mcp_app, "content_get_requirements", todo_id="1")
         assert "Do X" in result
 
@@ -755,12 +778,8 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_requirements", todo_id="1", content="Short content"
-        )
-        result = await call_tool(
-            mcp_app, "content_get_requirements", todo_id="1", max_chars=4000
-        )
+        await call_tool(mcp_app, "content_set_requirements", todo_id="1", content="Short content")
+        result = await call_tool(mcp_app, "content_get_requirements", todo_id="1", max_chars=4000)
         assert "Short content" in result
         assert "truncated" not in result
 
@@ -768,12 +787,8 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_requirements", todo_id="1", content="A" * 100
-        )
-        result = await call_tool(
-            mcp_app, "content_get_requirements", todo_id="1", max_chars=50
-        )
+        await call_tool(mcp_app, "content_set_requirements", todo_id="1", content="A" * 100)
+        result = await call_tool(mcp_app, "content_get_requirements", todo_id="1", max_chars=50)
         assert "A" * 50 in result
         assert "truncated" in result
         assert "50 chars omitted" in result
@@ -783,12 +798,8 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_research", todo_id="1", content="Short research"
-        )
-        result = await call_tool(
-            mcp_app, "content_get_research", todo_id="1", max_chars=4000
-        )
+        await call_tool(mcp_app, "content_set_research", todo_id="1", content="Short research")
+        result = await call_tool(mcp_app, "content_get_research", todo_id="1", max_chars=4000)
         assert "Short research" in result
         assert "truncated" not in result
 
@@ -796,12 +807,8 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_research", todo_id="1", content="B" * 100
-        )
-        result = await call_tool(
-            mcp_app, "content_get_research", todo_id="1", max_chars=50
-        )
+        await call_tool(mcp_app, "content_set_research", todo_id="1", content="B" * 100)
+        result = await call_tool(mcp_app, "content_get_research", todo_id="1", max_chars=50)
         assert "B" * 50 in result
         assert "truncated" in result
         assert "50 chars omitted" in result
@@ -813,9 +820,7 @@ class TestContentMCPTools:
         content = "Some content"
         await call_tool(mcp_app, "todo_add", title="Task")
         await call_tool(mcp_app, "content_set_requirements", todo_id="1", content=content)
-        result = await call_tool(
-            mcp_app, "content_get_requirements", todo_id="1", max_chars=0
-        )
+        result = await call_tool(mcp_app, "content_get_requirements", todo_id="1", max_chars=0)
         assert "truncated" in result
         assert f"{len(content)} chars omitted" in result
 
@@ -823,12 +828,8 @@ class TestContentMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Task")
-        await call_tool(
-            mcp_app, "content_set_requirements", todo_id="1", content="C" * 10
-        )
-        result = await call_tool(
-            mcp_app, "content_get_requirements", todo_id="1", max_chars=999999
-        )
+        await call_tool(mcp_app, "content_set_requirements", todo_id="1", content="C" * 10)
+        result = await call_tool(mcp_app, "content_get_requirements", todo_id="1", max_chars=999999)
         assert "CCCCCCCCCC" in result
         assert "truncated" not in result
 
@@ -1116,7 +1117,9 @@ class TestTodoTreeMerge:
         """A todo with a missing parent appears under __orphaned__ synthetic root."""
         cfg, name = project
         # Inject a todo with a dangling parent reference directly via storage
-        orphan = Todo(id="99", title="Lost Child", parent="999", created="2026-01-01", updated="2026-01-01")
+        orphan = Todo(
+            id="99", title="Lost Child", parent="999", created="2026-01-01", updated="2026-01-01"
+        )
         storage.save_todos(cfg, name, [orphan])
         result = await call_tool(mcp_app, "todo_tree", include_done=True)
         data = _json.loads(result)
@@ -1132,7 +1135,14 @@ class TestTodoTreeMerge:
     ) -> None:
         """A done orphaned todo is excluded when include_done=False."""
         cfg, name = project
-        orphan = Todo(id="99", title="Done Orphan", parent="999", status="done", created="2026-01-01", updated="2026-01-01")
+        orphan = Todo(
+            id="99",
+            title="Done Orphan",
+            parent="999",
+            status="done",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
         storage.save_todos(cfg, name, [orphan])
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)

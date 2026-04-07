@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +14,6 @@ from server.lib.models import (
     ProjConfig,
     ProjectDates,
     ProjectEntry,
-    ProjectIndex,
     ProjectMeta,
     RepoEntry,
     Todo,
@@ -56,7 +54,13 @@ def _setup_project_with_todos(
     storage.save_index(cfg, index)
 
 
-def _make_todo(tid: str, title: str, parent: str | None = None, children: list[str] | None = None, created: str = "2026-01-01") -> Todo:
+def _make_todo(
+    tid: str,
+    title: str,
+    parent: str | None = None,
+    children: list[str] | None = None,
+    created: str = "2026-01-01",
+) -> Todo:
     return Todo(
         id=tid,
         title=title,
@@ -439,9 +443,14 @@ class TestMigrateRollbackAndInterrupt:
         _setup_project_with_todos(cfg, "fail_backup", todos)
         original_text = storage.todos_path(cfg, "fail_backup").read_text()
 
-        with patch("server.tools.migrate.shutil.copy2", side_effect=OSError("disk full")):
-            with pytest.raises(OSError, match="disk full"):
-                _migrate_project(cfg, "fail_backup", dry_run=False)
+        with (
+            patch(
+                "server.tools.migrate.shutil.copy2",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            _migrate_project(cfg, "fail_backup", dry_run=False)
 
         # todos.yaml must be unchanged
         assert storage.todos_path(cfg, "fail_backup").read_text() == original_text
@@ -463,9 +472,11 @@ class TestMigrateRollbackAndInterrupt:
 
         boom = OSError("rename permission denied")
 
-        with patch.object(storage, "rename_todo_dir", side_effect=boom):
-            with pytest.raises(OSError, match="rename permission denied"):
-                _migrate_project(cfg, "fail_rename", dry_run=False)
+        with (
+            patch.object(storage, "rename_todo_dir", side_effect=boom),
+            pytest.raises(OSError, match="rename permission denied"),
+        ):
+            _migrate_project(cfg, "fail_rename", dry_run=False)
 
     def test_backup_created_before_rename_and_save(self, cfg: ProjConfig) -> None:
         """The .bak-* file must exist at the moment rename_todo_dir is first called."""
@@ -511,9 +522,15 @@ class TestMigrateRollbackAndInterrupt:
                 raise OSError("second rename failed")
             return original_rename(c, p, old, new)
 
-        with patch.object(storage, "rename_todo_dir", side_effect=fail_on_second):
-            with pytest.raises(OSError, match="second rename failed"):
-                _migrate_project(cfg, "partial_fail", dry_run=False)
+        with (
+            patch.object(
+                storage,
+                "rename_todo_dir",
+                side_effect=fail_on_second,
+            ),
+            pytest.raises(OSError, match="second rename failed"),
+        ):
+            _migrate_project(cfg, "partial_fail", dry_run=False)
 
         # Backup must still exist so the user can restore
         bak_files = list(proj_dir.glob("todos.yaml.bak-*"))
@@ -596,9 +613,7 @@ class TestMigrateArchiveAndDecisions:
         _setup_project_with_todos(cfg, "rollback", todos)
         archived = [_make_todo("T003", "Archived")]
         storage.save_archived_todos(cfg, "rollback", archived)
-        entry = storage.build_decision_entry(
-            decision="A decision", context="", todo_id="T001"
-        )
+        entry = storage.build_decision_entry(decision="A decision", context="", todo_id="T001")
         storage.append_decision(cfg, "rollback", entry)
 
         original_todos = storage.todos_path(cfg, "rollback").read_text()
@@ -606,14 +621,15 @@ class TestMigrateArchiveAndDecisions:
         original_decisions = storage.decisions_path(cfg, "rollback").read_text()
 
         # Fail during save_todos (after backups are created, during mutation)
-        real_save = storage.save_todos
 
         def boom(*args, **kwargs):
             raise RuntimeError("simulated write failure")
 
-        with patch.object(storage, "save_todos", side_effect=boom):
-            with pytest.raises(RuntimeError, match="simulated write failure"):
-                _migrate_project(cfg, "rollback", dry_run=False)
+        with (
+            patch.object(storage, "save_todos", side_effect=boom),
+            pytest.raises(RuntimeError, match="simulated write failure"),
+        ):
+            _migrate_project(cfg, "rollback", dry_run=False)
 
         # All files should be restored from backups
         assert storage.todos_path(cfg, "rollback").read_text() == original_todos
@@ -795,9 +811,15 @@ class TestCleanupConfig:
         storage._write_yaml(config_path, raw)
         original_text = config_path.read_text()
 
-        with patch.object(storage, "_write_yaml", side_effect=OSError("disk full")):
-            with pytest.raises(OSError, match="disk full"):
-                _cleanup_config(cfg)
+        with (
+            patch.object(
+                storage,
+                "_write_yaml",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            _cleanup_config(cfg)
 
         # Config should be restored from backup
         assert config_path.read_text() == original_text
@@ -808,13 +830,21 @@ class TestMigrateIdsToolMultiProject:
     async def test_tool_multi_project_iteration(self, cfg: ProjConfig, mcp_app) -> None:  # type: ignore[no-untyped-def]
         from tests.conftest import call_tool
 
-        _setup_project_with_todos(cfg, "proj_a", [
-            _make_todo("T001", "Task A1"),
-            _make_todo("T002", "Task A2"),
-        ])
-        _setup_project_with_todos(cfg, "proj_b", [
-            _make_todo("T001", "Task B1"),
-        ])
+        _setup_project_with_todos(
+            cfg,
+            "proj_a",
+            [
+                _make_todo("T001", "Task A1"),
+                _make_todo("T002", "Task A2"),
+            ],
+        )
+        _setup_project_with_todos(
+            cfg,
+            "proj_b",
+            [
+                _make_todo("T001", "Task B1"),
+            ],
+        )
 
         result = await call_tool(mcp_app, "proj_migrate_ids")
         parsed = json.loads(result)
@@ -869,8 +899,10 @@ class TestMigrateDirectoryRollback:
             call_log.append("rename_todo_dir")
             return real_rename(c, project_name, old, new)
 
-        with patch.object(storage, "save_todos", side_effect=tracking_save), \
-             patch.object(storage, "rename_todo_dir", side_effect=tracking_rename):
+        with (
+            patch.object(storage, "save_todos", side_effect=tracking_save),
+            patch.object(storage, "rename_todo_dir", side_effect=tracking_rename),
+        ):
             _migrate_project(cfg, "order_check", dry_run=False)
 
         assert "save_todos" in call_log
@@ -903,9 +935,15 @@ class TestMigrateDirectoryRollback:
                 raise OSError("second rename failed")
             return real_rename(c, project_name, old, new)
 
-        with patch.object(storage, "rename_todo_dir", side_effect=fail_on_second):
-            with pytest.raises(OSError, match="second rename failed"):
-                _migrate_project(cfg, "rev_check", dry_run=False)
+        with (
+            patch.object(
+                storage,
+                "rename_todo_dir",
+                side_effect=fail_on_second,
+            ),
+            pytest.raises(OSError, match="second rename failed"),
+        ):
+            _migrate_project(cfg, "rev_check", dry_run=False)
 
         # The first rename should have been reversed — original dir name restored
         # Since the rollback reverses the first successful rename, the old dir

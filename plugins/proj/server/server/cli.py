@@ -36,7 +36,11 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
                 files = sorted(sess_dir.glob("session-*.md"))
                 selected = files[-3:] if len(files) > 3 else files
                 if selected:
-                    aggregated: dict[str, list[str]] = {"decisions": [], "questions": [], "insights": []}
+                    aggregated: dict[str, list[str]] = {
+                        "decisions": [],
+                        "questions": [],
+                        "insights": [],
+                    }
                     for f in selected:
                         try:
                             parsed = _parse_session(f.read_text())
@@ -53,7 +57,10 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
                         if aggregated["questions"]:
                             print("**Open Questions**: " + "; ".join(aggregated["questions"][:3]))
         else:
-            print(f'\n⚡ **Activate**: Call `proj_load_session("{detected}")` to register this project for MCP tools this session.')
+            print(
+                f'\n⚡ **Activate**: Call `proj_load_session("{detected}")`'
+                " to register this project for MCP tools this session."
+            )
     except FileNotFoundError:
         print("Warning: project config not found, skipping session context", file=sys.stderr)
 

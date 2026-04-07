@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -64,7 +65,8 @@ def register(app: FastMCP) -> None:
             matches = [
                 e
                 for e in entries
-                if pattern.search(str(e.get("decision", ""))) or pattern.search(str(e.get("context", "")))
+                if pattern.search(str(e.get("decision", "")))
+                or pattern.search(str(e.get("context", "")))
             ]
             if not matches:
                 return f"No decisions matching '{decision}'."
@@ -93,10 +95,8 @@ def register(app: FastMCP) -> None:
             # context param: filter by since_days (entries newer than N days ago)
             since_days: int | None = None
             if context:
-                try:
+                with contextlib.suppress(ValueError):
                     since_days = int(context)
-                except ValueError:
-                    pass
             if since_days is not None:
                 cutoff = datetime.now(UTC) - timedelta(days=since_days)
                 cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S")

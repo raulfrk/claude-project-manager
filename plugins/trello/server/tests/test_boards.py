@@ -25,9 +25,7 @@ def board_tools(mock_trello_client: MagicMock) -> dict[str, callable]:
 
 
 class TestListBoards:
-    def test_returns_boards(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_returns_boards(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         boards_data = [{"id": "b1", "name": "Project"}, {"id": "b2", "name": "Personal"}]
         mock_trello_client.get.return_value = boards_data
 
@@ -36,18 +34,14 @@ class TestListBoards:
         mock_trello_client.get.assert_called_once_with("/members/me/boards")
         assert json.loads(result) == boards_data
 
-    def test_returns_empty_list(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_returns_empty_list(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         mock_trello_client.get.return_value = []
         result = board_tools["list_boards"]()
         assert json.loads(result) == []
 
 
 class TestGetBoard:
-    def test_returns_single_board(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_returns_single_board(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         board_data = {"id": "b1", "name": "Project", "desc": "A board"}
         mock_trello_client.get.return_value = board_data
 
@@ -58,9 +52,7 @@ class TestGetBoard:
 
 
 class TestUpdateBoard:
-    def test_updates_name(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_updates_name(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         updated = {"id": "b1", "name": "Renamed"}
         mock_trello_client.put.return_value = updated
 
@@ -69,28 +61,20 @@ class TestUpdateBoard:
         mock_trello_client.put.assert_called_once_with("/boards/b1", params={"name": "Renamed"})
         assert json.loads(result) == updated
 
-    def test_updates_desc(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_updates_desc(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "b1", "desc": "New desc"}
         result = board_tools["update_board"]("b1", desc="New desc")
         mock_trello_client.put.assert_called_once_with("/boards/b1", params={"desc": "New desc"})
         assert json.loads(result)["desc"] == "New desc"
 
-    def test_updates_both(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_updates_both(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "b1"}
         board_tools["update_board"]("b1", name="N", desc="D")
         _, kwargs = mock_trello_client.put.call_args
         assert kwargs["params"] == {"name": "N", "desc": "D"}
 
-    def test_omits_none_params(
-        self, mock_trello_client: MagicMock, board_tools: dict
-    ) -> None:
+    def test_omits_none_params(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "b1"}
         board_tools["update_board"]("b1")
         _, kwargs = mock_trello_client.put.call_args
         assert kwargs["params"] == {}
-
-

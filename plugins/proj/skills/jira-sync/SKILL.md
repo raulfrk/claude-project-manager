@@ -1,7 +1,7 @@
 ---
 name: jira-sync
 description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_map, mcp__proj__proj_jira_apply, mcp__proj__proj_jira_full_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_search, mcp__jira__jira_get_issue, mcp__jira__jira_get_issue_comments, mcp__jira__jira_init
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_full_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_get_issue_comments, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 context: fork
 agent: general-purpose
@@ -10,15 +10,9 @@ agent: general-purpose
 Pull Jira issues for a user and sync them to local projects/todos using **epic-first mapping**.
 This skill operates across all projects -- it does NOT require loading a project first.
 
-## Primary path: `proj_jira_full_sync`
+## Sync path
 
-The preferred approach uses a single tool call that handles deterministic mapping + apply:
-
-1. Fetch issues from Jira
-2. Call `proj_jira_full_sync` with the issues JSON
-3. Handle the response
-
-**Fallback**: If `proj_jira_full_sync` is unavailable (tool-not-found error), fall back to the legacy 3-step chain described in the "Legacy path" section below.
+Call `proj_jira_full_sync` directly -- it handles fetching, mapping, and applying in one call.
 
 ## Epic-first mapping logic
 
@@ -57,10 +51,7 @@ Do not proceed with any further sync steps.
 
 **3.** Call `proj_jira_full_sync`
 
-- Call `mcp__proj__proj_jira_full_sync` with:
-  - `project_name`: optional, to scope sync to one project
-  - `comments_json`: JSON of the `comments_by_key` dict from step 2 (if available)
-  - **Important**: When passing Jira issues from `jira_get_user_issues`, serialize the result with `json.dumps()` before passing to `jira_issues_json`. The tool also accepts raw dicts/lists as a fallback, but string serialization is preferred.
+- Call `mcp__proj__proj_jira_full_sync` with no arguments (or optionally `project_name` to scope to one project, `comments_json` from step 2).
 - Handle the response:
   - `"success"` -- display the summary counts
   - `"partial_success"` -- display errors table, offer one retry:
@@ -82,15 +73,6 @@ Display suggested next steps:
 - `2. /proj:trello-sync` -- if Trello is also enabled, sync there too
 
 ---
-
-## Legacy path (fallback)
-
-If `proj_jira_full_sync` is not available, fall back to the 3-step chain:
-
-1. Call `mcp__proj__proj_jira_map` with the fetched issues JSON -- produces a mapping plan.
-2. Display the mapping as a dry-run table with auto-mapped and needs-input sections.
-3. Ask user to **Apply**, **Edit**, or **Cancel**.
-4. Call `mcp__proj__proj_jira_apply` with the confirmed mapping.
 
 ## Prerequisites
 

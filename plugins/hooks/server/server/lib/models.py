@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from server.lib._types import JsonValue
+if TYPE_CHECKING:
+    from server.lib._types import JsonValue
 
 
 @dataclass
@@ -69,11 +71,16 @@ class Hook:
             source=str(data["source"]) if data.get("source") is not None else None,
             verification=bool(data.get("verification", False)),
             feedback_mapping=feedback_mapping,
-            feedback_tool=str(data["feedback_tool"]) if data.get("feedback_tool") is not None else None,
+            feedback_tool=str(data["feedback_tool"])
+            if data.get("feedback_tool") is not None
+            else None,
         )
 
     def update_from(self, new_def: dict[str, JsonValue]) -> None:
-        """Update content fields in-place from new_def. Preserves id, trigger_tool, target_tool, server, source."""
+        """Update content fields in-place from new_def.
+
+        Preserves id, trigger_tool, target_tool, server, source.
+        """
         if "blocking" in new_def:
             self.blocking = bool(new_def["blocking"])
         if "condition" in new_def:
@@ -82,10 +89,14 @@ class Hook:
             pm = new_def["param_mapping"]
             self.param_mapping = {str(k): v for k, v in pm.items()} if isinstance(pm, dict) else {}
         if "feedback_tool" in new_def:
-            self.feedback_tool = str(new_def["feedback_tool"]) if new_def["feedback_tool"] is not None else None
+            self.feedback_tool = (
+                str(new_def["feedback_tool"]) if new_def["feedback_tool"] is not None else None
+            )
         if "feedback_mapping" in new_def:
             fm = new_def["feedback_mapping"]
-            self.feedback_mapping = {str(k): v for k, v in fm.items()} if isinstance(fm, dict) else {}
+            self.feedback_mapping = (
+                {str(k): v for k, v in fm.items()} if isinstance(fm, dict) else {}
+            )
         if "verification" in new_def:
             self.verification = bool(new_def["verification"])
         # Enforce invariant: verification implies blocking

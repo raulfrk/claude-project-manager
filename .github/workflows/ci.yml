@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Sync venvs
+        run: |
+          for dir in plugins/*/server; do
+            echo "==> uv sync $dir"
+            uv sync --frozen --directory "$dir" --group dev --group test
+          done
+
+      - uses: pre-commit/action@v3.0.1
+
+  test:
+    needs: pre-commit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - plugin: proj
+            path: plugins/proj/server
+          - plugin: worktree
+            path: plugins/worktree/server
+          - plugin: sandbox
+            path: plugins/sandbox/server
+          - plugin: hooks
+            path: plugins/hooks/server
+          - plugin: trello
+            path: plugins/trello/server
+          - plugin: jira
+            path: plugins/jira/server
+          - plugin: todoist
+            path: plugins/todoist/server
+          - plugin: zoxide
+            path: plugins/zoxide/server
+          - plugin: _shared
+            path: plugins/_shared
+    name: test (${{ matrix.plugin }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --directory ${{ matrix.path }} --group test
+
+      - name: Run tests
+        run: uv run --directory ${{ matrix.path }} pytest

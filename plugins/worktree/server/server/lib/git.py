@@ -98,6 +98,16 @@ def add_worktree(repo_path: str, worktree_path: str, branch: str, new_branch: bo
     return worktree_path
 
 
+def reset_hard(worktree_path: str) -> str:
+    """Run `git reset --hard HEAD` in a worktree. Raises GitError on failure."""
+    return _run(["reset", "--hard", "HEAD"], cwd=worktree_path)
+
+
+def clean_untracked(worktree_path: str) -> str:
+    """Run `git clean -fd` in a worktree. Raises GitError on failure."""
+    return _run(["clean", "-fd"], cwd=worktree_path)
+
+
 def remove_worktree(repo_path: str, worktree_path: str, force: bool = False) -> None:
     """Remove a worktree. Use force=True only for unclean worktrees."""
     args = ["worktree", "remove"]
@@ -156,8 +166,8 @@ def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dic
                 cwd=worktree_path,
             )
             raise GitConflictError(f"Rebase conflict in {worktree_path}: {stderr}")
-    except FileNotFoundError:
-        raise GitError(f"git not found or invalid path: {worktree_path}")
+    except FileNotFoundError as err:
+        raise GitError(f"git not found or invalid path: {worktree_path}") from err
     return {"status": "rebased", "base_branch": base_branch}
 
 
@@ -173,6 +183,6 @@ def merge_ff_only(repo_path: str, branch: str) -> dict[str, str]:
         if result.returncode != 0:
             stderr = result.stderr.strip()
             raise GitError(f"Fast-forward merge failed for branch {branch}: {stderr}")
-    except FileNotFoundError:
-        raise GitError(f"git not found or invalid path: {repo_path}")
+    except FileNotFoundError as err:
+        raise GitError(f"git not found or invalid path: {repo_path}") from err
     return {"status": "merged", "branch": branch}

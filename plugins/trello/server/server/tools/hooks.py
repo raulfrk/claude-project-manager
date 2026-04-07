@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,14 +37,29 @@ def _get_trello_sync_config() -> dict[str, JsonValue]:
     return trello
 
 
+def _resolve_list_id(board_id: str, list_name: str) -> str:
+    """Resolve a list name/ID to a list ID on the given board."""
+    client = get_client()
+    try:
+        raw_lists = client.get(f"/boards/{board_id}/lists")
+    except Exception:
+        return ""
+    board_lists = raw_lists if isinstance(raw_lists, list) else []
+    for lst in board_lists:
+        if not isinstance(lst, dict):
+            continue
+        if lst.get("name") == list_name or lst.get("id") == list_name:
+            return str(lst.get("id", ""))
+    return ""
+
+
 def register(app: FastMCP) -> None:
     @app.tool(
         description=(
-            "Hook-friendly card+checklist creation for project init. "
-            "Creates a Trello card on the configured list and adds a "
-            "'Tasks' checklist. Reads board_id and list from proj.yaml "
-            "sync.trello config. "
-            "Returns {card_id, checklist_id} for feedback writeback."
+            "Hook-friendly card creation for project init. "
+            "Creates a Trello card on the configured default list. "
+            "Reads board_id and list from proj.yaml sync.trello config. "
+            "Returns {card_id} for feedback writeback."
         ),
     )
     def trello_add_card_hook(name: str) -> str:
@@ -52,158 +68,297 @@ def register(app: FastMCP) -> None:
         default_list = str(trello_cfg.get("default_list", "Active"))
 
         if not board_id:
-            return json.dumps({
-                "error": (
-                    "No default_board_id configured in sync.trello. "
-                    "Run /proj:trello-setup first."
-                ),
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "No default_board_id configured in sync.trello. "
+                        "Run /proj:trello-setup first."
+                    ),
+                }
+            )
 
         client = get_client()
 
         # Resolve list_id from list name
-        try:
-            raw_lists = client.get(f"/boards/{board_id}/lists")
-        except Exception as exc:
-            return json.dumps({
-                "error": f"Failed to fetch board lists: {exc}",
-            })
-
-        board_lists = raw_lists if isinstance(raw_lists, list) else []
-        list_id = ""
-        for lst in board_lists:
-            if not isinstance(lst, dict):
-                continue
-            if lst.get("name") == default_list or lst.get("id") == default_list:
-                list_id = str(lst.get("id", ""))
-                break
-
+        list_id = _resolve_list_id(board_id, default_list)
         if not list_id:
-            return json.dumps({
-                "error": f"List '{default_list}' not found on board {board_id}.",
-            })
+            return json.dumps(
+                {
+                    "error": f"List '{default_list}' not found on board {board_id}.",
+                }
+            )
 
         # Create card
         try:
             card = client.post(
-                "/cards", params={"idList": list_id, "name": name},
+                "/cards",
+                params={"idList": list_id, "name": name},
             )
         except Exception as exc:
-            return json.dumps({
-                "error": f"Failed to create card: {exc}",
-            })
+            return json.dumps(
+                {
+                    "error": f"Failed to create card: {exc}",
+                }
+            )
 
         if not isinstance(card, dict):
             return json.dumps({"error": "Unexpected card response format"})
         card_id = str(card.get("id", ""))
 
-        # Create "Tasks" checklist on the card
-        try:
-            checklist = client.post(
-                "/checklists",
-                params={"idCard": card_id, "name": "Tasks"},
-            )
-        except Exception as exc:
-            # Card was created but checklist failed — return card_id anyway
-            return json.dumps({
-                "card_id": card_id,
-                "checklist_id": "",
-                "warning": f"Card created but checklist failed: {exc}",
-            })
-
-        if not isinstance(checklist, dict):
-            return json.dumps({"card_id": card_id, "checklist_id": ""})
-        checklist_id = str(checklist.get("id", ""))
-
-        return json.dumps({
-            "card_id": card_id,
-            "checklist_id": checklist_id,
-        })
+        return json.dumps({"card_id": card_id})
 
     @app.tool(
         description=(
-            "Hook-friendly batch checklist item creation for batch child todo sync. "
-            "Creates multiple checklist items on the given checklist. "
-            "Creates the checklist first if checklist_id is null and card_id is provided. "
-            "Items is a list of item name strings."
+            "Hook-friendly card creation for a new todo. "
+            "Creates a Trello card on the configured tasks list. "
+            "Reads board_id and list_mappings from proj.yaml sync.trello config. "
+            "Returns {card_id} for feedback writeback."
         ),
     )
-    def trello_batch_add_checklist_items_hook(
-        checklist_id: str | None,
-        items: list[str],
-        card_id: str | None = None,
-        checklist_name: str | None = None,
+    def trello_add_todo_card_hook(
+        name: str,
+        desc: str | None = None,
+        due: str | None = None,
     ) -> str:
-        if not checklist_id:
-            if not card_id:
-                return json.dumps({"error": "card_id is required to create checklist"})
-            client = get_client()
-            try:
-                new_checklist = client.post(
-                    "/checklists",
-                    params={"idCard": card_id, "name": checklist_name or "Tasks"},
-                )
-                if not isinstance(new_checklist, dict):
-                    return json.dumps({"error": "Unexpected checklist response format"})
-                checklist_id = str(new_checklist.get("id", ""))
-            except Exception as exc:
-                return json.dumps({
-                    "error": f"checklist creation failed: {exc}",
-                    "checklist_id": None,
-                })
+        trello_cfg = _get_trello_sync_config()
+        board_id = str(trello_cfg.get("default_board_id", ""))
+
+        if not board_id:
+            return json.dumps(
+                {
+                    "error": (
+                        "No default_board_id configured in sync.trello. "
+                        "Run /proj:trello-setup first."
+                    ),
+                }
+            )
+
+        list_mappings = trello_cfg.get("list_mappings")
+        tasks_list = "proj-tasks"
+        if isinstance(list_mappings, dict):
+            tasks_list = str(list_mappings.get("tasks", tasks_list))
+
+        list_id = _resolve_list_id(board_id, tasks_list)
+        if not list_id:
+            return json.dumps(
+                {
+                    "error": f"Tasks list '{tasks_list}' not found on board {board_id}.",
+                }
+            )
+
         client = get_client()
-        successes: list[JsonValue] = []
+        params: dict[str, str] = {"idList": list_id, "name": name}
+        if desc:
+            params["desc"] = desc
+        if due:
+            params["due"] = due
+
+        try:
+            card = client.post("/cards", params=params)
+        except Exception as exc:
+            return json.dumps({"error": f"Failed to create card: {exc}"})
+
+        if not isinstance(card, dict):
+            return json.dumps({"error": "Unexpected card response format"})
+
+        return json.dumps({"card_id": str(card.get("id", ""))})
+
+    @app.tool(
+        description=(
+            "Hook-friendly child card creation. "
+            "Creates a Trello card on the tasks list and attaches a link "
+            "to the parent card. Returns {card_id} for feedback writeback."
+        ),
+    )
+    def trello_add_child_card_hook(
+        parent_card_id: str | None,
+        name: str,
+        desc: str | None = None,
+        due: str | None = None,
+    ) -> str:
+        trello_cfg = _get_trello_sync_config()
+        board_id = str(trello_cfg.get("default_board_id", ""))
+
+        if not board_id:
+            return json.dumps(
+                {
+                    "error": (
+                        "No default_board_id configured in sync.trello. "
+                        "Run /proj:trello-setup first."
+                    ),
+                }
+            )
+
+        list_mappings = trello_cfg.get("list_mappings")
+        tasks_list = "proj-tasks"
+        if isinstance(list_mappings, dict):
+            tasks_list = str(list_mappings.get("tasks", tasks_list))
+
+        list_id = _resolve_list_id(board_id, tasks_list)
+        if not list_id:
+            return json.dumps(
+                {
+                    "error": f"Tasks list '{tasks_list}' not found on board {board_id}.",
+                }
+            )
+
+        client = get_client()
+        params: dict[str, str] = {"idList": list_id, "name": name}
+        if desc:
+            params["desc"] = desc
+        if due:
+            params["due"] = due
+
+        try:
+            card = client.post("/cards", params=params)
+        except Exception as exc:
+            return json.dumps({"error": f"Failed to create child card: {exc}"})
+
+        if not isinstance(card, dict):
+            return json.dumps({"error": "Unexpected card response format"})
+
+        card_id = str(card.get("id", ""))
+        card_url = str(card.get("shortUrl", card.get("url", "")))
+
+        # Attach link to parent card if available
+        if parent_card_id and card_url:
+            with contextlib.suppress(Exception):
+                client.post(
+                    f"/cards/{parent_card_id}/attachments",
+                    params={"url": card_url, "name": name},
+                )
+
+        return json.dumps({"card_id": card_id})
+
+    @app.tool(
+        description=(
+            "Hook-friendly batch child card creation. "
+            "Creates multiple Trello cards on the tasks list and attaches "
+            "links to the parent card. Items is a list of card name strings. "
+            "Returns {children: [{card_id}]} for feedback writeback."
+        ),
+    )
+    def trello_batch_add_child_cards_hook(
+        parent_card_id: str | None,
+        items: list[str],
+    ) -> str:
+        trello_cfg = _get_trello_sync_config()
+        board_id = str(trello_cfg.get("default_board_id", ""))
+
+        if not board_id:
+            return json.dumps(
+                {
+                    "error": (
+                        "No default_board_id configured in sync.trello. "
+                        "Run /proj:trello-setup first."
+                    ),
+                }
+            )
+
+        list_mappings = trello_cfg.get("list_mappings")
+        tasks_list = "proj-tasks"
+        if isinstance(list_mappings, dict):
+            tasks_list = str(list_mappings.get("tasks", tasks_list))
+
+        list_id = _resolve_list_id(board_id, tasks_list)
+        if not list_id:
+            return json.dumps(
+                {
+                    "error": f"Tasks list '{tasks_list}' not found on board {board_id}.",
+                }
+            )
+
+        client = get_client()
+        children: list[dict[str, str]] = []
         failures: list[dict[str, JsonValue]] = []
+
         for idx, name in enumerate(items):
             try:
-                created = client.post(
-                    f"/checklists/{checklist_id}/checkItems",
-                    params={"name": name},
+                card = client.post(
+                    "/cards",
+                    params={"idList": list_id, "name": name},
                 )
-                successes.append(created)
+                if not isinstance(card, dict):
+                    failures.append({"index": idx, "name": name, "error": "Unexpected response"})
+                    continue
+                card_id = str(card.get("id", ""))
+                card_url = str(card.get("shortUrl", card.get("url", "")))
+                children.append({"card_id": card_id})
+
+                # Attach link to parent card
+                if parent_card_id and card_url:
+                    with contextlib.suppress(Exception):
+                        client.post(
+                            f"/cards/{parent_card_id}/attachments",
+                            params={"url": card_url, "name": name},
+                        )
             except Exception as exc:
                 failures.append({"index": idx, "name": name, "error": str(exc)})
-        return json.dumps({
-            "checklist_id": checklist_id,
-            "successes": successes,
-            "failures": failures,
-        })
+
+        return json.dumps(
+            {
+                "children": children,
+                "failures": failures,
+            }
+        )
 
     @app.tool(
         description=(
-            "Hook-friendly single checklist item creation. "
-            "Creates the checklist first if checklist_id is null and card_id is provided. "
-            "Returns {id, checklist_id} for feedback writeback."
+            "Hook-friendly verification that a todo's Trello card "
+            "exists and is in the expected done list after completion."
         ),
     )
-    def trello_add_checklist_item_hook(
-        checklist_id: str | None,
-        item_name: str,
-        card_id: str | None = None,
-        checklist_name: str | None = None,
-    ) -> str:
-        if not checklist_id:
-            if not card_id:
-                return json.dumps({"error": "card_id is required to create checklist"})
-            client = get_client()
-            try:
-                new_checklist = client.post(
-                    "/checklists",
-                    params={"idCard": card_id, "name": checklist_name or "Tasks"},
-                )
-                if not isinstance(new_checklist, dict):
-                    return json.dumps({"error": "Unexpected checklist response format"})
-                checklist_id = str(new_checklist.get("id", ""))
-            except Exception as exc:
-                return json.dumps({
-                    "error": f"checklist creation failed: {exc}",
-                    "checklist_id": None,
-                })
-        client = get_client()
-        created = client.post(
-            f"/checklists/{checklist_id}/checkItems",
-            params={"name": item_name},
-        )
-        created_id = str(created.get("id", "")) if isinstance(created, dict) else ""
-        return json.dumps({"id": created_id, "checklist_id": checklist_id})
+    def trello_verify_card_hook(card_id: str) -> str:
+        if not card_id:
+            return json.dumps(
+                {
+                    "verified": False,
+                    "error": "No card_id provided",
+                }
+            )
 
+        client = get_client()
+        try:
+            card = client.get(f"/cards/{card_id}")
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "verified": False,
+                    "error": f"Failed to fetch card: {exc}",
+                }
+            )
+
+        if not isinstance(card, dict):
+            return json.dumps(
+                {
+                    "verified": False,
+                    "error": "Unexpected card response format",
+                }
+            )
+
+        # Check the card exists and get its list
+        trello_cfg = _get_trello_sync_config()
+        list_mappings = trello_cfg.get("list_mappings")
+        done_list = "Done"
+        if isinstance(list_mappings, dict):
+            done_list = str(list_mappings.get("done", done_list))
+
+        card_list_id = str(card.get("idList", ""))
+        card_closed = bool(card.get("closed", False))
+
+        # Resolve done list ID
+        board_id = str(trello_cfg.get("default_board_id", ""))
+        done_list_id = _resolve_list_id(board_id, done_list) if board_id else ""
+
+        in_done_list = card_list_id == done_list_id if done_list_id else False
+
+        return json.dumps(
+            {
+                "verified": True,
+                "card_id": card_id,
+                "card_name": str(card.get("name", "")),
+                "in_done_list": in_done_list,
+                "closed": card_closed,
+                "current_list_id": card_list_id,
+            }
+        )

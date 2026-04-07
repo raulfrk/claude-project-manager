@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from server.lib.models import Hook, HookRegistry
 
-
 # ── Hook dataclass ────────────────────────────────────────────────────────────
 
 
@@ -84,23 +83,27 @@ class TestHook:
         assert h.verification is False
 
     def test_from_dict_preserves_param_mapping_values(self):
-        h = Hook.from_dict({
-            "id": "hook-001",
-            "trigger_tool": "a",
-            "target_tool": "b",
-            "server": "s",
-            "param_mapping": {"num": 42, "flag": True},
-        })
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "param_mapping": {"num": 42, "flag": True},
+            }
+        )
         assert h.param_mapping == {"num": 42, "flag": True}
 
     def test_from_dict_ignores_non_dict_param_mapping(self):
-        h = Hook.from_dict({
-            "id": "hook-001",
-            "trigger_tool": "a",
-            "target_tool": "b",
-            "server": "s",
-            "param_mapping": "not-a-dict",
-        })
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "param_mapping": "not-a-dict",
+            }
+        )
         assert h.param_mapping == {}
 
     def test_matches(self, sample_hook: Hook):
@@ -242,10 +245,12 @@ class TestHookRegistry:
         assert sample_registry.next_id() == "hook-003"
 
     def test_next_id_handles_non_numeric_ids(self):
-        reg = HookRegistry(hooks=[
-            Hook(id="hook-abc", trigger_tool="a", target_tool="b", server="s"),
-            Hook(id="hook-005", trigger_tool="c", target_tool="d", server="s"),
-        ])
+        reg = HookRegistry(
+            hooks=[
+                Hook(id="hook-abc", trigger_tool="a", target_tool="b", server="s"),
+                Hook(id="hook-005", trigger_tool="c", target_tool="d", server="s"),
+            ]
+        )
         assert reg.next_id() == "hook-006"
 
     def test_find_duplicate_found(self, sample_registry: HookRegistry):

@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from server.lib.http_client import FireResult
-from server.lib.models import Hook, HookRegistry
+from server.lib.models import HookRegistry
 from server.lib.storage import load, load_failures, save
 from server.lib.template import resolve_mapping
 from server.tools.fire import hooks_fire
@@ -66,7 +66,9 @@ class TestRegisterThenFire:
         mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result
+            ),
         ):
             result1 = await hooks_fire("trigger_a")
         assert json.loads(result1)["hooks_fired"] == 1
@@ -112,7 +114,9 @@ class TestConditionalFiring:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
-            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result
+            ),
         ):
             result = await hooks_fire("proj_init")
         assert json.loads(result)["hooks_fired"] == 1
@@ -186,7 +190,9 @@ class TestFailureRecoveryIntegration:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.storage._FAILURES_FILE", failures_yaml),
-            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=fail_result),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=fail_result
+            ),
         ):
             fire_result = await hooks_fire("proj_init")
 
@@ -203,7 +209,11 @@ class TestFailureRecoveryIntegration:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.storage._FAILURES_FILE", failures_yaml),
-            patch("server.tools.recovery.post_hook", new_callable=AsyncMock, return_value=success_result),
+            patch(
+                "server.tools.recovery.post_hook",
+                new_callable=AsyncMock,
+                return_value=success_result,
+            ),
         ):
             recover_result = await hooks_recover(hook_id="hook-001")
 
@@ -231,7 +241,9 @@ class TestFailureRecoveryIntegration:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.storage._FAILURES_FILE", failures_yaml),
-            patch("server.tools.fire._fire_single", new_callable=AsyncMock, return_value=fail_result),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=fail_result
+            ),
         ):
             await hooks_fire("t")
 

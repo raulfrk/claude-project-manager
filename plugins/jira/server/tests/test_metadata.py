@@ -20,9 +20,7 @@ def metadata_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetIssueTypes:
-    def test_fetches_issue_types(
-        self, mock_jira_client: MagicMock, metadata_tools: dict
-    ) -> None:
+    def test_fetches_issue_types(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
         data = [{"id": "1", "name": "Bug"}, {"id": "2", "name": "Task"}]
         mock_jira_client.get.return_value = data
 
@@ -33,9 +31,7 @@ class TestJiraGetIssueTypes:
 
 
 class TestJiraGetFields:
-    def test_fetches_fields(
-        self, mock_jira_client: MagicMock, metadata_tools: dict
-    ) -> None:
+    def test_fetches_fields(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
         data = [{"id": "summary", "name": "Summary"}, {"id": "customfield_10001", "name": "Sprint"}]
         mock_jira_client.get.return_value = data
 
@@ -46,9 +42,7 @@ class TestJiraGetFields:
 
 
 class TestJiraGetPriorities:
-    def test_fetches_priorities(
-        self, mock_jira_client: MagicMock, metadata_tools: dict
-    ) -> None:
+    def test_fetches_priorities(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
         data = [{"id": "1", "name": "Highest"}, {"id": "2", "name": "High"}]
         mock_jira_client.get.return_value = data
 
@@ -59,9 +53,7 @@ class TestJiraGetPriorities:
 
 
 class TestJiraGetStatuses:
-    def test_fetches_statuses(
-        self, mock_jira_client: MagicMock, metadata_tools: dict
-    ) -> None:
+    def test_fetches_statuses(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
         data = [{"id": "1", "name": "Open"}, {"id": "3", "name": "In Progress"}]
         mock_jira_client.get.return_value = data
 

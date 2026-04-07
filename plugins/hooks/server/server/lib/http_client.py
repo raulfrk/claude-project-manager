@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
-from server.lib._types import JsonValue
+if TYPE_CHECKING:
+    from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ async def post_hook(
     try:
         if url.startswith("unix://"):
             # Unix domain socket: unix:///tmp/claude-hooks-plugin.sock
-            socket_path = url[len("unix://"):]
+            socket_path = url[len("unix://") :]
             transport = httpx.AsyncHTTPTransport(uds=socket_path)
             effective_url = "http://localhost/hook"
         else:
@@ -87,7 +89,7 @@ async def post_hook(
                             error=data.get("error", f"HTTP {resp.status_code}"),
                         )
             except Exception:
-                pass
+                logger.debug("Failed to parse hook response as JSON", exc_info=True)
             # Fallback for non-JSON responses
             return FireResult(
                 hook_id=hook_id,
@@ -103,7 +105,7 @@ async def post_hook(
         msg = f"HTTP error posting to {url}: {exc}"
         logger.warning("hook %s: %s", hook_id, msg)
         return FireResult(hook_id=hook_id, error=msg)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         msg = f"Unexpected error posting to {url}: {exc}"
         logger.warning("hook %s: %s", hook_id, msg)
         return FireResult(hook_id=hook_id, error=msg)

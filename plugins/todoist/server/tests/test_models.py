@@ -11,7 +11,6 @@ from server.lib.models import (
     todoist_to_local_priority,
 )
 
-
 # -- local_to_todoist_priority ------------------------------------------------
 
 

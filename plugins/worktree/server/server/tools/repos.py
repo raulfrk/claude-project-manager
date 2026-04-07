@@ -87,6 +87,10 @@ def register(app: FastMCP) -> None:
     def wt_list_repos() -> str:
         return list_repos()
 
-    @app.tool(description="Get worktree configuration including default_worktree_dir (expanded to absolute path).")
+    @app.tool(
+        description=(
+            "Get worktree configuration including default_worktree_dir (expanded to absolute path)."
+        )
+    )
     def wt_config_get() -> str:
         return config_get()

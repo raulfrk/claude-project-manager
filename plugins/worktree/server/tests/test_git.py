@@ -13,11 +13,13 @@ from server.lib.git import (
     GitError,
     _parse_porcelain,
     add_worktree,
+    clean_untracked,
     is_git_repo,
     list_worktrees,
     merge_ff_only,
     rebase_worktree,
     remove_worktree,
+    reset_hard,
 )
 
 PORCELAIN_SAMPLE = """\
@@ -107,7 +109,9 @@ class TestAddWorktree:
         args = mock_run.call_args[0][0]
         b_index = args.index("-b")
         assert args[b_index + 1] == "feature/x", "branch name must follow -b"
-        assert args[b_index + 2] == str(tmp_path / "wt"), "worktree path must come after branch name"
+        assert args[b_index + 2] == str(tmp_path / "wt"), (
+            "worktree path must come after branch name"
+        )
 
     def test_calls_git_without_new_branch(self, tmp_path: Path) -> None:
         with patch("server.lib.git._run") as mock_run:
@@ -134,9 +138,40 @@ class TestRemoveWorktree:
         assert "--force" in args
 
 
+class TestResetHard:
+    def test_calls_git_reset_hard(self) -> None:
+        with patch("server.lib.git._run") as mock_run:
+            mock_run.return_value = ""
+            reset_hard("/some/worktree")
+        mock_run.assert_called_once_with(["reset", "--hard", "HEAD"], cwd="/some/worktree")
+
+    def test_raises_git_error_on_failure(self) -> None:
+        with (
+            patch("server.lib.git._run", side_effect=GitError("reset failed")),
+            pytest.raises(GitError, match="reset failed"),
+        ):
+            reset_hard("/some/worktree")
+
+
+class TestCleanUntracked:
+    def test_calls_git_clean(self) -> None:
+        with patch("server.lib.git._run") as mock_run:
+            mock_run.return_value = ""
+            clean_untracked("/some/worktree")
+        mock_run.assert_called_once_with(["clean", "-fd"], cwd="/some/worktree")
+
+    def test_raises_git_error_on_failure(self) -> None:
+        with (
+            patch("server.lib.git._run", side_effect=GitError("clean failed")),
+            pytest.raises(GitError, match="clean failed"),
+        ):
+            clean_untracked("/some/worktree")
+
+
 # ---------------------------------------------------------------------------
 # Subprocess error scenario tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunSubprocessErrors:
     """Tests that _run (and callers) propagate subprocess-level failures correctly."""
@@ -225,6 +260,7 @@ class TestRunSubprocessErrors:
 # Corrupted / unexpected git output tests
 # ---------------------------------------------------------------------------
 
+
 class TestParsePorcelainCorruptedOutput:
     """Tests for _parse_porcelain with edge-case and malformed input."""
 
@@ -260,18 +296,15 @@ class TestParsePorcelainCorruptedOutput:
     def test_unknown_lines_are_ignored(self) -> None:
         """Unrecognised lines in a block are silently skipped."""
         output = (
-            "worktree /some/path\n"
-            "HEAD abc1234\n"
-            "branch refs/heads/main\n"
-            "unknown-key some-value\n"
-            "\n"
+            "worktree /some/path\nHEAD abc1234\nbranch refs/heads/main\nunknown-key some-value\n\n"
         )
         entries = _parse_porcelain(output)
         assert len(entries) == 1
         assert entries[0].path == "/some/path"
 
     def test_no_trailing_newline_still_parsed(self) -> None:
-        """A valid block without a trailing blank line is still captured via the end-of-loop flush."""
+        """A valid block without a trailing blank line is still
+        captured via the end-of-loop flush."""
         output = "worktree /some/path\nHEAD abc1234\nbranch refs/heads/main"
         entries = _parse_porcelain(output)
         assert len(entries) == 1
@@ -303,28 +336,36 @@ class TestParsePorcelainCorruptedOutput:
 # Helper: initialise a real git repo with an initial commit
 # ---------------------------------------------------------------------------
 
+
 def _init_repo(path: Path) -> None:
     """Create a git repo at *path* with one initial commit."""
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
-        cwd=str(path), check=True, capture_output=True,
+        cwd=str(path),
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
-        cwd=str(path), check=True, capture_output=True,
+        cwd=str(path),
+        check=True,
+        capture_output=True,
     )
     (path / "init.txt").write_text("init")
     subprocess.run(["git", "add", "."], cwd=str(path), check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-m", "initial"],
-        cwd=str(path), check=True, capture_output=True,
+        cwd=str(path),
+        check=True,
+        capture_output=True,
     )
 
 
 # ---------------------------------------------------------------------------
 # rebase_worktree tests
 # ---------------------------------------------------------------------------
+
 
 class TestRebaseWorktree:
     """Tests for rebase_worktree using real git repos."""
@@ -337,31 +378,41 @@ class TestRebaseWorktree:
         # Create a feature branch with one commit
         subprocess.run(
             ["git", "checkout", "-b", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "feature.txt").write_text("feature work")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "feature commit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         # Add a commit on main that doesn't conflict
         subprocess.run(
             ["git", "checkout", "main"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "main.txt").write_text("main work")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "main commit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         # Switch back to feature for rebase
         subprocess.run(
             ["git", "checkout", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         result = rebase_worktree(str(repo), str(repo), "main")
@@ -375,31 +426,41 @@ class TestRebaseWorktree:
         # Create feature branch that edits init.txt
         subprocess.run(
             ["git", "checkout", "-b", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "init.txt").write_text("feature version")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "feature edit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         # Create conflicting commit on main
         subprocess.run(
             ["git", "checkout", "main"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "init.txt").write_text("main version")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "main edit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         # Switch to feature and attempt rebase
         subprocess.run(
             ["git", "checkout", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         with pytest.raises(GitConflictError, match="Rebase conflict"):
@@ -415,6 +476,7 @@ class TestRebaseWorktree:
 # merge_ff_only tests
 # ---------------------------------------------------------------------------
 
+
 class TestMergeFFOnly:
     """Tests for merge_ff_only using real git repos."""
 
@@ -426,19 +488,25 @@ class TestMergeFFOnly:
         # Create a branch with one commit ahead of main
         subprocess.run(
             ["git", "checkout", "-b", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "feature.txt").write_text("feature")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "feature commit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         # Go back to main and ff-merge
         subprocess.run(
             ["git", "checkout", "main"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         result = merge_ff_only(str(repo), "feature")
@@ -455,24 +523,32 @@ class TestMergeFFOnly:
         # Create diverging branches
         subprocess.run(
             ["git", "checkout", "-b", "feature"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "feature.txt").write_text("feature")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "feature commit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         subprocess.run(
             ["git", "checkout", "main"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
         (repo / "main.txt").write_text("main")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "main commit"],
-            cwd=str(repo), check=True, capture_output=True,
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
         )
 
         with pytest.raises(GitError, match="Fast-forward merge failed"):

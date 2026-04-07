@@ -32,7 +32,6 @@ def reset_session_state() -> None:
     state.clear_session_active()
 
 
-
 @pytest.fixture()
 def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjConfig:
     config_path = tmp_path / "proj.yaml"
@@ -65,7 +64,17 @@ def mcp_app(cfg: ProjConfig):  # type: ignore[no-untyped-def]
     """Return a configured FastMCP app with all tools registered."""
     from mcp.server.fastmcp import FastMCP
 
-    from server.tools import config, content, context, git, migrate, perms_sync, projects, todos, tracking_git
+    from server.tools import (
+        config,
+        content,
+        context,
+        git,
+        migrate,
+        perms_sync,
+        projects,
+        todos,
+        tracking_git,
+    )
 
     app = FastMCP("test-proj")
     config.register(app)

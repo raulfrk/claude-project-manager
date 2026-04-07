@@ -15,7 +15,12 @@ from server.lib.models import (
 
 class TestPermissions:
     def test_roundtrip(self) -> None:
-        data = {"allow": ["mcp__x__*"], "deny": ["Bash(rm *)"], "ask": ["Edit(*)"], "additionalDirectories": ["/tmp"]}
+        data = {
+            "allow": ["mcp__x__*"],
+            "deny": ["Bash(rm *)"],
+            "ask": ["Edit(*)"],
+            "additionalDirectories": ["/tmp"],
+        }
         p = Permissions.from_dict(data)
         assert p.allow == ["mcp__x__*"]
         assert p.deny == ["Bash(rm *)"]

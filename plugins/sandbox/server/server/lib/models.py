@@ -15,7 +15,9 @@ class Permissions:
 
     allow: list[str] = field(default_factory=list)
     deny: list[str] = field(default_factory=list)
-    raw: dict[str, object] = field(default_factory=dict)  # preserves ask, additionalDirectories, etc.
+    raw: dict[str, object] = field(
+        default_factory=dict
+    )  # preserves ask, additionalDirectories, etc.
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = dict(self.raw)
@@ -72,7 +74,9 @@ class SandboxNetwork:
     """sandbox.network section — only allowedDomains is actively managed."""
 
     allowed_domains: list[str] = field(default_factory=list)
-    raw: dict[str, object] = field(default_factory=dict)  # preserves allowUnixSockets, proxy ports, etc.
+    raw: dict[str, object] = field(
+        default_factory=dict
+    )  # preserves allowUnixSockets, proxy ports, etc.
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = dict(self.raw)
@@ -99,7 +103,9 @@ class SandboxConfig:
     auto_allow_bash_if_sandboxed: bool = False
     filesystem: SandboxFilesystem = field(default_factory=SandboxFilesystem)
     network: SandboxNetwork = field(default_factory=SandboxNetwork)
-    raw: dict[str, object] = field(default_factory=dict)  # preserves excludedCommands, enableWeaker*, etc.
+    raw: dict[str, object] = field(
+        default_factory=dict
+    )  # preserves excludedCommands, enableWeaker*, etc.
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = dict(self.raw)

@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from server.lib import state, storage
-from server.lib.ids import next_todo_id
 from server.lib.models import (
     ProjConfig,
     ProjectDates,
@@ -19,7 +18,6 @@ from server.lib.models import (
     RepoEntry,
     Todo,
 )
-
 from tests.conftest import call_tool
 
 
@@ -69,6 +67,7 @@ def project_with_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def app(project_with_parent, cfg):
     """Return a configured FastMCP app."""
     from mcp.server.fastmcp import FastMCP
+
     from server.tools import config, projects, todos
 
     # Use the cfg from project_with_parent fixture's monkeypatch
@@ -83,7 +82,9 @@ def app(project_with_parent, cfg):
 async def test_flat_children_created_atomically(project_with_parent):
     """Flat list of children created atomically in a single save."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
+
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
 
     cfg, name, parent_id = project_with_parent
     app = FastMCP("test-proj")
@@ -91,15 +92,17 @@ async def test_flat_children_created_atomically(project_with_parent):
     projects.register(app)
     todos_mod.register(app)
 
-    children_json = json.dumps([
-        {"title": "Child A"},
-        {"title": "Child B"},
-        {"title": "Child C"},
-    ])
+    children_json = json.dumps(
+        [
+            {"title": "Child A"},
+            {"title": "Child B"},
+            {"title": "Child C"},
+        ]
+    )
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id=parent_id,
-                             children=children_json)
+    result = await call_tool(
+        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
+    )
     data = json.loads(result)
 
     assert data["count"] == 3
@@ -124,7 +127,9 @@ async def test_flat_children_created_atomically(project_with_parent):
 async def test_nested_children_correct_ids(project_with_parent):
     """Nested children (parent with grandchildren) get correct hierarchical IDs."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
+
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
 
     cfg, name, parent_id = project_with_parent
     app = FastMCP("test-proj")
@@ -133,20 +138,22 @@ async def test_nested_children_correct_ids(project_with_parent):
     todos_mod.register(app)
 
     # Child A has two sub-children
-    children_json = json.dumps([
-        {
-            "title": "Child A",
-            "children": [
-                {"title": "Grandchild A1"},
-                {"title": "Grandchild A2"},
-            ],
-        },
-        {"title": "Child B"},
-    ])
+    children_json = json.dumps(
+        [
+            {
+                "title": "Child A",
+                "children": [
+                    {"title": "Grandchild A1"},
+                    {"title": "Grandchild A2"},
+                ],
+            },
+            {"title": "Child B"},
+        ]
+    )
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id=parent_id,
-                             children=children_json)
+    result = await call_tool(
+        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
+    )
     data = json.loads(result)
 
     # Depth-first: Child A, Grandchild A1, Grandchild A2, Child B
@@ -185,7 +192,9 @@ async def test_nested_children_correct_ids(project_with_parent):
 async def test_blocking_pairs_link_created_todos(project_with_parent):
     """blocking_pairs correctly link created todos by depth-first index."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
+
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
 
     cfg, name, parent_id = project_with_parent
     app = FastMCP("test-proj")
@@ -193,18 +202,23 @@ async def test_blocking_pairs_link_created_todos(project_with_parent):
     projects.register(app)
     todos_mod.register(app)
 
-    children_json = json.dumps([
-        {"title": "Setup"},
-        {"title": "Build"},
-        {"title": "Deploy"},
-    ])
+    children_json = json.dumps(
+        [
+            {"title": "Setup"},
+            {"title": "Build"},
+            {"title": "Deploy"},
+        ]
+    )
     # Setup (idx 0) blocks Build (idx 1); Build (idx 1) blocks Deploy (idx 2)
     blocking_json = json.dumps([[0, 1], [1, 2]])
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id=parent_id,
-                             children=children_json,
-                             blocking_pairs=blocking_json)
+    result = await call_tool(
+        app,
+        "todo_batch_add_children",
+        parent_id=parent_id,
+        children=children_json,
+        blocking_pairs=blocking_json,
+    )
     data = json.loads(result)
     assert data["count"] == 3
     assert "blocking_errors" not in data
@@ -232,9 +246,11 @@ async def test_blocking_pairs_link_created_todos(project_with_parent):
 async def test_invalid_parent_id_returns_error(project_with_parent):
     """Invalid parent_id returns an error message."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
 
-    cfg, name, parent_id = project_with_parent
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
+
+    cfg, name, _parent_id = project_with_parent
     app = FastMCP("test-proj")
     config.register(app)
     projects.register(app)
@@ -242,9 +258,9 @@ async def test_invalid_parent_id_returns_error(project_with_parent):
 
     children_json = json.dumps([{"title": "Orphan"}])
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id="nonexistent-99",
-                             children=children_json)
+    result = await call_tool(
+        app, "todo_batch_add_children", parent_id="nonexistent-99", children=children_json
+    )
     assert "not found" in result.lower()
 
     # Verify nothing was written
@@ -256,7 +272,9 @@ async def test_invalid_parent_id_returns_error(project_with_parent):
 async def test_empty_children_list_returns_error(project_with_parent):
     """Empty children list returns an error."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
+
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
 
     cfg, name, parent_id = project_with_parent
     app = FastMCP("test-proj")
@@ -264,9 +282,7 @@ async def test_empty_children_list_returns_error(project_with_parent):
     projects.register(app)
     todos_mod.register(app)
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id=parent_id,
-                             children="[]")
+    result = await call_tool(app, "todo_batch_add_children", parent_id=parent_id, children="[]")
     assert "non-empty" in result.lower()
 
     # Verify nothing changed
@@ -278,23 +294,28 @@ async def test_empty_children_list_returns_error(project_with_parent):
 async def test_invalid_json_returns_error(project_with_parent):
     """Invalid JSON for children parameter returns an error."""
     from mcp.server.fastmcp import FastMCP
-    from server.tools import config, projects, todos as todos_mod
 
-    cfg, name, parent_id = project_with_parent
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
+
+    _cfg, _name, parent_id = project_with_parent
     app = FastMCP("test-proj")
     config.register(app)
     projects.register(app)
     todos_mod.register(app)
 
-    result = await call_tool(app, "todo_batch_add_children",
-                             parent_id=parent_id,
-                             children="{not valid json")
+    result = await call_tool(
+        app, "todo_batch_add_children", parent_id=parent_id, children="{not valid json"
+    )
     assert "invalid json" in result.lower()
 
     # Also test invalid blocking_pairs JSON
     children_json = json.dumps([{"title": "Valid child"}])
-    result2 = await call_tool(app, "todo_batch_add_children",
-                              parent_id=parent_id,
-                              children=children_json,
-                              blocking_pairs="{bad}")
+    result2 = await call_tool(
+        app,
+        "todo_batch_add_children",
+        parent_id=parent_id,
+        children=children_json,
+        blocking_pairs="{bad}",
+    )
     assert "invalid json" in result2.lower()

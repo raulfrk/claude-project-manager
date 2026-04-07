@@ -43,10 +43,7 @@ def _serialize_result(result: _RawToolOutput) -> str:
         # If the string is already valid JSON object/array, pass through as-is
         try:
             parsed = json.loads(result)
-            if isinstance(parsed, (dict, list)):
-                serialized = result
-            else:
-                serialized = json.dumps(result)
+            serialized = result if isinstance(parsed, (dict, list)) else json.dumps(result)
         except (json.JSONDecodeError, ValueError):
             serialized = json.dumps(result)
     elif isinstance(result, (dict, int, float, bool)):
@@ -133,7 +130,12 @@ async def _dispatch_hook(
                 return data
             except Exception:
                 logger.warning("Hook dispatch for %s: malformed JSON response", tool_name)
-                return {"_error": "malformed response", "hooks_fired": 0, "errors": [], "results": []}
+                return {
+                    "_error": "malformed response",
+                    "hooks_fired": 0,
+                    "errors": [],
+                    "results": [],
+                }
     except (httpx.ConnectError, httpx.TimeoutException):
         logger.warning("Hook dispatch failed for %s: hooks server unreachable", tool_name)
         return {"_error": "hooks server unreachable", "hooks_fired": 0, "errors": [], "results": []}
@@ -142,7 +144,9 @@ async def _dispatch_hook(
         return None
 
 
-def _build_hooks_field(fire_response: dict[str, JsonValue] | None, tool_name: str) -> dict[str, JsonValue] | None:
+def _build_hooks_field(
+    fire_response: dict[str, JsonValue] | None, tool_name: str
+) -> dict[str, JsonValue] | None:
     """Map a hooks_fire_tool response to the _hooks injection format.
 
     Returns None when injection should be skipped (zero hooks, nested dispatch).
@@ -169,24 +173,33 @@ def _build_hooks_field(fire_response: dict[str, JsonValue] | None, tool_name: st
     # Build chain from results (ok) + errors
     raw_results_val = fire_response.get("results", [])
     raw_results: list[dict[str, JsonValue]] = [
-        r for r in (raw_results_val if isinstance(raw_results_val, list) else [])
+        r
+        for r in (raw_results_val if isinstance(raw_results_val, list) else [])
         if isinstance(r, dict)
     ]
     chain: list[JsonValue] = []
     for r in raw_results:
-        entry: dict[str, JsonValue] = {"hook_id": str(r.get("hook_id")), "target_tool": str(r.get("target_tool")) if r.get("target_tool") else None, "status": "ok", "error": None}
+        entry: dict[str, JsonValue] = {
+            "hook_id": str(r.get("hook_id")),
+            "target_tool": str(r.get("target_tool")) if r.get("target_tool") else None,
+            "status": "ok",
+            "error": None,
+        }
         chain.append(entry)
     for e in errors_list:
-        entry = {"hook_id": str(e.get("hook_id")), "target_tool": str(e.get("target_tool")) if e.get("target_tool") else None, "status": "error", "error": str(e.get("error")) if e.get("error") else None}
+        entry = {
+            "hook_id": str(e.get("hook_id")),
+            "target_tool": str(e.get("target_tool")) if e.get("target_tool") else None,
+            "status": "error",
+            "error": str(e.get("error")) if e.get("error") else None,
+        }
         chain.append(entry)
 
     error_strings: list[JsonValue] = []
     if has_error:
         error_strings = [str(fire_response["_error"])]
     else:
-        error_strings = [
-            str(e.get("error", str(e))) for e in errors_list
-        ]
+        error_strings = [str(e.get("error", str(e))) for e in errors_list]
 
     # Merge cascade errors from nested hook dispatch
     raw_cascade = fire_response.get("cascade_errors", [])
@@ -207,7 +220,9 @@ def _build_hooks_field(fire_response: dict[str, JsonValue] | None, tool_name: st
     }
 
 
-def _inject_hooks(original: _RawToolOutput, hooks_field: dict[str, JsonValue]) -> str | dict[str, JsonValue]:
+def _inject_hooks(
+    original: _RawToolOutput, hooks_field: dict[str, JsonValue]
+) -> str | dict[str, JsonValue]:
     """Inject a _hooks field into a tool result.
 
     Handles all result shapes: JSON object string, JSON non-object, non-JSON string,
@@ -222,7 +237,8 @@ def _inject_hooks(original: _RawToolOutput, hooks_field: dict[str, JsonValue]) -
             truncated_field: dict[str, JsonValue] = {
                 **hooks_field,
                 "chain": [],
-                "errors": (existing_errors if isinstance(existing_errors, list) else []) + ["chain truncated: result too large"],
+                "errors": (existing_errors if isinstance(existing_errors, list) else [])
+                + ["chain truncated: result too large"],
             }
             base["_hooks"] = truncated_field
             result_str = json.dumps(base, ensure_ascii=True)
@@ -315,7 +331,7 @@ def enable_hook_dispatch(
     mcp.tool = patched_tool  # type: ignore[assignment,method-assign]
 
 
-def _wrap_tool_fn(
+def _wrap_tool_fn[**P, R](
     fn: Callable[P, R],
     tool_name: str,
     hooks_port: int,
@@ -335,7 +351,9 @@ def _wrap_tool_fn(
 
     if asyncio.iscoroutinefunction(fn):
 
-        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R | str | dict[str, JsonValue]:
+        async def async_wrapper(
+            *args: P.args, **kwargs: P.kwargs
+        ) -> R | str | dict[str, JsonValue]:
             result: R = await fn(*args, **kwargs)
             fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
             hooks_field = _build_hooks_field(fire_response, tool_name)
@@ -354,7 +372,9 @@ def _wrap_tool_fn(
 
     # Sync tool: wrap as async so dispatch can be awaited.
     # Copy signature from original fn so FastMCP argument validation works.
-    async def sync_to_async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R | str | dict[str, JsonValue]:
+    async def sync_to_async_wrapper(
+        *args: P.args, **kwargs: P.kwargs
+    ) -> R | str | dict[str, JsonValue]:
         result: R = fn(*args, **kwargs)
         fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
         hooks_field = _build_hooks_field(fire_response, tool_name)

@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from server.lib._types import JsonValue
+if TYPE_CHECKING:
+    from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ def _load_proj_config(path: Path | None = None) -> dict[str, JsonValue]:
             raw = yaml.safe_load(f)
         if isinstance(raw, dict):
             return raw
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Could not read %s for condition evaluation", target)
     return {}
 
@@ -96,10 +98,7 @@ def evaluate_condition(
     if not condition or not condition.strip():
         return True
 
-    if config is not None:
-        _config = config
-    else:
-        _config = _load_proj_config(config_path)
+    _config = config if config is not None else _load_proj_config(config_path)
 
     # Split by 'or' first (lower precedence), then 'and' (higher precedence)
     or_groups = [g.strip() for g in condition.split(" or ")]
@@ -122,7 +121,10 @@ def validate_condition_syntax(condition: str) -> tuple[bool, str | None]:
     # Reject parentheses outright — evaluate_condition ignores them,
     # so allowing them would silently produce wrong results.
     if "(" in stripped or ")" in stripped:
-        return False, "Parentheses are not supported in conditions; use 'and'/'or' precedence directly"
+        return (
+            False,
+            "Parentheses are not supported in conditions; use 'and'/'or' precedence directly",
+        )
 
     # Split into tokens by 'or' then 'and' and check for empty terms
     or_groups = [g.strip() for g in stripped.split(" or ")]
@@ -171,10 +173,7 @@ def resolve_condition_status(
     if not condition or not condition.strip():
         return "always"
 
-    if config is not None:
-        _config = config
-    else:
-        _config = _load_proj_config(config_path)
+    _config = config if config is not None else _load_proj_config(config_path)
 
     has_runtime = False
 

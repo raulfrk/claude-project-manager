@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from server.lib.http_client import FireResult, post_hook
-
 
 # ── FireResult tests ────────────────────────────────────────────────────────
 
@@ -165,8 +163,10 @@ class TestPostHook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client) as mock_cls, \
-             patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls:
+        with (
+            patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client),
+            patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls,
+        ):
             mock_transport_cls.return_value = MagicMock()
             fr = await post_hook(
                 hook_id="h1",
@@ -197,8 +197,10 @@ class TestPostHook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client) as mock_cls, \
-             patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls:
+        with (
+            patch("server.lib.http_client.httpx.AsyncClient", return_value=mock_client),
+            patch("server.lib.http_client.httpx.AsyncHTTPTransport") as mock_transport_cls,
+        ):
             mock_transport_cls.return_value = MagicMock()
             fr = await post_hook(
                 hook_id="h1",

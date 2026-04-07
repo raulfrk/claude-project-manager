@@ -111,7 +111,7 @@ def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
     todos_raw = data.get("todos", [])
     if not isinstance(todos_raw, list):
         return []
-    return [Todo.from_dict(t) for t in todos_raw]
+    return [Todo.from_dict(t) for t in todos_raw if isinstance(t, dict)]
 
 
 def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
@@ -131,13 +131,15 @@ def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
     todos_raw = data.get("todos", [])
     if not isinstance(todos_raw, list):
         return []
-    return [Todo.from_dict(t) for t in todos_raw]
+    return [Todo.from_dict(t) for t in todos_raw if isinstance(t, dict)]
 
 
 def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[Todo]) -> None:
     """Append todos to archive.yaml, creating it if needed."""
     existing = load_archived_todos(cfg, project_name)
-    _write_yaml(archive_path(cfg, project_name), {"todos": [t.to_dict() for t in existing + todos_to_add]})
+    _write_yaml(
+        archive_path(cfg, project_name), {"todos": [t.to_dict() for t in existing + todos_to_add]}
+    )
 
 
 def archive_and_remove_todos(
@@ -146,7 +148,9 @@ def archive_and_remove_todos(
     remaining: list[Todo],
     to_archive: list[Todo],
 ) -> None:
-    """Stage both archive append and active removal; commit archive-first to minimise data-loss window.
+    """Stage both archive append and active removal.
+
+    Commit archive-first to minimise data-loss window.
 
     Both writes are prepared as temp files before either is committed. Archive rename
     happens first so a failure between the two renames leaves the todo in the archive
@@ -285,7 +289,10 @@ def todo_content_dir(cfg: ProjConfig, project_name: str, todo_id: str) -> Path:
 
 
 def rename_todo_dir(cfg: ProjConfig, project_name: str, old_id: str, new_id: str) -> bool:
-    """Rename a todo's content directory from old_id to new_id. Returns True if renamed, False if not found."""
+    """Rename a todo's content directory from old_id to new_id.
+
+    Returns True if renamed, False if not found.
+    """
     old_path = todo_content_dir(cfg, project_name, old_id)
     new_path = todo_content_dir(cfg, project_name, new_id)
     if not old_path.exists():

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import get_client
-from server.lib.models import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
+    from server.lib.models import JsonObject, JsonValue
 
 
 def register(app: FastMCP) -> None:
@@ -35,7 +38,7 @@ def register(app: FastMCP) -> None:
         try:
             result = client.post("/projects", json={"name": name})
             return json.dumps({"successes": [result], "failures": []})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return json.dumps({"successes": [], "failures": [{"name": name, "error": str(exc)}]})
 
     @app.tool(description="Find Todoist projects, optionally filtering by name.")
@@ -54,7 +57,8 @@ def register(app: FastMCP) -> None:
         if name is not None:
             lower = name.lower()
             projects = [
-                p for p in projects
+                p
+                for p in projects
                 if isinstance(p, dict) and lower in str(p.get("name", "")).lower()
             ]
         return json.dumps(projects)

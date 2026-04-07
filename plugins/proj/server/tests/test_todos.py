@@ -142,7 +142,9 @@ class TestNextTodoId:
         tid = next_todo_id(meta)
         assert tid == "1"
 
-    def test_root_id_increments_meta_counter(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_root_id_increments_meta_counter(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         next_todo_id(meta)
@@ -157,7 +159,9 @@ class TestNextTodoId:
         child_id = next_todo_id(meta, parent=parent)
         assert child_id == "3.1"
 
-    def test_child_id_increments_parent_counter(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_child_id_increments_parent_counter(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
@@ -166,7 +170,9 @@ class TestNextTodoId:
         next_todo_id(meta, parent=parent)
         assert parent.next_child_id == 3
 
-    def test_child_id_does_not_increment_meta_counter(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_child_id_does_not_increment_meta_counter(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
@@ -183,13 +189,17 @@ class TestNextTodoId:
         root = Todo(id=next_todo_id(meta), title="Root", created=today, updated=today)
         assert root.id == "1"
         # Child todo: ID "1.1"
-        child = Todo(id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today)
+        child = Todo(
+            id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today
+        )
         assert child.id == "1.1"
         # Grandchild todo: ID "1.1.1"
         grandchild_id = next_todo_id(meta, parent=child)
         assert grandchild_id == "1.1.1"
 
-    def test_multiple_children_get_sequential_suffixes(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_multiple_children_get_sequential_suffixes(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
@@ -203,24 +213,39 @@ class TestNextTodoId:
         today = str(__import__("datetime").date.today())
         root = Todo(id=next_todo_id(meta), title="Root", created=today, updated=today)
         assert root.id == "1"
-        child = Todo(id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today)
+        child = Todo(
+            id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today
+        )
         assert child.id == "1.1"
-        grandchild = Todo(id=next_todo_id(meta, parent=child), title="Grandchild", created=today, updated=today)
+        grandchild = Todo(
+            id=next_todo_id(meta, parent=child), title="Grandchild", created=today, updated=today
+        )
         assert grandchild.id == "1.1.1"
-        great = Todo(id=next_todo_id(meta, parent=grandchild), title="Great-grandchild", created=today, updated=today)
+        great = Todo(
+            id=next_todo_id(meta, parent=grandchild),
+            title="Great-grandchild",
+            created=today,
+            updated=today,
+        )
         assert great.id == "1.1.1.1"
         great_great_id = next_todo_id(meta, parent=great)
         assert great_great_id == "1.1.1.1.1"
         # Meta counter only incremented once (for root)
         assert meta.next_todo_id == 2
 
-    def test_deep_nesting_sibling_counters_are_independent(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+    def test_deep_nesting_sibling_counters_are_independent(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
         root = Todo(id=next_todo_id(meta), title="Root", created=today, updated=today)
-        child_a = Todo(id=next_todo_id(meta, parent=root), title="Child A", created=today, updated=today)
-        child_b = Todo(id=next_todo_id(meta, parent=root), title="Child B", created=today, updated=today)
+        child_a = Todo(
+            id=next_todo_id(meta, parent=root), title="Child A", created=today, updated=today
+        )
+        child_b = Todo(
+            id=next_todo_id(meta, parent=root), title="Child B", created=today, updated=today
+        )
         assert child_a.id == "1.1"
         assert child_b.id == "1.2"
         # Each child has its own independent counter
@@ -250,5 +275,3 @@ class TestContent:
         content = storage.read_claudemd(str(tmp_path))
         assert content is not None
         assert "Status: active" in content
-
-

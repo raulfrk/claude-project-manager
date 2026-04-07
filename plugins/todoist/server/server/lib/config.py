@@ -30,19 +30,14 @@ def load_config() -> TodoistConfig:
     1. TODOIST_CONFIG env var points to a YAML file -> parse it
     2. Default ~/.claude/todoist.yaml
     """
-    global _cached_config  # noqa: PLW0603
+    global _cached_config
     if _cached_config is not None:
         return _cached_config
 
-    config_path = Path(
-        os.environ.get("TODOIST_CONFIG", "~/.claude/todoist.yaml")
-    ).expanduser()
+    config_path = Path(os.environ.get("TODOIST_CONFIG", "~/.claude/todoist.yaml")).expanduser()
 
     if not config_path.exists():
-        msg = (
-            "Todoist not configured. "
-            "Create ~/.claude/todoist.yaml with api_token field."
-        )
+        msg = "Todoist not configured. Create ~/.claude/todoist.yaml with api_token field."
         raise ValueError(msg)
 
     try:

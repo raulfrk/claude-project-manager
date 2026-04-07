@@ -176,9 +176,7 @@ class TestZoxideQuery:
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_default_max_results(self, mock_run, zoxide_query):
-        mock_run.return_value = MagicMock(
-            stdout="\n".join(f"/path/{i}" for i in range(10)) + "\n"
-        )
+        mock_run.return_value = MagicMock(stdout="\n".join(f"/path/{i}" for i in range(10)) + "\n")
 
         result = zoxide_query("path")
 

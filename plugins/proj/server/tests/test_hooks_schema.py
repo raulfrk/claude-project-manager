@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 HOOKS_FILE = Path(__file__).parents[2] / "hooks" / "hooks.json"
 PLUGIN_JSON = Path(__file__).parents[2] / ".claude-plugin" / "plugin.json"
 STANDARD_HOOKS_PATH = "./hooks/hooks.json"
@@ -73,12 +72,8 @@ def test_each_matcher_group_has_hooks_array() -> None:
                 f"Claude Code rejects the flat structure — hook commands must be "
                 f"nested inside a 'hooks' array within each matcher group."
             )
-            assert isinstance(group["hooks"], list), (
-                f"{event}[{i}].hooks must be an array"
-            )
-            assert len(group["hooks"]) > 0, (
-                f"{event}[{i}].hooks must contain at least one hook"
-            )
+            assert isinstance(group["hooks"], list), f"{event}[{i}].hooks must be an array"
+            assert len(group["hooks"]) > 0, f"{event}[{i}].hooks must contain at least one hook"
 
 
 def test_each_hook_has_required_fields() -> None:
@@ -132,6 +127,4 @@ def test_matcher_is_string_if_present() -> None:
         for i, group in enumerate(groups):
             assert isinstance(group, dict)
             if "matcher" in group:
-                assert isinstance(group["matcher"], str), (
-                    f"{event}[{i}].matcher must be a string"
-                )
+                assert isinstance(group["matcher"], str), f"{event}[{i}].matcher must be a string"

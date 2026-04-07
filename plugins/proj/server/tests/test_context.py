@@ -35,8 +35,7 @@ from server.lib.models import (
     Todo,
 )
 from server.tools.context import _build_context, _read_project_knowledge, _read_session_history
-from tests.conftest import call_tool, setup_project
-
+from tests.conftest import call_tool
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,16 +73,11 @@ def _setup_project_with_todos(
     storage.save_meta(cfg, meta)
 
     index = storage.load_index(cfg)
-    index.projects[name] = ProjectEntry(
-        name=name, tracking_dir=str(proj_dir), created=today
-    )
+    index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
     storage.save_index(cfg, index)
 
     # Write todos
-    if todos:
-        todo_dicts = [t.to_dict() for t in todos]
-    else:
-        todo_dicts = []
+    todo_dicts = [t.to_dict() for t in todos] if todos else []
     (proj_dir / "todos.yaml").write_text(
         "todos:\n" + "".join(f"  - {json.dumps(td)}\n" for td in todo_dicts)
         if todo_dicts
@@ -148,9 +142,7 @@ class TestProjSessionContext:
         self, mcp_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """No config file returns error string, not JSON."""
-        monkeypatch.setattr(
-            storage, "_DEFAULT_CONFIG_PATH", tmp_path / "nonexistent.yaml"
-        )
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", tmp_path / "nonexistent.yaml")
         monkeypatch.delenv("PROJ_CONFIG", raising=False)
 
         result = await call_tool(mcp_app, "proj_session_context")
@@ -172,9 +164,7 @@ class TestProjSessionContext:
         _setup_project_with_todos(cfg, "myapp", tmp_path, todos=_make_todos())
         state.set_session_active("myapp")
 
-        result = await call_tool(
-            mcp_app, "proj_session_context", include_todo_count=False
-        )
+        result = await call_tool(mcp_app, "proj_session_context", include_todo_count=False)
         data = json.loads(result)
 
         assert "todo_count" not in data
@@ -187,9 +177,7 @@ class TestProjSessionContext:
         _setup_project_with_todos(cfg, "myapp", tmp_path, todos=todos)
         state.set_session_active("myapp")
 
-        result = await call_tool(
-            mcp_app, "proj_session_context", include_todo_count=True
-        )
+        result = await call_tool(mcp_app, "proj_session_context", include_todo_count=True)
         data = json.loads(result)
 
         assert "todo_count" in data
@@ -213,9 +201,7 @@ class TestProjSessionContext:
         cfg.todoist.mcp_server = "my_todoist_server"
         storage.save_config(cfg)
 
-        _setup_project_with_todos(
-            cfg, "myapp", tmp_path, todoist_project_id="12345"
-        )
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todoist_project_id="12345")
         state.set_session_active("myapp")
 
         result = await call_tool(mcp_app, "proj_session_context")
@@ -234,9 +220,7 @@ class TestProjSessionContext:
         cfg.trello.enabled = True
         storage.save_config(cfg)
 
-        _setup_project_with_todos(
-            cfg, "myapp", tmp_path, trello_card_id="abc123"
-        )
+        _setup_project_with_todos(cfg, "myapp", tmp_path, trello_card_id="abc123")
         state.set_session_active("myapp")
 
         result = await call_tool(mcp_app, "proj_session_context")
@@ -259,11 +243,29 @@ def _make_status_todos() -> list[Todo]:
     """Create todos with varied statuses, blockers, and children for status context testing."""
     return [
         Todo(id="T001", title="Pending ready", status="pending", priority="high", tags=["backend"]),
-        Todo(id="T002", title="In progress task", status="in_progress", priority="medium", children=["T002.1"]),
+        Todo(
+            id="T002",
+            title="In progress task",
+            status="in_progress",
+            priority="medium",
+            children=["T002.1"],
+        ),
         Todo(id="T003", title="Done task", status="done", priority="low"),
-        Todo(id="T004", title="Blocked task", status="pending", priority="medium", blocked_by=["T002"]),
+        Todo(
+            id="T004",
+            title="Blocked task",
+            status="pending",
+            priority="medium",
+            blocked_by=["T002"],
+        ),
         Todo(id="T005", title="Cancelled task", status="cancelled"),
-        Todo(id="T006", title="Another in progress", status="in_progress", priority="high", tags=["urgent"]),
+        Todo(
+            id="T006",
+            title="Another in progress",
+            status="in_progress",
+            priority="high",
+            tags=["urgent"],
+        ),
     ]
 
 
@@ -286,9 +288,7 @@ class TestProjStatusContext:
         assert "todos" in data
         assert "git_activity" in data
 
-    async def test_config_section(
-        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
+    async def test_config_section(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         """Config section contains tracking_dir and projects_base_dir."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
         state.set_session_active("myapp")
@@ -303,9 +303,7 @@ class TestProjStatusContext:
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
         """Project section contains name, status, priority, description, repos, tags, dates."""
-        _setup_project_with_todos(
-            cfg, "myapp", tmp_path, description="Status test", tags=["web"]
-        )
+        _setup_project_with_todos(cfg, "myapp", tmp_path, description="Status test", tags=["web"])
         state.set_session_active("myapp")
 
         result = await call_tool(mcp_app, "proj_status_context")
@@ -321,10 +319,9 @@ class TestProjStatusContext:
         assert "created" in proj["dates"]
         assert "last_updated" in proj["dates"]
 
-    async def test_todo_categorisation(
-        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """Todos are correctly categorised into in_progress, ready, blocked, all_open, done_count."""
+    async def test_todo_categorisation(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Todos are correctly categorised into in_progress,
+        ready, blocked, all_open, done_count."""
         _setup_project_with_todos(cfg, "myapp", tmp_path, todos=_make_status_todos())
         state.set_session_active("myapp")
 
@@ -354,10 +351,9 @@ class TestProjStatusContext:
         # done_count: T003
         assert todos["done_count"] == 1
 
-    async def test_todo_summary_fields(
-        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """Each todo in the lists has id, title, priority, status, tags, blocked_by, children_count."""
+    async def test_todo_summary_fields(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Each todo in the lists has id, title, priority,
+        status, tags, blocked_by, children_count."""
         _setup_project_with_todos(cfg, "myapp", tmp_path, todos=_make_status_todos())
         state.set_session_active("myapp")
 
@@ -378,9 +374,7 @@ class TestProjStatusContext:
         assert t001["tags"] == ["backend"]
         assert t001["children_count"] == 0
 
-    async def test_no_active_project_returns_error(
-        self, mcp_app: Any, cfg: ProjConfig
-    ) -> None:
+    async def test_no_active_project_returns_error(self, mcp_app: Any, cfg: ProjConfig) -> None:
         """No active project returns error string."""
         state.clear_session_active()
 
@@ -391,9 +385,14 @@ class TestProjStatusContext:
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
         """Passing project_name explicitly resolves the correct project."""
-        _setup_project_with_todos(cfg, "other", tmp_path, todos=[
-            Todo(id="T001", title="Only task", status="pending"),
-        ])
+        _setup_project_with_todos(
+            cfg,
+            "other",
+            tmp_path,
+            todos=[
+                Todo(id="T001", title="Only task", status="pending"),
+            ],
+        )
 
         result = await call_tool(mcp_app, "proj_status_context", project_name="other")
         data = json.loads(result)
@@ -496,11 +495,15 @@ class TestReadSessionHistory:
     def test_with_session_files(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """Returns summary, decisions, and questions from session files."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-20.md": SESSION_A,
-            "session-2026-03-21.md": SESSION_B,
-            "session-2026-03-22.md": SESSION_C,
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-20.md": SESSION_A,
+                "session-2026-03-21.md": SESSION_B,
+                "session-2026-03-22.md": SESSION_C,
+            },
+        )
 
         result = _read_session_history(cfg, "myapp")
 
@@ -540,10 +543,14 @@ class TestReadSessionHistory:
     def test_malformed_session_files(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """Gracefully handles session files without expected sections."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-20.md": "Just some random text\nNo sections here.",
-            "session-2026-03-21.md": "# Session: 2026-03-21\n\nSome notes but no ## sections.",
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-20.md": "Just some random text\nNo sections here.",
+                "session-2026-03-21.md": "# Session: 2026-03-21\n\nSome notes but no ## sections.",
+            },
+        )
 
         result = _read_session_history(cfg, "myapp")
 
@@ -564,12 +571,16 @@ class TestReadSessionHistory:
 ## Open Questions
 - This old question should NOT appear
 """
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-10.md": old_session,
-            "session-2026-03-20.md": SESSION_A,
-            "session-2026-03-21.md": SESSION_B,
-            "session-2026-03-22.md": SESSION_C,
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-10.md": old_session,
+                "session-2026-03-20.md": SESSION_A,
+                "session-2026-03-21.md": SESSION_B,
+                "session-2026-03-22.md": SESSION_C,
+            },
+        )
 
         result = _read_session_history(cfg, "myapp")
         questions = result["questions"]
@@ -584,10 +595,14 @@ class TestReadSessionHistory:
     def test_decisions_deduplicated(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """Duplicate decisions across sessions are deduplicated."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-20.md": SESSION_A,
-            "session-2026-03-21.md": SESSION_B,
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-20.md": SESSION_A,
+                "session-2026-03-21.md": SESSION_B,
+            },
+        )
 
         result = _read_session_history(cfg, "myapp")
         decisions = result["decisions"]
@@ -603,9 +618,13 @@ class TestBuildContextSessionHistory:
     def test_includes_session_history(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """_build_context includes session history sections when not compact."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-22.md": SESSION_C,
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-22.md": SESSION_C,
+            },
+        )
 
         result = _build_context(cfg, "myapp", compact=False)
 
@@ -618,9 +637,13 @@ class TestBuildContextSessionHistory:
     def test_compact_excludes_session_history(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """_build_context in compact mode does NOT include session history."""
         _setup_project_with_todos(cfg, "myapp", tmp_path)
-        _create_sessions(cfg, "myapp", {
-            "session-2026-03-22.md": SESSION_C,
-        })
+        _create_sessions(
+            cfg,
+            "myapp",
+            {
+                "session-2026-03-22.md": SESSION_C,
+            },
+        )
 
         result = _build_context(cfg, "myapp", compact=True)
 

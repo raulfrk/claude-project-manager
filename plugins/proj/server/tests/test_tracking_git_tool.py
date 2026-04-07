@@ -46,7 +46,9 @@ class TestTrackingGitFlush:
         assert data["status"] == "disabled"
 
     @pytest.mark.anyio
-    async def test_flush_commits(self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_commits(
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         # Write something to tracking dir
         tracking = storage.tracking_dir(cfg_with_git, project_with_git)
         (tracking / "extra.txt").write_text("new data")
@@ -57,7 +59,9 @@ class TestTrackingGitFlush:
         assert data["message"] == "test flush"
 
     @pytest.mark.anyio
-    async def test_flush_no_changes(self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_no_changes(
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         # First flush to commit existing files
         await call_tool(mcp_app, "tracking_git_flush", commit_message="initial")
         # Second flush with no new changes
@@ -66,7 +70,9 @@ class TestTrackingGitFlush:
         assert data["status"] == "no_changes"
 
     @pytest.mark.anyio
-    async def test_flush_auto_message(self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_auto_message(
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         tracking = storage.tracking_dir(cfg_with_git, project_with_git)
         (tracking / "extra.txt").write_text("data")
         result = await call_tool(mcp_app, "tracking_git_flush")
@@ -75,9 +81,12 @@ class TestTrackingGitFlush:
         assert data["message"] == f"[{project_with_git}] Update {project_with_git}"
 
     @pytest.mark.anyio
-    async def test_flush_per_project_override_disables(self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_per_project_override_disables(
+        self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         """Per-project enabled=False overrides global enabled=True."""
         from server.lib.models import ProjectGitTrackingConfig
+
         meta = storage.load_meta(cfg_with_git, project_with_git)
         meta.git_tracking = ProjectGitTrackingConfig(enabled=False)
         storage.save_meta(cfg_with_git, meta)
@@ -86,9 +95,12 @@ class TestTrackingGitFlush:
         assert data["status"] == "disabled"
 
     @pytest.mark.anyio
-    async def test_flush_per_project_override_enables(self, cfg: ProjConfig, tmp_path: Path, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_flush_per_project_override_enables(
+        self, cfg: ProjConfig, tmp_path: Path, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         """Per-project enabled=True overrides global enabled=False (default)."""
         from server.lib.models import ProjectGitTrackingConfig
+
         name = "test-proj"
         repo_path = str(tmp_path / "repo")
         Path(repo_path).mkdir()
@@ -107,14 +119,17 @@ class TestTrackingGitFlush:
 
 class TestProjUpdateMetaGitTracking:
     @pytest.mark.anyio
-    async def test_update_git_tracking_fields(self, cfg: ProjConfig, tmp_path: Path, mcp_app) -> None:  # type: ignore[no-untyped-def]
+    async def test_update_git_tracking_fields(
+        self, cfg: ProjConfig, tmp_path: Path, mcp_app
+    ) -> None:  # type: ignore[no-untyped-def]
         name = "test-proj"
         repo_path = str(tmp_path / "repo")
         Path(repo_path).mkdir()
         setup_project(cfg, name, repo_path)
         state.set_session_active(name)
         result = await call_tool(
-            mcp_app, "proj_update_meta",
+            mcp_app,
+            "proj_update_meta",
             git_tracking_enabled=True,
             git_tracking_github_enabled=True,
             git_tracking_github_repo_format="custom-{project-name}",

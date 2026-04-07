@@ -9,16 +9,16 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.lib._types import JsonValue
-
 from server.lib import storage
-from server.lib.conditions import evaluate_condition, _load_proj_config
+from server.lib.conditions import _load_proj_config, evaluate_condition
 from server.lib.http_client import FireResult, post_hook
-from server.lib.models import Hook
 from server.lib.template import _resolve_path, resolve_mapping
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib._types import JsonValue
+    from server.lib.models import Hook
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
         if path:
             return f"unix://{path}"
     except (FileNotFoundError, OSError):
-        pass
+        logger.debug("Socket registry lookup failed", exc_info=True)
     # Fallback: use server name as-is (allows direct URL or name-based routing)
     return server_name
 
@@ -154,7 +154,7 @@ async def _fire_verification(
         return_exceptions=True,
     )
 
-    for hook, result in zip(eligible, fire_results):
+    for hook, result in zip(eligible, fire_results, strict=False):
         if isinstance(result, BaseException):
             status, details = "fail", f"Exception: {result}"
             storage.log_failure(
@@ -192,11 +192,13 @@ async def _fire_verification(
             status=status,
             details=details,
         )
-        results.append({
-            "hook_id": hook.id,
-            "status": status,
-            "details": details,
-        })
+        results.append(
+            {
+                "hook_id": hook.id,
+                "status": status,
+                "details": details,
+            }
+        )
 
     return results
 
@@ -282,11 +284,13 @@ async def _fire_hooks_internal(
             *[_fire_single(h, source) for h in blocking_hooks],
             return_exceptions=True,
         )
-        for hook, result in zip(blocking_hooks, results):
+        for hook, result in zip(blocking_hooks, results, strict=False):
             fired += 1
             if isinstance(result, BaseException):
                 err_msg = f"Exception: {result}"
-                errors.append({"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool})
+                errors.append(
+                    {"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool}
+                )
                 storage.log_failure(
                     hook_id=hook.id,
                     trigger_tool=hook.trigger_tool,
@@ -297,7 +301,9 @@ async def _fire_hooks_internal(
                 )
             elif not result.ok:
                 err_msg = result.error or f"HTTP {result.status_code}"
-                errors.append({"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool})
+                errors.append(
+                    {"hook_id": hook.id, "error": err_msg, "target_tool": hook.target_tool}
+                )
                 storage.log_failure(
                     hook_id=hook.id,
                     trigger_tool=hook.trigger_tool,
@@ -320,7 +326,9 @@ async def _fire_hooks_internal(
     feedback_results: list[dict[str, JsonValue]] = []
     if blocking_hooks and results_by_id:
         fb_port = registry.settings.get("hooks_port", 19100)
-        trigger_url = _resolve_server_url("proj", int(fb_port) if isinstance(fb_port, (int, float, str)) else 19100)
+        trigger_url = _resolve_server_url(
+            "proj", int(fb_port) if isinstance(fb_port, (int, float, str)) else 19100
+        )
 
         for hook in blocking_hooks:
             if not hook.feedback_mapping or not hook.feedback_tool:
@@ -334,8 +342,11 @@ async def _fire_hooks_internal(
                 continue
 
             # Detect batch feedback: any key containing [*] triggers per-item iteration
-            batch_keys = {k: v for k, v in hook.feedback_mapping.items()
-                          if isinstance(k, str) and "[*]" in k and isinstance(v, str)}
+            batch_keys = {
+                k: v
+                for k, v in hook.feedback_mapping.items()
+                if isinstance(k, str) and "[*]" in k and isinstance(v, str)
+            }
 
             if batch_keys and trigger_url:
                 # Batch feedback: iterate over result array and source created array
@@ -359,7 +370,11 @@ async def _fire_hooks_internal(
                         child_id = child_entry.get("id")
                         if not child_id:
                             continue
-                        value = _resolve_path(result_array[i], field) if isinstance(result_array[i], dict) else result_array[i]
+                        value = (
+                            _resolve_path(result_array[i], field)
+                            if isinstance(result_array[i], dict)
+                            else result_array[i]
+                        )
                         if value is None:
                             continue
                         fb_params: dict[str, JsonValue] = {
@@ -375,12 +390,14 @@ async def _fire_hooks_internal(
                                 target_tool=hook.feedback_tool,
                                 params=fb_params,
                             )
-                            feedback_results.append({
-                                "hook_id": f"{hook.id}-{i}",
-                                "feedback_tool": hook.feedback_tool,
-                                "ok": fb_result.ok,
-                                "error": fb_result.error,
-                            })
+                            feedback_results.append(
+                                {
+                                    "hook_id": f"{hook.id}-{i}",
+                                    "feedback_tool": hook.feedback_tool,
+                                    "ok": fb_result.ok,
+                                    "error": fb_result.error,
+                                }
+                            )
                             if not fb_result.ok:
                                 err_msg = fb_result.error or f"HTTP {fb_result.status_code}"
                                 storage.log_failure(
@@ -391,19 +408,23 @@ async def _fire_hooks_internal(
                                     error=err_msg,
                                     source_result=source_result,
                                 )
-                                errors.append({
-                                    "hook_id": f"{hook.id}-feedback-{i}",
-                                    "error": err_msg,
-                                    "target_tool": hook.feedback_tool,
-                                })
+                                errors.append(
+                                    {
+                                        "hook_id": f"{hook.id}-feedback-{i}",
+                                        "error": err_msg,
+                                        "target_tool": hook.feedback_tool,
+                                    }
+                                )
                         except Exception as exc:
                             err_msg = f"feedback writeback exception for {hook.id}-{i}: {exc}"
-                            feedback_results.append({
-                                "hook_id": f"{hook.id}-{i}",
-                                "feedback_tool": hook.feedback_tool,
-                                "ok": False,
-                                "error": str(exc),
-                            })
+                            feedback_results.append(
+                                {
+                                    "hook_id": f"{hook.id}-{i}",
+                                    "feedback_tool": hook.feedback_tool,
+                                    "ok": False,
+                                    "error": str(exc),
+                                }
+                            )
                             storage.log_failure(
                                 hook_id=f"{hook.id}-feedback-{i}",
                                 trigger_tool=hook.trigger_tool,
@@ -412,11 +433,13 @@ async def _fire_hooks_internal(
                                 error=err_msg,
                                 source_result=source_result,
                             )
-                            errors.append({
-                                "hook_id": f"{hook.id}-feedback-{i}",
-                                "error": err_msg,
-                                "target_tool": hook.feedback_tool,
-                            })
+                            errors.append(
+                                {
+                                    "hook_id": f"{hook.id}-feedback-{i}",
+                                    "error": err_msg,
+                                    "target_tool": hook.feedback_tool,
+                                }
+                            )
                 continue  # skip single-value path below
 
             # Single-value feedback (existing behavior)
@@ -443,12 +466,14 @@ async def _fire_hooks_internal(
                         target_tool=hook.feedback_tool,
                         params=feedback_params,
                     )
-                    feedback_results.append({
-                        "hook_id": hook.id,
-                        "feedback_tool": hook.feedback_tool,
-                        "ok": fb_result.ok,
-                        "error": fb_result.error,
-                    })
+                    feedback_results.append(
+                        {
+                            "hook_id": hook.id,
+                            "feedback_tool": hook.feedback_tool,
+                            "ok": fb_result.ok,
+                            "error": fb_result.error,
+                        }
+                    )
                     if not fb_result.ok:
                         err_msg = fb_result.error or f"HTTP {fb_result.status_code}"
                         storage.log_failure(
@@ -459,19 +484,23 @@ async def _fire_hooks_internal(
                             error=err_msg,
                             source_result=source_result,
                         )
-                        errors.append({
-                            "hook_id": f"{hook.id}-feedback",
-                            "error": err_msg,
-                            "target_tool": hook.feedback_tool,
-                        })
+                        errors.append(
+                            {
+                                "hook_id": f"{hook.id}-feedback",
+                                "error": err_msg,
+                                "target_tool": hook.feedback_tool,
+                            }
+                        )
                 except Exception as exc:
                     err_msg = f"feedback writeback exception for {hook.id}: {exc}"
-                    feedback_results.append({
-                        "hook_id": hook.id,
-                        "feedback_tool": hook.feedback_tool,
-                        "ok": False,
-                        "error": str(exc),
-                    })
+                    feedback_results.append(
+                        {
+                            "hook_id": hook.id,
+                            "feedback_tool": hook.feedback_tool,
+                            "ok": False,
+                            "error": str(exc),
+                        }
+                    )
                     storage.log_failure(
                         hook_id=f"{hook.id}-feedback",
                         trigger_tool=hook.trigger_tool,
@@ -480,11 +509,13 @@ async def _fire_hooks_internal(
                         error=err_msg,
                         source_result=source_result,
                     )
-                    errors.append({
-                        "hook_id": f"{hook.id}-feedback",
-                        "error": err_msg,
-                        "target_tool": hook.feedback_tool,
-                    })
+                    errors.append(
+                        {
+                            "hook_id": f"{hook.id}-feedback",
+                            "error": err_msg,
+                            "target_tool": hook.feedback_tool,
+                        }
+                    )
 
     # Phase 1.6: Cascade dispatch for blocking hooks
     cascade_errors: list[str] = []
@@ -499,7 +530,12 @@ async def _fire_hooks_internal(
             if not isinstance(nested_source, dict):
                 continue
             nested = await _fire_hooks_internal(
-                hook.target_tool, nested_source, depth + 1, raw, max_depth, base_config,
+                hook.target_tool,
+                nested_source,
+                depth + 1,
+                raw,
+                max_depth,
+                base_config,
             )
             # Collect nested errors with chain path prefix
             nested_errors = nested.get("errors", [])
@@ -513,7 +549,7 @@ async def _fire_hooks_internal(
             if isinstance(nested_cascade, list):
                 cascade_errors.extend(str(e) for e in nested_cascade)
         except Exception:
-            pass  # cascade failure is non-fatal
+            logger.debug("Cascade failure (non-fatal)", exc_info=True)
 
     # Schedule non-blocking hooks (fire-and-forget)
     for hook in non_blocking_hooks:
@@ -529,7 +565,11 @@ async def _fire_hooks_internal(
 
         enriched: dict[str, JsonValue] = {**source, "hook_results": hook_results}  # type: ignore[dict-item]
         verification_results = await _fire_verification(
-            verification_matched, enriched, trigger_tool, source_result, base_config,
+            verification_matched,
+            enriched,
+            trigger_tool,
+            source_result,
+            base_config,
         )
 
     target_tool_by_id = {hook.id: hook.target_tool for hook in blocking_hooks}
@@ -585,15 +625,17 @@ async def hooks_fire(
             f"'{trigger_tool}'. Skipping to prevent runaway cascade."
         )
         logger.warning(msg)
-        return json.dumps({
-            "hooks_fired": 0,
-            "skipped": 0,
-            "errors": [],
-            "depth_limited": True,
-            "depth": depth,
-            "max_depth": max_depth,
-            "message": msg,
-        })
+        return json.dumps(
+            {
+                "hooks_fired": 0,
+                "skipped": 0,
+                "errors": [],
+                "depth_limited": True,
+                "depth": depth,
+                "max_depth": max_depth,
+                "message": msg,
+            }
+        )
 
     # Parse source_result
     try:
@@ -607,11 +649,19 @@ async def hooks_fire(
     base_config = _load_proj_config()
     if source:
         # Inject todo-level fields
-        todo_fields = {k: v for k, v in source.items() if k in (
-            "todoist_task_id", "trello_card_id", "trello_checklist_id",
-            "trello_checklist_item_id", "jira_issue_key",
-            "parent_todoist_task_id",
-        )}
+        todo_fields = {
+            k: v
+            for k, v in source.items()
+            if k
+            in (
+                "todoist_task_id",
+                "trello_card_id",
+                "trello_checklist_id",
+                "trello_checklist_item_id",
+                "jira_issue_key",
+                "parent_todoist_task_id",
+            )
+        }
         if todo_fields:
             todo_section = base_config.get("todo")
             if not isinstance(todo_section, dict):
@@ -619,9 +669,16 @@ async def hooks_fire(
                 base_config["todo"] = todo_section
             todo_section.update(todo_fields)
         # Inject project-level fields
-        project_fields = {k: v for k, v in source.items() if k in (
-            "todoist_project_id", "trello_card_id", "trello_checklist_id",
-        )}
+        project_fields = {
+            k: v
+            for k, v in source.items()
+            if k
+            in (
+                "todoist_project_id",
+                "trello_card_id",
+                "trello_checklist_id",
+            )
+        }
         if project_fields:
             project_section = base_config.get("project")
             if not isinstance(project_section, dict):
@@ -630,7 +687,12 @@ async def hooks_fire(
             project_section.update(project_fields)
 
     summary = await _fire_hooks_internal(
-        trigger_tool, source, depth, source_result, max_depth, base_config,
+        trigger_tool,
+        source,
+        depth,
+        source_result,
+        max_depth,
+        base_config,
     )
     return json.dumps(summary, indent=2)
 
@@ -651,7 +713,8 @@ def register(app: FastMCP) -> None:
             "hooks.yaml settings.max_depth). "
             "Blocking hooks are awaited concurrently; non-blocking hooks are "
             "dispatched as background tasks and do not delay the response. "
-            "Returns JSON summary: {hooks_fired, skipped, errors, non_blocking_dispatched, depth, max_depth}."
+            "Returns JSON summary: {hooks_fired, skipped, errors, "
+            "non_blocking_dispatched, depth, max_depth}."
         )
     )
     async def hooks_fire_tool(

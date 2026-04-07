@@ -6,15 +6,15 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from server.lib._types import JsonValue
-
 from server.lib import storage
 from server.lib.conditions import _load_proj_config
-from server.lib.models import Hook
 from server.tools.fire import _fire_verification
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib._types import JsonValue
+    from server.lib.models import Hook
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,18 @@ async def hooks_verify(
     base_config = _load_proj_config()
     if source:
         # Inject todo-level fields
-        todo_fields = {k: v for k, v in source.items() if k in (
-            "todoist_task_id", "trello_card_id", "trello_checklist_id",
-            "trello_checklist_item_id", "jira_issue_key",
-        )}
+        todo_fields = {
+            k: v
+            for k, v in source.items()
+            if k
+            in (
+                "todoist_task_id",
+                "trello_card_id",
+                "trello_checklist_id",
+                "trello_checklist_item_id",
+                "jira_issue_key",
+            )
+        }
         if todo_fields:
             todo_section = base_config.get("todo")
             if not isinstance(todo_section, dict):
@@ -56,9 +64,16 @@ async def hooks_verify(
                 base_config["todo"] = todo_section
             todo_section.update(todo_fields)
         # Inject project-level fields
-        project_fields = {k: v for k, v in source.items() if k in (
-            "todoist_project_id", "trello_card_id", "trello_checklist_id",
-        )}
+        project_fields = {
+            k: v
+            for k, v in source.items()
+            if k
+            in (
+                "todoist_project_id",
+                "trello_card_id",
+                "trello_checklist_id",
+            )
+        }
         if project_fields:
             project_section = base_config.get("project")
             if not isinstance(project_section, dict):
@@ -68,8 +83,7 @@ async def hooks_verify(
 
     registry = storage.load()
     verification_hooks: list[Hook] = [
-        h for h in registry.hooks
-        if h.trigger_tool == trigger_tool and h.verification
+        h for h in registry.hooks if h.trigger_tool == trigger_tool and h.verification
     ]
 
     if not verification_hooks:
@@ -87,14 +101,17 @@ async def hooks_verify(
     passed = sum(1 for r in results if r["status"] == "pass")
     failed = sum(1 for r in results if r["status"] != "pass")
 
-    return json.dumps({
-        "results": results,
-        "summary": {
-            "total": len(results),
-            "passed": passed,
-            "failed": failed,
+    return json.dumps(
+        {
+            "results": results,
+            "summary": {
+                "total": len(results),
+                "passed": passed,
+                "failed": failed,
+            },
         },
-    }, indent=2)
+        indent=2,
+    )
 
 
 # ── Registration ──────────────────────────────────────────────────────────────

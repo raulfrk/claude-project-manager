@@ -7,18 +7,18 @@ fetch -> diff -> execute push ops -> apply pull ops -> return summary.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
-import base64
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 
-from server.lib.models import JsonValue
 from server.lib import storage
-from server.tools.config import require_project
+from server.tools.config import require_config, require_project
+from server.tools.trello_migration import _needs_migration, migrate_checklist_to_card
 from server.tools.trello_sync import (
     TrelloApplyInput,
     TrelloSyncPlan,
@@ -28,6 +28,8 @@ from server.tools.trello_sync import (
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib.models import JsonValue, ProjConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ def _resolve_trello_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    return "/tmp/claude-hooks-trello.sock"
+    return "/tmp/claude-hooks-trello.sock"  # noqa: S108
 
 
 def _call_trello_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
@@ -109,25 +111,29 @@ def _build_push_ops(plan: TrelloSyncPlan, card_id: str) -> list[dict[str, JsonVa
     ops: list[dict[str, JsonValue]] = []
 
     for entry in plan.push_create_checklist:
-        ops.append({
-            "type": "push_create_checklist",
-            "tool": "create_checklist",
-            "params": {"card_id": card_id, "name": entry["name"]},
-            "todo_id": entry.get("todo_id"),
-            "checklist_key": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_create_checklist",
+                "tool": "create_checklist",
+                "params": {"card_id": card_id, "name": entry["name"]},
+                "todo_id": entry.get("todo_id"),
+                "checklist_key": entry.get("todo_id"),
+            }
+        )
 
     for entry in plan.push_create_item:
-        ops.append({
-            "type": "push_create_item",
-            "tool": "add_checklist_item",
-            "params": {
-                "checklist_id": entry.get("checklist_id", ""),
-                "name": entry["name"],
-            },
-            "todo_id": entry.get("todo_id"),
-            "parent_checklist_todo_id": entry.get("parent_checklist_todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_create_item",
+                "tool": "add_checklist_item",
+                "params": {
+                    "checklist_id": entry.get("checklist_id", ""),
+                    "name": entry["name"],
+                },
+                "todo_id": entry.get("todo_id"),
+                "parent_checklist_todo_id": entry.get("parent_checklist_todo_id"),
+            }
+        )
 
     for entry in plan.push_update_item:
         params: dict[str, JsonValue] = {
@@ -137,60 +143,70 @@ def _build_push_ops(plan: TrelloSyncPlan, card_id: str) -> list[dict[str, JsonVa
         }
         if "name" in entry:
             params["name"] = entry["name"]
-        ops.append({
-            "type": "push_update_item",
-            "tool": "update_checklist_item",
-            "params": params,
-            "todo_id": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_update_item",
+                "tool": "update_checklist_item",
+                "params": params,
+                "todo_id": entry.get("todo_id"),
+            }
+        )
 
     for entry in plan.push_complete_item:
-        ops.append({
-            "type": "push_complete_item",
-            "tool": "update_checklist_item",
-            "params": {
-                "card_id": card_id,
-                "checklist_id": entry.get("checklist_id", ""),
-                "item_id": entry.get("trello_checklist_item_id", ""),
-                "state": "complete",
-            },
-            "todo_id": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_complete_item",
+                "tool": "update_checklist_item",
+                "params": {
+                    "card_id": card_id,
+                    "checklist_id": entry.get("checklist_id", ""),
+                    "item_id": entry.get("trello_checklist_item_id", ""),
+                    "state": "complete",
+                },
+                "todo_id": entry.get("todo_id"),
+            }
+        )
 
     for entry in plan.push_delete_item:
-        ops.append({
-            "type": "push_delete_item",
-            "tool": "delete_checklist_item",
-            "params": {
-                "checklist_id": entry.get("checklist_id", ""),
-                "item_id": entry.get("trello_checklist_item_id", ""),
-            },
-            "todo_id": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_delete_item",
+                "tool": "delete_checklist_item",
+                "params": {
+                    "checklist_id": entry.get("checklist_id", ""),
+                    "item_id": entry.get("trello_checklist_item_id", ""),
+                },
+                "todo_id": entry.get("todo_id"),
+            }
+        )
 
     for entry in plan.push_rename_checklist:
-        ops.append({
-            "type": "push_rename_checklist",
-            "tool": "rename_checklist",
-            "params": {
-                "checklist_id": entry.get("trello_checklist_id", ""),
-                "name": entry["name"],
-            },
-            "todo_id": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_rename_checklist",
+                "tool": "rename_checklist",
+                "params": {
+                    "checklist_id": entry.get("trello_checklist_id", ""),
+                    "name": entry["name"],
+                },
+                "todo_id": entry.get("todo_id"),
+            }
+        )
 
     for entry in plan.push_reopen_item:
-        ops.append({
-            "type": "push_reopen_item",
-            "tool": "update_checklist_item",
-            "params": {
-                "card_id": card_id,
-                "checklist_id": entry.get("checklist_id", ""),
-                "item_id": entry.get("trello_checklist_item_id", ""),
-                "state": "incomplete",
-            },
-            "todo_id": entry.get("todo_id"),
-        })
+        ops.append(
+            {
+                "type": "push_reopen_item",
+                "tool": "update_checklist_item",
+                "params": {
+                    "card_id": card_id,
+                    "checklist_id": entry.get("checklist_id", ""),
+                    "item_id": entry.get("trello_checklist_item_id", ""),
+                    "state": "incomplete",
+                },
+                "todo_id": entry.get("todo_id"),
+            }
+        )
 
     return ops
 
@@ -216,7 +232,18 @@ def _execute_push_ops(
     if card_id and any(op["type"] in ("push_create_checklist", "push_create_item") for op in ops):
         try:
             data = _call_trello_tool("get_card_checklists", {"card_id": card_id})
-            existing_checklists = data if isinstance(data, list) else data.get("checklists", []) if isinstance(data, dict) else []
+            raw_checklists = (
+                data
+                if isinstance(data, list)
+                else data.get("checklists", [])
+                if isinstance(data, dict)
+                else []
+            )
+            existing_checklists = [
+                x
+                for x in (raw_checklists if isinstance(raw_checklists, list) else [])
+                if isinstance(x, dict)
+            ]
         except Exception:
             existing_checklists = None  # If fetch fails, skip dedup and proceed normally
 
@@ -225,26 +252,33 @@ def _execute_push_ops(
         # Cascading skip: if parent checklist creation failed, skip its items
         parent_cl = op.get("parent_checklist_todo_id")
         if parent_cl and parent_cl in skipped_checklists:
-            errors.append({
-                "operation_type": op["type"],
-                "error": f"Skipped: parent checklist {parent_cl} failed to create",
-                "retryable": True,
-                "retry_payload": op,
-            })
+            errors.append(
+                {
+                    "operation_type": op["type"],
+                    "error": f"Skipped: parent checklist {parent_cl} failed to create",
+                    "retryable": True,
+                    "retry_payload": op,
+                }
+            )
             continue
 
         # Dedup guard: skip checklist creation if one with same name exists
         if op["type"] == "push_create_checklist" and existing_checklists is not None:
             cl_name = _as_str(op_params.get("name", "")).strip().lower()
             match = next(
-                (cl for cl in existing_checklists
-                 if isinstance(cl, dict) and _as_str(cl.get("name", "")).strip().lower() == cl_name),
+                (
+                    cl
+                    for cl in existing_checklists
+                    if isinstance(cl, dict)
+                    and _as_str(cl.get("name", "")).strip().lower() == cl_name
+                ),
                 None,
             )
             if match:
                 logger.warning(
                     "Skipping duplicate checklist creation: '%s' already exists on card (id=%s)",
-                    _as_str(op_params.get("name", "")), _as_str(match.get("id", "")),
+                    _as_str(op_params.get("name", "")),
+                    _as_str(match.get("id", "")),
                 )
                 op["result"] = match
                 succeeded.append(op)
@@ -260,15 +294,20 @@ def _execute_push_ops(
                     continue
                 items = _as_list(cl.get("checkItems", []))
                 dedup_match = next(
-                    (it for it in items
-                     if isinstance(it, dict) and _as_str(it.get("name", "")).strip().lower() == item_name),
+                    (
+                        it
+                        for it in items
+                        if isinstance(it, dict)
+                        and _as_str(it.get("name", "")).strip().lower() == item_name
+                    ),
                     None,
                 )
                 break
             if dedup_match:
                 logger.warning(
                     "Skipping duplicate checklist item creation: '%s' already exists (id=%s)",
-                    _as_str(op_params.get("name", "")), _as_str(dedup_match.get("id", "")) if isinstance(dedup_match, dict) else "",
+                    _as_str(op_params.get("name", "")),
+                    _as_str(dedup_match.get("id", "")) if isinstance(dedup_match, dict) else "",
                 )
                 op["result"] = dedup_match
                 succeeded.append(op)
@@ -280,12 +319,14 @@ def _execute_push_ops(
             op["result"] = result
             succeeded.append(op)
         except Exception as e:
-            errors.append({
-                "operation_type": op["type"],
-                "error": str(e),
-                "retryable": True,
-                "retry_payload": op,
-            })
+            errors.append(
+                {
+                    "operation_type": op["type"],
+                    "error": str(e),
+                    "retryable": True,
+                    "retry_payload": op,
+                }
+            )
             ck = op.get("checklist_key")
             if op["type"] == "push_create_checklist" and isinstance(ck, str):
                 skipped_checklists.add(ck)
@@ -312,7 +353,16 @@ def _retry_failed_ops(
         if cid not in _checklist_cache:
             try:
                 data = _call_trello_tool("get_card_checklists", {"card_id": cid})
-                _checklist_cache[cid] = data if isinstance(data, list) else data.get("checklists", []) if isinstance(data, dict) else []
+                raw = (
+                    data
+                    if isinstance(data, list)
+                    else data.get("checklists", [])
+                    if isinstance(data, dict)
+                    else []
+                )
+                _checklist_cache[cid] = [
+                    x for x in (raw if isinstance(raw, list) else []) if isinstance(x, dict)
+                ]
             except Exception:
                 _checklist_cache[cid] = []
         return _checklist_cache[cid]
@@ -333,14 +383,19 @@ def _retry_failed_ops(
             checklists = _get_checklists_for_card(_as_str(params["card_id"]))
             cl_name = _as_str(params.get("name", "")).strip().lower()
             dedup_match = next(
-                (cl for cl in checklists
-                 if isinstance(cl, dict) and _as_str(cl.get("name", "")).strip().lower() == cl_name),
+                (
+                    cl
+                    for cl in checklists
+                    if isinstance(cl, dict)
+                    and _as_str(cl.get("name", "")).strip().lower() == cl_name
+                ),
                 None,
             )
             if dedup_match:
                 logger.warning(
                     "Skipping duplicate checklist creation on retry: '%s' already exists (id=%s)",
-                    _as_str(params.get("name", "")), _as_str(dedup_match.get("id", "")),
+                    _as_str(params.get("name", "")),
+                    _as_str(dedup_match.get("id", "")),
                 )
                 payload["result"] = dedup_match
                 succeeded.append(payload)
@@ -354,7 +409,10 @@ def _retry_failed_ops(
             if not card_id_for_lookup:
                 # Try to find card_id from any cached data
                 for cid, cls in _checklist_cache.items():
-                    if any(isinstance(cl, dict) and cl.get("id") == params["checklist_id"] for cl in cls):
+                    if any(
+                        isinstance(cl, dict) and cl.get("id") == params["checklist_id"]
+                        for cl in cls
+                    ):
                         card_id_for_lookup = cid
                         break
             if card_id_for_lookup:
@@ -366,14 +424,22 @@ def _retry_failed_ops(
                     item_name = _as_str(params.get("name", "")).strip().lower()
                     check_items = _as_list(cl.get("checkItems", []))
                     dedup_match = next(
-                        (it for it in check_items
-                         if isinstance(it, dict) and _as_str(it.get("name", "")).strip().lower() == item_name),
+                        (
+                            it
+                            for it in check_items
+                            if isinstance(it, dict)
+                            and _as_str(it.get("name", "")).strip().lower() == item_name
+                        ),
                         None,
                     )
                     if dedup_match:
                         logger.warning(
-                            "Skipping duplicate checklist item on retry: '%s' already exists (id=%s)",
-                            _as_str(params.get("name", "")), _as_str(dedup_match.get("id", "")) if isinstance(dedup_match, dict) else "",
+                            "Skipping duplicate checklist item on"
+                            " retry: '%s' already exists (id=%s)",
+                            _as_str(params.get("name", "")),
+                            _as_str(dedup_match.get("id", ""))
+                            if isinstance(dedup_match, dict)
+                            else "",
                         )
                         payload["result"] = dedup_match
                         succeeded.append(payload)
@@ -389,12 +455,15 @@ def _retry_failed_ops(
             payload["result"] = result
             succeeded.append(payload)
         except Exception as e:
-            still_failed.append({
-                "operation_type": _as_str(entry.get("operation_type")) or _as_str(payload.get("type", "unknown")),
-                "error": str(e),
-                "retryable": False,
-                "retry_payload": payload,
-            })
+            still_failed.append(
+                {
+                    "operation_type": _as_str(entry.get("operation_type"))
+                    or _as_str(payload.get("type", "unknown")),
+                    "error": str(e),
+                    "retryable": False,
+                    "retry_payload": payload,
+                }
+            )
 
     return succeeded, still_failed
 
@@ -424,6 +493,370 @@ def _build_summary(
     }
 
 
+# -- Single-project sync (extracted for batch reuse) --------------------------
+
+
+def _sync_single_project(
+    cfg: ProjConfig,
+    name: str,
+) -> dict[str, JsonValue]:
+    """Execute a full Trello sync cycle for one project.
+
+    Returns a result dict with status, summary, and optional errors/warnings.
+    Extracted from the tool handler so batch mode can reuse it.
+    """
+    # Load project meta
+    meta = storage.load_meta(cfg, name)
+    card_id = meta.trello_card_id
+    board_id = meta.trello.board_id or cfg.trello.default_board_id
+
+    if not board_id:
+        return {
+            "status": "error",
+            "error": "No Trello board_id configured (per-project or global default).",
+        }
+
+    # Auto-migrate from checklist model to card model if needed
+    todos = storage.load_todos(cfg, name)
+    migration_summary: dict[str, JsonValue] | None = None
+    if _needs_migration(todos):
+        migration_summary = migrate_checklist_to_card(
+            cfg,
+            name,
+            meta,
+            todos,
+            call_trello=_call_trello_tool,
+        )
+        migration_errors = migration_summary.get("errors", [])
+        if (
+            isinstance(migration_errors, list)
+            and migration_errors
+            and not migration_summary.get("migrated", 0)
+        ):
+            return {
+                "status": "error",
+                "error": f"Trello checklist-to-card migration failed: {migration_errors}",
+                "migration": migration_summary,
+            }
+        meta = storage.load_meta(cfg, name)
+        card_id = meta.trello_card_id
+
+    # Fetch card state
+    lists_data: list[dict[str, JsonValue]] | None = None
+    warnings: list[str] = []
+    if card_id:
+        try:
+            card_data = _call_trello_tool("get_card_checklists", {"card_id": card_id})
+            checklists = (
+                card_data
+                if isinstance(card_data, list)
+                else _as_list(_as_dict(card_data).get("checklists", []))
+            )
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"Failed to fetch card checklists: {e}",
+            }
+        card_detail: dict[str, JsonValue] = {}
+        try:
+            card_detail = _as_dict(_call_trello_tool("get_card", {"card_id": card_id}))
+            if not isinstance(card_detail, dict):
+                card_detail = {}
+        except Exception:
+            logger.debug("Failed to fetch card detail from Trello", exc_info=True)
+        trello_card_json = json.dumps(
+            {
+                "checklists": checklists,
+                "idList": card_detail.get("idList", ""),
+                "list": card_detail.get("list", {}),
+            }
+        )
+    else:
+        trello_card_json = json.dumps({"checklists": []})
+
+    # Compute diff
+    plan = compute_diff(trello_card_json, cfg, name)
+
+    # If card needs creating, do it first
+    if plan.card_create and not card_id:
+        try:
+            lists_result = _call_trello_tool("get_lists", {"board_id": board_id})
+            lists_data = (
+                [x for x in lists_result if isinstance(x, dict)]
+                if isinstance(lists_result, list)
+                else None
+            )
+            default_list = cfg.trello.default_list or "Active"
+            target_list_id = None
+            if isinstance(lists_data, list):
+                for lst in lists_data:
+                    if _as_str(lst.get("name", "")).lower() == default_list.lower():
+                        target_list_id = lst["id"]
+                        break
+                if not target_list_id and lists_data:
+                    target_list_id = lists_data[0]["id"]
+
+            if not target_list_id:
+                return {
+                    "status": "error",
+                    "error": "No lists found on the Trello board.",
+                }
+
+            existing_card_id = None
+            try:
+                existing_cards = _call_trello_tool(
+                    "get_cards_by_list_id", {"list_id": target_list_id}
+                )
+                if isinstance(existing_cards, list):
+                    for ec in existing_cards:
+                        if (
+                            isinstance(ec, dict)
+                            and _as_str(ec.get("name", "")).strip().lower() == name.strip().lower()
+                        ):
+                            existing_card_id = ec.get("id")
+                            break
+            except Exception:
+                logger.debug("Failed to check for existing card on list", exc_info=True)
+
+            if existing_card_id:
+                logger.warning(
+                    "Skipping duplicate card creation: card '%s' already exists on list (id=%s)",
+                    name,
+                    existing_card_id,
+                )
+                card_result = {"id": existing_card_id}
+            else:
+                card_result = _as_dict(
+                    _call_trello_tool(
+                        "add_card_to_list",
+                        {
+                            "list_id": target_list_id,
+                            "name": name,
+                        },
+                    )
+                )
+            new_card_id = _as_str(card_result.get("id", ""))
+            if new_card_id:
+                link_data = TrelloApplyInput(link_trello_card_id=new_card_id)
+                apply_changes(link_data, cfg, name)
+                card_id = new_card_id
+                trello_card_json = json.dumps({"checklists": []})
+                plan = compute_diff(trello_card_json, cfg, name)
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"Failed to create Trello card: {e}",
+            }
+
+    # Check for pull_delete candidates requiring user confirmation
+    if plan.pull_delete:
+        return {
+            "status": "needs_confirmation",
+            "requires_confirmation": True,
+            "pull_delete_pending": plan.pull_delete,
+        }
+
+    # Empty diff -> up to date
+    if plan.is_empty():
+        return {
+            "status": "success",
+            "summary": {
+                "pull": {
+                    "created": 0,
+                    "created_root": 0,
+                    "updated": 0,
+                    "completed": 0,
+                    "reopened": 0,
+                    "linked": 0,
+                },
+                "push": {
+                    "checklists_created": 0,
+                    "items_created": 0,
+                    "items_updated": 0,
+                    "items_completed": 0,
+                    "items_deleted": 0,
+                    "items_reopened": 0,
+                    "checklists_renamed": 0,
+                },
+                "up_to_date": True,
+            },
+        }
+
+    # Apply pull operations locally
+    has_pulls = bool(
+        plan.pull_create
+        or plan.pull_update
+        or plan.pull_complete
+        or plan.pull_reopen
+        or plan.pull_create_root
+    )
+    if has_pulls:
+        pull_data = TrelloApplyInput(
+            created_locally=plan.pull_create,
+            created_root_locally=plan.pull_create_root,
+            updated_locally=plan.pull_update,
+            completed_locally=plan.pull_complete,
+            reopened_locally=plan.pull_reopen,
+        )
+        pull_counts = apply_changes(pull_data, cfg, name)
+    else:
+        pull_counts = {
+            "created": 0,
+            "created_root": 0,
+            "updated": 0,
+            "completed": 0,
+            "reopened": 0,
+            "linked": 0,
+        }
+
+    # Execute push operations
+    if card_id:
+        ops = _build_push_ops(plan, card_id)
+        succeeded, errors = _execute_push_ops(ops, card_id=card_id)
+    else:
+        succeeded, errors = [], []
+
+    # Record TrelloSyncState snapshots after push
+    apply_changes(TrelloApplyInput(), cfg, name, push_confirmed=True)
+
+    # Auto-move card to correct list based on list_mismatches
+    cards_moved = 0
+    seen_card_ids: set[str] = set()
+    if board_id and plan.list_mismatches:
+        if not lists_data:
+            raw = _call_trello_tool("get_lists", {"board_id": board_id})
+            lists_data = [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+        lists_data_safe = lists_data if isinstance(lists_data, list) else []
+        for mismatch in plan.list_mismatches:
+            card_id = str(mismatch["card_id"])
+            expected_list = str(mismatch["expected_list"])
+            if card_id in seen_card_ids:
+                continue
+            seen_card_ids.add(card_id)
+            list_id = _resolve_name_to_id(expected_list, lists_data_safe)
+            if not list_id:
+                warnings.append(f"list not found: {expected_list}")
+                continue
+            try:
+                _call_trello_tool("move_card", {"card_id": card_id, "list_id": list_id})
+                cards_moved += 1
+            except Exception as e:
+                errors.append(
+                    {
+                        "operation_type": "list_mismatch",
+                        "error": str(e),
+                        "retryable": False,
+                        "retry_payload": {"card_id": mismatch["card_id"], "list_id": list_id},
+                    }
+                )
+
+    # Build response
+    summary = _build_summary(plan, pull_counts, succeeded)
+    summary["cards_moved"] = cards_moved
+
+    result: dict[str, JsonValue] = {}
+    if errors:
+        token = base64.b64encode(json.dumps(errors).encode()).decode()
+        result = {
+            "status": "partial_success",
+            "summary": summary,
+            "errors": errors,
+            "retry_token": token,
+        }
+    else:
+        result = {
+            "status": "success",
+            "summary": summary,
+        }
+
+    if warnings:
+        result["warnings"] = warnings
+    if migration_summary:
+        result["migration"] = migration_summary
+    return result
+
+
+def _is_trello_enabled(cfg: ProjConfig, project_name: str) -> bool:
+    """Check if a project has Trello sync enabled.
+
+    Returns True if either the global Trello sync is enabled and the project
+    doesn't explicitly disable it, or the project explicitly enables it.
+    """
+    try:
+        meta = storage.load_meta(cfg, project_name)
+    except (FileNotFoundError, Exception):
+        return False
+
+    # Per-project override takes priority
+    if meta.trello.enabled is not None:
+        return meta.trello.enabled
+
+    # Fall back to global config
+    return cfg.trello.enabled
+
+
+def _sync_batch(cfg: ProjConfig) -> dict[str, JsonValue]:
+    """Sync all Trello-enabled projects sequentially with rate limiting.
+
+    Returns a combined summary: {projects: [{name, status, summary}]}.
+    """
+    index = storage.load_index(cfg)
+    project_results: list[dict[str, JsonValue]] = []
+
+    # Filter for non-archived, Trello-enabled projects
+    eligible: list[str] = []
+    for pname, entry in index.projects.items():
+        if entry.archived:
+            continue
+        if _is_trello_enabled(cfg, pname):
+            eligible.append(pname)
+
+    if not eligible:
+        return {
+            "status": "success",
+            "projects": [],
+            "message": "No Trello-enabled projects found.",
+        }
+
+    for i, pname in enumerate(eligible):
+        try:
+            result = _sync_single_project(cfg, pname)
+            project_results.append(
+                {
+                    "name": pname,
+                    "status": result.get("status", "unknown"),
+                    "summary": result.get("summary", {}),
+                }
+            )
+        except Exception as e:
+            logger.warning("Batch sync failed for project %s: %s", pname, e)
+            project_results.append(
+                {
+                    "name": pname,
+                    "status": "error",
+                    "summary": {"error": str(e)},
+                }
+            )
+
+        # Rate limiting between projects (skip after the last one)
+        if i < len(eligible) - 1:
+            time.sleep(1.0)
+
+    # Determine overall status
+    statuses = {str(r.get("status", "")) for r in project_results}
+    if statuses == {"success"}:
+        overall = "success"
+    elif "error" in statuses and statuses == {"error"}:
+        overall = "error"
+    else:
+        overall = "partial_success"
+
+    return {
+        "status": overall,
+        "projects": project_results,
+    }
+
+
 # -- MCP tool registration ---------------------------------------------------
 
 
@@ -435,9 +868,14 @@ def register(app: FastMCP) -> None:
             "Execute a full Trello sync cycle for the active project: "
             "fetch card state -> diff -> execute push ops -> apply pull ops -> return summary. "
             "Reduces the sync flow from ~10 tool calls to 1. "
-            "On success: {\"status\": \"success\", \"summary\": {...}}. "
-            "On partial failure: {\"status\": \"partial_success\", \"errors\": [...], \"retry_token\": \"...\"}. "
-            "If pull_delete candidates exist: {\"status\": \"needs_confirmation\", \"pull_delete_pending\": [...]}. "
+            "When project_name=None and no active session, enters batch mode: "
+            "syncs all Trello-enabled projects sequentially with rate limiting. "
+            'On success: {"status": "success", "summary": {...}}. '
+            'On partial failure: {"status": "partial_success",'
+            ' "errors": [...], "retry_token": "..."}. '
+            "If pull_delete candidates exist:"
+            ' {"status": "needs_confirmation",'
+            ' "pull_delete_pending": [...]}. '
             "Pass retry_failures (base64-encoded JSON) to re-attempt only previously failed ops."
         )
     )
@@ -455,223 +893,41 @@ def register(app: FastMCP) -> None:
             succeeded, still_failed = _retry_failed_ops(failed_ops)
             if still_failed:
                 token = base64.b64encode(json.dumps(still_failed).encode()).decode()
-                return json.dumps({
-                    "status": "partial_success",
+                return json.dumps(
+                    {
+                        "status": "partial_success",
+                        "retried_succeeded": len(succeeded),
+                        "errors": still_failed,
+                        "retry_token": token,
+                    }
+                )
+            return json.dumps(
+                {
+                    "status": "success",
                     "retried_succeeded": len(succeeded),
-                    "errors": still_failed,
-                    "retry_token": token,
-                })
-            return json.dumps({
-                "status": "success",
-                "retried_succeeded": len(succeeded),
-                "summary": {"retry": True, "succeeded": len(succeeded)},
-            })
+                    "summary": {"retry": True, "succeeded": len(succeeded)},
+                }
+            )
 
         # -- Normal mode: full sync cycle --
 
-        # 1. Load config + resolve project
+        # Check if we have a specific project or active session
         result = require_project(project_name)
         if isinstance(result, str):
-            return json.dumps({"status": "error", "error": result})
+            # No active project -- enter batch mode if no explicit name was given
+            if project_name is not None:
+                # Explicit project name was given but not found
+                return json.dumps({"status": "error", "error": result})
+
+            # Batch mode: sync all Trello-enabled projects
+            try:
+                cfg = require_config()
+            except Exception as e:
+                return json.dumps({"status": "error", "error": str(e)})
+
+            batch_result = _sync_batch(cfg)
+            return json.dumps(batch_result, indent=2)
+
         cfg, name = result
-
-        # 2. Load project meta
-        meta = storage.load_meta(cfg, name)
-        card_id = meta.trello_card_id
-        board_id = meta.trello.board_id or cfg.trello.default_board_id
-
-        if not board_id:
-            return json.dumps({
-                "status": "error",
-                "error": "No Trello board_id configured (per-project or global default).",
-            })
-
-        # 3. Fetch card state (or create card if needed)
-        lists_data: list[dict[str, JsonValue]] | None = None
-        warnings: list[str] = []
-        if card_id:
-            try:
-                card_data = _call_trello_tool("get_card_checklists", {"card_id": card_id})
-                checklists = card_data if isinstance(card_data, list) else _as_list(_as_dict(card_data).get("checklists", []))
-            except Exception as e:
-                return json.dumps({
-                    "status": "error",
-                    "error": f"Failed to fetch card checklists: {e}",
-                })
-            # Fetch card details to get current list info (needed for list mismatch detection)
-            card_detail: dict[str, JsonValue] = {}
-            try:
-                card_detail = _as_dict(_call_trello_tool("get_card", {"card_id": card_id}))
-                if not isinstance(card_detail, dict):
-                    card_detail = {}
-            except Exception:
-                pass
-            trello_card_json = json.dumps({
-                "checklists": checklists,
-                "idList": card_detail.get("idList", ""),
-                "list": card_detail.get("list", {}),
-            })
-        else:
-            trello_card_json = json.dumps({"checklists": []})
-
-        # 4. Compute diff
-        plan = compute_diff(trello_card_json, cfg, name)
-
-        # 5. If card needs creating, do it first
-        if plan.card_create and not card_id:
-            try:
-                # Resolve target list
-                lists_result = _call_trello_tool("get_lists", {"board_id": board_id})
-                lists_data = [x for x in lists_result if isinstance(x, dict)] if isinstance(lists_result, list) else None
-                default_list = cfg.trello.default_list or "Active"
-                target_list_id = None
-                if isinstance(lists_data, list):
-                    for lst in lists_data:
-                        if _as_str(lst.get("name", "")).lower() == default_list.lower():
-                            target_list_id = lst["id"]
-                            break
-                    if not target_list_id and lists_data:
-                        target_list_id = lists_data[0]["id"]
-
-                if not target_list_id:
-                    return json.dumps({
-                        "status": "error",
-                        "error": "No lists found on the Trello board.",
-                    })
-
-                # Dedup guard: check if a card with matching name already exists
-                existing_card_id = None
-                try:
-                    existing_cards = _call_trello_tool("get_cards_by_list_id", {"list_id": target_list_id})
-                    if isinstance(existing_cards, list):
-                        for ec in existing_cards:
-                            if isinstance(ec, dict) and ec.get("name", "").strip().lower() == name.strip().lower():
-                                existing_card_id = ec.get("id")
-                                break
-                except Exception:
-                    pass  # If lookup fails, proceed with creation
-
-                if existing_card_id:
-                    logger.warning("Skipping duplicate card creation: card '%s' already exists on list (id=%s)", name, existing_card_id)
-                    card_result = {"id": existing_card_id}
-                else:
-                    card_result = _as_dict(_call_trello_tool("add_card_to_list", {
-                        "list_id": target_list_id,
-                        "name": name,
-                    }))
-                new_card_id = _as_str(card_result.get("id", ""))
-                if new_card_id:
-                    # Link the card locally
-                    link_data = TrelloApplyInput(link_trello_card_id=new_card_id)
-                    apply_changes(link_data, cfg, name)
-                    card_id = new_card_id
-                    # Re-fetch meta and recompute diff with empty card
-                    trello_card_json = json.dumps({"checklists": []})
-                    plan = compute_diff(trello_card_json, cfg, name)
-            except Exception as e:
-                return json.dumps({
-                    "status": "error",
-                    "error": f"Failed to create Trello card: {e}",
-                })
-
-        # 6. Check for pull_delete candidates requiring user confirmation
-        if plan.pull_delete:
-            return json.dumps({
-                "status": "needs_confirmation",
-                "requires_confirmation": True,
-                "pull_delete_pending": plan.pull_delete,
-            })
-
-        # 7. Empty diff -> up to date
-        if plan.is_empty():
-            return json.dumps({
-                "status": "success",
-                "summary": {
-                    "pull": {"created": 0, "created_root": 0, "updated": 0, "completed": 0, "reopened": 0, "linked": 0},
-                    "push": {"checklists_created": 0, "items_created": 0, "items_updated": 0, "items_completed": 0, "items_deleted": 0, "items_reopened": 0, "checklists_renamed": 0},
-                    "up_to_date": True,
-                },
-            })
-
-        # 8. Apply pull operations locally
-        has_pulls = bool(
-            plan.pull_create or plan.pull_update or plan.pull_complete
-            or plan.pull_reopen or plan.pull_create_root
-        )
-        if has_pulls:
-            pull_data = TrelloApplyInput(
-                created_locally=plan.pull_create,
-                created_root_locally=plan.pull_create_root,
-                updated_locally=plan.pull_update,
-                completed_locally=plan.pull_complete,
-                reopened_locally=plan.pull_reopen,
-            )
-            pull_counts = apply_changes(pull_data, cfg, name)
-        else:
-            pull_counts = {
-                "created": 0, "created_root": 0, "updated": 0,
-                "completed": 0, "reopened": 0, "linked": 0,
-            }
-
-        # 9. Execute push operations
-        if card_id:
-            ops = _build_push_ops(plan, card_id)
-            succeeded, errors = _execute_push_ops(ops, card_id=card_id)
-        else:
-            succeeded, errors = [], []
-
-        # 10. Record TrelloSyncState snapshots after push
-        apply_changes(TrelloApplyInput(), cfg, name, push_confirmed=True)
-
-        # 11. Auto-move card to correct list based on list_mismatches
-        cards_moved = 0
-        seen_card_ids: set[str] = set()
-        if board_id and plan.list_mismatches:
-            if not lists_data:
-                raw = _call_trello_tool("get_lists", {"board_id": board_id})
-                lists_data = raw if isinstance(raw, list) else []
-            lists_data_safe = lists_data if isinstance(lists_data, list) else []
-            for mismatch in plan.list_mismatches:
-                card_id = str(mismatch["card_id"])
-                expected_list = str(mismatch["expected_list"])
-                if card_id in seen_card_ids:
-                    continue
-                seen_card_ids.add(card_id)
-                list_id = _resolve_name_to_id(expected_list, lists_data_safe)
-                if not list_id:
-                    warnings.append(f"list not found: {expected_list}")
-                    continue
-                try:
-                    _call_trello_tool("move_card", {"card_id": card_id, "list_id": list_id})
-                    cards_moved += 1
-                except Exception as e:
-                    errors.append({
-                        "operation_type": "list_mismatch",
-                        "error": str(e),
-                        "retryable": False,
-                        "retry_payload": {"card_id": mismatch["card_id"], "list_id": list_id},
-                    })
-
-        # 12. Build response
-        summary = _build_summary(plan, pull_counts, succeeded)
-        summary["cards_moved"] = cards_moved
-
-        if errors:
-            token = base64.b64encode(json.dumps(errors).encode()).decode()
-            response: dict[str, JsonValue] = {
-                "status": "partial_success",
-                "summary": summary,
-                "errors": errors,
-                "retry_token": token,
-            }
-            if warnings:
-                response["warnings"] = warnings
-            return json.dumps(response)
-
-        response = {
-            "status": "success",
-            "summary": summary,
-        }
-        if warnings:
-            response["warnings"] = warnings
-        return json.dumps(response)
+        single_result = _sync_single_project(cfg, name)
+        return json.dumps(single_result)

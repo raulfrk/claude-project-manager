@@ -20,9 +20,7 @@ def version_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetVersions:
-    def test_fetches_versions(
-        self, mock_jira_client: MagicMock, version_tools: dict
-    ) -> None:
+    def test_fetches_versions(self, mock_jira_client: MagicMock, version_tools: dict) -> None:
         data = [{"id": "1", "name": "1.0"}, {"id": "2", "name": "2.0"}]
         mock_jira_client.get.return_value = data
 

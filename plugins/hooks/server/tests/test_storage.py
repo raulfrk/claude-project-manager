@@ -20,7 +20,6 @@ from server.lib.storage import (
     store_verification_result,
 )
 
-
 # ── load() ───────────────────────────────────────────────────────────────────
 
 
@@ -49,10 +48,13 @@ class TestLoad:
         assert "todoist" in reg.servers
 
     def test_load_preserves_settings(self, hooks_yaml: Path, write_yaml):
-        write_yaml(hooks_yaml, {
-            "hooks": [],
-            "settings": {"max_depth": 5},
-        })
+        write_yaml(
+            hooks_yaml,
+            {
+                "hooks": [],
+                "settings": {"max_depth": 5},
+            },
+        )
         reg = load(hooks_yaml)
         assert reg.settings["max_depth"] == 5
 
@@ -79,16 +81,20 @@ class TestSave:
         assert restored.servers == sample_registry.servers
 
     def test_save_overwrites_existing(self, hooks_yaml: Path):
-        reg1 = HookRegistry(hooks=[
-            Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s"),
-        ])
+        reg1 = HookRegistry(
+            hooks=[
+                Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s"),
+            ]
+        )
         save(reg1, hooks_yaml)
         assert len(load(hooks_yaml).hooks) == 1
 
-        reg2 = HookRegistry(hooks=[
-            Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s"),
-            Hook(id="hook-002", trigger_tool="c", target_tool="d", server="s"),
-        ])
+        reg2 = HookRegistry(
+            hooks=[
+                Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s"),
+                Hook(id="hook-002", trigger_tool="c", target_tool="d", server="s"),
+            ]
+        )
         save(reg2, hooks_yaml)
         assert len(load(hooks_yaml).hooks) == 2
 
@@ -161,14 +167,16 @@ class TestLogFailure:
         # Pre-fill with 200 entries
         entries = []
         for i in range(200):
-            entries.append({
-                "hook_id": f"hook-{i:03d}",
-                "trigger_tool": "t",
-                "target_tool": "u",
-                "server": "s",
-                "error": f"error-{i}",
-                "retry_count": 0,
-            })
+            entries.append(
+                {
+                    "hook_id": f"hook-{i:03d}",
+                    "trigger_tool": "t",
+                    "target_tool": "u",
+                    "server": "s",
+                    "error": f"error-{i}",
+                    "retry_count": 0,
+                }
+            )
         failures_yaml.write_text(yaml.dump(entries, default_flow_style=False))
 
         # Add one more — should trim to 200 (the cap)
@@ -282,20 +290,24 @@ class TestStoreVerificationResult:
         # Pre-fill with 500 entries
         entries = []
         for i in range(500):
-            entries.append({
-                "timestamp": "2026-01-01T00:00:00+00:00",
-                "trigger_tool": "t",
-                "hook_id": f"v-{i:04d}",
-                "status": "pass",
-                "details": f"details-{i}",
-            })
-        verifications_yaml.write_text(
-            yaml.dump(entries, default_flow_style=False)
-        )
+            entries.append(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "trigger_tool": "t",
+                    "hook_id": f"v-{i:04d}",
+                    "status": "pass",
+                    "details": f"details-{i}",
+                }
+            )
+        verifications_yaml.write_text(yaml.dump(entries, default_flow_style=False))
 
         # Add one more — should trim to 500
         store_verification_result(
-            "t", "v-new", "pass", "new details", path=verifications_yaml,
+            "t",
+            "v-new",
+            "pass",
+            "new details",
+            path=verifications_yaml,
         )
         result = load_verification_results(limit=0, path=verifications_yaml)
         assert len(result) == 500
@@ -316,16 +328,16 @@ class TestLoadVerificationResults:
     def test_default_limit_50(self, verifications_yaml: Path):
         entries = []
         for i in range(80):
-            entries.append({
-                "timestamp": "2026-01-01T00:00:00+00:00",
-                "trigger_tool": "t",
-                "hook_id": f"v-{i:03d}",
-                "status": "pass",
-                "details": f"d-{i}",
-            })
-        verifications_yaml.write_text(
-            yaml.dump(entries, default_flow_style=False)
-        )
+            entries.append(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "trigger_tool": "t",
+                    "hook_id": f"v-{i:03d}",
+                    "status": "pass",
+                    "details": f"d-{i}",
+                }
+            )
+        verifications_yaml.write_text(yaml.dump(entries, default_flow_style=False))
         result = load_verification_results(path=verifications_yaml)
         assert len(result) == 50
         # Should return the 50 most recent (last 50)
@@ -335,7 +347,11 @@ class TestLoadVerificationResults:
     def test_custom_limit(self, verifications_yaml: Path):
         for i in range(10):
             store_verification_result(
-                "t", f"v-{i}", "pass", f"d-{i}", path=verifications_yaml,
+                "t",
+                f"v-{i}",
+                "pass",
+                f"d-{i}",
+                path=verifications_yaml,
             )
         result = load_verification_results(limit=3, path=verifications_yaml)
         assert len(result) == 3
@@ -344,7 +360,11 @@ class TestLoadVerificationResults:
     def test_limit_zero_returns_all(self, verifications_yaml: Path):
         for i in range(5):
             store_verification_result(
-                "t", f"v-{i}", "pass", f"d-{i}", path=verifications_yaml,
+                "t",
+                f"v-{i}",
+                "pass",
+                f"d-{i}",
+                path=verifications_yaml,
             )
         result = load_verification_results(limit=0, path=verifications_yaml)
         assert len(result) == 5
@@ -357,7 +377,11 @@ class TestLogInvocation:
     def test_creates_file(self, tmp_path: Path):
         p = tmp_path / "inv.yaml"
         result = log_invocation(
-            hook_id="h-001", trigger_tool="t", target_tool="u", server="s", path=p,
+            hook_id="h-001",
+            trigger_tool="t",
+            target_tool="u",
+            server="s",
+            path=p,
         )
         assert result == p
         assert p.exists()
@@ -377,7 +401,11 @@ class TestLogInvocation:
     def test_includes_all_core_fields(self, tmp_path: Path):
         p = tmp_path / "inv.yaml"
         log_invocation(
-            hook_id="h-001", trigger_tool="trig", target_tool="tgt", server="svc", path=p,
+            hook_id="h-001",
+            trigger_tool="trig",
+            target_tool="tgt",
+            server="svc",
+            path=p,
         )
         entry = load_invocations(path=p)[0]
         assert entry["hook_id"] == "h-001"
@@ -389,8 +417,12 @@ class TestLogInvocation:
         p = tmp_path / "inv.yaml"
         long_val = "x" * 1000
         log_invocation(
-            hook_id="h-001", trigger_tool="t", target_tool="u", server="s",
-            source_result=long_val, path=p,
+            hook_id="h-001",
+            trigger_tool="t",
+            target_tool="u",
+            server="s",
+            source_result=long_val,
+            path=p,
         )
         entries = load_invocations(path=p)
         assert len(entries[0]["source_result"]) == 500
@@ -399,8 +431,12 @@ class TestLogInvocation:
         p = tmp_path / "inv.yaml"
         big_payload = {"key": "v" * 1000}
         log_invocation(
-            hook_id="h-001", trigger_tool="t", target_tool="u", server="s",
-            payload=big_payload, path=p,
+            hook_id="h-001",
+            trigger_tool="t",
+            target_tool="u",
+            server="s",
+            payload=big_payload,
+            path=p,
         )
         entries = load_invocations(path=p)
         assert len(entries[0]["payload"]) <= 500

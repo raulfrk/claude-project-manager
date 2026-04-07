@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
@@ -32,6 +34,4 @@ def register(app: FastMCP) -> None:
     def jira_delete_comment(issue_key: str, comment_id: str) -> str:
         client = get_client()
         client.delete(f"/rest/api/2/issue/{issue_key}/comment/{comment_id}")
-        return json.dumps(
-            {"deleted": True, "issue_key": issue_key, "comment_id": comment_id}
-        )
+        return json.dumps({"deleted": True, "issue_key": issue_key, "comment_id": comment_id})

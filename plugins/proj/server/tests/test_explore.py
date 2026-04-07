@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from server.tools.explore import explore_codebase
 
@@ -82,9 +79,15 @@ class TestExploreCodbase:
         assert "src" in result["key_dirs"]
 
     def test_file_types_counted(self, tmp_path: Path) -> None:
-        _make_tree(tmp_path, {
-            "a.py": "", "b.py": "", "c.ts": "", "README.md": "",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "",
+                "b.py": "",
+                "c.ts": "",
+                "README.md": "",
+            },
+        )
         result = explore_codebase(str(tmp_path))
         assert result["file_types"]["py"] == 2
         assert result["file_types"]["ts"] == 1

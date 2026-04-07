@@ -20,9 +20,7 @@ def attachment_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraAddAttachment:
-    def test_posts_multipart(
-        self, mock_jira_client: MagicMock, attachment_tools: dict
-    ) -> None:
+    def test_posts_multipart(self, mock_jira_client: MagicMock, attachment_tools: dict) -> None:
         mock_jira_client.post_multipart.return_value = [{"id": "10001", "filename": "report.pdf"}]
 
         result = attachment_tools["jira_add_attachment"](
@@ -61,9 +59,7 @@ class TestJiraListAttachments:
 
 
 class TestJiraDeleteAttachment:
-    def test_deletes_attachment(
-        self, mock_jira_client: MagicMock, attachment_tools: dict
-    ) -> None:
+    def test_deletes_attachment(self, mock_jira_client: MagicMock, attachment_tools: dict) -> None:
         mock_jira_client.delete.return_value = None
 
         result = attachment_tools["jira_delete_attachment"](attachment_id="10001")

@@ -25,7 +25,6 @@ from server.lib.models import (
     RepoEntry,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -145,7 +144,7 @@ class TestCmdSessionStart:
         from server.cli import cmd_session_start
 
         cmd_session_start(cwd=None, compact=False)
-        out, err = capsys.readouterr()
+        out, _err = capsys.readouterr()
         assert out == ""
 
     def test_cwd_no_match_prints_nothing(
@@ -157,7 +156,7 @@ class TestCmdSessionStart:
         from server.cli import cmd_session_start
 
         cmd_session_start(cwd="/nonexistent/path/xyz", compact=False)
-        out, err = capsys.readouterr()
+        out, _err = capsys.readouterr()
         assert out == ""
 
 
@@ -181,9 +180,7 @@ class TestCmdSessionEnd:
         assert out == ""
         assert err == ""
 
-    def test_no_cwd_is_noop(
-        self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_no_cwd_is_noop(self, cfg: ProjConfig, capsys: pytest.CaptureFixture[str]) -> None:
         """When no cwd is provided, session-end is silent (no project to detect)."""
         from server.cli import cmd_session_end
 
@@ -192,9 +189,7 @@ class TestCmdSessionEnd:
         assert out == ""
         assert err == ""
 
-    def test_bumps_last_updated_when_stale(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
+    def test_bumps_last_updated_when_stale(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """When last_updated is in the past, session-end saves the meta (updating timestamp)."""
         _make_project(cfg, "myapp", str(tmp_path), active=True)
 
@@ -255,7 +250,9 @@ class TestCmdSessionEnd:
 # ---------------------------------------------------------------------------
 
 
-def _run_cli(*args: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    *args: str, env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run `python -m server.cli <args>` as a subprocess."""
     import os
 
@@ -281,7 +278,9 @@ class TestCliArgParsing:
 
     def test_invalid_subcommand_exits_nonzero(self, tmp_path: Path) -> None:
         """An unrecognised subcommand exits non-zero."""
-        result = _run_cli("bogus-command", env_extra={"PROJ_CONFIG": str(tmp_path / "missing.yaml")})
+        result = _run_cli(
+            "bogus-command", env_extra={"PROJ_CONFIG": str(tmp_path / "missing.yaml")}
+        )
         # argparse prints error and exits 2 for unrecognised subcommands
         assert result.returncode != 0
 
@@ -289,7 +288,8 @@ class TestCliArgParsing:
         """session-start with no config exits 0 and emits no output."""
         result = _run_cli(
             "session-start",
-            "--cwd", str(tmp_path),
+            "--cwd",
+            str(tmp_path),
             env_extra={"PROJ_CONFIG": str(tmp_path / "missing.yaml")},
         )
         assert result.returncode == 0
@@ -299,7 +299,8 @@ class TestCliArgParsing:
         """--compact flag is accepted without error."""
         result = _run_cli(
             "session-start",
-            "--cwd", str(tmp_path),
+            "--cwd",
+            str(tmp_path),
             "--compact",
             env_extra={"PROJ_CONFIG": str(tmp_path / "missing.yaml")},
         )
@@ -309,7 +310,8 @@ class TestCliArgParsing:
         """session-end with no config exits 0 silently."""
         result = _run_cli(
             "session-end",
-            "--cwd", str(tmp_path),
+            "--cwd",
+            str(tmp_path),
             env_extra={"PROJ_CONFIG": str(tmp_path / "missing.yaml")},
         )
         assert result.returncode == 0
@@ -333,7 +335,6 @@ class TestCliArgParsing:
 
     def test_session_start_with_active_project_outputs_context(self, tmp_path: Path) -> None:
         """End-to-end: session-start prints project context when project is active."""
-        import os
 
         # Build a minimal config + project directory structure
         config_path = tmp_path / "proj.yaml"
@@ -341,9 +342,7 @@ class TestCliArgParsing:
         tracking_dir.mkdir()
 
         # Write config
-        config_path.write_text(
-            f"tracking_dir: {tracking_dir}\ngit_integration: false\n"
-        )
+        config_path.write_text(f"tracking_dir: {tracking_dir}\ngit_integration: false\n")
 
         # Write index with project (no active field — session-only now)
         proj_dir = tracking_dir / "myapp"
@@ -367,7 +366,8 @@ class TestCliArgParsing:
 
         result = _run_cli(
             "session-start",
-            "--cwd", str(tmp_path),
+            "--cwd",
+            str(tmp_path),
             env_extra={"PROJ_CONFIG": str(config_path)},
         )
         assert result.returncode == 0

@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+        args: [--check]
+
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: basedpyright
+        entry: bash -c 'export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"; exit_code=0; for dir in plugins/*/server; do echo "==> basedpyright $dir"; uv run --directory "$dir" basedpyright server || exit_code=1; done; exit $exit_code'
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: update-readme
+        name: Auto-update README
+        entry: python scripts/update_readme.py
+        language: system
+        pass_filenames: false
+        files: '(marketplace\.json|\.test-summary\.json|README\.md)$'

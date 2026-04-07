@@ -20,9 +20,7 @@ def worklog_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetWorklogs:
-    def test_fetches_worklogs(
-        self, mock_jira_client: MagicMock, worklog_tools: dict
-    ) -> None:
+    def test_fetches_worklogs(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
         data = {"worklogs": [{"id": "1", "timeSpent": "2h"}], "total": 1}
         mock_jira_client.get.return_value = data
 
@@ -49,7 +47,11 @@ class TestJiraAddWorklog:
     def test_adds_worklog_with_comment(
         self, mock_jira_client: MagicMock, worklog_tools: dict
     ) -> None:
-        mock_jira_client.post.return_value = {"id": "101", "timeSpent": "1h", "comment": "Code review"}
+        mock_jira_client.post.return_value = {
+            "id": "101",
+            "timeSpent": "1h",
+            "comment": "Code review",
+        }
 
         result = worklog_tools["jira_add_worklog"](
             issue_key="PROJ-42", time_spent="1h", comment="Code review"
@@ -63,9 +65,7 @@ class TestJiraAddWorklog:
 
 
 class TestJiraDeleteWorklog:
-    def test_deletes_worklog(
-        self, mock_jira_client: MagicMock, worklog_tools: dict
-    ) -> None:
+    def test_deletes_worklog(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
         mock_jira_client.delete.return_value = None
 
         result = worklog_tools["jira_delete_worklog"](issue_key="PROJ-42", worklog_id="100")

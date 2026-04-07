@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import JsonValue, get_client
 
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
 
 def register(app: FastMCP) -> None:
-    @app.tool(description="List sprints for a Jira board. Optionally filter by state (active, closed, future).")
+    @app.tool(
+        description=(
+            "List sprints for a Jira board. Optionally filter by state (active, closed, future)."
+        )
+    )
     def jira_get_sprints(board_id: str, state: str = "") -> str:
         client = get_client()
         params: dict[str, str] | None = {"state": state} if state else None

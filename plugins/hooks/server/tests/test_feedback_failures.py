@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, call
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,7 +12,6 @@ from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
 from server.lib.storage import save
 from server.tools.fire import hooks_fire
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

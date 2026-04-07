@@ -2,24 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import socket
 import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
-from pathlib import Path
-
-def _unix_socket_blocked() -> bool:
-    """Check if Unix socket creation is blocked by sandbox."""
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.close()
-        return False
-    except PermissionError:
-        return True
-
 
 from hook_transport.dual_transport import (
     _cleanup_stale_socket,
@@ -29,6 +19,16 @@ from hook_transport.dual_transport import (
     _start_http,
     _write_socket_registry,
 )
+
+
+def _unix_socket_blocked() -> bool:
+    """Check if Unix socket creation is blocked by sandbox."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.close()
+        return False
+    except PermissionError:
+        return True
 
 
 # ── _start_http tests ────────────────────────────────────────────────────────
@@ -94,18 +94,16 @@ def test_cleanup_stale_socket_removes_stale():
         path = f.name
     try:
         # Create a socket file but don't listen on it — simulates stale
-        os.unlink(path)
+        Path(path).unlink()
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.bind(path)
         sock.close()  # Close without listening — makes it stale
-        assert os.path.exists(path)
+        assert Path(path).exists()
         _cleanup_stale_socket(path)
-        assert not os.path.exists(path)
+        assert not Path(path).exists()
     finally:
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
+        with contextlib.suppress(FileNotFoundError):
+            Path(path).unlink()
 
 
 @pytest.mark.skipif(
@@ -116,7 +114,7 @@ def test_cleanup_stale_socket_raises_if_active():
     """Raises RuntimeError when a process is actively listening."""
     with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
         path = f.name
-    os.unlink(path)
+    Path(path).unlink()
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         sock.bind(path)
@@ -125,10 +123,8 @@ def test_cleanup_stale_socket_raises_if_active():
             _cleanup_stale_socket(path)
     finally:
         sock.close()
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
+        with contextlib.suppress(FileNotFoundError):
+            Path(path).unlink()
 
 
 # ── _run_dual_async tests ────────────────────────────────────────────────────
@@ -385,27 +381,35 @@ async def test_stdio_shutdown_sets_should_exit():
 
 
 class TestSocketRegistry:
-    def test_write_creates_registry_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_write_creates_registry_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
         _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-12345.sock")
         registry_file = tmp_path / "hooks"
         assert registry_file.exists()
         assert registry_file.read_text() == "/tmp/claude-hooks-hooks-12345.sock"
 
-    def test_delete_removes_registry_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_delete_removes_registry_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
         registry_file = tmp_path / "hooks"
         registry_file.write_text("/tmp/some-socket.sock")
         _delete_socket_registry("hooks")
         assert not registry_file.exists()
 
-    def test_delete_silently_handles_missing_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_delete_silently_handles_missing_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
         # Should not raise
         _delete_socket_registry("hooks")
 
     @pytest.mark.anyio
-    async def test_run_dual_async_writes_registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_run_dual_async_writes_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Registry file is written when Unix socket is bound."""
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
 

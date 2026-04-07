@@ -29,9 +29,7 @@ def mock_trello_client(mocker: pytest.MockerFixture) -> MagicMock:
     """Patch get_client() everywhere to return a shared mock TrelloClient."""
     mock_client = MagicMock(spec=TrelloClient)
     # Provide a default config with empty whitelist so board tools work in tests
-    mock_client._config = TrelloConfig(
-        api_key="test_key", token="test_token", allowed_board_ids=[]
-    )
+    mock_client._config = TrelloConfig(api_key="test_key", token="test_token", allowed_board_ids=[])
     for loc in _GET_CLIENT_LOCATIONS:
         mocker.patch(loc, return_value=mock_client)
     return mock_client

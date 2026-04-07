@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
@@ -21,12 +23,14 @@ def register(app: FastMCP) -> None:
                 "outwardIssue": {"key": outward_key},
             },
         )
-        return json.dumps({
-            "ok": True,
-            "inward_key": inward_key,
-            "outward_key": outward_key,
-            "link_type": link_type,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "inward_key": inward_key,
+                "outward_key": outward_key,
+                "link_type": link_type,
+            }
+        )
 
     @app.tool(description="Get all available issue link types.")
     def jira_get_link_types() -> str:

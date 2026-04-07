@@ -9,15 +9,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from server.lib.client import TodoistClient
-from server.lib.config import TodoistConfig
 from server.tools.tasks import _build_task_payload, _resolve_priority
-
 
 # -- Fixtures ---------------------------------------------------------------
 
 _PROXY_VARS = (
-    "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy",
-    "HTTPS_PROXY", "https_proxy", "FTP_PROXY", "ftp_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "FTP_PROXY",
+    "ftp_proxy",
 )
 
 
@@ -99,15 +103,17 @@ class TestBuildTaskPayload:
         assert _build_task_payload({"content": "Buy milk"}) == {"content": "Buy milk"}
 
     def test_all_fields(self) -> None:
-        payload = _build_task_payload({
-            "content": "Task",
-            "description": "Desc",
-            "priority": "high",
-            "labels": ["a"],
-            "dueString": "tomorrow",
-            "projectId": "proj1",
-            "parentId": "parent1",
-        })
+        payload = _build_task_payload(
+            {
+                "content": "Task",
+                "description": "Desc",
+                "priority": "high",
+                "labels": ["a"],
+                "dueString": "tomorrow",
+                "projectId": "proj1",
+                "parentId": "parent1",
+            }
+        )
         assert payload == {
             "content": "Task",
             "description": "Desc",
@@ -119,12 +125,14 @@ class TestBuildTaskPayload:
         }
 
     def test_snake_case_aliases(self) -> None:
-        payload = _build_task_payload({
-            "content": "X",
-            "due_string": "next week",
-            "project_id": "p1",
-            "parent_id": "pp1",
-        })
+        payload = _build_task_payload(
+            {
+                "content": "X",
+                "due_string": "next week",
+                "project_id": "p1",
+                "parent_id": "pp1",
+            }
+        )
         assert payload["due_string"] == "next week"
         assert payload["project_id"] == "p1"
         assert payload["parent_id"] == "pp1"
@@ -140,8 +148,9 @@ class TestAddTasks:
     def test_success_single(self, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _api_task(id="99", content="New task")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -153,8 +162,9 @@ class TestAddTasks:
         assert result["failures"] == []
 
     def test_missing_content(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -172,24 +182,30 @@ class TestAddTasks:
             RuntimeError("API error"),
         ]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
         tool = app._tool_manager._tools["todoist_add_tasks"]
-        result = json.loads(tool.fn(tasks=[
-            {"content": "Good"},
-            {"content": "Bad"},
-        ]))
+        result = json.loads(
+            tool.fn(
+                tasks=[
+                    {"content": "Good"},
+                    {"content": "Bad"},
+                ]
+            )
+        )
 
         assert len(result["successes"]) == 1
         assert len(result["failures"]) == 1
         assert result["failures"][0]["index"] == 1
 
     def test_empty_list(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -200,16 +216,21 @@ class TestAddTasks:
 
     def test_all_fail(self, mock_client: MagicMock) -> None:
         """All tasks fail — result is still valid JSON."""
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
         tool = app._tool_manager._tools["todoist_add_tasks"]
-        result = json.loads(tool.fn(tasks=[
-            {"description": "no content"},
-            {"description": "also no content"},
-        ]))
+        result = json.loads(
+            tool.fn(
+                tasks=[
+                    {"description": "no content"},
+                    {"description": "also no content"},
+                ]
+            )
+        )
 
         assert result["successes"] == []
         assert len(result["failures"]) == 2
@@ -222,8 +243,9 @@ class TestCompleteTasks:
     def test_success(self, mock_client: MagicMock) -> None:
         mock_client.close_task.return_value = {"ok": True}
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -237,8 +259,9 @@ class TestCompleteTasks:
     def test_failure(self, mock_client: MagicMock) -> None:
         mock_client.close_task.side_effect = RuntimeError("not found")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -255,8 +278,9 @@ class TestCompleteTasks:
             RuntimeError("gone"),
         ]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -267,8 +291,9 @@ class TestCompleteTasks:
         assert len(result["failures"]) == 1
 
     def test_empty_ids(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -288,8 +313,9 @@ class TestFindTasks:
             _api_task(id="2", content="B"),
         ]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -302,8 +328,9 @@ class TestFindTasks:
     def test_with_project_id(self, mock_client: MagicMock) -> None:
         mock_client.get.return_value = [_api_task(id="5")]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -316,8 +343,9 @@ class TestFindTasks:
     def test_with_filter(self, mock_client: MagicMock) -> None:
         mock_client.get.return_value = []
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -330,8 +358,9 @@ class TestFindTasks:
     def test_non_list_response_returns_empty(self, mock_client: MagicMock) -> None:
         mock_client.get.return_value = {"error": "unexpected"}
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -343,8 +372,9 @@ class TestFindTasks:
     def test_no_params_passes_none(self, mock_client: MagicMock) -> None:
         mock_client.get.return_value = []
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -361,8 +391,9 @@ class TestUpdateTasks:
     def test_success(self, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _api_task(id="1", content="Updated")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -373,8 +404,9 @@ class TestUpdateTasks:
         assert result["successes"][0]["content"] == "Updated"
 
     def test_missing_id(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -390,23 +422,29 @@ class TestUpdateTasks:
             RuntimeError("bad update"),
         ]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
         tool = app._tool_manager._tools["todoist_update_tasks"]
-        result = json.loads(tool.fn(tasks=[
-            {"id": "1", "content": "Good"},
-            {"id": "2", "content": "Bad"},
-        ]))
+        result = json.loads(
+            tool.fn(
+                tasks=[
+                    {"id": "1", "content": "Good"},
+                    {"id": "2", "content": "Bad"},
+                ]
+            )
+        )
 
         assert len(result["successes"]) == 1
         assert len(result["failures"]) == 1
 
     def test_empty_list(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -418,8 +456,9 @@ class TestUpdateTasks:
     def test_api_error(self, mock_client: MagicMock) -> None:
         mock_client.post.side_effect = RuntimeError("Server error")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -437,8 +476,9 @@ class TestDeleteTask:
     def test_success(self, mock_client: MagicMock) -> None:
         mock_client.delete.return_value = {"ok": True}
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -451,8 +491,9 @@ class TestDeleteTask:
     def test_error(self, mock_client: MagicMock) -> None:
         mock_client.delete.side_effect = RuntimeError("not found")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -469,8 +510,9 @@ class TestUncompleteTasks:
     def test_success(self, mock_client: MagicMock) -> None:
         mock_client.reopen_task.return_value = {"ok": True}
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -483,8 +525,9 @@ class TestUncompleteTasks:
     def test_failure(self, mock_client: MagicMock) -> None:
         mock_client.reopen_task.side_effect = RuntimeError("fail")
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -500,8 +543,9 @@ class TestUncompleteTasks:
             RuntimeError("nope"),
         ]
 
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)
@@ -512,8 +556,9 @@ class TestUncompleteTasks:
         assert len(result["failures"]) == 1
 
     def test_empty_ids(self, mock_client: MagicMock) -> None:
-        from server.tools.tasks import register
         from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
 
         app = FastMCP("test")
         register(app)

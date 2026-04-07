@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import yaml
-from mcp.server.fastmcp import FastMCP
 
 import server.lib.client as client_mod
 import server.lib.config as config_mod
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
@@ -59,9 +62,11 @@ def register(app: FastMCP) -> None:
         config_mod._cached_config = None
         client_mod._cached_client = None
 
-        return json.dumps({
-            "ok": True,
-            "displayName": myself.get("displayName", ""),
-            "emailAddress": myself.get("emailAddress", ""),
-            "config_path": str(config_path),
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "displayName": myself.get("displayName", ""),
+                "emailAddress": myself.get("emailAddress", ""),
+                "config_path": str(config_path),
+            }
+        )

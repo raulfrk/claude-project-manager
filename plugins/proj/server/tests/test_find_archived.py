@@ -90,9 +90,7 @@ class TestFindArchivedByTitle:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         # archive.yaml has no todos (created by setup_project with todos.yaml only)
-        result = await call_tool(
-            mcp_app, "proj_find_archived_by_title", title="Anything"
-        )
+        result = await call_tool(mcp_app, "proj_find_archived_by_title", title="Anything")
         data = json.loads(result)
 
         assert data == {"exact_match": None, "fuzzy_matches": [], "count": 0}
@@ -106,9 +104,7 @@ class TestFindArchivedByTitle:
         if archive.exists():
             archive.unlink()
 
-        result = await call_tool(
-            mcp_app, "proj_find_archived_by_title", title="Some title"
-        )
+        result = await call_tool(mcp_app, "proj_find_archived_by_title", title="Some title")
         data = json.loads(result)
 
         assert data == {"exact_match": None, "fuzzy_matches": [], "count": 0}

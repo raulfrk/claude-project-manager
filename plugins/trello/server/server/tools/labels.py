@@ -1,8 +1,15 @@
 """Trello labels tools."""
+
 from __future__ import annotations
+
 import json
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
+
 from server.lib.client import get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
 
 def register(app: FastMCP) -> None:
     @app.tool(description="Get all labels for a board.")

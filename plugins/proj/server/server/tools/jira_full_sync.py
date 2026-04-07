@@ -1,18 +1,23 @@
 """Jira full sync helpers — socket-based inter-plugin communication."""
+
 from __future__ import annotations
 
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
-from server.lib.models import JsonValue
+if TYPE_CHECKING:
+    from server.lib.models import JsonValue
 
 log = logging.getLogger(__name__)
 
 
-def _fetch_jira_issues(project_key: str | None = None, max_results: int = 200) -> tuple[list[dict[str, JsonValue]], int]:
+def _fetch_jira_issues(
+    project_key: str | None = None, max_results: int = 200
+) -> tuple[list[dict[str, JsonValue]], int]:
     """Fetch issues from Jira via socket, unwrap envelope, return (issues, total)."""
     params: dict[str, JsonValue] = {"max_results": max_results}
     if project_key:
@@ -23,7 +28,9 @@ def _fetch_jira_issues(project_key: str | None = None, max_results: int = 200) -
     total: int
     if isinstance(result, dict) and "issues" in result:
         issues_raw = result["issues"]
-        issues = [i for i in issues_raw if isinstance(i, dict)] if isinstance(issues_raw, list) else []
+        issues = (
+            [i for i in issues_raw if isinstance(i, dict)] if isinstance(issues_raw, list) else []
+        )
         total_raw = result.get("total", len(issues))
         total = int(total_raw) if isinstance(total_raw, (int, float)) else len(issues)
     elif isinstance(result, list):
@@ -36,7 +43,8 @@ def _fetch_jira_issues(project_key: str | None = None, max_results: int = 200) -
         log.warning(
             "Jira pagination: fetched %d of %d total issues. "
             "Use max_results parameter to fetch more.",
-            len(issues), total,
+            len(issues),
+            total,
         )
     return issues, total
 
@@ -50,7 +58,7 @@ def _resolve_jira_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    return "/tmp/claude-hooks-jira.sock"
+    return "/tmp/claude-hooks-jira.sock"  # noqa: S108
 
 
 def _call_jira_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:

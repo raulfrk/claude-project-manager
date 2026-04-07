@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-import yaml
 
 from server.lib.http_client import FireResult
 from server.lib.models import Hook, HookRegistry
@@ -16,7 +15,6 @@ from server.tools.fire import hooks_fire
 from server.tools.recovery import hooks_recover
 from server.tools.registry import hooks_register, hooks_unregister
 from server.tools.verify import hooks_verify
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +54,10 @@ class TestFullLifecycle:
 
     @pytest.mark.asyncio
     async def test_register_fire_verify_stored(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Full lifecycle: register primary + verification, fire trigger,
         confirm Phase 1 fires first, Phase 2 fires after with aggregated results,
@@ -91,12 +92,16 @@ class TestFullLifecycle:
             if hook.verification:
                 # Verification hook returns convention-based pass
                 return FireResult(
-                    hook_id=hook.id, status_code=200, body="ok",
+                    hook_id=hook.id,
+                    status_code=200,
+                    body="ok",
                     result=json.dumps({"status": "pass", "details": "perms verified"}),
                 )
             # Primary hook returns a normal result
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result="perms setup complete",
             )
 
@@ -135,13 +140,18 @@ class TestFullLifecycle:
 
     @pytest.mark.asyncio
     async def test_verification_receives_aggregated_hook_results(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Verification hooks receive Phase 1 blocking results via hook_results key."""
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_b", blocking=True),
-            _hook("verify-001", "trigger_a", "verify_target", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_b", blocking=True),
+                _hook("verify-001", "trigger_a", "verify_target", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         captured_verification_source: dict = {}
@@ -150,11 +160,15 @@ class TestFullLifecycle:
             if hook.verification:
                 captured_verification_source.update(source)
                 return FireResult(
-                    hook_id=hook.id, status_code=200, body="ok",
+                    hook_id=hook.id,
+                    status_code=200,
+                    body="ok",
                     result=json.dumps({"status": "pass", "details": "ok"}),
                 )
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result="primary result value",
             )
 
@@ -182,20 +196,26 @@ class TestVerificationFailureRecovery:
 
     @pytest.mark.asyncio
     async def test_verification_failure_logged_and_recoverable(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Verification hook that fails logs to failures + verifications,
         and the failure appears in hooks_recover list output.
         """
-        reg = _make_registry([
-            _hook("verify-001", "trigger_a", "verify_target", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("verify-001", "trigger_a", "verify_target", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         # Verification hook returns HTTP error
         async def mock_fire_single(hook, source):
             return FireResult(
-                hook_id=hook.id, status_code=500,
+                hook_id=hook.id,
+                status_code=500,
                 body="Internal Server Error",
                 error="HTTP 500",
             )
@@ -208,7 +228,7 @@ class TestVerificationFailureRecovery:
         ):
             raw = await hooks_fire("trigger_a")
 
-        data = json.loads(raw)
+        json.loads(raw)
 
         # Verification result stored as fail
         v_entries = load_verification_results(path=verifications_yaml)
@@ -231,20 +251,27 @@ class TestVerificationFailureRecovery:
 
     @pytest.mark.asyncio
     async def test_verification_failure_convention_response(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Verification hook returning {"status": "fail", "details": "..."} via
         convention-based response — failure stored but not in failures yaml
         (only HTTP/transport errors log to failures).
         """
-        reg = _make_registry([
-            _hook("verify-001", "trigger_a", "verify_target", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("verify-001", "trigger_a", "verify_target", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         async def mock_fire_single(hook, source):
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result=json.dumps({"status": "fail", "details": "task still open"}),
             )
 
@@ -256,7 +283,7 @@ class TestVerificationFailureRecovery:
         ):
             raw = await hooks_fire("trigger_a")
 
-        data = json.loads(raw)
+        json.loads(raw)
 
         # Verification stored as fail
         v_entries = load_verification_results(path=verifications_yaml)
@@ -277,17 +304,22 @@ class TestMixedPrimaryVerification:
 
     @pytest.mark.asyncio
     async def test_all_primary_before_verification(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Multiple primary hooks (blocking + non-blocking) fire before
         any verification hooks.
         """
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_a", blocking=True),
-            _hook("primary-002", "trigger_a", "target_b", blocking=True),
-            _hook("verify-001", "trigger_a", "verify_a", verification=True),
-            _hook("verify-002", "trigger_a", "verify_b", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_a", blocking=True),
+                _hook("primary-002", "trigger_a", "target_b", blocking=True),
+                _hook("verify-001", "trigger_a", "verify_a", verification=True),
+                _hook("verify-002", "trigger_a", "verify_b", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         call_order: list[str] = []
@@ -296,11 +328,15 @@ class TestMixedPrimaryVerification:
             call_order.append(hook.id)
             if hook.verification:
                 return FireResult(
-                    hook_id=hook.id, status_code=200, body="ok",
+                    hook_id=hook.id,
+                    status_code=200,
+                    body="ok",
                     result=json.dumps({"status": "pass", "details": "ok"}),
                 )
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result="primary done",
             )
 
@@ -328,17 +364,23 @@ class TestMixedPrimaryVerification:
 
     @pytest.mark.asyncio
     async def test_verification_not_fired_when_no_verification_hooks(
-        self, hooks_yaml: Path, failures_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
     ):
         """When only primary hooks exist, no verification section in response."""
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_a", blocking=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_a", blocking=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         async def mock_fire_single(hook, source):
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result="done",
             )
 
@@ -355,13 +397,18 @@ class TestMixedPrimaryVerification:
 
     @pytest.mark.asyncio
     async def test_verification_fires_even_when_primary_fails(
-        self, hooks_yaml: Path, failures_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        failures_yaml: Path,
+        verifications_yaml: Path,
     ):
         """Verification hooks fire even if a primary blocking hook errors."""
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_a", blocking=True),
-            _hook("verify-001", "trigger_a", "verify_a", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_a", blocking=True),
+                _hook("verify-001", "trigger_a", "verify_a", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         call_order: list[str] = []
@@ -370,11 +417,15 @@ class TestMixedPrimaryVerification:
             call_order.append(hook.id)
             if hook.id == "primary-001":
                 return FireResult(
-                    hook_id=hook.id, status_code=500,
-                    body="error", error="HTTP 500",
+                    hook_id=hook.id,
+                    status_code=500,
+                    body="error",
+                    error="HTTP 500",
                 )
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result=json.dumps({"status": "pass", "details": "verified"}),
             )
 
@@ -409,24 +460,32 @@ class TestExplicitHooksVerify:
 
     @pytest.mark.asyncio
     async def test_hooks_verify_returns_structured_summary(
-        self, hooks_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        verifications_yaml: Path,
     ):
         """hooks_verify returns results array and summary with total/passed/failed."""
-        reg = _make_registry([
-            _hook("verify-001", "trigger_a", "verify_a", verification=True),
-            _hook("verify-002", "trigger_a", "verify_b", verification=True),
-            _hook("verify-003", "trigger_a", "verify_c", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("verify-001", "trigger_a", "verify_a", verification=True),
+                _hook("verify-002", "trigger_a", "verify_b", verification=True),
+                _hook("verify-003", "trigger_a", "verify_c", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         async def mock_fire_single(hook, source):
             if hook.id == "verify-002":
                 return FireResult(
-                    hook_id=hook.id, status_code=200, body="ok",
+                    hook_id=hook.id,
+                    status_code=200,
+                    body="ok",
                     result=json.dumps({"status": "fail", "details": "check failed"}),
                 )
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result=json.dumps({"status": "pass", "details": "ok"}),
             )
 
@@ -451,17 +510,23 @@ class TestExplicitHooksVerify:
 
     @pytest.mark.asyncio
     async def test_hooks_verify_stores_results(
-        self, hooks_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        verifications_yaml: Path,
     ):
         """hooks_verify stores all verification results to verifications yaml."""
-        reg = _make_registry([
-            _hook("verify-001", "trigger_a", "verify_a", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("verify-001", "trigger_a", "verify_a", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         async def mock_fire_single(hook, source):
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result=json.dumps({"status": "pass", "details": "confirmed"}),
             )
 
@@ -481,12 +546,15 @@ class TestExplicitHooksVerify:
 
     @pytest.mark.asyncio
     async def test_hooks_verify_no_verification_hooks_registered(
-        self, hooks_yaml: Path,
+        self,
+        hooks_yaml: Path,
     ):
         """hooks_verify with no verification hooks returns appropriate status."""
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_b", blocking=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_b", blocking=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
@@ -498,13 +566,17 @@ class TestExplicitHooksVerify:
 
     @pytest.mark.asyncio
     async def test_hooks_verify_does_not_fire_primary_hooks(
-        self, hooks_yaml: Path, verifications_yaml: Path,
+        self,
+        hooks_yaml: Path,
+        verifications_yaml: Path,
     ):
         """hooks_verify only fires verification hooks, not primary ones."""
-        reg = _make_registry([
-            _hook("primary-001", "trigger_a", "target_b", blocking=True),
-            _hook("verify-001", "trigger_a", "verify_target", verification=True),
-        ])
+        reg = _make_registry(
+            [
+                _hook("primary-001", "trigger_a", "target_b", blocking=True),
+                _hook("verify-001", "trigger_a", "verify_target", verification=True),
+            ]
+        )
         save(reg, hooks_yaml)
 
         fired_hooks: list[str] = []
@@ -512,7 +584,9 @@ class TestExplicitHooksVerify:
         async def mock_fire_single(hook, source):
             fired_hooks.append(hook.id)
             return FireResult(
-                hook_id=hook.id, status_code=200, body="ok",
+                hook_id=hook.id,
+                status_code=200,
+                body="ok",
                 result=json.dumps({"status": "pass", "details": "ok"}),
             )
 

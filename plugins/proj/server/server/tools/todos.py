@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import JsonValue, ProjectMeta, ProjConfig, Todo
+from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-_UTC = timezone.utc
+_UTC = UTC
 
 
-def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None) -> dict[str, JsonValue]:
+def _todo_hook_fields(
+    todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None
+) -> dict[str, JsonValue]:
     """Return enriched fields for hook dispatch from a todo and its project metadata."""
     fields: dict[str, JsonValue] = {
         "title": todo.title,
@@ -27,9 +29,8 @@ def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[T
         "notes": todo.notes,
         "due_date": todo.due_date,
         "todoist_task_id": todo.todoist_task_id,
-        "trello_card_id": meta.trello_card_id,
-        "trello_checklist_id": todo.trello_checklist_id,
-        "trello_checklist_item_id": todo.trello_checklist_item_id,
+        "trello_project_card_id": meta.trello_card_id,
+        "trello_card_id": todo.trello_card_id,
         "jira_issue_key": todo.jira_issue_key,
         "project_name": name,
         "todoist_project_id": meta.todoist_project_id,
@@ -39,8 +40,8 @@ def _todo_hook_fields(todo: Todo, meta: ProjectMeta, name: str, *, todos: list[T
         parent_todo = next((t for t in todos if t.id == todo.parent), None)
         if parent_todo and parent_todo.todoist_task_id:
             fields["parent_todoist_task_id"] = parent_todo.todoist_task_id
-        if parent_todo and parent_todo.trello_checklist_id:
-            fields["parent_trello_checklist_id"] = parent_todo.trello_checklist_id
+        if parent_todo and parent_todo.trello_card_id:
+            fields["parent_trello_card_id"] = parent_todo.trello_card_id
     return fields
 
 
@@ -101,7 +102,12 @@ def _complete_child(
     todo.status = TodoStatus.DONE
     todo.updated = today
     storage.save_todos(cfg, name, todos)
-    return json.dumps({"result": f"Marked {todo.id} as done (will archive with parent when parent completes).", "todo_id": todo.id})
+    return json.dumps(
+        {
+            "result": f"Marked {todo.id} as done (will archive with parent when parent completes).",
+            "todo_id": todo.id,
+        }
+    )
 
 
 def _complete_parent(
@@ -115,11 +121,14 @@ def _complete_parent(
     todo_map = {t.id: t for t in todos}
     todo_id = todo.id
     undone = [
-        c for c in todo.children
+        c
+        for c in todo.children
         if (child := todo_map.get(c)) is not None and child.status != TodoStatus.DONE
     ]
     if undone:
-        return json.dumps({"error": f"Cannot complete {todo_id}: children not done yet: {', '.join(undone)}."})
+        return json.dumps(
+            {"error": f"Cannot complete {todo_id}: children not done yet: {', '.join(undone)}."}
+        )
     family_ids = _collect_family(todo_id, todos)
     family = [t for t in todos if t.id in family_ids]
     for t in family:
@@ -137,7 +146,9 @@ def _complete_parent(
         if changed:
             t.updated = today
     storage.archive_and_remove_todos(cfg, name, remaining, family)
-    return json.dumps({"result": f"Archived {todo_id} and family ({len(family)} todo(s)).", "todo_id": todo_id})
+    return json.dumps(
+        {"result": f"Archived {todo_id} and family ({len(family)} todo(s)).", "todo_id": todo_id}
+    )
 
 
 def _filter_todos(
@@ -168,7 +179,14 @@ def _filter_todos(
 
 
 def register(app: FastMCP) -> None:
-    """Register todo_add, todo_list, todo_get, todo_update, todo_complete, todo_block, todo_unblock, todo_delete, todo_ready, todo_add_child, todo_batch_add_children, todo_tree, todo_set_content_flag, todo_check_executable, and proj_identify_batches tools with the MCP app."""
+    """Register todo management tools with the MCP app.
+
+    Registers todo_add, todo_list, todo_get, todo_update,
+    todo_complete, todo_block, todo_unblock, todo_delete, todo_ready,
+    todo_add_child, todo_batch_add_children, todo_tree,
+    todo_set_content_flag, todo_check_executable, and
+    proj_identify_batches.
+    """
 
     @app.tool(description="Add a new todo to a project.")
     def todo_add(
@@ -180,7 +198,6 @@ def register(app: FastMCP) -> None:
         notes: str = "",
         due_date: str | None = None,
         todoist_task_id: str | None = None,
-        trello_checklist_item_id: str | None = None,
         project_name: str | None = None,
     ) -> str:
         result = require_project(project_name)
@@ -198,7 +215,15 @@ def register(app: FastMCP) -> None:
                 return json.dumps({"error": f"Parent todo '{parent}' not found."})
 
         if due_date is not None and not due_date.strip():
-            return json.dumps({"error": "due_date cannot be empty. Omit it or provide a value (e.g. '2026-03-15' or 'next Friday')."})
+            return json.dumps(
+                {
+                    "error": (
+                        "due_date cannot be empty. Omit it or"
+                        " provide a value (e.g. '2026-03-15'"
+                        " or 'next Friday')."
+                    )
+                }
+            )
 
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
@@ -210,7 +235,6 @@ def register(app: FastMCP) -> None:
             notes=notes,
             due_date=due_date,
             todoist_task_id=todoist_task_id,
-            trello_checklist_item_id=trello_checklist_item_id,
             created=today,
             updated=today,
         )
@@ -220,7 +244,13 @@ def register(app: FastMCP) -> None:
         todos.append(todo)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added todo {todo.id}: {title}", "todo_id": todo.id, **_todo_hook_fields(todo, meta, name, todos=todos)})
+        return json.dumps(
+            {
+                "result": f"Added todo {todo.id}: {title}",
+                "todo_id": todo.id,
+                **_todo_hook_fields(todo, meta, name, todos=todos),
+            }
+        )
 
     @app.tool(
         description=(
@@ -271,7 +301,9 @@ def register(app: FastMCP) -> None:
                 lines.append(f"{t.id} | {t.status} | {t.title} | {t.priority} | {tags_str}")
             if truncated:
                 lines.append(f"... {truncated} more items")
-            return json.dumps({"result": "\n".join(lines), "truncated": truncated, "count": len(filtered)})
+            return json.dumps(
+                {"result": "\n".join(lines), "truncated": truncated, "count": len(filtered)}
+            )
         result_json = json.dumps([t.to_dict() for t in filtered], indent=2)
         if truncated:
             result_json += f"\n... {truncated} more items"
@@ -363,7 +395,13 @@ def register(app: FastMCP) -> None:
         todo.updated = _now()
         meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"result": f"Updated todo {todo_id}.", "todo_id": todo_id, **_todo_hook_fields(todo, meta, name)})
+        return json.dumps(
+            {
+                "result": f"Updated todo {todo_id}.",
+                "todo_id": todo_id,
+                **_todo_hook_fields(todo, meta, name),
+            }
+        )
 
     @app.tool(description="Mark a todo as done.")
     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
@@ -410,7 +448,9 @@ def register(app: FastMCP) -> None:
         todo.updated = _now()
         meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name)})
+        return json.dumps(
+            {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name)}
+        )
 
     @app.tool(
         description=(
@@ -429,10 +469,16 @@ def register(app: FastMCP) -> None:
         if not todo:
             return json.dumps({"error": f"Todo '{todo_id}' not found."})
         if MANUAL_TAG in todo.tags:
-            return json.dumps({
-                "error": f"⚠️ Todo '{todo_id}' is tagged `manual` — execute it yourself, then run `/proj:todo done {todo_id}`",
-                "todo_id": todo_id,
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        f"⚠️ Todo '{todo_id}' is tagged `manual`"
+                        " — execute it yourself, then run"
+                        f" `/proj:todo done {todo_id}`"
+                    ),
+                    "todo_id": todo_id,
+                }
+            )
         return json.dumps(todo.to_dict(), indent=2)
 
     @app.tool(description="Set blocking relationships between todos.")
@@ -465,7 +511,9 @@ def register(app: FastMCP) -> None:
             target.updated = today
         blocker.updated = today
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"result": f"{todo_id} now blocks: {', '.join(blocks_ids)}", "todo_id": todo_id})
+        return json.dumps(
+            {"result": f"{todo_id} now blocks: {', '.join(blocks_ids)}", "todo_id": todo_id}
+        )
 
     @app.tool(description="Remove blocking relationships for a todo.")
     def todo_unblock(todo_id: str, project_name: str | None = None) -> str:
@@ -487,7 +535,9 @@ def register(app: FastMCP) -> None:
         todo.blocks = []
         todo.updated = today
         storage.save_todos(cfg, name, todos)
-        return json.dumps({"result": f"Removed all blocking relationships from {todo_id}.", "todo_id": todo_id})
+        return json.dumps(
+            {"result": f"Removed all blocking relationships from {todo_id}.", "todo_id": todo_id}
+        )
 
     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
     def todo_delete(todo_id: str, project_name: str | None = None) -> str:
@@ -580,7 +630,13 @@ def register(app: FastMCP) -> None:
         todos.append(child)
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
-        return json.dumps({"result": f"Added child todo {child.id} under {parent_id}: {title}", "todo_id": child.id, **_todo_hook_fields(child, meta, name, todos=todos)})
+        return json.dumps(
+            {
+                "result": f"Added child todo {child.id} under {parent_id}: {title}",
+                "todo_id": child.id,
+                **_todo_hook_fields(child, meta, name, todos=todos),
+            }
+        )
 
     @app.tool(
         description=(
@@ -680,7 +736,7 @@ def register(app: FastMCP) -> None:
                 # Recurse into nested children
                 nested_raw = spec.get("children")
                 if isinstance(nested_raw, list) and nested_raw:
-                    _flatten(nested_raw, child)
+                    _flatten([x for x in nested_raw if isinstance(x, dict)], child)
 
         _flatten(child_specs, parent)
 
@@ -695,10 +751,14 @@ def register(app: FastMCP) -> None:
                 pair_errors.append(f"Indices must be integers: {pair}")
                 continue
             if blocker_idx < 0 or blocker_idx >= len(created):
-                pair_errors.append(f"blocker_idx {blocker_idx} out of range (0..{len(created)-1})")
+                pair_errors.append(
+                    f"blocker_idx {blocker_idx} out of range (0..{len(created) - 1})"
+                )
                 continue
             if blocked_idx < 0 or blocked_idx >= len(created):
-                pair_errors.append(f"blocked_idx {blocked_idx} out of range (0..{len(created)-1})")
+                pair_errors.append(
+                    f"blocked_idx {blocked_idx} out of range (0..{len(created) - 1})"
+                )
                 continue
             if blocker_idx == blocked_idx:
                 pair_errors.append(f"Self-blocking not allowed: {pair}")
@@ -732,7 +792,8 @@ def register(app: FastMCP) -> None:
             "count": len(created),
             "project_name": name,
             "todoist_project_id": meta.todoist_project_id,
-            "trello_card_id": meta.trello_card_id,
+            "trello_project_card_id": meta.trello_card_id,
+            "trello_card_id": parent.trello_card_id,
             "parent_todoist_task_id": parent.todoist_task_id,
             "todoist_tasks": todoist_tasks,
         }
@@ -771,9 +832,9 @@ def register(app: FastMCP) -> None:
         return out
 
     _STATUS_EMOJI: dict[str, str] = {
-        "pending": "\U0001f532",       # 🔲
-        "in_progress": "\U0001f504",   # 🔄
-        "done": "\u2705",             # ✅
+        "pending": "\U0001f532",  # 🔲
+        "in_progress": "\U0001f504",  # 🔄
+        "done": "\u2705",  # ✅
     }
 
     def _compact_tree_line(node: dict[str, JsonValue], depth: int = 0) -> list[str]:
@@ -804,7 +865,7 @@ def register(app: FastMCP) -> None:
             count += 1
             children = node.get("_children", [])
             if isinstance(children, list):
-                count += _count_tree_nodes(children)
+                count += _count_tree_nodes([x for x in children if isinstance(x, dict)])
         return count
 
     @app.tool(
@@ -844,8 +905,7 @@ def register(app: FastMCP) -> None:
             roots = [r for r in (_filter_tree_node(root) for root in roots) if r is not None]
         # Detect orphaned todos: have a parent ID that no longer exists in todo_map
         orphaned = [
-            todo_map[t.id] for t in todos
-            if t.parent is not None and t.parent not in todo_map
+            todo_map[t.id] for t in todos if t.parent is not None and t.parent not in todo_map
         ]
         if not include_done:
             orphaned = [o for o in orphaned if _filter_tree_node(o) is not None]
@@ -866,7 +926,9 @@ def register(app: FastMCP) -> None:
                 lines = lines[:max_items]
             if truncated:
                 lines.append(f"... {truncated} more items")
-            return json.dumps({"result": "\n".join(lines), "truncated": truncated, "count": len(roots)})
+            return json.dumps(
+                {"result": "\n".join(lines), "truncated": truncated, "count": len(roots)}
+            )
 
         result_json = json.dumps(roots, indent=2)
         if truncated:
@@ -896,7 +958,7 @@ def register(app: FastMCP) -> None:
         requested_set = set(found_ids)
 
         # Build in-degree map and adjacency list (within requested set only)
-        in_degree: dict[str, int] = {tid: 0 for tid in found_ids}
+        in_degree: dict[str, int] = dict.fromkeys(found_ids, 0)
         # adjacency: blocker -> list of todos it unblocks
         adjacency: dict[str, list[str]] = {tid: [] for tid in found_ids}
 
@@ -1033,5 +1095,8 @@ def register(app: FastMCP) -> None:
             todo = next(t for t in archived if t.title == match_title)
             ratio = difflib.SequenceMatcher(None, title.lower(), match_title.lower()).ratio()
             fuzzy.append({"id": todo.id, "title": todo.title, "ratio": round(ratio, 3)})
-        fuzzy.sort(key=lambda x: float(x["ratio"]) if isinstance(x["ratio"], (int, float)) else 0.0, reverse=True)
+        fuzzy.sort(
+            key=lambda x: float(x["ratio"]) if isinstance(x["ratio"], (int, float)) else 0.0,
+            reverse=True,
+        )
         return json.dumps({"exact_match": None, "fuzzy_matches": fuzzy, "count": len(fuzzy)})

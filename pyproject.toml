@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cpm-install"
+version = "1.0.0"
+description = "Installer for claude-project-manager plugin marketplace"
+requires-python = ">=3.12"
+dependencies = ["rich>=13.0", "pyyaml>=6.0"]
+
+[project.scripts]
+cpm-install = "installer.main:main"
+
+[project.optional-dependencies]
+plugins = [
+    "mcp>=1.2.0",
+    "pyyaml>=6.0",
+    "gitpython>=3.1",
+    "httpx>=0.28",
+    "claude-hook-transport",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["installer"]
+
+[dependency-groups]
+test = ["pytest>=8.0", "pytest-cov>=7.0", "pytest-mock>=3.14"]
+
+[tool.ruff.lint.per-file-ignores]
+"installer/tests/**" = ["S"]
+"tests/**" = ["S"]
+"scripts/tests/**" = ["S"]
+
+[tool.uv.sources]
+claude-hook-transport = { path = "plugins/_shared" }

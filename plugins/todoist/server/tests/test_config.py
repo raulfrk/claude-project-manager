@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import server.lib.config as config_mod
-from server.lib.config import TodoistConfig, load_config
+from server.lib.config import load_config
 
 
 @pytest.fixture(autouse=True)
@@ -19,9 +19,7 @@ def _clear_config_cache() -> None:
 
 
 class TestValidConfig:
-    def test_loads_all_fields(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_loads_all_fields(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text(
             "api_token: tok-123\nenabled: false\nauto_sync: false\nroot_only: true\n"
@@ -47,9 +45,7 @@ class TestValidConfig:
         assert cfg.auto_sync is True
         assert cfg.root_only is False
 
-    def test_extra_fields_ignored(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_extra_fields_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text("api_token: tok-789\nfoo: bar\nextra: 42\n")
         monkeypatch.setenv("TODOIST_CONFIG", str(cfg_file))
@@ -60,9 +56,7 @@ class TestValidConfig:
 
 
 class TestMissingFile:
-    def test_missing_file_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_file_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TODOIST_CONFIG", str(tmp_path / "nonexistent.yaml"))
 
         with pytest.raises(ValueError, match="Todoist not configured"):
@@ -70,9 +64,7 @@ class TestMissingFile:
 
 
 class TestMalformedYaml:
-    def test_malformed_yaml_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_malformed_yaml_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text(":\n  - :\n    bad: [")
         monkeypatch.setenv("TODOIST_CONFIG", str(cfg_file))
@@ -80,9 +72,7 @@ class TestMalformedYaml:
         with pytest.raises(ValueError, match="Invalid YAML"):
             load_config()
 
-    def test_empty_file_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_file_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text("")
         monkeypatch.setenv("TODOIST_CONFIG", str(cfg_file))
@@ -90,9 +80,7 @@ class TestMalformedYaml:
         with pytest.raises(ValueError, match="Invalid YAML"):
             load_config()
 
-    def test_scalar_yaml_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_scalar_yaml_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text("just a string\n")
         monkeypatch.setenv("TODOIST_CONFIG", str(cfg_file))
@@ -112,9 +100,7 @@ class TestMissingApiToken:
         with pytest.raises(ValueError, match="missing api_token"):
             load_config()
 
-    def test_empty_api_token_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_api_token_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "todoist.yaml"
         cfg_file.write_text("api_token: '  '\n")
         monkeypatch.setenv("TODOIST_CONFIG", str(cfg_file))

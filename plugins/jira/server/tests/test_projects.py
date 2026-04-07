@@ -63,9 +63,7 @@ class TestJiraListProjects:
 
 
 class TestJiraGetProject:
-    def test_returns_project_data(
-        self, mock_jira_client: MagicMock, project_tools: dict
-    ) -> None:
+    def test_returns_project_data(self, mock_jira_client: MagicMock, project_tools: dict) -> None:
         project_data = {"key": "PROJ", "name": "Project", "lead": {"displayName": "Alice"}}
         mock_jira_client.get.return_value = project_data
 

@@ -20,9 +20,7 @@ def link_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraLinkIssues:
-    def test_posts_issue_link(
-        self, mock_jira_client: MagicMock, link_tools: dict
-    ) -> None:
+    def test_posts_issue_link(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
         mock_jira_client.post.return_value = None
 
         result = link_tools["jira_link_issues"](
@@ -47,9 +45,7 @@ class TestJiraLinkIssues:
 
 
 class TestJiraGetLinkTypes:
-    def test_fetches_link_types(
-        self, mock_jira_client: MagicMock, link_tools: dict
-    ) -> None:
+    def test_fetches_link_types(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
         data = {"issueLinkTypes": [{"id": "10000", "name": "Blocks"}]}
         mock_jira_client.get.return_value = data
 

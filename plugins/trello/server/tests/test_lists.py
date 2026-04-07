@@ -24,9 +24,7 @@ def list_tools(mock_trello_client: MagicMock) -> dict[str, callable]:
 
 
 class TestGetLists:
-    def test_returns_lists(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_returns_lists(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         lists_data = [
             {"id": "l1", "name": "To Do"},
             {"id": "l2", "name": "Done"},
@@ -38,18 +36,14 @@ class TestGetLists:
         mock_trello_client.get.assert_called_once_with("/boards/board1/lists")
         assert json.loads(result) == lists_data
 
-    def test_returns_empty_list(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_returns_empty_list(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         mock_trello_client.get.return_value = []
         result = list_tools["get_lists"]("board1")
         assert json.loads(result) == []
 
 
 class TestGetList:
-    def test_returns_single_list(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_returns_single_list(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         list_data = {"id": "l1", "name": "To Do", "closed": False}
         mock_trello_client.get.return_value = list_data
 
@@ -60,9 +54,7 @@ class TestGetList:
 
 
 class TestCreateList:
-    def test_creates_list(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_creates_list(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         created = {"id": "l3", "name": "In Progress", "idBoard": "board1"}
         mock_trello_client.post.return_value = created
 
@@ -75,39 +67,29 @@ class TestCreateList:
 
 
 class TestUpdateList:
-    def test_updates_name(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_updates_name(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         updated = {"id": "l1", "name": "Renamed"}
         mock_trello_client.put.return_value = updated
 
         result = list_tools["update_list"]("l1", name="Renamed")
 
-        mock_trello_client.put.assert_called_once_with(
-            "/lists/l1", params={"name": "Renamed"}
-        )
+        mock_trello_client.put.assert_called_once_with("/lists/l1", params={"name": "Renamed"})
         assert json.loads(result) == updated
 
-    def test_updates_closed(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_updates_closed(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "l1", "closed": True}
         result = list_tools["update_list"]("l1", closed=True)
         _, kwargs = mock_trello_client.put.call_args
         assert kwargs["params"]["closed"] is True
         assert json.loads(result)["closed"] is True
 
-    def test_updates_both(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_updates_both(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "l1"}
         list_tools["update_list"]("l1", name="N", closed=False)
         _, kwargs = mock_trello_client.put.call_args
         assert kwargs["params"] == {"name": "N", "closed": False}
 
-    def test_none_params_omitted(
-        self, mock_trello_client: MagicMock, list_tools: dict
-    ) -> None:
+    def test_none_params_omitted(self, mock_trello_client: MagicMock, list_tools: dict) -> None:
         mock_trello_client.put.return_value = {"id": "l1"}
         list_tools["update_list"]("l1")
         _, kwargs = mock_trello_client.put.call_args

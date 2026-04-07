@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import yaml
 
 from server.lib.models import JsonDict, _int
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass
@@ -115,7 +118,7 @@ class CircuitBreakerManager:
                 self._save()
                 return True
             opened = datetime.fromisoformat(breaker.opened_at)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             elapsed = (now - opened).total_seconds()
             if elapsed >= self.recovery_timeout:
                 breaker.state = "HALF_OPEN"
@@ -131,7 +134,7 @@ class CircuitBreakerManager:
         breaker = self._get_or_create(service)
         breaker.state = "HEALTHY"
         breaker.failure_count = 0
-        breaker.last_success = datetime.now(timezone.utc).isoformat()
+        breaker.last_success = datetime.now(UTC).isoformat()
         breaker.opened_at = None
         self._save()
 
@@ -143,17 +146,17 @@ class CircuitBreakerManager:
         """
         breaker = self._get_or_create(service)
         breaker.failure_count += 1
-        breaker.last_failure = datetime.now(timezone.utc).isoformat()
+        breaker.last_failure = datetime.now(UTC).isoformat()
         breaker.last_error = error
         breaker.last_status_code = status_code
 
         if breaker.state == "HALF_OPEN":
             # Probe failed — reopen
             breaker.state = "OPEN"
-            breaker.opened_at = datetime.now(timezone.utc).isoformat()
+            breaker.opened_at = datetime.now(UTC).isoformat()
         elif breaker.state == "HEALTHY" and breaker.failure_count >= self.failure_threshold:
             breaker.state = "OPEN"
-            breaker.opened_at = datetime.now(timezone.utc).isoformat()
+            breaker.opened_at = datetime.now(UTC).isoformat()
 
         self._save()
 
@@ -189,7 +192,7 @@ class OrphanLogger:
                 "external_id": external_id,
                 "todo_id": todo_id,
                 "error": error,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
         # Rolling cap — keep the most recent entries

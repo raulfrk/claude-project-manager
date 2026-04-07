@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 import server.lib.config as config_mod
-from server.lib.config import JiraConfig, load_config
+from server.lib.config import load_config
 
 
 @pytest.fixture(autouse=True)
@@ -23,13 +23,15 @@ class TestYamlLoading:
     def test_loads_full_yaml_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_file = tmp_path / "jira.yaml"
         config_file.write_text(
-            yaml.dump({
-                "personal_access_token": "my_pat",
-                "base_url": "https://jira.example.com",
-                "allowed_project_keys": ["PROJ", "DEV"],
-                "default_user": "alice",
-                "rate_limit_per_10s": 50,
-            })
+            yaml.dump(
+                {
+                    "personal_access_token": "my_pat",
+                    "base_url": "https://jira.example.com",
+                    "allowed_project_keys": ["PROJ", "DEV"],
+                    "default_user": "alice",
+                    "rate_limit_per_10s": 50,
+                }
+            )
         )
         monkeypatch.setenv("JIRA_CONFIG", str(config_file))
 
@@ -63,9 +65,7 @@ class TestYamlLoading:
 
 
 class TestEnvVarFallback:
-    def test_loads_from_env_vars(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_loads_from_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Point JIRA_CONFIG to a non-existent file so YAML path is skipped
         monkeypatch.setenv("JIRA_CONFIG", str(tmp_path / "nonexistent.yaml"))
         monkeypatch.setenv("JIRA_PAT", "env_pat")
@@ -80,9 +80,7 @@ class TestEnvVarFallback:
 
 
 class TestMissingCredentials:
-    def test_no_config_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_config_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("JIRA_CONFIG", str(tmp_path / "nonexistent.yaml"))
         monkeypatch.delenv("JIRA_PAT", raising=False)
         monkeypatch.delenv("JIRA_BASE_URL", raising=False)
@@ -97,10 +95,12 @@ class TestSingletonCaching:
     ) -> None:
         config_file = tmp_path / "jira.yaml"
         config_file.write_text(
-            yaml.dump({
-                "personal_access_token": "pat",
-                "base_url": "https://jira.example.com",
-            })
+            yaml.dump(
+                {
+                    "personal_access_token": "pat",
+                    "base_url": "https://jira.example.com",
+                }
+            )
         )
         monkeypatch.setenv("JIRA_CONFIG", str(config_file))
 

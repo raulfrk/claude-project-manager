@@ -180,18 +180,14 @@ class TestContextTools:
         result = _read_recent_notes(notes_file)
         assert result == ""
 
-    def test_read_recent_notes_nonexistent_file(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
+    def test_read_recent_notes_nonexistent_file(self, cfg: ProjConfig, tmp_path: Path) -> None:
         from server.tools.context import _read_recent_notes
 
         notes_file = tmp_path / "DOES_NOT_EXIST.md"
         result = _read_recent_notes(notes_file)
         assert result == ""
 
-    def test_build_context_compact_skips_notes(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
+    def test_build_context_compact_skips_notes(self, cfg: ProjConfig, tmp_path: Path) -> None:
         _setup_project(cfg, "myapp", tmp_path)
         storage.append_note(cfg, "myapp", "A note that should be hidden")
         from server.tools.context import _build_context

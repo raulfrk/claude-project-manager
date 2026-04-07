@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import time
 from collections import deque
-
-from collections.abc import Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from server.lib.config import JiraConfig, load_config
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Recursive JSON value type — no Any needed.
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
@@ -61,7 +64,9 @@ class JiraClient:
         raise RuntimeError(msg)
 
     def get(
-        self, path: str, params: Mapping[str, ParamValue] | None = None,
+        self,
+        path: str,
+        params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a GET request to the Jira REST API."""
         self._rate_limit()
@@ -75,9 +80,7 @@ class JiraClient:
     ) -> JsonValue:
         """Send a POST request to the Jira REST API."""
         self._rate_limit()
-        return self._handle_response(
-            self._http.post(path, json=json_body, params=params or {})
-        )
+        return self._handle_response(self._http.post(path, json=json_body, params=params or {}))
 
     def put(
         self,
@@ -87,12 +90,12 @@ class JiraClient:
     ) -> JsonValue:
         """Send a PUT request to the Jira REST API."""
         self._rate_limit()
-        return self._handle_response(
-            self._http.put(path, json=json_body, params=params or {})
-        )
+        return self._handle_response(self._http.put(path, json=json_body, params=params or {}))
 
     def delete(
-        self, path: str, params: Mapping[str, ParamValue] | None = None,
+        self,
+        path: str,
+        params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a DELETE request to the Jira REST API."""
         self._rate_limit()
@@ -106,7 +109,7 @@ class JiraClient:
     ) -> JsonValue:
         """Send a multipart/form-data POST (for attachments)."""
         self._rate_limit()
-        with open(file_path, "rb") as f:  # noqa: S108
+        with Path(file_path).open("rb") as f:
             return self._handle_response(
                 self._http.post(
                     path,
@@ -122,7 +125,7 @@ _cached_client: JiraClient | None = None
 
 def get_client() -> JiraClient:
     """Return a singleton JiraClient, creating it on first call."""
-    global _cached_client  # noqa: PLW0603
+    global _cached_client
     if _cached_client is None:
         _cached_client = JiraClient(load_config())
     return _cached_client

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from server.lib import state, storage
+from server.lib import state
 from server.lib.models import ProjConfig
 from tests.conftest import call_tool, setup_project
 
@@ -49,7 +49,9 @@ class TestProjGetTodoContext:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         todo_id = await _add_todo(mcp_app, "Task with reqs")
-        await call_tool(mcp_app, "content_set_requirements", todo_id=todo_id, content="## Reqs\nDo X.")
+        await call_tool(
+            mcp_app, "content_set_requirements", todo_id=todo_id, content="## Reqs\nDo X."
+        )
         result = await call_tool(mcp_app, "proj_get_todo_context", todo_id=todo_id)
         data = json.loads(result)
         assert "Do X." in data["requirements"]
@@ -69,7 +71,9 @@ class TestProjGetTodoContext:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         todo_id = await _add_todo(mcp_app, "Full task")
-        await call_tool(mcp_app, "content_set_requirements", todo_id=todo_id, content="Requirements here.")
+        await call_tool(
+            mcp_app, "content_set_requirements", todo_id=todo_id, content="Requirements here."
+        )
         await call_tool(mcp_app, "content_set_research", todo_id=todo_id, content="Research here.")
         result = await call_tool(mcp_app, "proj_get_todo_context", todo_id=todo_id)
         data = json.loads(result)
@@ -81,7 +85,9 @@ class TestProjGetTodoContext:
     ) -> None:
         parent_id = await _add_todo(mcp_app, "Parent task")
         child_id = await _add_todo(mcp_app, "Child task", parent=parent_id)
-        result = await call_tool(mcp_app, "proj_get_todo_context", todo_id=child_id, include_parent=True)
+        result = await call_tool(
+            mcp_app, "proj_get_todo_context", todo_id=child_id, include_parent=True
+        )
         data = json.loads(result)
         assert data["parent"] is not None
         assert data["parent"]["id"] == parent_id
@@ -92,7 +98,9 @@ class TestProjGetTodoContext:
     ) -> None:
         parent_id = await _add_todo(mcp_app, "Parent task")
         child_id = await _add_todo(mcp_app, "Child task", parent=parent_id)
-        result = await call_tool(mcp_app, "proj_get_todo_context", todo_id=child_id, include_parent=False)
+        result = await call_tool(
+            mcp_app, "proj_get_todo_context", todo_id=child_id, include_parent=False
+        )
         data = json.loads(result)
         assert data["parent"] is None
 
@@ -100,7 +108,9 @@ class TestProjGetTodoContext:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         todo_id = await _add_todo(mcp_app, "Top level")
-        result = await call_tool(mcp_app, "proj_get_todo_context", todo_id=todo_id, include_parent=True)
+        result = await call_tool(
+            mcp_app, "proj_get_todo_context", todo_id=todo_id, include_parent=True
+        )
         data = json.loads(result)
         assert data["parent"] is None
 
@@ -132,6 +142,8 @@ class TestProjGetTodoContext:
     ) -> None:
         setup_project(cfg, "other", str(tmp_path / "other"))
         await call_tool(mcp_app, "todo_add", title="Other task", project_name="other")
-        result = await call_tool(mcp_app, "proj_get_todo_context", todo_id="1", project_name="other")
+        result = await call_tool(
+            mcp_app, "proj_get_todo_context", todo_id="1", project_name="other"
+        )
         data = json.loads(result)
         assert data["todo"]["title"] == "Other task"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from server.lib.template import resolve_mapping, resolve_template, resolve_value
 
-
 # ── resolve_template ─────────────────────────────────────────────────────────
 
 

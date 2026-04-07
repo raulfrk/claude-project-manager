@@ -7,18 +7,19 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
-from server.lib.models import ProjConfig, ProjectMeta
+from server.tools._perms_common import derive_write_paths
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mcp.server.fastmcp import FastMCP
 
-
+    from server.lib.models import ProjConfig, ProjectMeta
 
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
@@ -54,25 +55,26 @@ def _mcp_allow_entry(server_name: str) -> str:
     return f"mcp__{server_name}__*"
 
 
-
-
 # ── Setup (one-shot atomic write) ─────────────────────────────────────────────
-
 
 
 _SANDBOX_ADDED_RE = re.compile(r"Sandbox paths added:\s*(\d+)")
 _MCP_ADDED_RE = re.compile(r"MCP rules added:\s*(\d+)")
+_SKILL_ADDED_RE = re.compile(r"Skill rules added:\s*(\d+)")
 _ADDL_DIRS_ADDED_RE = re.compile(r"Additional directories added:\s*(\d+)")
 
 
 def _parse_batch_setup_counts(result: str) -> dict[str, int]:
-    """Extract sandbox_paths, mcp_rules, and additional_directories counts from batch_setup result string."""
+    """Extract sandbox_paths, mcp_rules, skill_rules, and
+    additional_directories counts from batch_setup result string."""
     sandbox_m = _SANDBOX_ADDED_RE.search(result)
     mcp_m = _MCP_ADDED_RE.search(result)
+    skill_m = _SKILL_ADDED_RE.search(result)
     addl_m = _ADDL_DIRS_ADDED_RE.search(result)
     return {
         "sandbox_paths": int(sandbox_m.group(1)) if sandbox_m else 0,
         "mcp_rules": int(mcp_m.group(1)) if mcp_m else 0,
+        "skill_rules": int(skill_m.group(1)) if skill_m else 0,
         "additional_directories": int(addl_m.group(1)) if addl_m else 0,
     }
 
@@ -84,7 +86,10 @@ def _compute_setup_paths(
     archive_destination: str | None = None,
     worktree_root_dir: str | None = None,
 ) -> list[str]:
-    """Compute resolved absolute paths for sandbox allowWrite (writable repos + tracking + archive + worktree root)."""
+    """Compute resolved absolute paths for sandbox allowWrite.
+
+    Includes writable repos, tracking, archive, and worktree root.
+    """
     paths = []
     if cfg.permissions.projects_root:
         root = str(Path(cfg.permissions.projects_root).expanduser().resolve())
@@ -121,40 +126,53 @@ def setup_permissions(
     cfg: ProjConfig,
     *,
     mcp_servers: list[str] | None = None,
+    skill_prefixes: list[str] | None = None,
     archive_destination: str | None = None,
     worktree_root_dir: str | None = None,
     batch_setup_fn: Callable[..., str] | None = None,
 ) -> dict[str, int]:
-    """Add sandbox allowWrite paths + MCP wildcard rules via the perms batch_setup function.
+    """Add sandbox allowWrite paths + MCP wildcard rules + skill rules.
 
-    Computes the list of writable paths and MCP servers, then delegates to
-    ``batch_setup_fn`` for the actual settings file write.  When no
-    ``batch_setup_fn`` is provided, returns computed counts without applying
-    (hooks dispatch to perms plugin).
+    Uses the perms batch_setup function. Computes the list of writable
+    paths and MCP servers, then delegates to ``batch_setup_fn`` for
+    the actual settings file write. When no ``batch_setup_fn`` is
+    provided, returns computed counts without applying (hooks dispatch
+    to perms plugin).
 
-    Computed paths are also passed as ``additional_directories`` so the perms
-    plugin can write them to ``permissions.additionalDirectories`` for permanent
-    project directory access.
+    Computed paths are also passed as ``additional_directories`` so
+    the perms plugin can write them to
+    ``permissions.additionalDirectories`` for permanent project
+    directory access.
 
-    Returns a dict with counts: {"sandbox_paths": N, "mcp_rules": N, "additional_directories": N}.
-    Idempotent.
+    Returns a dict with counts: {"sandbox_paths": N,
+    "mcp_rules": N, "skill_rules": N,
+    "additional_directories": N}. Idempotent.
     """
-    paths = _compute_setup_paths(meta, cfg, archive_destination=archive_destination, worktree_root_dir=worktree_root_dir)
+    paths = _compute_setup_paths(
+        meta, cfg, archive_destination=archive_destination, worktree_root_dir=worktree_root_dir
+    )
     servers = mcp_servers or []
+    skills = skill_prefixes or []
 
-    if not paths and not servers:
-        return {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
+    if not paths and not servers and not skills:
+        return {"sandbox_paths": 0, "mcp_rules": 0, "skill_rules": 0, "additional_directories": 0}
 
     if batch_setup_fn is not None:
-        result = batch_setup_fn(
-            paths=paths, mcp_servers=servers, additional_directories=paths,
-        )
+        kwargs: dict[str, object] = {
+            "paths": paths,
+            "mcp_servers": servers,
+            "additional_directories": paths,
+        }
+        if skills:
+            kwargs["skill_prefixes"] = skills
+        result = batch_setup_fn(**kwargs)
         return _parse_batch_setup_counts(result)
 
     # No batch_fn — return computed data; hooks dispatch to perms plugin
     return {
         "sandbox_paths": len(paths),
         "mcp_rules": len(servers),
+        "skill_rules": len(skills),
         "additional_directories": len(paths),
     }
 
@@ -188,21 +206,12 @@ def _collect_all_allow_rules(
 
 
 def _collect_sandbox_write_paths(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
-    """Derive the sandbox.filesystem.allowWrite paths that setup_permissions would create."""
-    paths: set[str] = set()
-    if cfg.permissions.projects_root:
-        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
-    else:
-        for repo in meta.repos:
-            if not repo.reference:
-                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    if cfg.permissions.tracking_root:
-        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
-        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
-            paths.add(tracking)
-    elif cfg.tracking_dir:
-        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
-    return paths
+    """Derive the sandbox.filesystem.allowWrite paths that setup_permissions would create.
+
+    Delegates to :func:`derive_write_paths` (without worktree_root_dir, since
+    revocation doesn't need worktree paths).
+    """
+    return derive_write_paths(meta, cfg)
 
 
 _SANDBOX_REMOVED_RE = re.compile(r"sandbox paths removed:\s*(\d+)")
@@ -211,7 +220,8 @@ _ADDL_DIRS_REMOVED_RE = re.compile(r"additional directories removed:\s*(\d+)")
 
 
 def _parse_batch_revoke_counts(result: str) -> dict[str, int]:
-    """Extract sandbox_paths, mcp_rules, and additional_directories counts from batch_revoke result string."""
+    """Extract sandbox_paths, mcp_rules, and additional_directories
+    counts from batch_revoke result string."""
     sandbox_m = _SANDBOX_REMOVED_RE.search(result)
     mcp_m = _MCP_REMOVED_RE.search(result)
     addl_m = _ADDL_DIRS_REMOVED_RE.search(result)
@@ -255,7 +265,9 @@ def revoke_all_permissions(
 
     if batch_revoke_fn is not None:
         result = batch_revoke_fn(
-            paths=paths, mcp_servers=servers, additional_directories=paths,
+            paths=paths,
+            mcp_servers=servers,
+            additional_directories=paths,
         )
         return _parse_batch_revoke_counts(result)
 
@@ -316,14 +328,16 @@ def register(app: FastMCP) -> None:
             worktree_root_dir=worktree_root_dir,
         )
         total = sum(counts.values())
-        return json.dumps({
-            "result": "success",
-            "project_name": name,
-            "total": total,
-            "counts": counts,
-            "paths": paths,
-            "mcp_servers": mcp_servers or [],
-        })
+        return json.dumps(
+            {
+                "result": "success",
+                "project_name": name,
+                "total": total,
+                "counts": counts,
+                "paths": paths,
+                "mcp_servers": mcp_servers or [],
+            }
+        )
 
     @app.tool(
         description=(
@@ -360,11 +374,13 @@ def register(app: FastMCP) -> None:
 
         counts = revoke_all_permissions(meta, cfg, mcp_servers=mcp_servers)
         total = sum(counts.values())
-        return json.dumps({
-            "result": "success",
-            "project_name": name,
-            "total": total,
-            "counts": counts,
-            "paths": paths,
-            "mcp_servers": mcp_servers or [],
-        })
+        return json.dumps(
+            {
+                "result": "success",
+                "project_name": name,
+                "total": total,
+                "counts": counts,
+                "paths": paths,
+                "mcp_servers": mcp_servers or [],
+            }
+        )

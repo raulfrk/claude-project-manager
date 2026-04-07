@@ -2,97 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
-from server.lib.models import ProjConfig, ProjectMeta
-from server.lib.sandbox_helpers import project_dirs_from_meta
+from server.tools._perms_common import derive_mcp_rules, derive_skill_prefixes, derive_write_paths
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mcp.server.fastmcp import FastMCP
 
-
-def _derive_expected_rules(meta: ProjectMeta, cfg: ProjConfig) -> set[str]:
-    """Derive expected permissions.allow rules.
-
-    Only MCP wildcard rules are expected now — Read/Edit/Bash rules are no
-    longer managed in permissions.allow (sandbox allowWrite handles file access).
-    """
-    rules: set[str] = set()
-
-    if cfg.permissions.auto_allow_mcps:
-        # proj is always present — it's the running plugin itself
-        rules.add("mcp__plugin_proj_proj__*")
-        # perms and worktree are only expected when their integrations are enabled
-        if cfg.sandbox_integration:
-            rules.add("mcp__plugin_sandbox_sandbox__*")
-        if cfg.worktree_integration:
-            rules.add("mcp__plugin_worktree_worktree__*")
-        if cfg.todoist.enabled:
-            rules.add("mcp__todoist__*")  # Fixed prefix — local plugin
-        if cfg.jira.enabled:
-            rules.add("mcp__plugin_jira_jira__*")
-        if cfg.trello.enabled:
-            rules.add("mcp__plugin_trello_trello__*")
-    # Global Claude.ai MCP servers — always expected, unconditionally
-    rules.add("mcp__claude_ai_Excalidraw__*")
-    rules.add("mcp__claude_ai_Mermaid_Chart__*")
-    return rules
-
-
-def _derive_expected_sandbox_paths(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    worktree_root_dir: str | None = None,
-) -> set[str]:
-    """Derive the paths expected in sandbox.filesystem.allowWrite."""
-    paths: set[str] = set()
-    if cfg.permissions.projects_root:
-        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
-    else:
-        for repo in meta.repos:
-            if not repo.reference:
-                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    if cfg.permissions.tracking_root:
-        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
-        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
-            paths.add(tracking)
-    elif cfg.tracking_dir:
-        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
-    if cfg.worktree_integration and worktree_root_dir:
-        wt_root = str(Path(worktree_root_dir).expanduser().resolve()).rstrip("/")
-        if not any(wt_root.startswith(p + "/") or wt_root == p for p in paths):
-            paths.add(wt_root)
-    return paths
-
-
-def _derive_expected_additional_dirs(
-    meta: ProjectMeta,
-    cfg: ProjConfig,
-    worktree_root_dir: str | None = None,
-) -> set[str]:
-    """Derive the paths expected in permissions.additionalDirectories."""
-    paths: set[str] = set()
-    if cfg.permissions.projects_root:
-        paths.add(str(Path(cfg.permissions.projects_root).expanduser().resolve()).rstrip("/"))
-    else:
-        for repo in meta.repos:
-            if not repo.reference:
-                paths.add(str(Path(repo.path).expanduser().resolve()).rstrip("/"))
-    if cfg.permissions.tracking_root:
-        tracking = str(Path(cfg.permissions.tracking_root).expanduser().resolve()).rstrip("/")
-        if not any(tracking.startswith(p + "/") or tracking == p for p in paths):
-            paths.add(tracking)
-    elif cfg.tracking_dir:
-        paths.add(str(Path(cfg.tracking_dir).expanduser().resolve()).rstrip("/"))
-    if cfg.worktree_integration and worktree_root_dir:
-        wt_root = str(Path(worktree_root_dir).expanduser().resolve()).rstrip("/")
-        if not any(wt_root.startswith(p + "/") or wt_root == p for p in paths):
-            paths.add(wt_root)
-    return paths
+    from server.lib.models import ProjConfig, ProjectMeta
 
 
 def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
@@ -106,6 +27,17 @@ def _extract_mcp_servers(missing_mcp: list[str]) -> list[str]:
     return servers
 
 
+def _extract_skill_prefixes(missing_skills: list[str]) -> list[str]:
+    """Extract prefixes from Skill() rules like ``Skill(proj:*)``."""
+    prefixes: list[str] = []
+    for rule in missing_skills:
+        if rule.startswith("Skill(") and rule.endswith("*)"):
+            # "Skill(proj:*)" → "proj:"
+            prefix = rule[len("Skill(") : -len("*)")]
+            prefixes.append(prefix)
+    return prefixes
+
+
 def run_sync(
     meta: ProjectMeta,
     cfg: ProjConfig,
@@ -113,24 +45,31 @@ def run_sync(
     actual_rules: set[str],
     actual_sandbox_paths: set[str],
     actual_additional_dirs: set[str] | None = None,
+    actual_skill_allow: set[str] | None = None,
     actual_deny_rules: list[str] | None = None,
     sandbox_mode: bool,
     apply: bool = False,
     worktree_root_dir: str | None = None,
     batch_setup_fn: Callable[..., str] | None = None,
 ) -> str:
-    expected = _derive_expected_rules(meta, cfg)
+    expected = derive_mcp_rules(meta, cfg)
     missing = expected - actual_rules
 
     # In sandbox mode, also check sandbox.filesystem.allowWrite
     missing_sandbox_paths: set[str] = set()
     if sandbox_mode:
-        expected_paths = _derive_expected_sandbox_paths(meta, cfg, worktree_root_dir=worktree_root_dir)
+        expected_paths = derive_write_paths(meta, cfg, worktree_root_dir=worktree_root_dir)
         missing_sandbox_paths = expected_paths - actual_sandbox_paths
+
+    # Check skill allow rules
+    missing_skills: set[str] = set()
+    expected_skills = derive_skill_prefixes(cfg)
+    if actual_skill_allow is not None:
+        missing_skills = expected_skills - actual_skill_allow
 
     # Check permissions.additionalDirectories
     missing_additional_dirs: set[str] = set()
-    expected_additional = _derive_expected_additional_dirs(meta, cfg, worktree_root_dir=worktree_root_dir)
+    expected_additional = derive_write_paths(meta, cfg, worktree_root_dir=worktree_root_dir)
     if actual_additional_dirs is not None:
         missing_additional_dirs = expected_additional - actual_additional_dirs
 
@@ -139,9 +78,16 @@ def run_sync(
     # Check deny rules presence (v4 mode = projects_root is set)
     deny_warning = ""
     if cfg.permissions.projects_root and not actual_deny_rules:
-        deny_warning = "\n⚠️ No deny rules found. Run `/proj:migrate-sandbox` to install default deny rules."
+        deny_warning = (
+            "\n⚠️ No deny rules found. Run `/proj:migrate-sandbox` to install default deny rules."
+        )
 
-    if not missing and not missing_sandbox_paths and not missing_additional_dirs:
+    if (
+        not missing
+        and not missing_sandbox_paths
+        and not missing_additional_dirs
+        and not missing_skills
+    ):
         msg = f"✅ {target_name} is in sync — all expected rules are present."
         if deny_warning:
             msg += deny_warning
@@ -149,15 +95,18 @@ def run_sync(
 
     # Group by type (only MCP rules expected in permissions.allow now)
     missing_mcp = sorted(r for r in missing if r.startswith("mcp__"))
+    missing_skill_list = sorted(missing_skills)
 
     if apply:
         from server.tools.perms_grant import setup_permissions
 
         mcp_servers = _extract_mcp_servers(missing_mcp)
+        skill_prefixes = _extract_skill_prefixes(missing_skill_list)
         counts = setup_permissions(
             meta,
             cfg,
             mcp_servers=mcp_servers,
+            skill_prefixes=skill_prefixes or None,
             worktree_root_dir=worktree_root_dir,
             batch_setup_fn=batch_setup_fn,
         )
@@ -172,6 +121,8 @@ def run_sync(
             parts.append(f"{counts['sandbox_paths']} sandbox path(s)")
         if counts["mcp_rules"]:
             parts.append(f"{counts['mcp_rules']} MCP rule(s)")
+        if counts.get("skill_rules"):
+            parts.append(f"{counts['skill_rules']} skill rule(s)")
         if counts.get("additional_directories"):
             parts.append(f"{counts['additional_directories']} additional dir(s)")
         applied_total = total
@@ -184,6 +135,9 @@ def run_sync(
     if missing_mcp:
         lines.append("**MCP rules:**")
         lines.extend(f"  - `{r}`" for r in missing_mcp)
+    if missing_skill_list:
+        lines.append("\n**Skill rules:**")
+        lines.extend(f"  - `{r}`" for r in missing_skill_list)
     if missing_sandbox_paths:
         lines.append("\n**Sandbox allowWrite paths:**")
         lines.extend(f"  - `{p}`" for p in sorted(missing_sandbox_paths))
@@ -192,10 +146,9 @@ def run_sync(
         lines.extend(f"  - `{p}`" for p in sorted(missing_additional_dirs))
     hint = "\nRun `proj_setup_permissions` to add all missing rules at once."
     if missing_mcp:
-        hint += (
-            "\nOr use `sandbox_add_mcp_allow` "
-            "to add MCP rules individually."
-        )
+        hint += "\nOr use `sandbox_add_mcp_allow` to add MCP rules individually."
+    if missing_skill_list:
+        hint += "\nOr use `sandbox_add_skill_allow` to add skill rules individually."
     lines.append(hint)
     if deny_warning:
         lines.append(deny_warning)
@@ -222,6 +175,7 @@ def register(app: FastMCP) -> None:
         actual_rules: list[str] | None = None,
         actual_sandbox_paths: list[str] | None = None,
         actual_additional_dirs: list[str] | None = None,
+        actual_skill_allow: list[str] | None = None,
         actual_deny_rules: list[str] | None = None,
         sandbox_mode: bool = False,
         worktree_root_dir: str | None = None,
@@ -241,7 +195,10 @@ def register(app: FastMCP) -> None:
             cfg,
             actual_rules=set(actual_rules),
             actual_sandbox_paths=set(actual_sandbox_paths or []),
-            actual_additional_dirs=set(actual_additional_dirs) if actual_additional_dirs is not None else None,
+            actual_additional_dirs=set(actual_additional_dirs)
+            if actual_additional_dirs is not None
+            else None,
+            actual_skill_allow=set(actual_skill_allow) if actual_skill_allow is not None else None,
             actual_deny_rules=actual_deny_rules,
             sandbox_mode=sandbox_mode,
             apply=apply,

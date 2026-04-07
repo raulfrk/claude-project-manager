@@ -5,12 +5,16 @@
 
 ## Overview
 
-Claude Code plugin marketplace for project management workflows. Five plugins:
+Claude Code plugin marketplace for project management workflows. Nine plugins:
 - `sandbox` — manage sandbox-mode `settings.json` (write paths, MCP allow rules, network domains, deny rules)
 - `worktree` — git worktree management
 - `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync)
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
 - `jira` — Jira MCP server (issues, projects, epics, bulk operations)
+- `hooks` — central MCP-to-MCP hook registry with schema-based param mapping, auto-registration, and recovery
+- `todoist` — Todoist task and project management via REST API
+- `zoxide` — zoxide frecency database integration (boost, remove, query paths)
+- `analyse` — guided code review skill (walk through features, explain code, create todos)
 
 ## Overhaul Plan
 
@@ -19,8 +23,7 @@ A comprehensive overhaul requirements document exists at:
 
 It contains the full workflow map, user vision, quality assessment, gap analysis, 31 change proposals, and 35 implementation todos across 6 phases. **Read this file before starting any overhaul work.** Key architectural decisions:
 - **Hooks plugin** (`plugins/hooks/`) — central MCP→MCP registry with schema-based param mapping, auto-registration, and recovery
-- **3 new plugins planned**: `plugins/todoist/` (local, replacing external MCP), `plugins/zoxide/`, `plugins/hooks/`
-- **Perms is single source of truth** for settings.json — proj must never write settings files directly
+- **Sandbox is single source of truth** for settings.json — proj must never write settings files directly
 - **Proj must not read worktree.yaml directly** — use worktree MCP tools
 - **Remove deny functionality** from sandbox (denyWrite/denyRead)
 - **Define skill rewrite** — free-form writing → probing Q&A → iterative rerun → quality gate

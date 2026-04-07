@@ -1,9 +1,9 @@
 """zoxide MCP server entrypoint."""
 
-from mcp.server.fastmcp import FastMCP
-
 from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
+from mcp.server.fastmcp import FastMCP
+
 from server.tools import zoxide as zoxide_tools
 
 mcp = FastMCP("zoxide")

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from server.lib._types import JsonValue
 from server.lib.models import Hook, HookRegistry
+
+if TYPE_CHECKING:
+    from server.lib._types import JsonValue
 
 logger = logging.getLogger("hooks.discovery")
 
@@ -17,7 +20,14 @@ _DEFAULT_PLUGIN_GLOB = "plugins/*/.claude-plugin"
 _AUTO_SOURCE = "auto"
 
 # Fields compared for drift detection between existing hook and new definition
-_DRIFT_FIELDS = ("blocking", "condition", "param_mapping", "feedback_tool", "feedback_mapping", "verification")
+_DRIFT_FIELDS = (
+    "blocking",
+    "condition",
+    "param_mapping",
+    "feedback_tool",
+    "feedback_mapping",
+    "verification",
+)
 
 
 _DRIFT_DEFAULTS: dict[str, JsonValue] = {
@@ -165,7 +175,6 @@ def discover_and_register(
     """
     files = find_default_hooks_files(root=root, glob_pattern=glob_pattern)
     stats: dict[str, dict[str, int]] = {}
-    any_updated = False
 
     for path in files:
         plugin_name = _plugin_name_from_path(path)
@@ -191,7 +200,6 @@ def discover_and_register(
                 if existing.source == _AUTO_SOURCE and _hook_content_differs(existing, hook_def):
                     existing.update_from(hook_def)
                     updated_count += 1
-                    any_updated = True
                 continue
 
             # Build Hook from definition, forcing source="auto"

@@ -58,7 +58,7 @@ class TestWouldCreateCycle:
 
     def test_long_chain(self):
         """Chain of 10 nodes; closing the loop detects cycle."""
-        hooks = [_hook(f"n{i}", f"n{i+1}") for i in range(10)]
+        hooks = [_hook(f"n{i}", f"n{i + 1}") for i in range(10)]
         assert would_create_cycle(hooks, "n10", "n0") is True
         assert would_create_cycle(hooks, "n10", "n5") is True
         assert would_create_cycle(hooks, "n5", "n10") is False

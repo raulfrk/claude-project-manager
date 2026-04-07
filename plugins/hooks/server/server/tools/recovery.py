@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-
-from server.lib._types import JsonValue
 
 from server.lib import storage
 from server.lib.http_client import post_hook
@@ -15,6 +13,8 @@ from server.lib.template import resolve_mapping
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,7 @@ async def _retry_entry(entry: dict[str, JsonValue]) -> bool:
     registry = storage.load()
     hook = registry.find_by_id(hook_id)
 
-    if hook is not None:
-        params = resolve_mapping(hook.param_mapping, source)
-    else:
-        # Hook was unregistered -- fire with empty params
-        params = {}
+    params = resolve_mapping(hook.param_mapping, source) if hook is not None else {}
 
     # Resolve server URL
     server_info = registry.servers.get(server, {})
@@ -80,12 +76,14 @@ async def hooks_recover(
     # ── Clear mode ───────────────────────────────────────────────────────
     if clear:
         cleared = storage.clear_failures()
-        return json.dumps({
-            "retried": 0,
-            "succeeded": 0,
-            "still_failed": 0,
-            "cleared": cleared,
-        })
+        return json.dumps(
+            {
+                "retried": 0,
+                "succeeded": 0,
+                "still_failed": 0,
+                "cleared": cleared,
+            }
+        )
 
     # ── List mode (no hook_id) ───────────────────────────────────────────
     if hook_id is None:
@@ -96,13 +94,15 @@ async def hooks_recover(
     other_entries = [e for e in entries if e.get("hook_id") != hook_id]
 
     if not target_entries:
-        return json.dumps({
-            "retried": 0,
-            "succeeded": 0,
-            "still_failed": 0,
-            "cleared": 0,
-            "message": f"No failure entries found for hook_id '{hook_id}'.",
-        })
+        return json.dumps(
+            {
+                "retried": 0,
+                "succeeded": 0,
+                "still_failed": 0,
+                "cleared": 0,
+                "message": f"No failure entries found for hook_id '{hook_id}'.",
+            }
+        )
 
     retried = 0
     succeeded = 0
@@ -117,19 +117,21 @@ async def hooks_recover(
             # Increment retry_count and update timestamp
             rc = entry.get("retry_count", 0)
             entry["retry_count"] = (rc if isinstance(rc, int) else 0) + 1
-            entry["timestamp"] = datetime.now(tz=timezone.utc).isoformat()
+            entry["timestamp"] = datetime.now(tz=UTC).isoformat()
             still_failed_entries.append(entry)
 
     # Rebuild the failures file: keep others + still-failed retries
     new_entries = other_entries + still_failed_entries
     storage.save_failures(new_entries)
 
-    return json.dumps({
-        "retried": retried,
-        "succeeded": succeeded,
-        "still_failed": len(still_failed_entries),
-        "cleared": 0,
-    })
+    return json.dumps(
+        {
+            "retried": retried,
+            "succeeded": succeeded,
+            "still_failed": len(still_failed_entries),
+            "cleared": 0,
+        }
+    )
 
 
 # ── Registration ─────────────────────────────────────────────────────────────

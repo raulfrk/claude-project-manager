@@ -6,13 +6,17 @@ from pathlib import Path
 
 import yaml
 
-_HOOKS_PATH = (
-    Path(__file__).parent.parent.parent
-    / ".claude-plugin"
-    / "default-hooks.yaml"
-)
+_HOOKS_PATH = Path(__file__).parent.parent.parent / ".claude-plugin" / "default-hooks.yaml"
 
-_REQUIRED_FIELDS = {"id", "trigger_tool", "target_tool", "server", "param_mapping", "blocking", "condition"}
+_REQUIRED_FIELDS = {
+    "id",
+    "trigger_tool",
+    "target_tool",
+    "server",
+    "param_mapping",
+    "blocking",
+    "condition",
+}
 
 
 class TestDefaultHooksYaml:

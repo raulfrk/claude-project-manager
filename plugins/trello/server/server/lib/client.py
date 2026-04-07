@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import time
 from collections import deque
-
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import httpx
 
 from server.lib.config import TrelloConfig, load_config
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 BASE_URL = "https://api.trello.com/1"
 
@@ -31,9 +33,13 @@ class TrelloClient:
     def check_board_access(self, board_id: str) -> None:
         """Raise if board_id is not in the configured whitelist."""
         if not self._config.allowed_board_ids:
-            raise RuntimeError("No boards in whitelist. Run trello_init to configure allowed boards.")
+            raise RuntimeError(
+                "No boards in whitelist. Run trello_init to configure allowed boards."
+            )
         if board_id not in self._config.allowed_board_ids:
-            raise RuntimeError(f"Board '{board_id}' not in whitelist. Allowed: {self._config.allowed_board_ids}")
+            raise RuntimeError(
+                f"Board '{board_id}' not in whitelist. Allowed: {self._config.allowed_board_ids}"
+            )
 
     def _auth_params(self) -> dict[str, str]:
         return {"key": self._config.api_key, "token": self._config.token}
@@ -57,7 +63,9 @@ class TrelloClient:
         raise RuntimeError(msg)
 
     def get(
-        self, path: str, params: Mapping[str, ParamValue] | None = None,
+        self,
+        path: str,
+        params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a GET request to the Trello API."""
         self._rate_limit()
@@ -87,7 +95,9 @@ class TrelloClient:
         return self._handle_response(self._http.put(path, params=merged, json=json))
 
     def delete(
-        self, path: str, params: Mapping[str, ParamValue] | None = None,
+        self,
+        path: str,
+        params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a DELETE request to the Trello API."""
         self._rate_limit()
@@ -100,7 +110,7 @@ _cached_client: TrelloClient | None = None
 
 def get_client() -> TrelloClient:
     """Return a singleton TrelloClient, creating it on first call."""
-    global _cached_client  # noqa: PLW0603
+    global _cached_client
     if _cached_client is None:
         _cached_client = TrelloClient(load_config())
     return _cached_client

@@ -15,7 +15,7 @@ else
   exit 1
 fi
 
-plugins=(proj perms worktree trello jira hooks todoist zoxide)
+plugins=(proj sandbox worktree trello jira hooks todoist zoxide)
 
 for plugin in "${plugins[@]}"; do
   dir="$REPO_ROOT/plugins/$plugin/server"

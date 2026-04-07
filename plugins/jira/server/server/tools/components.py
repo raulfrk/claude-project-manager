@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
 
 from server.lib.client import JsonValue, get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
@@ -17,9 +19,7 @@ def register(app: FastMCP) -> None:
         return json.dumps(data)
 
     @app.tool(description="Create a component in a Jira project.")
-    def jira_create_component(
-        project_key: str, name: str, description: str = ""
-    ) -> str:
+    def jira_create_component(project_key: str, name: str, description: str = "") -> str:
         client = get_client()
         body: dict[str, JsonValue] = {"project": project_key, "name": name}
         if description:

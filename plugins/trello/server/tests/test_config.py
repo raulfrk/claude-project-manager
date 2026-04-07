@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import server.lib.config as config_mod
-from server.lib.config import TrelloConfig, load_config
+from server.lib.config import load_config
 
 
 @pytest.fixture(autouse=True)
@@ -22,9 +22,7 @@ def _clear_config_cache() -> None:
 class TestLoadConfigFromYaml:
     def test_loads_from_yaml_file(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "trello.yaml"
-        cfg_file.write_text(
-            "api_key: yaml-key\ntoken: yaml-token\ndefault_board_id: board123\n"
-        )
+        cfg_file.write_text("api_key: yaml-key\ntoken: yaml-token\ndefault_board_id: board123\n")
         os.environ["TRELLO_CONFIG"] = str(cfg_file)
         try:
             cfg = load_config()
@@ -37,9 +35,7 @@ class TestLoadConfigFromYaml:
 
     def test_loads_custom_rate_limit(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "trello.yaml"
-        cfg_file.write_text(
-            "api_key: k\ntoken: t\nrate_limit_per_10s: 50\n"
-        )
+        cfg_file.write_text("api_key: k\ntoken: t\nrate_limit_per_10s: 50\n")
         os.environ["TRELLO_CONFIG"] = str(cfg_file)
         try:
             cfg = load_config()
@@ -102,9 +98,7 @@ class TestLoadConfigFromEnvVars:
 
 
 class TestLoadConfigError:
-    def test_no_config_raises_error(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_config_raises_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRELLO_CONFIG", str(tmp_path / "nonexistent.yaml"))
         monkeypatch.delenv("TRELLO_API_KEY", raising=False)
         monkeypatch.delenv("TRELLO_TOKEN", raising=False)

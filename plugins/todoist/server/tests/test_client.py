@@ -10,8 +10,14 @@ from server.lib.client import TodoistClient, get_client
 from server.lib.config import TodoistConfig
 
 _PROXY_VARS = (
-    "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy",
-    "HTTPS_PROXY", "https_proxy", "FTP_PROXY", "ftp_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "FTP_PROXY",
+    "ftp_proxy",
 )
 
 
@@ -31,9 +37,7 @@ def _make_client(api_token: str = "tok-test") -> TodoistClient:
 
 class TestGet:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             assert method == "GET"
             assert path == "/tasks"
             return httpx.Response(200, json=[{"id": "1"}])
@@ -46,9 +50,7 @@ class TestGet:
     def test_with_params(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, object] = {}
 
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             captured.update(kwargs)
             return httpx.Response(200, json={"ok": True})
 
@@ -60,9 +62,7 @@ class TestGet:
 
 class TestPost:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             assert method == "POST"
             assert path == "/tasks"
             return httpx.Response(200, json={"id": "99", "content": "Buy milk"})
@@ -75,9 +75,7 @@ class TestPost:
 
 class TestDelete:
     def test_success_empty_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             assert method == "DELETE"
             return httpx.Response(204)
 
@@ -89,9 +87,7 @@ class TestDelete:
 
 class TestError401:
     def test_invalid_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(401, text="Unauthorized")
 
         client = _make_client()
@@ -101,27 +97,17 @@ class TestError401:
 
 
 class TestError429:
-    def test_rate_limit_with_retry_after(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
-            return httpx.Response(
-                429, text="Too Many Requests", headers={"Retry-After": "30"}
-            )
+    def test_rate_limit_with_retry_after(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
+            return httpx.Response(429, text="Too Many Requests", headers={"Retry-After": "30"})
 
         client = _make_client()
         monkeypatch.setattr(client._http, "request", mock_request)
         with pytest.raises(RuntimeError, match="Retry after 30 seconds"):
             client.get("/tasks")
 
-    def test_rate_limit_no_retry_after_header(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+    def test_rate_limit_no_retry_after_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(429, text="Too Many Requests")
 
         client = _make_client()
@@ -132,9 +118,7 @@ class TestError429:
 
 class TestTimeout:
     def test_timeout_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             raise httpx.TimeoutException("timed out")
 
         client = _make_client()
@@ -145,9 +129,7 @@ class TestTimeout:
 
 class TestOtherErrors:
     def test_500_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(500, text="Internal Server Error")
 
         client = _make_client()
@@ -156,9 +138,7 @@ class TestOtherErrors:
             client.get("/tasks")
 
     def test_404_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(404, text="Not Found")
 
         client = _make_client()
@@ -168,14 +148,10 @@ class TestOtherErrors:
 
 
 class TestCloseTask:
-    def test_close_calls_correct_endpoint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_close_calls_correct_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, object] = {}
 
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             captured["method"] = method
             captured["path"] = path
             return httpx.Response(204)
@@ -189,14 +165,10 @@ class TestCloseTask:
 
 
 class TestReopenTask:
-    def test_reopen_calls_correct_endpoint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_reopen_calls_correct_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, object] = {}
 
-        def mock_request(
-            method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
+        def mock_request(method: str, path: str, **kwargs: object) -> httpx.Response:
             captured["method"] = method
             captured["path"] = path
             return httpx.Response(204)
@@ -210,9 +182,7 @@ class TestReopenTask:
 
 
 class TestSingleton:
-    def test_get_client_returns_same_instance(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_get_client_returns_same_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "server.lib.client.load_config",
             lambda: TodoistConfig(api_token="tok-singleton"),
@@ -221,9 +191,7 @@ class TestSingleton:
         c2 = get_client()
         assert c1 is c2
 
-    def test_get_client_uses_load_config(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_get_client_uses_load_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "server.lib.client.load_config",
             lambda: TodoistConfig(api_token="tok-from-config"),

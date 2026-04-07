@@ -10,7 +10,6 @@ hooks:
     feedback_tool: proj_update_meta
     feedback_mapping:
       card_id: trello_card_id
-      checklist_id: trello_checklist_id
 
   - id: trello-on-proj-load
     trigger_tool: proj_load_session
@@ -33,111 +32,90 @@ hooks:
 
   - id: trello-on-todo-add
     trigger_tool: todo_add
-    target_tool: add_checklist_item
+    target_tool: trello_add_todo_card_hook
     server: trello
     param_mapping:
-      checklist_id: "${trello_checklist_id}"
       name: "${title}"
+      desc: "${notes}"
+      due: "${due_date}"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
     feedback_tool: todo_update
     feedback_mapping:
-      result.id: trello_checklist_item_id
+      card_id: trello_card_id
 
   - id: trello-on-todo-complete
     trigger_tool: todo_complete
-    target_tool: update_checklist_item
+    target_tool: move_card
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      checklist_id: "${trello_checklist_id}"
-      item_id: "${trello_checklist_item_id}"
-      state: "complete"
+      list_id: "${sync.trello.list_mappings.done}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
   - id: trello-on-todo-uncomplete
     trigger_tool: todo_uncomplete
-    target_tool: update_checklist_item
+    target_tool: move_card
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      checklist_id: "${trello_checklist_id}"
-      item_id: "${trello_checklist_item_id}"
-      state: "incomplete"
+      list_id: "${sync.trello.list_mappings.tasks}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
-  - id: verify-trello-checklist-item
+  - id: verify-trello-todo-card
     trigger_tool: todo_complete
-    target_tool: trello_verify_checklist_item
+    target_tool: trello_verify_card_hook
     server: trello
     param_mapping:
       card_id: "${result.trello_card_id}"
-      item_id: "${result.trello_checklist_item_id}"
     verification: true
     condition: "sync.trello.enabled"
 
-  # Known limitation: only the title (name) syncs to Trello. Priority, due_date,
-  # tags, and notes have no equivalent fields in Trello checklist items.
   - id: trello-on-todo-update
     trigger_tool: todo_update
-    target_tool: rename_checklist_item
+    target_tool: update_card_details
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      checklist_id: "${trello_checklist_id}"
-      item_id: "${trello_checklist_item_id}"
       name: "${title}"
+      desc: "${notes}"
+      due: "${due_date}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
   - id: trello-on-todo-delete
     trigger_tool: todo_delete
-    target_tool: delete_checklist_item
+    target_tool: archive_card
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      checklist_id: "${trello_checklist_id}"
-      item_id: "${trello_checklist_item_id}"
     blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_item_id"
+    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
   - id: trello-on-todo-add-child
     trigger_tool: todo_add_child
-    target_tool: trello_add_checklist_item_hook
+    target_tool: trello_add_child_card_hook
     server: trello
     param_mapping:
-      checklist_id: "${parent_trello_checklist_id}"
-      card_id: "${project.trello_card_id}"
-      item_name: "${todo.title}"
+      parent_card_id: "${parent_trello_card_id}"
+      name: "${todo.title}"
     feedback_tool: todo_update
     feedback_mapping:
-      checklist_id: trello_checklist_id
-      id: trello_checklist_item_id
+      card_id: trello_card_id
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync"
 
-  - id: trello-on-root-todo-delete
-    trigger_tool: todo_delete
-    target_tool: delete_checklist
-    server: trello
-    param_mapping:
-      checklist_id: "${trello_checklist_id}"
-    blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_checklist_id"
-
   - id: trello-on-todo-batch-add-children
     trigger_tool: todo_batch_add_children
-    target_tool: trello_batch_add_checklist_items_hook
+    target_tool: trello_batch_add_child_cards_hook
     server: trello
     param_mapping:
-      checklist_id: "${trello_checklist_id}"
-      card_id: "${project.trello_card_id}"
-      checklist_name: "Tasks"
+      parent_card_id: "${trello_card_id}"
       items: "${children[*].title}"
     feedback_tool: todo_update
     feedback_mapping:
-      "children[*].id": "trello_checklist_item_id"
+      "children[*].card_id": "trello_card_id"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"

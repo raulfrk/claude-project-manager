@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.enums import TERMINAL_STATUSES
-from server.lib.models import JsonValue, ProjConfig, Todo
 from server.tools.config import require_config
+from server.tools.context_injection import inject_context
 from server.tools.git import _active_branches, _git_log
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
+
+logger = logging.getLogger(__name__)
 
 
 def _read_recent_notes(notes_path: Path, max_sections: int = 3, max_chars: int = 600) -> str:
@@ -61,9 +67,7 @@ def _format_notes_section(cfg: ProjConfig, project_name: str, lines: list[str]) 
         lines.append(f"\n### Recent Notes\n{notes}")
 
 
-def _read_session_history(
-    cfg: ProjConfig, project_name: str
-) -> dict[str, JsonValue]:
+def _read_session_history(cfg: ProjConfig, project_name: str) -> dict[str, JsonValue]:
     """Return session history data from recent session files.
 
     Returns a dict with:
@@ -83,7 +87,7 @@ def _read_session_history(
     latest_content = files[-1].read_text()
     # Strip the ``# Session: ...`` header line
     header_match = re.match(r"^# Session:[^\n]*\n?", latest_content)
-    body = latest_content[header_match.end():] if header_match else latest_content
+    body = latest_content[header_match.end() :] if header_match else latest_content
     summary = body.strip()[:300]
 
     # --- decisions from recent sessions (last 5 decisions, deduplicated) ---
@@ -123,9 +127,7 @@ def _read_session_history(
     return {"summary": summary, "decisions": decisions, "questions": questions}
 
 
-def _format_session_history(
-    cfg: ProjConfig, project_name: str, lines: list[str]
-) -> None:
+def _format_session_history(cfg: ProjConfig, project_name: str, lines: list[str]) -> None:
     """Append session history sections to *lines* if session data exists."""
     data = _read_session_history(cfg, project_name)
     if not data:
@@ -133,9 +135,13 @@ def _format_session_history(
 
     summary = data.get("summary", "")
     decisions_raw = data.get("decisions", [])
-    decisions: list[str] = [str(d) for d in decisions_raw] if isinstance(decisions_raw, list) else []
+    decisions: list[str] = (
+        [str(d) for d in decisions_raw] if isinstance(decisions_raw, list) else []
+    )
     questions_raw = data.get("questions", [])
-    questions: list[str] = [str(q) for q in questions_raw] if isinstance(questions_raw, list) else []
+    questions: list[str] = (
+        [str(q) for q in questions_raw] if isinstance(questions_raw, list) else []
+    )
 
     if summary:
         lines.append(f"\n### Last Session\n{summary}")
@@ -183,6 +189,36 @@ def _format_knowledge_section(cfg: ProjConfig, project_name: str, lines: list[st
             lines.append(f"- {b}")
 
 
+def _collect_git_diff_paths(meta: ProjectMeta) -> list[str]:
+    """Collect changed file paths from git diff across all trackable repos.
+
+    Runs ``git diff --name-only`` and ``git diff --cached --name-only`` per repo.
+    Returns empty list on any failure (timeout, subprocess error, etc.).
+    """
+    paths: list[str] = []
+    trackable_repos = [repo for repo in meta.repos if not repo.reference]
+    for repo in trackable_repos:
+        try:
+            for cmd in (
+                ["git", "diff", "--name-only"],
+                ["git", "diff", "--cached", "--name-only"],
+            ):
+                result = subprocess.run(
+                    cmd,
+                    cwd=repo.path,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().splitlines():
+                        if line:
+                            paths.append(line)
+        except Exception:
+            logger.debug("Failed to list worktree paths", exc_info=True)
+    return paths
+
+
 def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) -> str:
     """Build a markdown context string for the active project."""
     meta = storage.load_meta(cfg, project_name)
@@ -200,20 +236,44 @@ def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) ->
     # Detect old single-path format
     raw = storage._load_yaml(storage.meta_path(cfg, project_name))
     if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
-        lines.append("\n⚠️ Project uses legacy single-path format. Run `/proj:migrate-dirs` to upgrade to multi-dir format.")
+        lines.append(
+            "\n⚠️ Project uses legacy single-path format."
+            " Run `/proj:migrate-dirs` to upgrade to multi-dir format."
+        )
 
     _format_todos_section(todos, lines)
 
     if not compact:
-        _format_notes_section(cfg, project_name, lines)
-        _format_session_history(cfg, project_name, lines)
-        _format_knowledge_section(cfg, project_name, lines)
+        if cfg.context_injection.enabled:
+            try:
+                git_paths = _collect_git_diff_paths(meta)
+                result = inject_context(cfg, project_name, todos, git_paths)
+                if result.notes:
+                    lines.append(f"\n### Recent Notes\n{result.notes}")
+                if result.decisions:
+                    lines.append(f"\n### Key Decisions\n{result.decisions}")
+                if result.knowledge:
+                    lines.append(f"\n### Project Knowledge\n{result.knowledge}")
+            except Exception:
+                logger.warning("context_injection failed, falling back to legacy", exc_info=True)
+                _format_notes_section(cfg, project_name, lines)
+                _format_session_history(cfg, project_name, lines)
+                _format_knowledge_section(cfg, project_name, lines)
+        else:
+            _format_notes_section(cfg, project_name, lines)
+            _format_session_history(cfg, project_name, lines)
+            _format_knowledge_section(cfg, project_name, lines)
 
     return "\n".join(lines)
 
 
 def register(app: FastMCP) -> None:
-    """Register ctx_session_start, ctx_session_end, ctx_detect_project, notes_append, claudemd_write, claudemd_read, proj_session_context, and proj_status_context tools with the MCP app."""
+    """Register context tools with the MCP app.
+
+    Registers ctx_session_start, ctx_session_end, ctx_detect_project,
+    notes_append, claudemd_write, claudemd_read, proj_session_context,
+    and proj_status_context.
+    """
 
     @app.tool(description="Build session context string for active project (SessionStart hook).")
     def ctx_session_start(cwd: str | None = None, compact: bool = False) -> str:
@@ -285,7 +345,11 @@ def register(app: FastMCP) -> None:
             if meta.claudemd_management is not None:
                 enabled = meta.claudemd_management
         if not enabled:
-            return "CLAUDE.md management is disabled (claudemd_management=false). Enable it in global or project config to allow writes."
+            return (
+                "CLAUDE.md management is disabled"
+                " (claudemd_management=false). Enable it in global"
+                " or project config to allow writes."
+            )
         storage.write_claudemd(repo_path, content)
         return f"Written CLAUDE.md at {repo_path}."
 
@@ -294,7 +358,12 @@ def register(app: FastMCP) -> None:
         result = storage.read_claudemd(repo_path)
         return result if result is not None else f"No CLAUDE.md found at {repo_path}."
 
-    @app.tool(description="Return structured JSON context for the active project session (config, project metadata, integrations).")
+    @app.tool(
+        description=(
+            "Return structured JSON context for the active project"
+            " session (config, project metadata, integrations)."
+        )
+    )
     def proj_session_context(include_todo_count: bool = False) -> str:
         if not storage.config_exists():
             return "No config found. Run config_init first."
@@ -358,7 +427,13 @@ def register(app: FastMCP) -> None:
 
         return json.dumps(result)
 
-    @app.tool(description="Return structured JSON context for the status skill: config, project metadata, categorised todos, and git activity in one call.")
+    @app.tool(
+        description=(
+            "Return structured JSON context for the status skill:"
+            " config, project metadata, categorised todos, and"
+            " git activity in one call."
+        )
+    )
     def proj_status_context(project_name: str | None = None) -> str:
         cfg = require_config()
         name = state.resolve_project(project_name)
@@ -401,10 +476,9 @@ def register(app: FastMCP) -> None:
                     for repo in trackable_repos
                 }
                 branch_futures = {
-                    executor.submit(_active_branches, repo.path): repo
-                    for repo in trackable_repos
+                    executor.submit(_active_branches, repo.path): repo for repo in trackable_repos
                 }
-                for fut, repo in log_futures.items():
+                for fut, _repo in log_futures.items():
                     all_commits.extend(fut.result())
                 for fut, repo in branch_futures.items():
                     all_branches.extend(f"{repo.label}:{b}" for b in fut.result())

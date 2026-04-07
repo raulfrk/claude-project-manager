@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 # Recursive type alias for variable JSON/YAML data.
 # Uses Mapping (covariant) instead of dict (invariant) so that dict[str, str] etc.
@@ -30,8 +30,9 @@ def _list(v: JsonValue) -> list[JsonValue]:
     return list(v) if isinstance(v, list) else []
 
 
-class QualityLevel(str, Enum):
+class QualityLevel(StrEnum):
     """Quality level presets for run/execute workflows."""
+
     FAST = "fast"
     BALANCED = "balanced"
     CAREFUL = "careful"
@@ -41,15 +42,29 @@ class QualityLevel(str, Enum):
 @dataclass
 class SmartGateConfig:
     """Configuration for smart gate complexity scoring."""
+
     enabled: bool = True
-    auto_execute_threshold: int = 3   # score 0-3 → AUTO-EXECUTE
-    light_review_threshold: int = 7   # score 4-7 → LIGHT REVIEW
+    auto_execute_threshold: int = 3  # score 0-3 → AUTO-EXECUTE
+    light_review_threshold: int = 7  # score 4-7 → LIGHT REVIEW
     # score 8-14 → FULL REVIEW (implicit)
-    critical_path_patterns: list[str] = field(default_factory=lambda: [
-        "*.env*", "*secret*", "*credential*", "*key*", "*auth*", "*permission*",
-        "Dockerfile", "docker-compose*", ".github/workflows/*",
-        "pyproject.toml", "package.json", "settings.json", "proj.yaml", "*.config.*",
-    ])
+    critical_path_patterns: list[str] = field(
+        default_factory=lambda: [
+            "*.env*",
+            "*secret*",
+            "*credential*",
+            "*key*",
+            "*auth*",
+            "*permission*",
+            "Dockerfile",
+            "docker-compose*",
+            ".github/workflows/*",
+            "pyproject.toml",
+            "package.json",
+            "settings.json",
+            "proj.yaml",
+            "*.config.*",
+        ]
+    )
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -60,13 +75,15 @@ class SmartGateConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: JsonDict) -> "SmartGateConfig":
+    def from_dict(cls, data: JsonDict) -> SmartGateConfig:
         raw_patterns = data.get("critical_path_patterns")
         return cls(
             enabled=bool(data.get("enabled", True)),
             auto_execute_threshold=_int(data.get("auto_execute_threshold"), 3),
             light_review_threshold=_int(data.get("light_review_threshold"), 7),
-            critical_path_patterns=[str(p) for p in raw_patterns] if isinstance(raw_patterns, list) else cls().critical_path_patterns,
+            critical_path_patterns=[str(p) for p in raw_patterns]
+            if isinstance(raw_patterns, list)
+            else cls().critical_path_patterns,
         )
 
 
@@ -77,7 +94,9 @@ class SmartGateConfig:
 class TodoistSync:
     enabled: bool = False
     auto_sync: bool = True
-    mcp_server: str = "claude_ai_Todoist"  # Deprecated: ignored, local plugin uses fixed "todoist" prefix
+    mcp_server: str = (
+        "claude_ai_Todoist"  # Deprecated: ignored, local plugin uses fixed "todoist" prefix
+    )
     root_only: bool = False
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -151,16 +170,19 @@ class ArchiveConfig:
 @dataclass
 class TrelloListMappings:
     created: str = "Backlog"  # List name or ID where new todos are added as cards
-    done: str = "Done"        # List name or ID where completed todos are moved
+    done: str = "Done"  # List name or ID where completed todos are moved
+    projects: str = "Projects"  # List name for project tracking cards
+    tasks: str = "proj-tasks"  # List name for active todo cards
     # Project-status-based list mappings (map project status to Trello list name)
-    active: str = ""          # List name for active projects (empty = not configured)
-    pending: str = ""         # List name for paused/blocked projects (empty = not configured)
-    archived: str = ""        # List name for archived projects (empty = not configured)
+    active: str = ""  # List name for active projects (empty = not configured)
+    pending: str = ""  # List name for paused/blocked projects (empty = not configured)
+    archived: str = ""  # List name for archived projects (empty = not configured)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
-            "created": self.created,
             "done": self.done,
+            "projects": self.projects,
+            "tasks": self.tasks,
             "active": self.active,
             "pending": self.pending,
             "archived": self.archived,
@@ -171,6 +193,8 @@ class TrelloListMappings:
         return cls(
             created=str(data.get("created", "Backlog")),
             done=str(data.get("done", "Done")),
+            projects=str(data.get("projects", "Projects")),
+            tasks=str(data.get("tasks", "proj-tasks")),
             active=str(data.get("active", "")),
             pending=str(data.get("pending", "")),
             archived=str(data.get("archived", "")),
@@ -193,7 +217,6 @@ class TrelloSync:
             "enabled": self.enabled,
             "auto_sync": self.auto_sync,
             "default_board_id": self.default_board_id,
-            "default_list": self.default_list,
             "list_mappings": self.list_mappings.to_dict(),
             "on_delete": self.on_delete,
         }
@@ -257,8 +280,12 @@ class PermissionsConfig:
         return cls(
             auto_grant=bool(data.get("auto_grant", True)),
             auto_allow_mcps=bool(data.get("auto_allow_mcps", True)),
-            projects_root=str(data["projects_root"]) if isinstance(data.get("projects_root"), str) else None,
-            tracking_root=str(data["tracking_root"]) if isinstance(data.get("tracking_root"), str) else None,
+            projects_root=str(data["projects_root"])
+            if isinstance(data.get("projects_root"), str)
+            else None,
+            tracking_root=str(data["tracking_root"])
+            if isinstance(data.get("tracking_root"), str)
+            else None,
         )
 
 
@@ -269,7 +296,11 @@ class TeamModeConfig:
     trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {"enabled": self.enabled, "max_agents": self.max_agents, "trust_level": self.trust_level}
+        return {
+            "enabled": self.enabled,
+            "max_agents": self.max_agents,
+            "trust_level": self.trust_level,
+        }
 
     @classmethod
     def from_dict(cls, data: JsonDict) -> TeamModeConfig:
@@ -300,6 +331,60 @@ class ResilienceConfig:
 
 
 @dataclass
+class ContextInjectionSectionsConfig:
+    """Budget allocation percentages for context injection sections."""
+
+    notes: int = 40
+    decisions: int = 35
+    knowledge: int = 25
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "notes": self.notes,
+            "decisions": self.decisions,
+            "knowledge": self.knowledge,
+        }
+
+    @classmethod
+    def from_dict(cls, data: JsonDict) -> ContextInjectionSectionsConfig:
+        return cls(
+            notes=_int(data.get("notes"), 40),
+            decisions=_int(data.get("decisions"), 35),
+            knowledge=_int(data.get("knowledge"), 25),
+        )
+
+
+@dataclass
+class ContextInjectionConfig:
+    """Configuration for automatic context injection at session start."""
+
+    enabled: bool = True
+    budget: int = 2000
+    recency_window: int = 24  # hours
+    sections: ContextInjectionSectionsConfig = field(default_factory=ContextInjectionSectionsConfig)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "enabled": self.enabled,
+            "budget": self.budget,
+            "recency_window": self.recency_window,
+            "sections": self.sections.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: JsonDict) -> ContextInjectionConfig:
+        sections_raw = data.get("sections", {})
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            budget=_int(data.get("budget"), 2000),
+            recency_window=_int(data.get("recency_window"), 24),
+            sections=ContextInjectionSectionsConfig.from_dict(
+                sections_raw if isinstance(sections_raw, dict) else {}
+            ),
+        )
+
+
+@dataclass
 class ProjConfig:
     tracking_dir: str = "~/projects/tracking"
     projects_base_dir: str | None = None
@@ -321,6 +406,7 @@ class ProjConfig:
     smart_gate: SmartGateConfig = field(default_factory=SmartGateConfig)
     quality_level: str = "balanced"
     worktree_isolation: bool = True  # default-on: isolate parallel agents in git worktrees
+    context_injection: ContextInjectionConfig = field(default_factory=ContextInjectionConfig)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -330,7 +416,11 @@ class ProjConfig:
             "git_integration": self.git_integration,
             "default_priority": self.default_priority,
             "permissions": self.permissions.to_dict(),
-            "sync": {"todoist": self.todoist.to_dict(), "trello": self.trello.to_dict(), "jira": self.jira.to_dict()},
+            "sync": {
+                "todoist": self.todoist.to_dict(),
+                "trello": self.trello.to_dict(),
+                "jira": self.jira.to_dict(),
+            },
             "git_tracking": self.git_tracking.to_dict(),
             "sandbox_integration": self.sandbox_integration,
             "worktree_integration": self.worktree_integration,
@@ -342,6 +432,7 @@ class ProjConfig:
             "smart_gate": self.smart_gate.to_dict(),
             "quality_level": self.quality_level,
             "worktree_isolation": self.worktree_isolation,
+            "context_injection": self.context_injection.to_dict(),
         }
 
     @classmethod
@@ -383,6 +474,10 @@ class ProjConfig:
         if not isinstance(smart_gate_raw, dict):
             smart_gate_raw = {}
 
+        ctx_injection_raw = data.get("context_injection", {})
+        if not isinstance(ctx_injection_raw, dict):
+            ctx_injection_raw = {}
+
         pbd = data.get("projects_base_dir")
 
         return cls(
@@ -405,6 +500,7 @@ class ProjConfig:
             smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
             quality_level=str(data.get("quality_level", "balanced")),
             worktree_isolation=bool(data.get("worktree_isolation", True)),
+            context_injection=ContextInjectionConfig.from_dict(ctx_injection_raw),
         )
 
 
@@ -420,7 +516,7 @@ def validate_project_name(name: str) -> str | None:
     - Contains ``/`` or ``\\`` (path separators)
     - Contains null bytes (``\\x00``)
     - Starts with ``.`` (hidden/reserved names such as ``.git``)
-    - Contains newlines or other ASCII control characters (ordinals 0–31 and 127)
+    - Contains newlines or other ASCII control characters (ordinals 0-31 and 127)
     """
     if not name or not name.strip():
         return "Project name must not be empty or whitespace-only."
@@ -473,7 +569,7 @@ class ProjectEntry:
             tracking_dir=str(data["tracking_dir"]),
             created=str(data["created"]),
             archived=bool(data.get("archived", False)),
-            tags=list(tags) if isinstance(tags, list) else [],
+            tags=[str(t) for t in tags] if isinstance(tags, list) else [],
             archive_date=str(data["archive_date"]) if data.get("archive_date") else None,
             purgeable=bool(data.get("purgeable", True)),
         )
@@ -499,7 +595,9 @@ class ProjectIndex:
         # ignored here (session-only concept now).
         return cls(
             version=_int(data.get("version"), 1),
-            projects={k: ProjectEntry.from_dict(v) for k, v in projects_raw.items() if isinstance(v, dict)},
+            projects={
+                k: ProjectEntry.from_dict(v) for k, v in projects_raw.items() if isinstance(v, dict)
+            },
         )
 
 
@@ -514,7 +612,12 @@ class RepoEntry:
     reference: bool = False  # True = read-only context; no write perms, no git tracking
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {"label": self.label, "path": self.path, "claudemd": self.claudemd, "reference": self.reference}
+        return {
+            "label": self.label,
+            "path": self.path,
+            "claudemd": self.claudemd,
+            "reference": self.reference,
+        }
 
     @classmethod
     def from_dict(cls, data: JsonDict) -> RepoEntry:
@@ -574,19 +677,20 @@ class ProjectTodoistConfig:
 class ProjectTrelloConfig:
     """Per-project Trello config — overrides global TrelloSync defaults."""
 
-    enabled: bool | None = None          # None = use global config default
-    board_id: str | None = None          # Trello board ID for this project
+    enabled: bool | None = None  # None = use global config default
+    board_id: str | None = None  # Trello board ID for this project
     list_mappings: TrelloListMappings | None = None  # None = use global defaults
-    on_delete: str | None = None         # "archive" | "delete" | None = use global default
+    on_delete: str | None = None  # "archive" | "delete" | None = use global default
     trello_tasks_checklist_id: str | None = None  # cached ID of the "Tasks" catch-all checklist
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "board_id": self.board_id,
-            "list_mappings": self.list_mappings.to_dict() if self.list_mappings is not None else None,
+            "list_mappings": self.list_mappings.to_dict()
+            if self.list_mappings is not None
+            else None,
             "on_delete": self.on_delete,
-            "trello_tasks_checklist_id": self.trello_tasks_checklist_id,
         }
 
     @classmethod
@@ -654,7 +758,9 @@ class ProjectMeta:
     zoxide_integration: bool | None = None  # None = use global config default
     claudemd_management: bool | None = None  # None = use global config default
     jira_issue_key: str | None = None  # set when project was created from a Jira epic; stable link
-    jira_synced_comment_ids: list[str] = field(default_factory=list)  # Jira comment IDs already synced to NOTES.md
+    jira_synced_comment_ids: list[str] = field(
+        default_factory=list
+    )  # Jira comment IDs already synced to NOTES.md
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -689,7 +795,13 @@ class ProjectMeta:
         if not (isinstance(repos_raw, list) and repos_raw):
             path_raw = data.get("path")
             if isinstance(path_raw, str) and path_raw:
-                repos_raw = [{"label": "code", "path": path_raw, "claudemd": False, "reference": False}]
+                legacy_repo: JsonDict = {
+                    "label": "code",
+                    "path": path_raw,
+                    "claudemd": False,
+                    "reference": False,
+                }
+                repos_raw = [legacy_repo]
         links_raw = data.get("links", [])
         tags_raw = data.get("tags", [])
         perms_raw = data.get("permissions", {})
@@ -704,15 +816,27 @@ class ProjectMeta:
             status=str(data.get("status", "active")),
             priority=str(data.get("priority", "medium")),
             repos=[
-                RepoEntry.from_dict(r) for r in (repos_raw if isinstance(repos_raw, list) else []) if isinstance(r, dict)
+                RepoEntry.from_dict(r)
+                for r in (repos_raw if isinstance(repos_raw, list) else [])
+                if isinstance(r, dict)
             ],
             dates=ProjectDates.from_dict(dates_raw if isinstance(dates_raw, dict) else {}),
             tags=[str(x) for x in tags_raw] if isinstance(tags_raw, list) else [],
-            links=links_raw if isinstance(links_raw, list) else [],
+            links=[
+                {str(k): str(v) for k, v in lnk.items()}
+                for lnk in links_raw
+                if isinstance(lnk, dict)
+            ]
+            if isinstance(links_raw, list)
+            else [],
             next_todo_id=_int(data.get("next_todo_id"), 1),
             git_enabled=bool(data.get("git_enabled", True)),
-            todoist_project_id=str(data["todoist_project_id"]) if isinstance(data.get("todoist_project_id"), str) else None,
-            trello_card_id=str(data["trello_card_id"]) if isinstance(data.get("trello_card_id"), str) else None,
+            todoist_project_id=str(data["todoist_project_id"])
+            if isinstance(data.get("todoist_project_id"), str)
+            else None,
+            trello_card_id=str(data["trello_card_id"])
+            if isinstance(data.get("trello_card_id"), str)
+            else None,
             permissions=ProjectPermissions.from_dict(
                 perms_raw if isinstance(perms_raw, dict) else {}
             ),
@@ -725,10 +849,18 @@ class ProjectMeta:
             git_tracking=ProjectGitTrackingConfig.from_dict(
                 git_tracking_raw if isinstance(git_tracking_raw, dict) else {}
             ),
-            zoxide_integration=bool(zi_raw) if (zi_raw := data.get("zoxide_integration")) is not None else None,
-            claudemd_management=bool(cm_raw) if (cm_raw := data.get("claudemd_management")) is not None else None,
-            jira_issue_key=str(data["jira_issue_key"]) if isinstance(data.get("jira_issue_key"), str) else None,
-            jira_synced_comment_ids=[str(x) for x in jsci] if isinstance((jsci := data.get("jira_synced_comment_ids")), list) else [],
+            zoxide_integration=bool(zi_raw)
+            if (zi_raw := data.get("zoxide_integration")) is not None
+            else None,
+            claudemd_management=bool(cm_raw)
+            if (cm_raw := data.get("claudemd_management")) is not None
+            else None,
+            jira_issue_key=str(data["jira_issue_key"])
+            if isinstance(data.get("jira_issue_key"), str)
+            else None,
+            jira_synced_comment_ids=[str(x) for x in jsci]
+            if isinstance((jsci := data.get("jira_synced_comment_ids")), list)
+            else [],
         )
 
 
@@ -737,26 +869,44 @@ class ProjectMeta:
 
 @dataclass
 class TrelloSyncState:
-    """Snapshot of last-synced state for a todo's Trello representation."""
+    """Snapshot of last-synced state for a todo's Trello representation.
 
-    last_sync: str = ""       # ISO 8601 datetime of last successful sync
-    synced_name: str = ""     # name as it was on Trello after last sync
-    synced_state: str = ""    # "complete" or "incomplete" after last sync
-    trello_updated: str = ""  # ISO 8601 datetime of last pull from Trello
+    Card-per-todo model (v2): each todo maps to a Trello card.
+    Fields track card-level state for change detection.
+    """
+
+    last_sync: str = ""  # ISO 8601 datetime of last successful sync
+    synced_name: str = ""  # card title as it was on Trello after last sync
+    card_id: str = ""  # Trello card ID at last sync
+    list_id: str = ""  # Trello list ID the card was in at last sync
+    desc_hash: str = ""  # deterministic hash of card description at last sync
+    # Legacy fields kept for backward compat during migration
+    synced_state: str = ""  # "complete" or "incomplete" (legacy checklist model)
+    trello_updated: str = ""  # ISO 8601 datetime of last pull from Trello (legacy)
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
+        d: dict[str, JsonValue] = {
             "last_sync": self.last_sync,
             "synced_name": self.synced_name,
-            "synced_state": self.synced_state,
-            "trello_updated": self.trello_updated,
+            "card_id": self.card_id,
+            "list_id": self.list_id,
+            "desc_hash": self.desc_hash,
         }
+        # Only serialize legacy fields when non-empty (migration compat)
+        if self.synced_state:
+            d["synced_state"] = self.synced_state
+        if self.trello_updated:
+            d["trello_updated"] = self.trello_updated
+        return d
 
     @classmethod
     def from_dict(cls, data: JsonDict) -> TrelloSyncState:
         return cls(
             last_sync=str(data.get("last_sync", "")),
             synced_name=str(data.get("synced_name", "")),
+            card_id=str(data.get("card_id", "")),
+            list_id=str(data.get("list_id", "")),
+            desc_hash=str(data.get("desc_hash", "")),
             synced_state=str(data.get("synced_state", "")),
             trello_updated=str(data.get("trello_updated", "")),
         )
@@ -775,7 +925,7 @@ class TodoGit:
         commits = data.get("commits", [])
         return cls(
             branch=str(data["branch"]) if isinstance(data.get("branch"), str) else None,
-            commits=list(commits) if isinstance(commits, list) else [],
+            commits=[str(c) for c in commits] if isinstance(commits, list) else [],
         )
 
 
@@ -798,12 +948,16 @@ class Todo:
     has_requirements: bool = False
     has_research: bool = False
     todoist_task_id: str | None = None
-    todoist_description_synced: str = ""  # last Todoist description pulled; used to detect changes and avoid duplicate appends
+    todoist_description_synced: str = (
+        ""  # last Todoist description pulled; used to detect changes and avoid duplicate appends
+    )
     trello_card_id: str | None = None  # set when synced with Trello; stable link to the Trello card
     trello_checklist_id: str | None = None  # set for root todos that become Trello checklists
     trello_checklist_item_id: str | None = None  # set for todos that become Trello checklist items
     jira_issue_key: str | None = None  # set when synced with Jira; stable link to the Jira issue
-    jira_synced_comment_ids: list[str] = field(default_factory=list)  # Jira comment IDs already pulled into notes
+    jira_synced_comment_ids: list[str] = field(
+        default_factory=list
+    )  # Jira comment IDs already pulled into notes
     due_date: str | None = None  # ISO 8601 date string (YYYY-MM-DD) or None
     trello_sync_state: TrelloSyncState | None = None  # last-synced snapshot for Trello
 
@@ -828,12 +982,12 @@ class Todo:
             "todoist_task_id": self.todoist_task_id,
             "todoist_description_synced": self.todoist_description_synced,
             "trello_card_id": self.trello_card_id,
-            "trello_checklist_id": self.trello_checklist_id,
-            "trello_checklist_item_id": self.trello_checklist_item_id,
             "jira_issue_key": self.jira_issue_key,
             "jira_synced_comment_ids": self.jira_synced_comment_ids,
             "due_date": self.due_date,
-            "trello_sync_state": self.trello_sync_state.to_dict() if self.trello_sync_state is not None else None,
+            "trello_sync_state": self.trello_sync_state.to_dict()
+            if self.trello_sync_state is not None
+            else None,
         }
 
     @classmethod
@@ -856,13 +1010,25 @@ class Todo:
             notes=str(data.get("notes", "")),
             has_requirements=bool(data.get("has_requirements", False)),
             has_research=bool(data.get("has_research", False)),
-            todoist_task_id=str(data["todoist_task_id"]) if isinstance(data.get("todoist_task_id"), str) else None,
+            todoist_task_id=str(data["todoist_task_id"])
+            if isinstance(data.get("todoist_task_id"), str)
+            else None,
             todoist_description_synced=str(data.get("todoist_description_synced", "")),
-            trello_card_id=str(data["trello_card_id"]) if isinstance(data.get("trello_card_id"), str) else None,
-            trello_checklist_id=str(data["trello_checklist_id"]) if isinstance(data.get("trello_checklist_id"), str) else None,
-            trello_checklist_item_id=str(data["trello_checklist_item_id"]) if isinstance(data.get("trello_checklist_item_id"), str) else None,
-            jira_issue_key=str(data["jira_issue_key"]) if isinstance(data.get("jira_issue_key"), str) else None,
-            jira_synced_comment_ids=[str(x) for x in jsci] if isinstance((jsci := data.get("jira_synced_comment_ids")), list) else [],
+            trello_card_id=str(data["trello_card_id"])
+            if isinstance(data.get("trello_card_id"), str)
+            else None,
+            trello_checklist_id=str(data["trello_checklist_id"])
+            if isinstance(data.get("trello_checklist_id"), str)
+            else None,
+            trello_checklist_item_id=str(data["trello_checklist_item_id"])
+            if isinstance(data.get("trello_checklist_item_id"), str)
+            else None,
+            jira_issue_key=str(data["jira_issue_key"])
+            if isinstance(data.get("jira_issue_key"), str)
+            else None,
+            jira_synced_comment_ids=[str(x) for x in jsci]
+            if isinstance((jsci := data.get("jira_synced_comment_ids")), list)
+            else [],
             due_date=str(data["due_date"]) if isinstance(data.get("due_date"), str) else None,
             trello_sync_state=TrelloSyncState.from_dict(tss_raw)
             if isinstance((tss_raw := data.get("trello_sync_state")), dict)

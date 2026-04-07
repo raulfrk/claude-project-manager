@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import httpx
 
 from server.lib.config import TodoistConfig, load_config
-from server.lib.models import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from server.lib.models import JsonObject, JsonValue
 
 BASE_URL = "https://api.todoist.com/api/v1"
 
@@ -26,9 +30,7 @@ class TodoistClient:
             raise RuntimeError("Todoist API error 401: Invalid API token")
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "60")
-            raise RuntimeError(
-                f"Todoist rate limited. Retry after {retry_after} seconds."
-            )
+            raise RuntimeError(f"Todoist rate limited. Retry after {retry_after} seconds.")
         if resp.is_success:
             if resp.content:
                 result: JsonValue = resp.json()

@@ -43,7 +43,7 @@ def _git_log(repo_path: str, since_days: int, repo_label: str = "") -> list[str]
     for line in lines:
         line = line.strip()
         if "|" in line:
-            sha, subject, author, date_str = line.split("|", 3)
+            sha, subject, _author, date_str = line.split("|", 3)
             suffix = f" ({repo_label})" if repo_label else ""
             commits.append(f"{date_str} {sha[:8]} {subject}{suffix}")
     return commits
@@ -55,7 +55,11 @@ def _active_branches(repo_path: str) -> list[str]:
 
 
 def register(app: FastMCP) -> None:
-    """Register git_detect_work, git_link_todo, git_suggest_todos, and proj_git_reconcile_todos tools with the MCP app."""
+    """Register git tools with the MCP app.
+
+    Registers git_detect_work, git_link_todo, git_suggest_todos,
+    and proj_git_reconcile_todos.
+    """
 
     @app.tool(description="Detect recent git activity across all project repos.")
     def git_detect_work(project_name: str | None = None, since_days: int = 7) -> str:
@@ -78,7 +82,7 @@ def register(app: FastMCP) -> None:
             branch_futures = {
                 executor.submit(_active_branches, repo.path): repo for repo in trackable_repos
             }
-            for fut, repo in log_futures.items():
+            for fut, _repo in log_futures.items():
                 all_commits.extend(fut.result())
             for fut, repo in branch_futures.items():
                 all_branches.extend(f"{repo.label}:{b}" for b in fut.result())
@@ -131,7 +135,9 @@ def register(app: FastMCP) -> None:
             return "No active project."
         meta = storage.load_meta(cfg, name)
         if not meta.git_enabled:
-            return json.dumps({"git_enabled": False, "commits": [], "branches": [], "suggestions": []})
+            return json.dumps(
+                {"git_enabled": False, "commits": [], "branches": [], "suggestions": []}
+            )
 
         all_commits: list[str] = []
         all_branches: list[str] = []
@@ -169,12 +175,14 @@ def register(app: FastMCP) -> None:
                 else:
                     date_str, sha, subject = "", "", line
 
-                suggestions.append({
-                    "repo": repo.label,
-                    "subject": subject,
-                    "sha": sha,
-                    "date": date_str,
-                })
+                suggestions.append(
+                    {
+                        "repo": repo.label,
+                        "subject": subject,
+                        "sha": sha,
+                        "date": date_str,
+                    }
+                )
 
         return json.dumps(
             {

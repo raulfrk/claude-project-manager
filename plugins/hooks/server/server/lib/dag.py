@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from server.lib.models import Hook
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from server.lib.models import Hook
 
 
 def _build_adjacency(hooks: list[Hook]) -> dict[str, set[str]]:
@@ -87,4 +90,4 @@ def find_cycle_path(hooks: list[Hook], new_trigger: str, new_target: str) -> lis
     return None
 
 
-__all__ = ["would_create_cycle", "find_cycle_path"]
+__all__ = ["find_cycle_path", "would_create_cycle"]

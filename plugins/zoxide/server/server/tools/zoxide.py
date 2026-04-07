@@ -56,4 +56,6 @@ def register(mcp: FastMCP) -> None:
         if not lines:
             return json.dumps({"result": [], "paths": [], "count": 0})
         results_list = lines[:max_results]
-        return json.dumps({"result": results_list, "paths": results_list, "count": len(results_list)})
+        return json.dumps(
+            {"result": results_list, "paths": results_list, "count": len(results_list)}
+        )

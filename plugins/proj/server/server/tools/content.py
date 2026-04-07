@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mcp.server.fastmcp import FastMCP
 
 
 def register(app: FastMCP) -> None:
-    """Register content_set_requirements, content_get_requirements, content_set_research, content_get_research, and proj_get_todo_context tools with the MCP app."""
+    """Register content tools with the MCP app.
+
+    Registers content_set_requirements, content_get_requirements,
+    content_set_research, content_get_research, and
+    proj_get_todo_context.
+    """
 
     @app.tool(description="Write requirements.md for a todo.")
     def content_set_requirements(
@@ -41,7 +47,10 @@ def register(app: FastMCP) -> None:
         if len(result) > max_chars:
             file_path = storage.requirements_path(cfg, name, todo_id)
             omitted = len(result) - max_chars
-            return result[:max_chars] + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+            return (
+                result[:max_chars]
+                + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+            )
         return result
 
     @app.tool(description="Write research.md for a todo.")
@@ -67,7 +76,10 @@ def register(app: FastMCP) -> None:
         if len(result) > max_chars:
             file_path = storage.research_path(cfg, name, todo_id)
             omitted = len(result) - max_chars
-            return result[:max_chars] + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+            return (
+                result[:max_chars]
+                + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+            )
         return result
 
     @app.tool(
@@ -104,7 +116,10 @@ def register(app: FastMCP) -> None:
                 return None
             if len(content) > max_chars:
                 omitted = len(content) - max_chars
-                return content[:max_chars] + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+                return (
+                    content[:max_chars]
+                    + f"\n\n[truncated — {omitted} chars omitted. Full file at {file_path}]"
+                )
             return content
 
         requirements = _truncate(

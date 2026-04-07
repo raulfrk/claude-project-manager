@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
-from server.lib.models import ProjConfig
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib.models import ProjConfig
 
 _VALID_SCOPES = ("all", "sessions", "notes", "requirements", "research", "decisions")
 _MAX_SNIPPETS = 5
@@ -74,11 +76,13 @@ def _extract_snippets(
                 rel = file_path.relative_to(tracking_root)
             except ValueError:
                 rel = file_path
-            matches.append({
-                "source": str(rel),
-                "match": line.strip(),
-                "context": context_block,
-            })
+            matches.append(
+                {
+                    "source": str(rel),
+                    "match": line.strip(),
+                    "context": context_block,
+                }
+            )
 
     return matches
 

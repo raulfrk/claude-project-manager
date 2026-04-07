@@ -1,29 +1,28 @@
 """MCP tools for batched Trello sync — diff and apply.
 
-Model: one Trello card per project. Root todos with children become checklists
-(name = todo title), their flattened descendants become checklist items.
-Root leaf todos go into a "Tasks" catch-all checklist.
+Card-per-todo model (v2): each todo becomes its own Trello card.
+- Todo cards go in the "tasks" list
+- Project tracking cards go in the "projects" list
+- Parent-child relationships use Trello card-to-card attachments
+- Card titles use format: [project-name] [todo-id] Title
+- Card descriptions contain status, priority, tags, blocked_by, notes
 
 Sync uses last-changed-wins: each todo carries a TrelloSyncState snapshot
-recording the name/state at last sync time. Changes are detected by comparing
-current local state vs snapshot (local changed) and current Trello state vs
-snapshot (Trello changed).
+recording the card title, list, and description hash at last sync time.
 """
 
 from __future__ import annotations
 
-import difflib
+import hashlib
 import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
-from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, Todo, TrelloSyncState
 from server.lib.retry import retry_link
 from server.tools.config import require_project
@@ -33,25 +32,10 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-TASKS_CHECKLIST_NAME = "Tasks"
-_UTC = timezone.utc
+_UTC = UTC
 
-
-def _collect_descendants(todo_id: str, todo_map: dict[str, Todo], visited: set[str] | None = None) -> list[str]:
-    """Recursively collect all descendant IDs of a todo (children, grandchildren, etc.)."""
-    if visited is None:
-        visited = set()
-    if todo_id in visited:
-        return []
-    visited.add(todo_id)
-    todo = todo_map.get(todo_id)
-    if not todo:
-        return []
-    result = []
-    for child_id in list(todo.children):
-        result.append(child_id)
-        result.extend(_collect_descendants(child_id, todo_map, visited))
-    return result
+# Trello card description max length
+_DESC_MAX_LEN = 16384
 
 
 def _now() -> str:
@@ -59,30 +43,212 @@ def _now() -> str:
     return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
 
 
-def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bool:
-    """Return True if title matches an archived todo (exact or fuzzy)."""
-    if not archived:
-        return False
-    lower_title = title.lower()
-    titles = [t.title for t in archived]
-    if any(t.lower() == lower_title for t in titles):
-        return True
-    return bool(difflib.get_close_matches(title, titles, n=1, cutoff=threshold))
+# ── Title formatting ────────────────────────────────────────────────────────
+
+
+def format_card_title(project_name: str, todo_id: str, title: str) -> str:
+    """Format a Trello card title: [project-name] [todo-id] Title."""
+    return f"[{project_name}] [{todo_id}] {title}"
+
+
+def parse_card_title(card_name: str) -> tuple[str, str, str] | None:
+    """Parse a card title back into (project_name, todo_id, title).
+
+    Returns None if the title doesn't match the expected format.
+    """
+    m = re.match(r"^\[([^\]]*)\]\s+\[([^\]]*)\]\s+(.+)$", card_name)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+    return None
+
+
+# ── Description generation ──────────────────────────────────────────────────
+
+
+def build_card_description(todo: Todo, project_name: str = "") -> str:
+    """Build a Trello card description from a todo's fields.
+
+    Uses sorted keys for deterministic output (important for hash stability).
+    """
+    lines: list[str] = []
+
+    # Status and priority
+    status = getattr(todo.status, "value", todo.status)
+    priority = getattr(todo.priority, "value", todo.priority)
+    lines.append(f"**Status**: {status}")
+    lines.append(f"**Priority**: {priority}")
+
+    if project_name:
+        lines.append(f"**Project**: {project_name}")
+
+    # Due date
+    if todo.due_date:
+        lines.append(f"**Due**: {todo.due_date}")
+
+    # Tags
+    if todo.tags:
+        tags_str = ", ".join(sorted(todo.tags))
+        lines.append(f"**Tags**: {tags_str}")
+
+    # Blocked by
+    if todo.blocked_by:
+        blocked_str = ", ".join(sorted(todo.blocked_by))
+        lines.append(f"**Blocked by**: {blocked_str}")
+
+    # Children
+    if todo.children:
+        children_str = ", ".join(todo.children)
+        lines.append(f"**Children**: {children_str}")
+
+    # Notes
+    if todo.notes:
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append(todo.notes)
+
+    desc = "\n".join(lines)
+
+    # Truncate if needed
+    if len(desc) > _DESC_MAX_LEN:
+        desc = desc[: _DESC_MAX_LEN - 3] + "..."
+
+    return desc
+
+
+def build_project_card_description(
+    meta: object,
+    todos: list[Todo],
+    project_name: str,
+) -> str:
+    """Build a Trello card description for a project tracking card.
+
+    Args:
+        meta: ProjectMeta object with status, tags, etc.
+        todos: list of all project todos (for summary counts)
+        project_name: project name for display
+    """
+    lines: list[str] = []
+
+    status = getattr(meta, "status", "active")
+    lines.append(f"**Project**: {project_name}")
+    lines.append(f"**Status**: {status}")
+
+    # Todo summary
+    total = len(todos)
+    done = sum(1 for t in todos if t.status in TERMINAL_STATUSES)
+    pending = total - done
+    lines.append(f"**Todos**: {total} total, {done} done, {pending} pending")
+
+    # Root todos list
+    roots = [t for t in todos if t.parent is None]
+    if roots:
+        lines.append("")
+        lines.append("## Root Todos")
+        for r in roots:
+            status_icon = "x" if r.status in TERMINAL_STATUSES else " "
+            lines.append(f"- [{status_icon}] [{r.id}] {r.title}")
+
+    desc = "\n".join(lines)
+    if len(desc) > _DESC_MAX_LEN:
+        desc = desc[: _DESC_MAX_LEN - 3] + "..."
+    return desc
+
+
+def compute_desc_hash(desc: str) -> str:
+    """Compute a deterministic hash for a card description."""
+    return hashlib.md5(desc.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+# ── Topological ordering ───────────────────────────────────────────────────
+
+
+def _topo_sort_todos(todos: list[Todo]) -> list[Todo]:
+    """Sort todos so parents come before children (topological order).
+
+    Todos without parents come first, then children in order of depth.
+    """
+    todo_map = {t.id: t for t in todos}
+    visited: set[str] = set()
+    result: list[Todo] = []
+
+    def _visit(tid: str) -> None:
+        if tid in visited:
+            return
+        visited.add(tid)
+        todo = todo_map.get(tid)
+        if not todo:
+            return
+        # Visit parent first
+        if todo.parent and todo.parent in todo_map:
+            _visit(todo.parent)
+        result.append(todo)
+
+    for t in todos:
+        _visit(t.id)
+
+    return result
 
 
 # ── Data structures ──────────────────────────────────────────────────────────
 
 
 @dataclass
-class TrelloSyncPlan:
-    """Result of comparing Trello card checklists with local todos."""
+class CardOp:
+    """A single card operation in the sync plan."""
 
-    pull_create: list[dict[str, JsonValue]] = field(default_factory=list)
+    todo_id: str
+    card_id: str = ""
+    title: str = ""
+    desc: str = ""
+    list_id: str = ""
+    list_name: str = ""
+    parent_todo_id: str = ""
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        d: dict[str, JsonValue] = {"todo_id": self.todo_id}
+        if self.card_id:
+            d["card_id"] = self.card_id
+        if self.title:
+            d["title"] = self.title
+        if self.desc:
+            d["desc"] = self.desc
+        if self.list_id:
+            d["list_id"] = self.list_id
+        if self.list_name:
+            d["list_name"] = self.list_name
+        if self.parent_todo_id:
+            d["parent_todo_id"] = self.parent_todo_id
+        return d
+
+
+@dataclass
+class TrelloSyncPlan:
+    """Result of comparing Trello cards with local todos (card-per-todo model)."""
+
+    # Push operations (local -> Trello)
+    push_create_card: list[dict[str, JsonValue]] = field(default_factory=list)
+    push_update_card: list[dict[str, JsonValue]] = field(default_factory=list)
+    push_move_card: list[dict[str, JsonValue]] = field(default_factory=list)
+    push_archive_card: list[dict[str, JsonValue]] = field(default_factory=list)
+    push_attach_link: list[dict[str, JsonValue]] = field(default_factory=list)
+
+    # Pull operations (Trello -> local)
     pull_update: list[dict[str, JsonValue]] = field(default_factory=list)
+    pull_move: list[dict[str, JsonValue]] = field(default_factory=list)
     pull_complete: list[str] = field(default_factory=list)
     pull_reopen: list[str] = field(default_factory=list)
-    pull_delete: list[dict[str, JsonValue]] = field(default_factory=list)
-    pull_create_root: list[dict[str, JsonValue]] = field(default_factory=list)
+
+    # Metadata
+    conflicts: list[dict[str, JsonValue]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    project_card_create: bool = False
+    project_card_update: bool = False
+
+    # Lists to auto-create
+    lists_to_create: list[str] = field(default_factory=list)
+
+    # Legacy checklist-based fields (used by trello_full_sync)
     push_create_checklist: list[dict[str, JsonValue]] = field(default_factory=list)
     push_create_item: list[dict[str, JsonValue]] = field(default_factory=list)
     push_update_item: list[dict[str, JsonValue]] = field(default_factory=list)
@@ -90,60 +256,58 @@ class TrelloSyncPlan:
     push_delete_item: list[dict[str, JsonValue]] = field(default_factory=list)
     push_rename_checklist: list[dict[str, JsonValue]] = field(default_factory=list)
     push_reopen_item: list[dict[str, JsonValue]] = field(default_factory=list)
-    conflicts: list[dict[str, JsonValue]] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    pull_delete: list[dict[str, JsonValue]] = field(default_factory=list)
+    pull_create: list[dict[str, JsonValue]] = field(default_factory=list)
+    pull_create_root: list[dict[str, JsonValue]] = field(default_factory=list)
     card_create: bool = False
-    label_create: bool = False
     list_mismatches: list[dict[str, JsonValue]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not any([
-            self.pull_create, self.pull_update, self.pull_complete,
-            self.pull_reopen, self.pull_delete, self.pull_create_root,
-            self.push_create_checklist, self.push_create_item,
-            self.push_update_item, self.push_complete_item,
-            self.push_delete_item, self.push_rename_checklist,
-            self.push_reopen_item,
-            self.conflicts, self.list_mismatches,
-            self.card_create, self.label_create,
-        ])
+        return not any(
+            [
+                self.push_create_card,
+                self.push_update_card,
+                self.push_move_card,
+                self.push_archive_card,
+                self.push_attach_link,
+                self.pull_update,
+                self.pull_move,
+                self.pull_complete,
+                self.pull_reopen,
+                self.conflicts,
+                self.project_card_create,
+                self.project_card_update,
+                self.lists_to_create,
+            ]
+        )
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
-            "pull_create": self.pull_create,
+            "push_create_card": self.push_create_card,
+            "push_update_card": self.push_update_card,
+            "push_move_card": self.push_move_card,
+            "push_archive_card": self.push_archive_card,
+            "push_attach_link": self.push_attach_link,
             "pull_update": self.pull_update,
+            "pull_move": self.pull_move,
             "pull_complete": self.pull_complete,
             "pull_reopen": self.pull_reopen,
-            "pull_delete": self.pull_delete,
-            "pull_create_root": self.pull_create_root,
-            "push_create_checklist": self.push_create_checklist,
-            "push_create_item": self.push_create_item,
-            "push_update_item": self.push_update_item,
-            "push_complete_item": self.push_complete_item,
-            "push_delete_item": self.push_delete_item,
-            "push_rename_checklist": self.push_rename_checklist,
-            "push_reopen_item": self.push_reopen_item,
             "conflicts": self.conflicts,
             "warnings": self.warnings,
-            "card_create": self.card_create,
-            "label_create": self.label_create,
-            "list_mismatches": self.list_mismatches,
+            "project_card_create": self.project_card_create,
+            "project_card_update": self.project_card_update,
+            "lists_to_create": self.lists_to_create,
             "summary": {
-                "pull_create_count": len(self.pull_create),
+                "push_create_card_count": len(self.push_create_card),
+                "push_update_card_count": len(self.push_update_card),
+                "push_move_card_count": len(self.push_move_card),
+                "push_archive_card_count": len(self.push_archive_card),
+                "push_attach_link_count": len(self.push_attach_link),
                 "pull_update_count": len(self.pull_update),
+                "pull_move_count": len(self.pull_move),
                 "pull_complete_count": len(self.pull_complete),
                 "pull_reopen_count": len(self.pull_reopen),
-                "pull_delete_count": len(self.pull_delete),
-                "pull_create_root_count": len(self.pull_create_root),
-                "push_create_checklist_count": len(self.push_create_checklist),
-                "push_create_item_count": len(self.push_create_item),
-                "push_update_item_count": len(self.push_update_item),
-                "push_complete_item_count": len(self.push_complete_item),
-                "push_delete_item_count": len(self.push_delete_item),
-                "push_rename_checklist_count": len(self.push_rename_checklist),
-                "push_reopen_item_count": len(self.push_reopen_item),
                 "conflict_count": len(self.conflicts),
-                "list_mismatch_count": len(self.list_mismatches),
             },
         }
 
@@ -152,111 +316,67 @@ class TrelloSyncPlan:
 class TrelloApplyInput:
     """Input for applying Trello sync changes locally."""
 
-    created_locally: list[dict[str, JsonValue]] = field(default_factory=list)
-    created_root_locally: list[dict[str, JsonValue]] = field(default_factory=list)
     updated_locally: list[dict[str, JsonValue]] = field(default_factory=list)
     completed_locally: list[str] = field(default_factory=list)
     reopened_locally: list[str] = field(default_factory=list)
-    pull_delete: list[str] = field(default_factory=list)
-    link_trello_ids: list[dict[str, str]] = field(default_factory=list)
+    link_card_ids: list[dict[str, str]] = field(default_factory=list)
+    link_project_card_id: str | None = None
+
+    # Legacy checklist-based fields (used by trello_full_sync)
     link_trello_card_id: str | None = None
+    created_locally: list[dict[str, JsonValue]] = field(default_factory=list)
+    created_root_locally: list[dict[str, JsonValue]] = field(default_factory=list)
 
 
-# ── Flattening logic ─────────────────────────────────────────────────────────
+# ── Rate limiting ───────────────────────────────────────────────────────────
 
 
-def _flatten_descendants(
+@dataclass
+class RateLimitConfig:
+    """Configuration for Trello API rate limiting."""
+
+    delay_ms: int = 100  # delay between API calls in milliseconds
+    backoff_base_ms: int = 500  # base delay for exponential backoff on 429
+    max_retries: int = 3  # max retries per call on 429
+
+
+# ── Diff engine ─────────────────────────────────────────────────────────────
+
+
+def _resolve_target_list(
     todo: Todo,
-    todo_map: dict[str, Todo],
-    prefix: str = "",
-) -> list[tuple[str, Todo]]:
-    """Recursively flatten a todo's descendants depth-first.
+    cfg: ProjConfig,
+    meta: object,
+) -> str:
+    """Determine which Trello list a todo card should be in.
 
-    Returns list of (display_name, todo) tuples. display_name uses the
-    dotted ID path format: "2.3.1 \u2014 title" (em dash separator).
-    The todo's own ID already encodes the hierarchy (e.g., "1.1.1").
+    Returns the list name from list_mappings config.
     """
-    results: list[tuple[str, Todo]] = []
-    for child_id in todo.children:
-        child = todo_map.get(child_id)
-        if child is None:
-            continue
-        results.append((f"{child.id} \u2014 {child.title}", child))
-        # Recurse into grandchildren
-        results.extend(_flatten_descendants(child, todo_map, prefix))
-    return results
+    proj_lm = getattr(meta, "trello", None)
+    if proj_lm and hasattr(proj_lm, "list_mappings") and proj_lm.list_mappings is not None:
+        lm = proj_lm.list_mappings
+    else:
+        lm = cfg.trello.list_mappings
 
-
-def build_expected_state(
-    todos: list[Todo],
-) -> tuple[list[dict[str, JsonValue]], list[dict[str, JsonValue]]]:
-    """Build the expected Trello checklist state from local todos.
-
-    Returns (checklists, tasks_items) where:
-    - checklists: list of dicts with keys: todo_id, name, items (list of item dicts)
-    - tasks_items: list of item dicts for the "Tasks" catch-all checklist
-    Each item dict has: todo_id, name, checked
-    """
-    todo_map = {t.id: t for t in todos}
-    roots = [t for t in todos if t.parent is None]
-
-    checklists: list[dict[str, JsonValue]] = []
-    tasks_items: list[dict[str, JsonValue]] = []
-
-    for root in roots:
-        if root.children:
-            # Root with children -> checklist
-            items: list[dict[str, JsonValue]] = []
-            # Self-referencing item at position 0: makes the root todo
-            # itself visible as a checkable item in the Trello checklist.
-            items.append({
-                "todo_id": root.id,
-                "name": root.title,
-                "checked": root.status in TERMINAL_STATUSES,
-                "is_self_ref": True,
-            })
-            for display_name, desc_todo in _flatten_descendants(root, todo_map):
-                items.append({
-                    "todo_id": desc_todo.id,
-                    "name": display_name,
-                    "checked": desc_todo.status in TERMINAL_STATUSES,
-                })
-            checklists.append({
-                "todo_id": root.id,
-                "name": root.title,
-                "items": items,
-            })
-        else:
-            # Root leaf -> item in "Tasks" checklist
-            tasks_items.append({
-                "todo_id": root.id,
-                "name": root.title,
-                "checked": root.status in TERMINAL_STATUSES,
-            })
-
-    return checklists, tasks_items
-
-
-# ── Core logic ───────────────────────────────────────────────────────────────
+    if todo.status in TERMINAL_STATUSES:
+        return lm.done
+    return lm.tasks
 
 
 def compute_diff(
-    trello_card_json: str,
+    trello_cards_json: str,
     cfg: ProjConfig,
     name: str,
 ) -> TrelloSyncPlan:
-    """Compare Trello card checklists with local todos using last-changed-wins.
+    """Compare local todos vs Trello cards and produce a card-based sync plan.
 
-    For each linked item, the algorithm checks:
-    - local_changed: todo.updated > sync_state.last_sync
-    - trello_changed: item.name != sync_state.synced_name or item.state != sync_state.synced_state
-    - Both changed -> conflict (default: prefer local)
-    - Only local changed -> push
-    - Only Trello changed -> pull
-    - Neither changed -> skip
-
-    First-sync migration: if trello_sync_state is None, fall back to direct
-    comparison (backward compat for one cycle), then record snapshot on apply.
+    Args:
+        trello_cards_json: JSON string containing:
+            - "cards": list of Trello card objects (id, name, desc, idList, list)
+            - "lists": list of Trello list objects (id, name)
+            - "project_card": optional project tracking card object
+        cfg: proj config
+        name: project name
     """
     meta = storage.load_meta(cfg, name)
     todos = storage.load_todos(cfg, name)
@@ -264,561 +384,402 @@ def compute_diff(
 
     plan = TrelloSyncPlan()
 
-    # Check if card needs to be created
-    if not meta.trello_card_id:
-        plan.card_create = True
-
-    # Parse Trello card state
+    # Parse Trello state
     try:
-        trello_data: dict[str, JsonValue] = json.loads(trello_card_json) if trello_card_json else {}
+        trello_data: dict[str, JsonValue] = (
+            json.loads(trello_cards_json) if trello_cards_json else {}
+        )
     except json.JSONDecodeError:
         trello_data = {}
 
-    checklists_raw = trello_data.get("checklists", [])
-    trello_checklists: list[dict[str, JsonValue]] = [c for c in checklists_raw if isinstance(c, dict)] if isinstance(checklists_raw, list) else []
-    valid_card = "checklists" in trello_data
+    cards_raw = trello_data.get("cards", [])
+    trello_cards: list[dict[str, JsonValue]] = (
+        [c for c in cards_raw if isinstance(c, dict)] if isinstance(cards_raw, list) else []
+    )
 
-    # Build Trello lookups
-    trello_items_by_id: dict[str, dict[str, JsonValue]] = {}  # item_id -> item data
-    trello_checklists_by_id: dict[str, dict[str, JsonValue]] = {}  # checklist_id -> checklist data
-    for cl in trello_checklists:
-        cl_id = str(cl.get("id", ""))
-        if cl_id:
-            trello_checklists_by_id[cl_id] = cl
-        check_items = cl.get("checkItems", [])
-        for item in (check_items if isinstance(check_items, list) else []):
-            item_id = str(item.get("id", ""))
-            if item_id:
-                item["_checklist_id"] = cl_id
-                item["_checklist_name"] = str(cl.get("name", ""))
-                trello_items_by_id[item_id] = item
+    lists_raw = trello_data.get("lists", [])
+    trello_lists: list[dict[str, JsonValue]] = (
+        [lst for lst in lists_raw if isinstance(lst, dict)] if isinstance(lists_raw, list) else []
+    )
 
-    # Build local lookups
+    # Build lookups
     todo_map = {t.id: t for t in todos}
-    local_by_checklist_item_id: dict[str, Todo] = {}
-    local_by_checklist_id: dict[str, Todo] = {}
+    archived_card_ids = {t.trello_card_id for t in archived if t.trello_card_id}
+
+    # Trello card lookup by ID
+    trello_card_by_id: dict[str, dict[str, JsonValue]] = {}
+    for card in trello_cards:
+        cid = str(card.get("id", ""))
+        if cid:
+            trello_card_by_id[cid] = card
+
+    # Trello list name lookup
+    list_name_by_id: dict[str, str] = {}
+    list_id_by_name: dict[str, str] = {}
+    for lst in trello_lists:
+        lid = str(lst.get("id", ""))
+        lname = str(lst.get("name", ""))
+        if lid and lname:
+            list_name_by_id[lid] = lname
+            list_id_by_name[lname.lower()] = lid
+
+    # Determine required lists
+    proj_lm = (
+        meta.trello.list_mappings
+        if meta.trello.list_mappings is not None
+        else cfg.trello.list_mappings
+    )
+    required_lists = {proj_lm.tasks, proj_lm.done, proj_lm.projects}
+    required_lists.discard("")
+    for req_list in required_lists:
+        if req_list.lower() not in list_id_by_name:
+            plan.lists_to_create.append(req_list)
+
+    # Check project tracking card
+    project_card = trello_data.get("project_card")
+    if not meta.trello_card_id:
+        plan.project_card_create = True
+    elif isinstance(project_card, dict):
+        # Check if project card description needs updating
+        current_desc = str(project_card.get("desc", ""))
+        expected_desc = build_project_card_description(meta, todos, name)
+        if compute_desc_hash(current_desc) != compute_desc_hash(expected_desc):
+            plan.project_card_update = True
+
+    # ── Linked todos: compare local vs Trello cards ─────────────────
+
+    seen_card_ids: set[str] = set()
 
     for todo in todos:
-        if todo.trello_checklist_item_id:
-            local_by_checklist_item_id[todo.trello_checklist_item_id] = todo
-        if todo.trello_checklist_id:
-            local_by_checklist_id[todo.trello_checklist_id] = todo
-
-    # Build archive lookup (Bug 1 fix: detect items linked to archived todos)
-    archived_by_checklist_item_id: dict[str, Todo] = {}
-    archived_by_checklist_id: dict[str, Todo] = {}
-    for todo in archived:
-        if todo.trello_checklist_item_id:
-            archived_by_checklist_item_id[todo.trello_checklist_item_id] = todo
-        if todo.trello_checklist_id:
-            archived_by_checklist_id[todo.trello_checklist_id] = todo
-
-    # Build expected local state
-    expected_checklists, expected_tasks_items = build_expected_state(todos)
-
-    # ── Linked items: last-changed-wins ──────────────────────────────
-
-    ghost_deleted_ids: set[str] = set()
-
-    for item_id, item in trello_items_by_id.items():
-        item_name = str(item.get("name", ""))
-        item_state = str(item.get("state", "incomplete"))
-        is_checked = item_state == "complete"
-
-        if item_id in local_by_checklist_item_id:
-            local_todo = local_by_checklist_item_id[item_id]
-            local_is_done = local_todo.status in TERMINAL_STATUSES
-            expected_name = _find_expected_name(
-                local_todo.id, expected_checklists, expected_tasks_items,
+        if not todo.trello_card_id:
+            # Unlinked todo -> needs card creation
+            expected_title = format_card_title(name, todo.id, todo.title)
+            expected_desc = build_card_description(todo, name)
+            target_list = _resolve_target_list(todo, cfg, meta)
+            plan.push_create_card.append(
+                {
+                    "todo_id": todo.id,
+                    "title": expected_title,
+                    "desc": expected_desc,
+                    "list_name": target_list,
+                    "parent_todo_id": todo.parent or "",
+                }
             )
-            local_display_name = expected_name or local_todo.title
-            local_state_str = "complete" if local_is_done else "incomplete"
+            continue
 
-            ss = local_todo.trello_sync_state
+        seen_card_ids.add(todo.trello_card_id)
 
-            if ss is None or not ss.last_sync:
-                # ── First-sync migration (232.8): no snapshot yet ────
-                # Fall back to direct comparison for one cycle
-                checklist_id = str(item.get("_checklist_id", ""))
-                _first_sync_diff(
-                    plan, local_todo, item_name, item_state, is_checked,
-                    local_is_done, local_display_name, expected_checklists,
-                    expected_tasks_items, checklist_id,
+        trello_card = trello_card_by_id.get(todo.trello_card_id)
+        if not trello_card:
+            # Card was deleted in Trello -- clear link, re-create
+            plan.warnings.append(
+                f"Card {todo.trello_card_id} for todo {todo.id} not found in Trello; will re-create"
+            )
+            # Clear the stale link so it gets re-created
+            todo.trello_card_id = None
+            expected_title = format_card_title(name, todo.id, todo.title)
+            expected_desc = build_card_description(todo, name)
+            target_list = _resolve_target_list(todo, cfg, meta)
+            plan.push_create_card.append(
+                {
+                    "todo_id": todo.id,
+                    "title": expected_title,
+                    "desc": expected_desc,
+                    "list_name": target_list,
+                    "parent_todo_id": todo.parent or "",
+                }
+            )
+            continue
+
+        # Card exists -- check for changes
+        trello_title = str(trello_card.get("name", ""))
+        trello_desc = str(trello_card.get("desc", ""))
+        trello_list_id = str(trello_card.get("idList", ""))
+        bool(trello_card.get("closed", False))
+
+        expected_title = format_card_title(name, todo.id, todo.title)
+        expected_desc = build_card_description(todo, name)
+        expected_list = _resolve_target_list(todo, cfg, meta)
+        expected_list_id = list_id_by_name.get(expected_list.lower(), "")
+
+        ss = todo.trello_sync_state
+
+        if ss is None or not ss.last_sync:
+            # First sync: push local state (local wins)
+            if trello_title != expected_title or compute_desc_hash(
+                trello_desc
+            ) != compute_desc_hash(expected_desc):
+                plan.push_update_card.append(
+                    {
+                        "todo_id": todo.id,
+                        "card_id": todo.trello_card_id,
+                        "title": expected_title,
+                        "desc": expected_desc,
+                    }
                 )
-            else:
-                # ── Last-changed-wins logic (232.5) ──────────────────
-                local_changed = local_todo.updated > ss.last_sync
-                trello_changed = (
-                    item_name != ss.synced_name or item_state != ss.synced_state
+            if expected_list_id and trello_list_id != expected_list_id:
+                plan.push_move_card.append(
+                    {
+                        "todo_id": todo.id,
+                        "card_id": todo.trello_card_id,
+                        "list_id": expected_list_id,
+                        "list_name": expected_list,
+                    }
                 )
-
-                if local_changed and trello_changed:
-                    # Conflict — true last-changed-wins using timestamps
-                    trello_ts = ss.trello_updated if ss else ""
-                    local_ts = local_todo.updated or ""
-                    if trello_ts and trello_ts > local_ts:
-                        resolution = "trello"
-                    else:
-                        resolution = "local"
-                    plan.conflicts.append({
-                        "todo_id": local_todo.id,
-                        "local_value": {"name": local_display_name, "state": local_state_str},
-                        "trello_value": {"name": item_name, "state": item_state},
-                        "trello_updated": trello_ts,
-                        "local_updated": local_ts,
-                        "resolution": resolution,
-                        "resolution_rationale": (
-                            "trello_updated > local_updated" if resolution == "trello"
-                            else "local_updated >= trello_updated (local wins by default)"
-                        ),
-                    })
-                    if resolution == "trello":
-                        _emit_pull_for_linked(
-                            plan, local_todo, item_name, item_state, is_checked,
-                            local_is_done, expected_checklists, expected_tasks_items,
-                        )
-                    else:
-                        _emit_push_for_linked(
-                            plan, local_todo, local_display_name, local_state_str,
-                            item_name, item_state, item,
-                        )
-                elif local_changed and not trello_changed:
-                    # Only local changed -> push
-                    _emit_push_for_linked(
-                        plan, local_todo, local_display_name, local_state_str,
-                        item_name, item_state, item,
-                    )
-                elif trello_changed and not local_changed:
-                    # Only Trello changed -> pull
-                    _emit_pull_for_linked(
-                        plan, local_todo, item_name, item_state, is_checked,
-                        local_is_done, expected_checklists, expected_tasks_items,
-                    )
-                # else: neither changed -> skip
-
-        elif item_id in archived_by_checklist_item_id:
-            # Bug 1 fix: Item is linked to an archived todo — don't pull as new.
-            # If Trello item is still unchecked, push complete to keep in sync.
-            if not is_checked:
-                plan.push_complete_item.append({
-                    "item_id": item_id,
-                    "checklist_id": str(item.get("_checklist_id", "")),
-                    "state": "complete",
-                })
-            # If already checked: skip — both sides agree it's done.
-
-        else:
-            # New item in Trello not linked locally — create
-            actual_title = _strip_id_prefix(item_name)
-
-            # Bug 2 fix: ghost check against archived todos
-            if _ghost_check(actual_title, archived):
-                # Matches a recently archived todo — don't pull duplicate.
-                # Push delete to clean up the Trello side.
-                plan.push_delete_item.append({
-                    "item_id": item_id,
-                    "checklist_id": str(item.get("_checklist_id", "")),
-                })
-                ghost_deleted_ids.add(item_id)
-                continue
-
-            cl_id = str(item.get("_checklist_id", ""))
-
-            # Determine parent: if checklist is linked to a root todo, parent = that root
-            parent_id: str | None = None
-            parent_checklist_id: str | None = None
-            parent_todo: Todo | None = None
-            if cl_id and cl_id in local_by_checklist_id:
-                parent_todo = local_by_checklist_id[cl_id]
-                parent_id = parent_todo.id
-            elif cl_id and str(item.get("_checklist_name", "")) != TASKS_CHECKLIST_NAME:
-                # Bug 3 fix: item is in a new checklist (will be pull_create_root)
-                # Store the checklist ID so apply_changes can resolve the parent
-                parent_checklist_id = cl_id
-
-            plan.pull_create.append({
-                "title": actual_title,
-                "parent": parent_id,
-                "parent_checklist_id": parent_checklist_id,
-                "trello_checklist_item_id": item_id,
-                "checked": is_checked,
-            })
-
-    # New checklists not linked locally -> potentially new root todos
-    for cl_id, cl in trello_checklists_by_id.items():
-        cl_name = str(cl.get("name", ""))
-        # Bug 1 fix: also skip checklists linked to archived root todos
-        if (
-            cl_id not in local_by_checklist_id
-            and cl_id not in archived_by_checklist_id
-            and cl_name != TASKS_CHECKLIST_NAME
-        ):
-            plan.pull_create_root.append({
-                "title": cl_name,
-                "trello_checklist_id": cl_id,
-            })
-
-    # ── Pull-delete detection (replaces Bug 4 closure propagation) ───
-    # When a linked todo's Trello checklist item is missing, surface it as
-    # a pull_delete candidate requiring user confirmation instead of
-    # auto-completing.
-    stale_links: set[str] = set()
-    if valid_card:
-        # Build set of checklist IDs present on the Trello card
-        present_checklist_ids = set(trello_checklists_by_id.keys())
-        for todo in todos:
+            # Check if Trello card is in done list but local isn't done
+            trello_list_name = list_name_by_id.get(trello_list_id, "")
             if (
-                todo.trello_checklist_item_id
-                and todo.trello_checklist_item_id not in trello_items_by_id
+                trello_list_name.lower() == proj_lm.done.lower()
                 and todo.status not in TERMINAL_STATUSES
             ):
-                # Checklist-level guard: if the entire checklist is missing
-                # from the card, emit a warning instead of individual
-                # pull_delete entries (the checklist may have been renamed
-                # or the card data may be stale).
-                parent_cl_id = todo.trello_checklist_id
-                if not parent_cl_id and todo.parent:
-                    parent_todo = todo_map.get(todo.parent)
-                    if parent_todo:
-                        parent_cl_id = parent_todo.trello_checklist_id
-                if parent_cl_id and parent_cl_id not in present_checklist_ids:
-                    # Entire checklist missing — warn, don't generate
-                    # individual pull_delete entries.
-                    warn_msg = (
-                        f"Checklist {parent_cl_id} missing from Trello card; "
-                        f"skipping pull_delete for todo {todo.id} ({todo.title!r})"
-                    )
-                    if warn_msg not in plan.warnings:
-                        plan.warnings.append(warn_msg)
-                    continue
-                stale_links.add(todo.trello_checklist_item_id)
-                plan.pull_delete.append({
-                    "todo_id": todo.id,
-                    "title": todo.title,
-                    "trello_checklist_item_id": todo.trello_checklist_item_id,
-                })
-
-    # ── Push phase: Local -> Trello (unlinked items) ─────────────────
-
-    # Push checklists for root todos with children
-    for cl_spec in expected_checklists:
-        root_id = str(cl_spec["todo_id"])
-        root_todo = todo_map.get(root_id)
-        if root_todo is None:
-            continue
-
-        if not root_todo.trello_checklist_id:
-            # New checklist to create
-            plan.push_create_checklist.append({
-                "todo_id": root_id,
-                "name": str(cl_spec["name"]),
-            })
+                plan.pull_complete.append(todo.id)
+            elif (
+                trello_list_name.lower() != proj_lm.done.lower()
+                and todo.status in TERMINAL_STATUSES
+            ):
+                # Trello says active but local says done
+                plan.push_move_card.append(
+                    {
+                        "todo_id": todo.id,
+                        "card_id": todo.trello_card_id,
+                        "list_id": list_id_by_name.get(proj_lm.done.lower(), ""),
+                        "list_name": proj_lm.done,
+                    }
+                )
         else:
-            # Check if name changed
-            trello_cl = trello_checklists_by_id.get(root_todo.trello_checklist_id)
-            if trello_cl:
-                trello_name = str(trello_cl.get("name", ""))
-                local_name = str(cl_spec["name"])
-                if trello_name != local_name:
-                    plan.push_rename_checklist.append({
-                        "checklist_id": root_todo.trello_checklist_id,
-                        "name": local_name,
-                    })
-                    # Also rename the self-ref item if it exists but was
-                    # NOT processed by the linked-items loop (item not on
-                    # Trello card — edge case).  When the self-ref item IS
-                    # on the Trello card, the linked-items loop already
-                    # handles the name push via last-changed-wins.
-                    if (
-                        root_todo.trello_checklist_item_id
-                        and root_todo.trello_checklist_item_id not in trello_items_by_id
-                    ):
-                        plan.push_update_item.append({
-                            "item_id": root_todo.trello_checklist_item_id,
-                            "name": local_name,
-                            "checklist_id": root_todo.trello_checklist_id,
-                        })
+            # ── Last-changed-wins logic ─────────────────────────────
+            local_changed_title = expected_title != ss.synced_name
+            local_changed_desc = compute_desc_hash(expected_desc) != ss.desc_hash
+            local_changed_list = expected_list_id and expected_list_id != ss.list_id
+            local_changed = local_changed_title or local_changed_desc or local_changed_list
 
-        # Push items within this checklist (only unlinked ones)
-        items_spec = cl_spec.get("items", [])
-        if isinstance(items_spec, list):
-            for item_spec in items_spec:
-                if not isinstance(item_spec, dict):
-                    continue
-                item_todo_id = str(item_spec.get("todo_id", ""))
-                is_self_ref = bool(item_spec.get("is_self_ref", False))
-                item_todo = todo_map.get(item_todo_id)
-                if item_todo is None:
-                    continue
-                # Self-ref items: the root todo IS the checklist owner.
-                # Use trello_checklist_item_id (not trello_checklist_id) to
-                # decide whether the self-ref item is already linked.
-                if is_self_ref:
-                    if not root_todo.trello_checklist_item_id and root_todo.trello_checklist_id:
-                        # Backward compat: checklist exists but self-ref item
-                        # was never created — emit push_create_item.
-                        plan.push_create_item.append({
-                            "todo_id": root_todo.id,
-                            "name": str(item_spec.get("name", "")),
-                            "checklist_id": root_todo.trello_checklist_id,
-                            "checked": bool(item_spec.get("checked", False)),
-                            "is_self_ref": True,
-                        })
-                    elif not root_todo.trello_checklist_id:
-                        # New checklist being created — self-ref item will be
-                        # created along with the checklist (no checklist_id yet).
-                        plan.push_create_item.append({
-                            "todo_id": root_todo.id,
-                            "name": str(item_spec.get("name", "")),
-                            "checklist_id": None,
-                            "checked": bool(item_spec.get("checked", False)),
-                            "is_self_ref": True,
-                        })
-                    # If already linked: handled by last-changed-wins loop above.
-                    continue
-                # Only push-create for items not yet linked; linked items
-                # are handled by the last-changed-wins loop above.
-                # Bug 5 fix: skip items with stale links (handled by pull_delete detection)
-                if not item_todo.trello_checklist_item_id:
-                    plan.push_create_item.append({
-                        "todo_id": item_todo.id,
-                        "name": str(item_spec.get("name", "")),
-                        "checklist_id": root_todo.trello_checklist_id,
-                        "checked": bool(item_spec.get("checked", False)),
-                    })
-                # Stale links (item deleted in Trello) are handled by pull_delete
-                # detection above — no re-creation.
+            trello_changed_title = trello_title != ss.synced_name
+            trello_changed_desc = compute_desc_hash(trello_desc) != ss.desc_hash
+            trello_changed_list = trello_list_id != ss.list_id
+            trello_changed = trello_changed_title or trello_changed_desc or trello_changed_list
 
-    # Push items for the "Tasks" catch-all checklist
-    # Find Tasks checklist: prefer stored ID, fall back to name-based scan
-    tasks_cl_id: str | None = None
-    stored_tasks_id = meta.trello.trello_tasks_checklist_id
-    if stored_tasks_id and stored_tasks_id in trello_checklists_by_id:
-        # Stored ID is still valid
-        tasks_cl_id = stored_tasks_id
-    else:
-        # Stored ID missing or stale — fall back to name-based scan
-        for cl_id, cl in trello_checklists_by_id.items():
-            if str(cl.get("name", "")) == TASKS_CHECKLIST_NAME:
-                tasks_cl_id = cl_id
-                break
-        # Update stored ID if we found it by name (or clear if gone)
-        if tasks_cl_id != stored_tasks_id:
-            meta.trello.trello_tasks_checklist_id = tasks_cl_id
-            storage.save_meta(cfg, meta)
+            if local_changed and trello_changed:
+                # Conflict -- use timestamps for resolution
+                local_ts = todo.updated or ""
+                trello_ts = ss.trello_updated if ss.trello_updated else ""
+                resolution = "trello" if trello_ts and trello_ts > local_ts else "local"
 
-    if expected_tasks_items and not tasks_cl_id:
-        # Need to create "Tasks" checklist
-        plan.push_create_checklist.append({
-            "todo_id": "_tasks",
-            "name": TASKS_CHECKLIST_NAME,
-        })
+                plan.conflicts.append(
+                    {
+                        "todo_id": todo.id,
+                        "local_title": expected_title,
+                        "trello_title": trello_title,
+                        "local_updated": local_ts,
+                        "trello_updated": trello_ts,
+                        "resolution": resolution,
+                    }
+                )
 
-    for item_spec in expected_tasks_items:
-        item_todo_id = str(item_spec.get("todo_id", ""))
-        item_todo = todo_map.get(item_todo_id)
-        if item_todo is None:
+                if resolution == "trello":
+                    _emit_pull_for_card(
+                        plan,
+                        todo,
+                        trello_title,
+                        trello_list_id,
+                        list_name_by_id,
+                        proj_lm,
+                        name,
+                    )
+                else:
+                    plan.warnings.append(
+                        f"Conflict on todo {todo.id}: both sides changed since last sync; "
+                        f"local wins (local_updated={local_ts}, trello_updated={trello_ts})"
+                    )
+                    _emit_push_for_card(
+                        plan,
+                        todo,
+                        expected_title,
+                        expected_desc,
+                        expected_list_id,
+                        expected_list,
+                        trello_title,
+                        trello_desc,
+                        trello_list_id,
+                    )
+            elif local_changed:
+                _emit_push_for_card(
+                    plan,
+                    todo,
+                    expected_title,
+                    expected_desc,
+                    expected_list_id,
+                    expected_list,
+                    trello_title,
+                    trello_desc,
+                    trello_list_id,
+                )
+            elif trello_changed:
+                _emit_pull_for_card(
+                    plan,
+                    todo,
+                    trello_title,
+                    trello_list_id,
+                    list_name_by_id,
+                    proj_lm,
+                    name,
+                )
+            # else: neither changed -> skip
+
+    # ── Pull: scan Trello cards for changes to linked todos ─────────
+    # Build reverse lookup: trello_card_id -> todo
+    card_id_to_todo: dict[str, Todo] = {}
+    for t in todos:
+        if t.trello_card_id:
+            card_id_to_todo[t.trello_card_id] = t
+
+    # Determine mapped list names (lowercase) for filtering
+    mapped_list_names: set[str] = set()
+    for ln in (proj_lm.tasks, proj_lm.done, proj_lm.projects, proj_lm.created):
+        if ln:
+            mapped_list_names.add(ln.lower())
+
+    for card_id, card in trello_card_by_id.items():
+        if card_id in seen_card_ids:
             continue
-        # Only push-create for items not yet linked
-        # Bug 5 fix: skip items with stale links (handled by closure propagation)
-        if not item_todo.trello_checklist_item_id:
-            plan.push_create_item.append({
-                "todo_id": item_todo.id,
-                "name": str(item_spec.get("name", "")),
-                "checklist_id": tasks_cl_id,
-                "checked": bool(item_spec.get("checked", False)),
-            })
-        # Stale links (item deleted in Trello) are handled by closure
-        # propagation above — no re-creation.
 
-    # Push delete: items in Trello not linked to any local or archived todo
-    # Bug 7 fix: include archived todos' links to prevent deleting their items
-    linked_trello_item_ids = {
-        t.trello_checklist_item_id for t in todos if t.trello_checklist_item_id
-    } | {
-        t.trello_checklist_item_id for t in archived if t.trello_checklist_item_id
-    }
-    for item_id in trello_items_by_id:
-        if item_id in ghost_deleted_ids:
-            continue  # already queued for deletion by ghost check
-        if item_id not in linked_trello_item_ids and item_id not in {
-            str(pc.get("trello_checklist_item_id", ""))
-            for pc in plan.pull_create
-        }:
-            plan.push_delete_item.append({
-                "item_id": item_id,
-                "checklist_id": str(trello_items_by_id[item_id].get("_checklist_id", "")),
-            })
+        card_list_id = str(card.get("idList", ""))
+        card_list_name = list_name_by_id.get(card_list_id, "")
 
-    # ── List mismatch detection (228.5) ──────────────────────────────
-    # If list_mappings are configured, check whether the card's current list
-    # matches the expected list for the project's status.
-    if meta.trello_card_id and trello_data:
-        from server.lib.models import TrelloListMappings
+        # Skip cards in unmapped lists
+        if card_list_name and card_list_name.lower() not in mapped_list_names:
+            logger.debug(
+                "Skipping card %s in unmapped list '%s'",
+                card_id,
+                card_list_name,
+            )
+            continue
 
-        proj_lm = meta.trello.list_mappings if meta.trello.list_mappings is not None else cfg.trello.list_mappings
-        status_list_map: dict[str, str] = {
-            "active": proj_lm.active,
-            "paused": proj_lm.pending,
-            "blocked": proj_lm.pending,
-        }
-        expected_list = status_list_map.get(meta.status, "")
-        if expected_list:
-            list_val = trello_data.get("list")
-            current_list = str(list_val.get("name", "")) if isinstance(list_val, dict) else ""
-            if not current_list:
-                current_list = str(trello_data.get("idList", ""))
-            if current_list and current_list != expected_list:
-                plan.list_mismatches.append({
-                    "card_id": meta.trello_card_id,
-                    "current_list": current_list,
-                    "expected_list": expected_list,
-                    "project_status": meta.status,
-                })
+        if card_id in archived_card_ids:
+            # Card belongs to archived todo -- archive in Trello if not closed
+            if not card.get("closed", False):
+                plan.push_archive_card.append(
+                    {
+                        "card_id": card_id,
+                        "reason": "archived_todo",
+                    }
+                )
+            continue
+
+        # Check if this card is linked to a local todo (via card_id_to_todo)
+        linked_todo = card_id_to_todo.get(card_id)
+        if not linked_todo:
+            # Unlinked card -- try to match by parsing title
+            card_name = str(card.get("name", ""))
+            parsed = parse_card_title(card_name)
+            if parsed:
+                _, parsed_todo_id, _ = parsed
+                if parsed_todo_id in todo_map:
+                    logger.info(
+                        "Unlinked card %s matches todo %s by title"
+                        " but has no trello_card_id link; skipping",
+                        card_id,
+                        parsed_todo_id,
+                    )
+            else:
+                logger.debug(
+                    "Skipping unlinked card %s (no matching local todo)",
+                    card_id,
+                )
+            continue
+
+        # Card is linked but was already processed in the todos loop above
+        # (this branch shouldn't normally be reached since seen_card_ids tracks them)
+
+    # ── Attachment links for new cards ──────────────────────────────
+    # (computed after card creation -- actual attachment happens in apply phase)
+    for create_op in plan.push_create_card:
+        parent_tid = str(create_op.get("parent_todo_id", ""))
+        if parent_tid:
+            parent = todo_map.get(parent_tid)
+            if parent and parent.trello_card_id:
+                plan.push_attach_link.append(
+                    {
+                        "child_todo_id": str(create_op["todo_id"]),
+                        "parent_card_id": parent.trello_card_id,
+                    }
+                )
+
+    # Sort card creation in topological order (parents before children)
+    if plan.push_create_card:
+        id_order = {t.id: i for i, t in enumerate(_topo_sort_todos(todos))}
+        plan.push_create_card.sort(key=lambda op: id_order.get(str(op.get("todo_id", "")), 999999))
 
     return plan
 
 
-def _first_sync_diff(
+def _emit_push_for_card(
     plan: TrelloSyncPlan,
-    local_todo: Todo,
-    item_name: str,
-    item_state: str,
-    is_checked: bool,
-    local_is_done: bool,
-    local_display_name: str,
-    expected_checklists: list[dict[str, JsonValue]],
-    expected_tasks_items: list[dict[str, JsonValue]],
-    checklist_id: str = "",
+    todo: Todo,
+    expected_title: str,
+    expected_desc: str,
+    expected_list_id: str,
+    expected_list_name: str,
+    trello_title: str,
+    trello_desc: str,
+    trello_list_id: str,
 ) -> None:
-    """First-sync migration: no snapshot yet, use direct comparison (232.8).
-
-    Compares current local vs current Trello directly. Each difference is
-    treated as a push (local wins for first sync).
-    """
-    local_state_str = "complete" if local_is_done else "incomplete"
-
-    # Name difference -> push local name
-    if item_name != local_display_name:
-        plan.push_update_item.append({
-            "item_id": local_todo.trello_checklist_item_id,
-            "name": local_display_name,
-            "checklist_id": checklist_id,
-        })
-
-    # State difference -> push local state
-    if local_is_done and not is_checked:
-        plan.push_complete_item.append({
-            "item_id": local_todo.trello_checklist_item_id,
-            "checklist_id": checklist_id,
-            "state": "complete",
-        })
-    elif not local_is_done and is_checked:
-        # Trello is checked but local is not — for first sync, pull Trello's state
-        plan.pull_complete.append(local_todo.id)
+    """Emit push operations for a linked card where local wins."""
+    if expected_title != trello_title or compute_desc_hash(expected_desc) != compute_desc_hash(
+        trello_desc
+    ):
+        plan.push_update_card.append(
+            {
+                "todo_id": todo.id,
+                "card_id": todo.trello_card_id,
+                "title": expected_title,
+                "desc": expected_desc,
+            }
+        )
+    if expected_list_id and trello_list_id != expected_list_id:
+        plan.push_move_card.append(
+            {
+                "todo_id": todo.id,
+                "card_id": todo.trello_card_id,
+                "list_id": expected_list_id,
+                "list_name": expected_list_name,
+            }
+        )
 
 
-def _emit_push_for_linked(
+def _emit_pull_for_card(
     plan: TrelloSyncPlan,
-    local_todo: Todo,
-    local_display_name: str,
-    local_state_str: str,
-    trello_name: str,
-    trello_state: str,
-    trello_item: dict[str, JsonValue],
+    todo: Todo,
+    trello_title: str,
+    trello_list_id: str,
+    list_name_by_id: dict[str, str],
+    list_mappings: object,
+    project_name: str,
 ) -> None:
-    """Emit push operations for a linked item where local wins."""
-    if local_display_name != trello_name:
-        plan.push_update_item.append({
-            "item_id": local_todo.trello_checklist_item_id,
-            "name": local_display_name,
-            "checklist_id": str(trello_item.get("_checklist_id", "")),
-        })
-    if local_state_str != trello_state:
-        if local_state_str == "complete":
-            plan.push_complete_item.append({
-                "item_id": local_todo.trello_checklist_item_id,
-                "checklist_id": str(trello_item.get("_checklist_id", "")),
-                "state": "complete",
-            })
-        else:  # local is "incomplete", trello is "complete" → push reopen
-            if local_todo.trello_checklist_item_id:
-                # Check if push_update_item already has an entry for this item
-                existing = next(
-                    (e for e in plan.push_update_item
-                     if e.get("item_id") == local_todo.trello_checklist_item_id),
-                    None,
-                )
-                if existing is not None:
-                    existing["state"] = "incomplete"
-                else:
-                    plan.push_reopen_item.append({
-                        "trello_checklist_item_id": local_todo.trello_checklist_item_id,
-                        "checklist_id": str(trello_item.get("_checklist_id", "")),
-                        "state": "incomplete",
-                    })
+    """Emit pull operations for a linked card where Trello wins."""
+    # Parse title to extract the actual todo title
+    parsed = parse_card_title(trello_title)
+    if parsed:
+        _, _, actual_title = parsed
+    else:
+        actual_title = trello_title
 
-
-def _emit_pull_for_linked(
-    plan: TrelloSyncPlan,
-    local_todo: Todo,
-    item_name: str,
-    item_state: str,
-    is_checked: bool,
-    local_is_done: bool,
-    expected_checklists: list[dict[str, JsonValue]],
-    expected_tasks_items: list[dict[str, JsonValue]],
-) -> None:
-    """Emit pull operations for a linked item where Trello wins."""
-    # Name change
-    expected_name = _find_expected_name(
-        local_todo.id, expected_checklists, expected_tasks_items,
-    )
-    if item_name != local_todo.title:
-        if expected_name is None or item_name != expected_name:
-            actual_title = _strip_id_prefix(item_name)
-            plan.pull_update.append({
-                "todo_id": local_todo.id,
+    expected_title = format_card_title(project_name, todo.id, todo.title)
+    if trello_title != expected_title:
+        plan.pull_update.append(
+            {
+                "todo_id": todo.id,
                 "title": actual_title,
-            })
+            }
+        )
 
-    # State change
-    if is_checked and not local_is_done:
-        plan.pull_complete.append(local_todo.id)
-    elif not is_checked and local_is_done:
-        plan.pull_reopen.append(local_todo.id)
+    # Check list-based status
+    trello_list_name = list_name_by_id.get(trello_list_id, "")
+    done_list = getattr(list_mappings, "done", "Done")
 
-
-def _find_expected_name(
-    todo_id: str,
-    checklists: list[dict[str, JsonValue]],
-    tasks_items: list[dict[str, JsonValue]],
-) -> str | None:
-    """Find the expected display name for a todo in the expected state."""
-    for cl in checklists:
-        items = cl.get("items", [])
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, dict) and str(item.get("todo_id", "")) == todo_id:
-                    return str(item.get("name", ""))
-    for item in tasks_items:
-        if isinstance(item, dict) and str(item.get("todo_id", "")) == todo_id:
-            return str(item.get("name", ""))
-    return None
-
-
-def _strip_id_prefix(name: str) -> str:
-    """Strip ID prefix from a checklist item name.
-
-    Handles both old format ('1.1: title', '1.1: 1.1.1: title')
-    and new format ('1.1 \u2014 title', '1.1.1 \u2014 title').
-    """
-    # New format: "2.3.1 \u2014 title"
-    m = re.match(r"^[\d.]+\s*\u2014\s*", name)
-    if m:
-        return name[m.end():]
-    # Old format: one or more "ID: " prefixes (IDs contain digits and dots)
-    return re.sub(r"^(?:\d[\d.]*:\s*)+", "", name)
+    if trello_list_name.lower() == done_list.lower() and todo.status not in TERMINAL_STATUSES:
+        plan.pull_complete.append(todo.id)
+    elif trello_list_name.lower() != done_list.lower() and todo.status in TERMINAL_STATUSES:
+        plan.pull_reopen.append(todo.id)
 
 
 # ── Apply logic ──────────────────────────────────────────────────────────────
@@ -838,61 +799,13 @@ def apply_changes(
     now = _now()
 
     counts = {
-        "created": 0,
-        "created_root": 0,
         "updated": 0,
         "completed": 0,
         "reopened": 0,
-        "pull_deleted": 0,
         "linked": 0,
     }
 
-    # 1. Create new root todos (from pull_create_root -- new checklists)
-    todo: Todo | None
-    for item in data.created_root_locally:
-        todo = Todo(
-            id=next_todo_id(meta),
-            title=str(item.get("title", "")),
-            created=now,
-            updated=now,
-            trello_checklist_id=str(item["trello_checklist_id"]) if item.get("trello_checklist_id") else None,
-        )
-        todo.trello_sync_state = TrelloSyncState(trello_updated=now)
-        todos.append(todo)
-        todo_map[todo.id] = todo
-        counts["created_root"] += 1
-
-    # Build lookup: trello_checklist_id -> todo_id (for resolving new checklist parents)
-    checklist_id_to_todo: dict[str, str] = {}
-    for todo in todos:
-        if todo.trello_checklist_id:
-            checklist_id_to_todo[todo.trello_checklist_id] = todo.id
-
-    # 2. Create new child todos (from pull_create -- new checklist items)
-    for item in data.created_locally:
-        parent_id = str(item["parent"]) if item.get("parent") else None
-        # Bug 3 fix: resolve parent from parent_checklist_id if parent is None
-        if not parent_id and item.get("parent_checklist_id"):
-            parent_id = checklist_id_to_todo.get(str(item["parent_checklist_id"]))
-        parent_todo = todo_map.get(parent_id) if parent_id else None
-        todo = Todo(
-            id=next_todo_id(meta, parent=parent_todo),
-            title=str(item.get("title", "")),
-            created=now,
-            updated=now,
-            parent=parent_id,
-            trello_checklist_item_id=str(item["trello_checklist_item_id"]) if item.get("trello_checklist_item_id") else None,
-            status=TodoStatus.DONE if item.get("checked") else "pending",
-        )
-        todo.trello_sync_state = TrelloSyncState(trello_updated=now)
-        if parent_todo:
-            parent_todo.children.append(todo.id)
-            parent_todo.updated = now
-        todos.append(todo)
-        todo_map[todo.id] = todo
-        counts["created"] += 1
-
-    # 3. Update existing todos
+    # 1. Update existing todos (title changes from Trello)
     for item in data.updated_locally:
         todo_id = str(item.get("todo_id", ""))
         todo = todo_map.get(todo_id)
@@ -901,185 +814,84 @@ def apply_changes(
         if "title" in item and item["title"] is not None:
             todo.title = str(item["title"])
         todo.updated = now
-        if todo.trello_sync_state:
-            todo.trello_sync_state.trello_updated = now
-        else:
-            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["updated"] += 1
 
-    # 4. Link Trello IDs (after push operations return Trello IDs)
+    # 2. Link card IDs (after push card creation returns Trello IDs)
     trk_dir = str(storage.tracking_dir(cfg, name))
-    for link_item in data.link_trello_ids:
+    for link_item in data.link_card_ids:
         todo_id = str(link_item.get("todo_id", ""))
-        # Handle _tasks sentinel: store checklist ID on meta instead of a todo
-        if todo_id == "_tasks" and "trello_checklist_id" in link_item:
-            def _link_tasks_checklist(itm: Mapping[str, JsonValue] = link_item) -> None:  # noqa: E501
-                meta.trello.trello_tasks_checklist_id = (
-                    str(itm["trello_checklist_id"]) if itm.get("trello_checklist_id") else None
-                )
-            try:
-                retry_link(
-                    _link_tasks_checklist,
-                    orphan_context={
-                        "tracking_dir": trk_dir,
-                        "external_id": str(link_item.get("trello_checklist_id", "")),
-                        "todo_id": "_tasks",
-                        "service": "trello",
-                    },
-                )
-                counts["linked"] += 1
-            except Exception:
-                logger.warning(
-                    "Failed to link Trello checklist %s to _tasks; logged as orphaned resource",
-                    link_item.get("trello_checklist_id", ""),
-                )
-            continue
+        card_id = str(link_item.get("card_id", ""))
         todo = todo_map.get(todo_id)
-        if not todo:
+        if not todo or not card_id:
             continue
-        assert todo is not None
-        # -- Checklist-level link --
-        if "trello_checklist_id" in link_item:
-            def _link_checklist(t: Todo | None = todo, itm: Mapping[str, JsonValue] = link_item) -> None:  # noqa: E501  # todo narrowed by guard above
-                assert t is not None
-                t.trello_checklist_id = (
-                    str(itm["trello_checklist_id"]) if itm.get("trello_checklist_id") else None
-                )
-            try:
-                retry_link(
-                    _link_checklist,
-                    orphan_context={
-                        "tracking_dir": trk_dir,
-                        "external_id": str(link_item.get("trello_checklist_id", "")),
-                        "todo_id": todo_id,
-                        "service": "trello",
-                    },
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to link Trello checklist %s to todo %s; logged as orphaned resource",
-                    link_item.get("trello_checklist_id", ""),
-                    todo_id,
-                )
-                continue
-        # -- Item-level link --
-        if "trello_checklist_item_id" in link_item:
-            def _link_item(t: Todo | None = todo, itm: Mapping[str, JsonValue] = link_item) -> None:  # noqa: E501  # todo narrowed by guard above
-                assert t is not None
-                t.trello_checklist_item_id = (
-                    str(itm["trello_checklist_item_id"]) if itm.get("trello_checklist_item_id") else None
-                )
-            try:
-                retry_link(
-                    _link_item,
-                    orphan_context={
-                        "tracking_dir": trk_dir,
-                        "external_id": str(link_item.get("trello_checklist_item_id", "")),
-                        "todo_id": todo_id,
-                        "service": "trello",
-                    },
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to link Trello checklist item %s to todo %s; logged as orphaned resource",
-                    item.get("trello_checklist_item_id", ""),
-                    todo_id,
-                )
-                continue
-        todo.updated = now
-        counts["linked"] += 1
 
-    # 5. Link card ID on project meta
-    if data.link_trello_card_id:
-        meta.trello_card_id = data.link_trello_card_id
+        def _link_card(t: Todo | None = todo, cid: str = card_id) -> None:
+            if t is None:
+                raise ValueError("Todo must not be None when linking card")
+            t.trello_card_id = cid
 
-    # 6. Complete todos
-    to_archive: list[Todo] = []
+        try:
+            retry_link(
+                _link_card,
+                orphan_context={
+                    "tracking_dir": trk_dir,
+                    "external_id": card_id,
+                    "todo_id": todo_id,
+                    "service": "trello",
+                },
+            )
+            todo.updated = now
+            counts["linked"] += 1
+        except Exception:
+            logger.warning(
+                "Failed to link Trello card %s to todo %s; logged as orphaned resource",
+                card_id,
+                todo_id,
+            )
+
+    # 3. Link project card ID
+    if data.link_project_card_id:
+        meta.trello_card_id = data.link_project_card_id
+
+    # 4. Complete todos
     for raw_todo_id in data.completed_locally:
         todo = todo_map.get(str(raw_todo_id))
         if not todo or todo.status in TERMINAL_STATUSES:
             continue
         todo.status = TodoStatus.DONE
         todo.updated = now
-        if todo.trello_sync_state:
-            todo.trello_sync_state.trello_updated = now
-        else:
-            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["completed"] += 1
-        # Leaf todos (no parent, no children) get archived
-        if not todo.parent and not todo.children:
-            to_archive.append(todo)
-            for t in todos:
-                if todo.id in t.blocks:
-                    t.blocks.remove(todo.id)
-                    t.updated = now
-                if todo.id in t.blocked_by:
-                    t.blocked_by.remove(todo.id)
-                    t.updated = now
 
-    # 7. Reopen todos
+    # 5. Reopen todos
     for raw_todo_id in data.reopened_locally:
         todo = todo_map.get(str(raw_todo_id))
         if not todo or todo.status not in TERMINAL_STATUSES:
             continue
         todo.status = "pending"
         todo.updated = now
-        if todo.trello_sync_state:
-            todo.trello_sync_state.trello_updated = now
-        else:
-            todo.trello_sync_state = TrelloSyncState(trello_updated=now)
         counts["reopened"] += 1
 
-    # 7b. Delete user-confirmed todos (pull_delete) — cascade to descendants
-    to_delete: set[str] = set()
-    for raw_todo_id in data.pull_delete:
-        tid = str(raw_todo_id)
-        if tid in todo_map:
-            to_delete.add(tid)
-            for desc_id in _collect_descendants(tid, todo_map):
-                to_delete.add(desc_id)
-
-    # Cross-reference cleanup
-    for t in todos:
-        t.blocks = [x for x in t.blocks if x not in to_delete]
-        t.blocked_by = [x for x in t.blocked_by if x not in to_delete]
-        t.children = [x for x in t.children if x not in to_delete]
-
-    # Clear to_archive entries for cascade-deleted IDs
-    to_archive = [t for t in to_archive if t.id not in to_delete]
-
-    # Filter and count
-    todos = [t for t in todos if t.id not in to_delete]
-    counts["pull_deleted"] += len(to_delete)
-    for tid in to_delete:
-        todo_map.pop(tid, None)
-
-    # 8. Record trello_sync_state on all synced todos (232.7)
-    # Only update sync state when push operations have been confirmed complete,
-    # so the snapshot reflects what Trello actually has.
+    # 6. Record trello_sync_state on all synced todos
     if push_confirmed:
         sync_now = _now()
-        expected_checklists, expected_tasks_items = build_expected_state(todos)
+        # Resolve list IDs for all todos
         for todo in todos:
-            if todo.trello_checklist_item_id or todo.trello_checklist_id:
-                expected_name = _find_expected_name(
-                    todo.id, expected_checklists, expected_tasks_items,
-                )
-                display_name = expected_name or todo.title
-                state_str = "complete" if todo.status in TERMINAL_STATUSES else "incomplete"
+            if todo.trello_card_id:
+                expected_title = format_card_title(name, todo.id, todo.title)
+                expected_desc = build_card_description(todo, name)
+                _resolve_target_list(todo, cfg, meta)
+
                 todo.trello_sync_state = TrelloSyncState(
                     last_sync=sync_now,
-                    synced_name=display_name,
-                    synced_state=state_str,
+                    synced_name=expected_title,
+                    card_id=todo.trello_card_id,
+                    list_id="",  # Will be populated by caller with actual Trello list ID
+                    desc_hash=compute_desc_hash(expected_desc),
                 )
 
     # Save atomically
     storage.save_meta(cfg, meta)
-    if to_archive:
-        remaining = [t for t in todos if t not in to_archive]
-        storage.archive_and_remove_todos(cfg, name, remaining, to_archive)
-    else:
-        storage.save_todos(cfg, name, todos)
+    storage.save_todos(cfg, name, todos)
 
     return counts
 
@@ -1092,19 +904,17 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Compare Trello card checklists with local todos and produce a sync plan. "
-            "Takes Trello card state as JSON (checklists array with items). Returns a "
-            "JSON sync plan with batched operations for both sides. Uses last-changed-wins "
-            "logic with conflict detection. "
-            "When auto_apply=True, pull operations (pull_create, pull_update, "
-            "pull_complete, pull_reopen, pull_create_root) are applied locally "
-            "immediately and the response includes project_info so the caller "
-            "can execute push operations via Trello MCP tools. "
-            "Set summary_only=True to return only summary counts, not full plan arrays."
+            "Compare Trello cards with local todos and produce a card-based sync plan. "
+            "Takes Trello state as JSON with 'cards' (list of card objects), 'lists' "
+            "(list of list objects), and optional 'project_card'. Returns a JSON sync "
+            "plan with card-level operations (create, update, move, archive). "
+            "Uses last-changed-wins logic with conflict detection. "
+            "When auto_apply=True, pull operations are applied locally immediately. "
+            "Set summary_only=True to return only summary counts."
         )
     )
     def proj_trello_diff(
-        trello_card_json: str,
+        trello_cards_json: str,
         auto_apply: bool = False,
         summary_only: bool = False,
         project_name: str | None = None,
@@ -1114,7 +924,7 @@ def register(app: FastMCP) -> None:
             return result
         cfg, proj_name = result
 
-        plan = compute_diff(trello_card_json, cfg, proj_name)
+        plan = compute_diff(trello_cards_json, cfg, proj_name)
 
         if not auto_apply:
             plan_dict = plan.to_dict()
@@ -1131,18 +941,12 @@ def register(app: FastMCP) -> None:
                 "mcp_server": "trello",
                 "board_id": meta.trello.board_id or cfg.trello.default_board_id,
                 "trello_card_id": meta.trello_card_id or "",
-                "default_list": cfg.trello.default_list,
             },
         }
 
-        has_pulls = bool(
-            plan.pull_create or plan.pull_update or plan.pull_complete
-            or plan.pull_reopen or plan.pull_create_root
-        )
+        has_pulls = bool(plan.pull_update or plan.pull_complete or plan.pull_reopen)
         if has_pulls:
             pull_data = TrelloApplyInput(
-                created_locally=plan.pull_create,
-                created_root_locally=plan.pull_create_root,
                 updated_locally=plan.pull_update,
                 completed_locally=plan.pull_complete,
                 reopened_locally=plan.pull_reopen,
@@ -1151,8 +955,10 @@ def register(app: FastMCP) -> None:
             response["auto_applied"] = counts
         else:
             auto: JsonValue = {
-                "created": 0, "created_root": 0, "updated": 0,
-                "completed": 0, "reopened": 0, "pull_deleted": 0, "linked": 0,
+                "updated": 0,
+                "completed": 0,
+                "reopened": 0,
+                "linked": 0,
             }
             response["auto_applied"] = auto
 
@@ -1161,10 +967,9 @@ def register(app: FastMCP) -> None:
     @app.tool(
         description=(
             "Apply Trello sync results to local todos in bulk. Takes a JSON "
-            "object with: created_locally, created_root_locally, updated_locally, "
-            "completed_locally, reopened_locally, pull_delete (list of todo_ids "
-            "confirmed for deletion), link_trello_ids, "
-            "link_trello_card_id. All changes are applied atomically. "
+            "object with: updated_locally, completed_locally, reopened_locally, "
+            "link_card_ids (list of {todo_id, card_id}), "
+            "link_project_card_id. All changes are applied atomically. "
             "Records trello_sync_state on each synced todo after apply."
         )
     )
@@ -1190,21 +995,19 @@ def register(app: FastMCP) -> None:
             return [str(x) for x in v] if isinstance(v, list) else []
 
         def _str_dict_list(v: JsonValue) -> list[dict[str, str]]:
-            return [
-                {str(k): str(val) for k, val in x.items()}
-                for x in v if isinstance(x, dict)
-            ] if isinstance(v, list) else []
+            return (
+                [{str(k): str(val) for k, val in x.items()} for x in v if isinstance(x, dict)]
+                if isinstance(v, list)
+                else []
+            )
 
-        card_id_raw = raw.get("link_trello_card_id")
+        card_id_raw = raw.get("link_project_card_id")
         data = TrelloApplyInput(
-            created_locally=_dict_list(raw.get("created_locally", [])),
-            created_root_locally=_dict_list(raw.get("created_root_locally", [])),
             updated_locally=_dict_list(raw.get("updated_locally", [])),
             completed_locally=_str_list(raw.get("completed_locally", [])),
             reopened_locally=_str_list(raw.get("reopened_locally", [])),
-            pull_delete=_str_list(raw.get("pull_delete", [])),
-            link_trello_ids=_str_dict_list(raw.get("link_trello_ids", [])),
-            link_trello_card_id=str(card_id_raw) if isinstance(card_id_raw, str) else None,
+            link_card_ids=_str_dict_list(raw.get("link_card_ids", [])),
+            link_project_card_id=str(card_id_raw) if isinstance(card_id_raw, str) else None,
         )
         counts = apply_changes(data, cfg, proj_name, push_confirmed=push_confirmed)
         return json.dumps({"status": "ok", "counts": counts})

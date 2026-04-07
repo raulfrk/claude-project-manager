@@ -18,9 +18,8 @@ import pytest
 import yaml
 
 from server.lib import state, storage
-from server.lib.models import ProjConfig, ProjectEntry, ProjectMeta, RepoEntry
+from server.lib.models import ProjConfig, ProjectEntry, ProjectMeta
 from tests.conftest import call_tool
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,7 +53,8 @@ def _write_legacy_meta(cfg: ProjConfig, name: str, path: str) -> None:
     (tracking / "todos.yaml").write_text("todos: []\n")
     (tracking / "NOTES.md").write_text(f"# {name}\n")
     (tracking / "agents.yaml").write_text(
-        "version: 1\nagents:\n  define: null\n  research: null\n  decompose: null\n  execute: null\n"
+        "version: 1\nagents:\n  define: null\n"
+        "  research: null\n  decompose: null\n  execute: null\n"
     )
 
 
@@ -68,9 +68,7 @@ def legacy_project(cfg: ProjConfig, tmp_path: Path) -> tuple[str, ProjConfig]:
     # Register in index
     tracking = Path(cfg.tracking_dir) / name
     index = storage.load_index(cfg)
-    index.projects[name] = ProjectEntry(
-        name=name, tracking_dir=str(tracking), created="2026-01-01"
-    )
+    index.projects[name] = ProjectEntry(name=name, tracking_dir=str(tracking), created="2026-01-01")
     storage.save_index(cfg, index)
     state.set_session_active(name)
 
@@ -92,11 +90,13 @@ class TestFromDictLegacyPath:
 
     def test_from_dict_new_format_ignores_path(self) -> None:
         """When repos is non-empty, the legacy `path` key should be ignored."""
-        meta = ProjectMeta.from_dict({
-            "name": "x",
-            "repos": [{"label": "app", "path": "/bar"}],
-            "path": "/old",
-        })
+        meta = ProjectMeta.from_dict(
+            {
+                "name": "x",
+                "repos": [{"label": "app", "path": "/bar"}],
+                "path": "/old",
+            }
+        )
         assert len(meta.repos) == 1
         assert meta.repos[0].label == "app"
         assert meta.repos[0].path == "/bar"
@@ -129,8 +129,8 @@ class TestBuildContextWarning:
         self, cfg: ProjConfig, tmp_path: Path
     ) -> None:
         """_build_context should NOT warn for projects using the new repos format."""
-        from tests.conftest import setup_project
         from server.tools.context import _build_context
+        from tests.conftest import setup_project
 
         setup_project(cfg, "new-proj", str(tmp_path))
         result = _build_context(cfg, "new-proj")
@@ -206,7 +206,7 @@ class TestProjMigrateDirs:
         self, mcp_app: Any, legacy_project: tuple[str, ProjConfig]
     ) -> None:
         """Migrating twice should succeed first time, then report already migrated."""
-        name, cfg = legacy_project
+        _name, _cfg = legacy_project
         # First migration
         result1 = await call_tool(mcp_app, "proj_migrate_dirs", label="code")
         parsed1 = json.loads(result1)
@@ -251,8 +251,10 @@ class TestProjMigrateDirsExtended:
         )
         tracking_archived = Path(cfg.tracking_dir) / "proj-archived"
         index.projects["proj-archived"] = ProjectEntry(
-            name="proj-archived", tracking_dir=str(tracking_archived),
-            created="2026-01-01", archived=True,
+            name="proj-archived",
+            tracking_dir=str(tracking_archived),
+            created="2026-01-01",
+            archived=True,
         )
         storage.save_index(cfg, index)
 
@@ -269,7 +271,9 @@ class TestProjMigrateDirsExtended:
         assert "proj-archived" not in all_names
 
     async def test_migrate_dirs_single_project_overrides_all(
-        self, mcp_app: Any, cfg: ProjConfig,
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
     ) -> None:
         """Explicit project_name should migrate only that project."""
         # Create two legacy projects
@@ -289,7 +293,9 @@ class TestProjMigrateDirsExtended:
         assert len(parsed["migrated"]) == 1
         assert parsed["migrated"][0]["project"] == "proj-a"
         # proj-b should not appear anywhere
-        all_projects = [r["project"] for r in parsed["migrated"] + parsed["skipped"] + parsed["errors"]]
+        all_projects = [
+            r["project"] for r in parsed["migrated"] + parsed["skipped"] + parsed["errors"]
+        ]
         assert "proj-b" not in all_projects
 
     async def test_migrate_dirs_backup_created(
@@ -309,7 +315,10 @@ class TestProjMigrateDirsExtended:
         assert bak_raw["repos"] == []
 
     async def test_migrate_dirs_auto_rollback(
-        self, mcp_app: Any, legacy_project: tuple[str, ProjConfig], monkeypatch: pytest.MonkeyPatch,
+        self,
+        mcp_app: Any,
+        legacy_project: tuple[str, ProjConfig],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """If _write_yaml fails, meta.yaml should be restored from backup."""
         name, cfg = legacy_project
@@ -356,7 +365,9 @@ class TestProjMigrateDirsExtended:
         assert isinstance(parsed["dry_run"], bool)
 
     async def test_migrate_dirs_missing_tracking_dir(
-        self, mcp_app: Any, cfg: ProjConfig,
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
     ) -> None:
         """Index entry pointing to non-existent dir should not crash; appears in skipped."""
         index = storage.load_index(cfg)

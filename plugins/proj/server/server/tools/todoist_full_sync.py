@@ -13,9 +13,8 @@ import json
 import logging
 import warnings
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import httpx
@@ -28,6 +27,8 @@ from server.lib.retry import retry_link
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 _TODOIST_TO_LOCAL: dict[str, str] = {"p1": "high", "p2": "high", "p3": "medium", "p4": "low"}
 _LOCAL_TO_TODOIST: dict[str, str] = {"high": "p2", "medium": "p3", "low": "p4"}
 
-_UTC = timezone.utc
+_UTC = UTC
 
 
 def _now() -> str:
@@ -76,7 +77,7 @@ def _ts_newer(a: str, b: str) -> bool:
         return a > b
 
 
-def _content_differs(local: "Todo", task: dict[str, JsonValue]) -> bool:
+def _content_differs(local: Todo, task: dict[str, JsonValue]) -> bool:
     """Return True if local todo content differs from the Todoist task.
 
     Compares the fields that would be pushed: title, priority, labels, due date.
@@ -204,11 +205,20 @@ class SyncPlan:
     root_only_cleanup: list[dict[str, str]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not any([
-            self.pull_create, self.pull_update, self.pull_complete,
-            self.push_create, self.push_create_phase2, self.push_update, self.push_complete,
-            self.ghost_close, self.potential_links, self.root_only_cleanup,
-        ])
+        return not any(
+            [
+                self.pull_create,
+                self.pull_update,
+                self.pull_complete,
+                self.push_create,
+                self.push_create_phase2,
+                self.push_update,
+                self.push_complete,
+                self.ghost_close,
+                self.potential_links,
+                self.root_only_cleanup,
+            ]
+        )
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -251,8 +261,36 @@ class ApplyInput:
 # ── Core logic (standalone functions) ─────────────────────────────────────────
 
 
+def _compute_todoist_depth(task_id: str, todoist_by_id: dict[str, dict[str, JsonValue]]) -> int:
+    """Walk the parentId chain counting hops. Returns 0 for root tasks.
+
+    Uses a ``seen`` set for cycle detection and caps at depth 10.
+    """
+    depth = 0
+    current = task_id
+    seen: set[str] = set()
+    while depth < 10:
+        task = todoist_by_id.get(current)
+        if task is None:
+            break
+        parent = str(task.get("parentId") or task.get("parent_id") or "")
+        if not parent:
+            break
+        if parent == current:
+            # Self-reference — stop immediately
+            break
+        if parent in seen:
+            break
+        seen.add(current)
+        current = parent
+        depth += 1
+    return depth
+
+
 def _find_link_candidate(
-    local_todo: dict[str, JsonValue], todoist_tasks: list[dict[str, JsonValue]], threshold: float = 0.7
+    local_todo: dict[str, JsonValue],
+    todoist_tasks: list[dict[str, JsonValue]],
+    threshold: float = 0.7,
 ) -> dict[str, JsonValue] | None:
     """Find a Todoist task that likely matches an unlinked local todo by title similarity."""
     import re
@@ -321,9 +359,9 @@ def _find_link_candidate_reverse(
 def _infer_parent_link_from_children(
     todoist_id: str,
     todoist_by_id: Mapping[str, JsonValue],
-    local_by_todoist_id: dict[str, "Todo"],
-    local_by_id: dict[str, "Todo"],
-) -> "Todo | None":
+    local_by_todoist_id: dict[str, Todo],
+    local_by_id: dict[str, Todo],
+) -> Todo | None:
     """Infer local parent by checking whether Todoist children are already linked locally.
 
     Returns the local parent Todo if ALL linked Todoist children agree on the same
@@ -331,7 +369,8 @@ def _infer_parent_link_from_children(
     no local child has a parent set.
     """
     todoist_children = [
-        t for t in todoist_by_id.values()
+        t
+        for t in todoist_by_id.values()
         if isinstance(t, dict) and str(t.get("parentId") or "") == todoist_id
     ]
     if not todoist_children:
@@ -388,8 +427,9 @@ def compute_diff(
     # Build a set of Todoist IDs claimed by archived todos. These are used only
     # to suppress re-pulling — we never push_complete based on archived data.
     archived_todoist_ids: set[str] = {
-        t.todoist_task_id for t in archived if t.todoist_task_id
-        and t.todoist_task_id not in local_by_todoist_id
+        t.todoist_task_id
+        for t in archived
+        if t.todoist_task_id and t.todoist_task_id not in local_by_todoist_id
     }
 
     plan = SyncPlan()
@@ -427,18 +467,21 @@ def compute_diff(
                 todoist_id, todoist_by_id, local_by_todoist_id, local_by_id
             )
             if parent_match:
-                plan.potential_links.append({
-                    "local_todo": {"id": parent_match.id, "title": parent_match.title},
-                    "todoist_task": {"id": todoist_id, "content": content},
-                    "score": 1.0,
-                })
+                plan.potential_links.append(
+                    {
+                        "local_todo": {"id": parent_match.id, "title": parent_match.title},
+                        "todoist_task": {"id": todoist_id, "content": content},
+                        "score": 1.0,
+                    }
+                )
                 linked_local_ids.add(parent_match.id)
                 continue
             # Link candidate check: see if an unlinked local todo matches this Todoist task
             link_match = _find_link_candidate_reverse(task, local_unlinked)
             if link_match:
                 matched_todo_val = link_match["local_todo"]
-                assert isinstance(matched_todo_val, Todo)
+                if not isinstance(matched_todo_val, Todo):
+                    raise TypeError(f"Expected Todo, got {type(matched_todo_val).__name__}")
                 matched_todo: Todo = matched_todo_val
                 score = link_match["score"]
                 link_entry: dict[str, JsonValue] = {
@@ -451,15 +494,19 @@ def compute_diff(
                 continue
             # Prepare for local creation
             new_notes, new_synced = _apply_description_sync("", "", todoist_desc)
-            plan.pull_create.append({
-                "title": content,
-                "priority": local_priority,
-                "tags": todoist_labels,
-                "notes": new_notes,
-                "due_date": todoist_due,
-                "todoist_task_id": todoist_id,
-                "todoist_description_synced": new_synced,
-            })
+            plan.pull_create.append(
+                {
+                    "title": content,
+                    "priority": local_priority,
+                    "tags": todoist_labels,
+                    "notes": new_notes,
+                    "due_date": todoist_due,
+                    "todoist_task_id": todoist_id,
+                    "todoist_description_synced": new_synced,
+                    "todoist_parent_id": str(task.get("parentId") or task.get("parent_id") or "")
+                    or None,
+                }
+            )
         else:
             # Existing — check timestamps
             local_todo = local_by_todoist_id[todoist_id]
@@ -499,19 +546,21 @@ def compute_diff(
             if task.get("parentId"):
                 cleanup_todo = local_by_todoist_id.get(todoist_id)
                 if cleanup_todo and cleanup_todo.parent:
-                    plan.root_only_cleanup.append({
-                        "todoist_task_id": todoist_id,
-                        "todo_id": cleanup_todo.id,
-                    })
+                    plan.root_only_cleanup.append(
+                        {
+                            "todoist_task_id": todoist_id,
+                            "todo_id": cleanup_todo.id,
+                        }
+                    )
 
     # Split unlinked into roots (phase 1) and children-of-unlinked (phase 2)
     # Exclude todos that were matched as link candidates to prevent duplicate push_create.
     # Also exclude children of child-inferred parents — their parent won't be created via
     # push_create so they'd have an unresolvable _parent_local_id in phase 2.
     remaining_unlinked = [
-        t for t in local_unlinked
-        if t.id not in linked_local_ids
-        and not (t.parent and t.parent in linked_local_ids)
+        t
+        for t in local_unlinked
+        if t.id not in linked_local_ids and not (t.parent and t.parent in linked_local_ids)
     ]
     unlinked_ids = {t.id for t in remaining_unlinked}
     unlinked_roots: list[Todo] = []
@@ -610,10 +659,12 @@ def compute_diff(
         if task.get("parentId"):
             continue
         # Todoist task is missing parentId — push an update to set it
-        plan.push_update.append({
-            "id": todoist_id,
-            "parentId": parent_todo.todoist_task_id,
-        })
+        plan.push_update.append(
+            {
+                "id": todoist_id,
+                "parentId": parent_todo.todoist_task_id,
+            }
+        )
 
     return plan
 
@@ -647,6 +698,7 @@ def apply_changes(
         "updated": 0,
         "completed": 0,
         "linked": 0,
+        "relinked": 0,
         "cleared": 0,
     }
 
@@ -654,15 +706,56 @@ def apply_changes(
     staged_description_synced: dict[str, str] = {}
 
     # 1. Create new todos
+    # Build todoist_task_id → local todo id map from existing todos
+    todoist_to_local: dict[str, str] = {}
+    for t in todos:
+        if t.todoist_task_id:
+            todoist_to_local[t.todoist_task_id] = t.id
+
+    # Build synthetic todoist_by_id from pull_create items for depth computation
+    synthetic_todoist_by_id: dict[str, dict[str, JsonValue]] = {}
     for item in data.created_locally:
+        tid = str(item.get("todoist_task_id", ""))
+        if tid:
+            synthetic_todoist_by_id[tid] = {
+                "parentId": item.get("todoist_parent_id") or "",
+            }
+
+    # Sort by Todoist depth ascending so parents are created before children
+    data.created_locally.sort(
+        key=lambda it: _compute_todoist_depth(
+            str(it.get("todoist_task_id", "")), synthetic_todoist_by_id
+        )
+    )
+
+    # Track orphans: items whose todoist_parent_id couldn't be resolved
+    pull_create_orphans: list[tuple[str, str]] = []
+
+    for item in data.created_locally:
+        # Resolve parent: explicit "parent" field takes priority
         parent_id = str(item["parent"]) if item.get("parent") else None
         parent_todo = todo_map.get(parent_id) if parent_id else None
+
+        # If no explicit parent, try resolving via todoist_parent_id
+        if not parent_todo:
+            todoist_parent_id = str(item.get("todoist_parent_id") or "")
+            if todoist_parent_id:
+                local_parent_id = todoist_to_local.get(todoist_parent_id)
+                if local_parent_id:
+                    parent_todo = todo_map.get(local_parent_id)
+                else:
+                    # Parent not found — track as orphan for 448.4
+                    item_tid = str(item.get("todoist_task_id", ""))
+                    pull_create_orphans.append((item_tid, todoist_parent_id))
+
         desc_synced_value = str(item.get("todoist_description_synced", ""))
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
             title=str(item.get("title", "")),
             priority=str(item.get("priority", cfg.default_priority)),
-            tags=[str(t) for t in tags_raw] if isinstance((tags_raw := item.get("tags")), list) else [],
+            tags=[str(t) for t in tags_raw]
+            if isinstance((tags_raw := item.get("tags")), list)
+            else [],
             notes=str(item.get("notes", "")),
             due_date=str(item["due_date"]) if item.get("due_date") else None,
             todoist_task_id=str(item["todoist_task_id"]) if item.get("todoist_task_id") else None,
@@ -673,10 +766,14 @@ def apply_changes(
         if not push_confirmed and desc_synced_value:
             staged_description_synced[todo.id] = desc_synced_value
         if parent_todo:
+            todo.parent = parent_todo.id
             parent_todo.children.append(todo.id)
             parent_todo.updated = today
         todos.append(todo)
         todo_map[todo.id] = todo
+        # Update todoist_to_local so subsequent children can find this parent
+        if todo.todoist_task_id:
+            todoist_to_local[todo.todoist_task_id] = todo.id
         int_counts["created"] += 1
     # 2. Update existing todos
     _CONTENT_FIELDS = {"title", "priority", "tags", "notes", "due_date"}
@@ -693,7 +790,7 @@ def apply_changes(
             todo.priority = str(item["priority"])
             content_changed = True
         if "tags" in item and isinstance(item["tags"], list):
-            todo.tags = list(item["tags"])
+            todo.tags = [str(t) for t in item["tags"]]
             content_changed = True
         if "notes" in item and item["notes"] is not None:
             todo.notes = str(item["notes"])
@@ -725,10 +822,13 @@ def apply_changes(
         todoist_task_id = str(link_item.get("todoist_task_id", ""))
         todo = todo_map.get(todo_id)
         if todo and todoist_task_id:
-            assert todo is not None
             try:
-                def _do_link(t: Todo | None = todo, tid: str = todoist_task_id, ts: str = today) -> None:  # noqa: E731  # todo narrowed by guard above
-                    assert t is not None
+
+                def _do_link(
+                    t: Todo | None = todo, tid: str = todoist_task_id, ts: str = today
+                ) -> None:  # todo narrowed by guard above
+                    if t is None:
+                        raise ValueError("Todo must not be None when linking")
                     t.todoist_task_id = tid
                     t.updated = ts
 
@@ -751,8 +851,29 @@ def apply_changes(
                 )
                 logger.warning(
                     "Orphaned Todoist task %s (todo %s): %s",
-                    todoist_task_id, todo_id, exc,
+                    todoist_task_id,
+                    todo_id,
+                    exc,
                 )
+
+    # 3b. Re-link orphans whose parents were created in the same batch
+    for orphan_todoist_id, todoist_parent_id in pull_create_orphans:
+        orphan_local_id = todoist_to_local.get(orphan_todoist_id)
+        parent_local_id = todoist_to_local.get(todoist_parent_id)
+        if not orphan_local_id or not parent_local_id:
+            continue
+        orphan_todo = todo_map.get(orphan_local_id)
+        parent_todo = todo_map.get(parent_local_id)
+        if not orphan_todo or not parent_todo:
+            continue
+        # Skip if orphan already has a parent (was linked by a later sibling resolution)
+        if orphan_todo.parent:
+            continue
+        orphan_todo.parent = parent_todo.id
+        if orphan_todo.id not in parent_todo.children:
+            parent_todo.children.append(orphan_todo.id)
+        parent_todo.updated = today
+        int_counts["relinked"] += 1
 
     # 4. Clear todoist IDs (root_only cleanup)
     for raw_todo_id in data.cleared_todoist_ids:
@@ -793,6 +914,7 @@ def apply_changes(
 
     result: dict[str, JsonValue] = dict(int_counts)
     result["staged_description_synced"] = staged_description_synced
+    result["pull_create_orphans"] = [[tid, parent_tid] for tid, parent_tid in pull_create_orphans]
     return result
 
 
@@ -808,7 +930,7 @@ def _resolve_todoist_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    return "/tmp/claude-hooks-todoist.sock"
+    return "/tmp/claude-hooks-todoist.sock"  # noqa: S108
 
 
 def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
@@ -886,12 +1008,18 @@ def _execute_push_creates(
     try:
         result = _call_todoist_tool("todoist_add_tasks", {"tasks": add_payloads})
         # todoist_add_tasks returns {"successes": [...], "failures": [...]}
+        created_tasks_raw: JsonValue
         if isinstance(result, dict):
-            created_tasks = result.get("successes", result.get("tasks", [])) or []
+            created_tasks_raw = result.get("successes", result.get("tasks", [])) or []
         elif isinstance(result, list):
-            created_tasks = result
+            created_tasks_raw = result
         else:
-            created_tasks = []
+            created_tasks_raw = []
+        created_tasks = (
+            [x for x in created_tasks_raw if isinstance(x, dict)]
+            if isinstance(created_tasks_raw, list)
+            else []
+        )
         for i, task in enumerate(tasks):
             todo_id = str(task.get("todo_id", ""))
             if i < len(created_tasks):
@@ -913,12 +1041,14 @@ def _execute_push_creates(
                         task["result_todoist_id"] = recovered_id
                         succeeded.append(task)
                     else:
-                        errors.append({
-                            "operation_type": "push_create",
-                            "error": "No ID returned for created task",
-                            "retryable": True,
-                            "retry_payload": task,
-                        })
+                        errors.append(
+                            {
+                                "operation_type": "push_create",
+                                "error": "No ID returned for created task",
+                                "retryable": True,
+                                "retry_payload": task,
+                            }
+                        )
             else:
                 # Response was truncated — the task may have been created anyway.
                 # Look it up by content+project before marking as an error so we
@@ -933,21 +1063,25 @@ def _execute_push_creates(
                     task["result_todoist_id"] = recovered_id
                     succeeded.append(task)
                 else:
-                    errors.append({
-                        "operation_type": "push_create",
-                        "error": "Task not in response",
-                        "retryable": True,
-                        "retry_payload": task,
-                    })
+                    errors.append(
+                        {
+                            "operation_type": "push_create",
+                            "error": "Task not in response",
+                            "retryable": True,
+                            "retry_payload": task,
+                        }
+                    )
     except Exception as e:
         # All tasks in this batch failed
         for task in tasks:
-            errors.append({
-                "operation_type": "push_create",
-                "error": str(e),
-                "retryable": True,
-                "retry_payload": task,
-            })
+            errors.append(
+                {
+                    "operation_type": "push_create",
+                    "error": str(e),
+                    "retryable": True,
+                    "retry_payload": task,
+                }
+            )
 
     # Handle complete_after_create for successfully created tasks
     complete_ids = [
@@ -987,12 +1121,14 @@ def _execute_push_creates_phase2(
             task_copy.pop("_parent_local_id", None)
             resolved.append(task_copy)
         else:
-            errors.append({
-                "operation_type": "push_create_phase2",
-                "error": f"Parent {parent_local_id} not in phase-1 ID map",
-                "retryable": True,
-                "retry_payload": task,
-            })
+            errors.append(
+                {
+                    "operation_type": "push_create_phase2",
+                    "error": f"Parent {parent_local_id} not in phase-1 ID map",
+                    "retryable": True,
+                    "retry_payload": task,
+                }
+            )
 
     if not resolved:
         return [], errors, {}
@@ -1013,12 +1149,15 @@ def _execute_push_updates(
         _call_todoist_tool("todoist_update_tasks", {"tasks": tasks})
         return tasks, []
     except Exception as e:
-        errors: list[dict[str, JsonValue]] = [{
-            "operation_type": "push_update",
-            "error": str(e),
-            "retryable": True,
-            "retry_payload": task,
-        } for task in tasks]
+        errors: list[dict[str, JsonValue]] = [
+            {
+                "operation_type": "push_update",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": task,
+            }
+            for task in tasks
+        ]
         return [], errors
 
 
@@ -1033,12 +1172,14 @@ def _execute_push_completes(
         _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
         return task_ids, []
     except Exception as e:
-        errors: list[dict[str, JsonValue]] = [{
-            "operation_type": "push_complete",
-            "error": str(e),
-            "retryable": True,
-            "retry_payload": {"ids": task_ids},
-        }]
+        errors: list[dict[str, JsonValue]] = [
+            {
+                "operation_type": "push_complete",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": {"ids": task_ids},
+            }
+        ]
         return [], errors
 
 
@@ -1053,12 +1194,14 @@ def _execute_ghost_close(
         _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
         return task_ids, []
     except Exception as e:
-        errors: list[dict[str, JsonValue]] = [{
-            "operation_type": "ghost_close",
-            "error": str(e),
-            "retryable": True,
-            "retry_payload": {"ids": task_ids},
-        }]
+        errors: list[dict[str, JsonValue]] = [
+            {
+                "operation_type": "ghost_close",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": {"ids": task_ids},
+            }
+        ]
         return [], errors
 
 
@@ -1078,12 +1221,14 @@ def _execute_root_only_cleanup(
             _call_todoist_tool("todoist_delete", {"id": todoist_task_id})
             succeeded.append(entry)
         except Exception as e:
-            errors.append({
-                "operation_type": "root_only_cleanup",
-                "error": str(e),
-                "retryable": True,
-                "retry_payload": entry,
-            })
+            errors.append(
+                {
+                    "operation_type": "root_only_cleanup",
+                    "error": str(e),
+                    "retryable": True,
+                    "retry_payload": entry,
+                }
+            )
 
     return succeeded, errors
 
@@ -1119,7 +1264,7 @@ def _find_existing_todoist_task(
         for t in tasks:
             if not isinstance(t, dict):
                 continue
-            if t.get("content", "").strip() != needle:
+            if str(t.get("content", "")).strip() != needle:
                 continue
             # Narrow by parentId when available
             if parent_id:
@@ -1131,7 +1276,10 @@ def _find_existing_todoist_task(
     except Exception as exc:
         logger.warning(
             "Dedup lookup failed for project=%s content=%r parent=%s: %s",
-            project_id, content, parent_id, exc,
+            project_id,
+            content,
+            parent_id,
+            exc,
         )
     return None
 
@@ -1163,15 +1311,27 @@ def _retry_failed_ops(
                 content = str(payload.get("content", ""))
                 parent_id = str(payload.get("parentId", "") or "")
                 existing_id = _find_existing_todoist_task(
-                    project_id, content, parent_id=parent_id or None,
+                    project_id,
+                    content,
+                    parent_id=parent_id or None,
                 )
 
                 if existing_id:
                     payload["result_todoist_id"] = existing_id
                 else:
                     add_payload = {
-                        k: v for k, v in payload.items()
-                        if k in ("content", "priority", "description", "labels", "dueString", "parentId", "project_id")
+                        k: v
+                        for k, v in payload.items()
+                        if k
+                        in (
+                            "content",
+                            "priority",
+                            "description",
+                            "labels",
+                            "dueString",
+                            "parentId",
+                            "project_id",
+                        )
                     }
                     result = _call_todoist_tool("todoist_add_tasks", {"tasks": [add_payload]})
                     # Extract the new task ID so we can persist it locally
@@ -1181,7 +1341,11 @@ def _retry_failed_ops(
                         created_tasks = result
                     else:
                         created_tasks = []
-                    if isinstance(created_tasks, list) and created_tasks and isinstance(created_tasks[0], dict):
+                    if (
+                        isinstance(created_tasks, list)
+                        and created_tasks
+                        and isinstance(created_tasks[0], dict)
+                    ):
                         new_id = str(created_tasks[0].get("id", ""))
                         if new_id:
                             payload["result_todoist_id"] = new_id
@@ -1212,12 +1376,14 @@ def _retry_failed_ops(
                 still_failed.append(entry)
                 continue
         except Exception as e:
-            still_failed.append({
-                "operation_type": op_type,
-                "error": str(e),
-                "retryable": False,
-                "retry_payload": payload,
-            })
+            still_failed.append(
+                {
+                    "operation_type": op_type,
+                    "error": str(e),
+                    "retryable": False,
+                    "retry_payload": payload,
+                }
+            )
 
     return succeeded, still_failed, link_ops
 
@@ -1242,6 +1408,7 @@ def _build_summary(
             "updated": pull_counts.get("updated", 0),
             "completed": pull_counts.get("completed", 0),
             "linked": pull_counts.get("linked", 0),
+            "relinked": pull_counts.get("relinked", 0),
             "cleared": pull_counts.get("cleared", 0),
         },
         "push": {
@@ -1255,7 +1422,9 @@ def _build_summary(
     }
 
 
-def _migrate_parent_links(todos: list[Todo], todoist_tasks: list[dict[str, JsonValue]]) -> dict[str, int]:
+def _migrate_parent_links(
+    todos: list[Todo], todoist_tasks: list[dict[str, JsonValue]]
+) -> dict[str, int]:
     """One-time migration to fix child todos that exist in Todoist as root tasks
     but should be sub-tasks of their parent. Idempotent — safe to run multiple times.
 
@@ -1277,7 +1446,8 @@ def _migrate_parent_links(todos: list[Todo], todoist_tasks: list[dict[str, JsonV
         if not task:
             logger.warning(
                 "Migration: Todoist task %s not found for todo %s",
-                todo.todoist_task_id, todo.id,
+                todo.todoist_task_id,
+                todo.id,
             )
             continue
         if task.get("parentId") == parent.todoist_task_id:
@@ -1303,9 +1473,10 @@ def register(app: FastMCP) -> None:
             "Execute a full Todoist sync cycle for the active project: "
             "fetch tasks -> diff -> execute push ops -> apply pull ops -> return summary. "
             "Reduces the sync flow from ~10 tool calls to 1. "
-            "On success: {\"status\": \"success\", \"summary\": {...}}. "
-            "On partial failure: {\"status\": \"partial_success\", \"errors\": [...], \"retry_token\": \"...\"}. "
-            "If potential_links exist: {\"status\": \"needs_confirmation\", \"potential_links\": [...]}. "
+            'On success: {"status": "success", "summary": {...}}. '
+            'On partial failure: {"status": "partial_success",'
+            ' "errors": [...], "retry_token": "..."}. '
+            'If potential_links exist: {"status": "needs_confirmation", "potential_links": [...]}. '
             "Pass confirmed_links (JSON list of {todo_id, todoist_task_id}) to confirm links. "
             "Pass retry_failures (base64-encoded JSON) to re-attempt only previously failed ops."
         )
@@ -1322,11 +1493,13 @@ def register(app: FastMCP) -> None:
                 raw = json.loads(base64.b64decode(retry_failures))
                 # New format: {"project_name": "...", "ops": [...]}
                 # Old format (pre-2.10.4): bare list
+                failed_ops: list[dict[str, JsonValue]]
                 if isinstance(raw, dict) and "ops" in raw:
-                    failed_ops = raw["ops"]
+                    ops_raw = raw["ops"]
+                    failed_ops = ops_raw if isinstance(ops_raw, list) else []
                     embedded_project_name = raw.get("project_name")
                 else:
-                    failed_ops = raw
+                    failed_ops = raw if isinstance(raw, list) else []
                     embedded_project_name = None
             except (json.JSONDecodeError, Exception) as e:
                 return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
@@ -1352,17 +1525,21 @@ def register(app: FastMCP) -> None:
             if still_failed:
                 token_data = {"project_name": effective_project_name, "ops": still_failed}
                 token = base64.b64encode(json.dumps(token_data).encode()).decode()
-                return json.dumps({
-                    "status": "partial_success",
+                return json.dumps(
+                    {
+                        "status": "partial_success",
+                        "retried_succeeded": len(succeeded),
+                        "errors": still_failed,
+                        "retry_token": token,
+                    }
+                )
+            return json.dumps(
+                {
+                    "status": "success",
                     "retried_succeeded": len(succeeded),
-                    "errors": still_failed,
-                    "retry_token": token,
-                })
-            return json.dumps({
-                "status": "success",
-                "retried_succeeded": len(succeeded),
-                "summary": {"retry": True, "succeeded": len(succeeded)},
-            })
+                    "summary": {"retry": True, "succeeded": len(succeeded)},
+                }
+            )
 
         # -- Normal mode: full sync cycle --
 
@@ -1382,10 +1559,12 @@ def register(app: FastMCP) -> None:
         has_todoist_project = bool(project_todoist_id)
 
         if not has_local_todos and not has_todoist_project:
-            return json.dumps({
-                "status": "success",
-                "summary": {"up_to_date": True},
-            })
+            return json.dumps(
+                {
+                    "status": "success",
+                    "summary": {"up_to_date": True},
+                }
+            )
 
         # 4. Fetch tasks from Todoist via socket
         todoist_tasks: list[dict[str, JsonValue]] = []
@@ -1396,19 +1575,28 @@ def register(app: FastMCP) -> None:
                     {"project_id": project_todoist_id},
                 )
                 if isinstance(fetch_result, list):
-                    todoist_tasks = fetch_result
+                    todoist_tasks = [x for x in fetch_result if isinstance(x, dict)]
                 elif isinstance(fetch_result, dict):
-                    todoist_tasks = fetch_result.get("tasks", [])
+                    tasks_raw = fetch_result.get("tasks", [])
+                    todoist_tasks = (
+                        [x for x in tasks_raw if isinstance(x, dict)]
+                        if isinstance(tasks_raw, list)
+                        else []
+                    )
             except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
-                return json.dumps({
-                    "status": "error",
-                    "error": f"Todoist plugin unavailable: {e}",
-                })
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"Todoist plugin unavailable: {e}",
+                    }
+                )
             except Exception as e:
-                return json.dumps({
-                    "status": "error",
-                    "error": f"Failed to fetch Todoist tasks: {e}",
-                })
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"Failed to fetch Todoist tasks: {e}",
+                    }
+                )
 
         # 5. Compute diff
         plan = compute_diff(todoist_tasks, cfg, name)
@@ -1434,17 +1622,21 @@ def register(app: FastMCP) -> None:
 
         # 7. Check for potential_links requiring user confirmation
         if plan.potential_links and not confirmed_links:
-            return json.dumps({
-                "status": "needs_confirmation",
-                "potential_links": plan.potential_links,
-            })
+            return json.dumps(
+                {
+                    "status": "needs_confirmation",
+                    "potential_links": plan.potential_links,
+                }
+            )
 
         # 8. Empty diff -> up to date
         if plan.is_empty():
-            return json.dumps({
-                "status": "success",
-                "summary": {"up_to_date": True},
-            })
+            return json.dumps(
+                {
+                    "status": "success",
+                    "summary": {"up_to_date": True},
+                }
+            )
 
         # 9. Phase A: Apply pull operations locally (push_confirmed=False)
         has_pulls = bool(plan.pull_create or plan.pull_update or plan.pull_complete)
@@ -1456,14 +1648,20 @@ def register(app: FastMCP) -> None:
             )
             pull_counts = apply_changes(pull_data, cfg, name, push_confirmed=False)
         else:
-            pull_counts = {
-                "created": 0, "updated": 0, "completed": 0,
-                "linked": 0, "cleared": 0,
+            pull_counts: dict[str, JsonValue] = {
+                "created": 0,
+                "updated": 0,
+                "completed": 0,
+                "linked": 0,
+                "relinked": 0,
+                "cleared": 0,
                 "staged_description_synced": {},
             }
 
         staged_desc_raw = pull_counts.get("staged_description_synced", {})
-        staged_desc: dict[str, JsonValue] = staged_desc_raw if isinstance(staged_desc_raw, dict) else {}
+        staged_desc: dict[str, JsonValue] = (
+            staged_desc_raw if isinstance(staged_desc_raw, dict) else {}
+        )
 
         # 10. Execute push operations
         all_errors: list[dict[str, JsonValue]] = []
@@ -1486,14 +1684,16 @@ def register(app: FastMCP) -> None:
 
         # 10c. Push creates (phase 1)
         p1_succeeded, p1_errors, phase1_id_map = _execute_push_creates(
-            plan.push_create, project_todoist_id,
+            plan.push_create,
+            project_todoist_id,
         )
         total_push_created = len(p1_succeeded)
         all_errors.extend(p1_errors)
 
         # 10d. Push creates (phase 2) — children needing phase-1 parent IDs
         p2_succeeded, p2_errors, phase2_id_map = _execute_push_creates_phase2(
-            plan.push_create_phase2, phase1_id_map,
+            plan.push_create_phase2,
+            phase1_id_map,
         )
         total_push_created_p2 = len(p2_succeeded)
         all_errors.extend(p2_errors)
@@ -1551,10 +1751,12 @@ def register(app: FastMCP) -> None:
         staged_updates: list[dict[str, JsonValue]] = []
         if staged_desc:
             for todo_id, desc_val in staged_desc.items():
-                staged_updates.append({
-                    "todo_id": todo_id,
-                    "todoist_description_synced": desc_val,
-                })
+                staged_updates.append(
+                    {
+                        "todo_id": todo_id,
+                        "todoist_description_synced": desc_val,
+                    }
+                )
 
         if link_ops or cleared_ids or staged_updates:
             link_data = ApplyInput(
@@ -1569,17 +1771,25 @@ def register(app: FastMCP) -> None:
         if migrate:
             migration_todos = storage.load_todos(cfg, name)
             migration_tasks_raw = _call_todoist_tool(
-                "todoist_find_tasks", {"project_id": project_todoist_id},
+                "todoist_find_tasks",
+                {"project_id": project_todoist_id},
             )
             if isinstance(migration_tasks_raw, list):
-                migrate_result = _migrate_parent_links(migration_todos, migration_tasks_raw)
+                migrate_result = _migrate_parent_links(
+                    migration_todos,
+                    [x for x in migration_tasks_raw if isinstance(x, dict)],
+                )
 
         # 12. Build response
         summary = _build_summary(
-            plan, pull_counts,
-            total_push_created, total_push_created_p2,
-            total_push_updated, total_push_completed,
-            total_ghost_closed, total_root_cleaned,
+            plan,
+            pull_counts,
+            total_push_created,
+            total_push_created_p2,
+            total_push_updated,
+            total_push_completed,
+            total_ghost_closed,
+            total_root_cleaned,
         )
 
         if migrate_result:
@@ -1590,14 +1800,18 @@ def register(app: FastMCP) -> None:
             # needing an active session.
             token_data = {"project_name": name, "ops": all_errors}
             token = base64.b64encode(json.dumps(token_data).encode()).decode()
-            return json.dumps({
-                "status": "partial_success",
-                "summary": summary,
-                "errors": all_errors,
-                "retry_token": token,
-            })
+            return json.dumps(
+                {
+                    "status": "partial_success",
+                    "summary": summary,
+                    "errors": all_errors,
+                    "retry_token": token,
+                }
+            )
 
-        return json.dumps({
-            "status": "success",
-            "summary": summary,
-        })
+        return json.dumps(
+            {
+                "status": "success",
+                "summary": summary,
+            }
+        )

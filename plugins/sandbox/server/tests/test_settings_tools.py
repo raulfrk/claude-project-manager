@@ -26,7 +26,9 @@ from tests.conftest import read_settings, write_settings
 
 class TestAddWritePath:
     def test_adds_path_and_edit_rule(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"filesystem": {"allowWrite": []}}, "permissions": {"allow": []}})
+        write_settings(
+            tmp_path, {"sandbox": {"filesystem": {"allowWrite": []}}, "permissions": {"allow": []}}
+        )
         result = json.loads(sandbox_add_write_path("/tmp/test"))
         assert result["added"] > 0
         data = read_settings(tmp_path)
@@ -34,18 +36,32 @@ class TestAddWritePath:
         assert any("Edit(" in r for r in data["permissions"]["allow"])
 
     def test_idempotent(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"filesystem": {"allowWrite": ["/tmp/test"]}}, "permissions": {"allow": ["Edit(//tmp/test/**)"]}})
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"filesystem": {"allowWrite": ["/tmp/test"]}},
+                "permissions": {"allow": ["Edit(//tmp/test/**)"]},
+            },
+        )
         result = json.loads(sandbox_add_write_path("/tmp/test"))
         assert result["added"] == 0
 
 
 class TestRemoveWritePath:
     def test_removes_path_and_edit_rule(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"filesystem": {"allowWrite": ["/tmp/test"]}}, "permissions": {"allow": ["Edit(//tmp/test/**)"]}})
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"filesystem": {"allowWrite": ["/tmp/test"]}},
+                "permissions": {"allow": ["Edit(//tmp/test/**)"]},
+            },
+        )
         result = json.loads(sandbox_remove_write_path("/tmp/test"))
         assert result["removed"] > 0
         data = read_settings(tmp_path)
-        assert "/tmp/test" not in data.get("sandbox", {}).get("filesystem", {}).get("allowWrite", [])
+        assert "/tmp/test" not in data.get("sandbox", {}).get("filesystem", {}).get(
+            "allowWrite", []
+        )
 
 
 class TestMcpAllow:
@@ -123,26 +139,42 @@ class TestDomains:
 
 class TestBatchOps:
     def test_batch_setup(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}, "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}}})
-        result = json.loads(sandbox_batch_setup(
-            paths=["/tmp/p1"],
-            mcp_servers=["plugin_proj_proj"],
-            domains=["github.com"],
-        ))
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        result = json.loads(
+            sandbox_batch_setup(
+                paths=["/tmp/p1"],
+                mcp_servers=["plugin_proj_proj"],
+                domains=["github.com"],
+            )
+        )
         assert result["paths_added"] == 1
         assert result["mcp_added"] == 1
         assert result["domains_added"] == 1
 
     def test_batch_revoke(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {
-            "permissions": {"allow": ["mcp__plugin_proj_proj__*", "Edit(//tmp/p1/**)"]},
-            "sandbox": {"filesystem": {"allowWrite": ["/tmp/p1"]}, "network": {"allowedDomains": ["github.com"]}},
-        })
-        result = json.loads(sandbox_batch_revoke(
-            paths=["/tmp/p1"],
-            mcp_servers=["plugin_proj_proj"],
-            domains=["github.com"],
-        ))
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": ["mcp__plugin_proj_proj__*", "Edit(//tmp/p1/**)"]},
+                "sandbox": {
+                    "filesystem": {"allowWrite": ["/tmp/p1"]},
+                    "network": {"allowedDomains": ["github.com"]},
+                },
+            },
+        )
+        result = json.loads(
+            sandbox_batch_revoke(
+                paths=["/tmp/p1"],
+                mcp_servers=["plugin_proj_proj"],
+                domains=["github.com"],
+            )
+        )
         assert result["paths_removed"] == 1
         assert result["mcp_removed"] == 1
         assert result["domains_removed"] == 1
@@ -150,7 +182,13 @@ class TestBatchOps:
 
 class TestListAndCheck:
     def test_list_text(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"enabled": True, "filesystem": {"allowWrite": ["/tmp/x"]}}, "permissions": {"allow": ["mcp__proj__*"]}})
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"enabled": True, "filesystem": {"allowWrite": ["/tmp/x"]}},
+                "permissions": {"allow": ["mcp__proj__*"]},
+            },
+        )
         result = sandbox_list("text")
         assert "/tmp/x" in result
         assert "mcp__proj__*" in result
@@ -162,12 +200,20 @@ class TestListAndCheck:
         assert "sandbox_enabled" in data
 
     def test_check_present(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"filesystem": {"allowWrite": ["/tmp/x"]}}, "permissions": {"allow": ["mcp__proj__*"]}, })
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"filesystem": {"allowWrite": ["/tmp/x"]}},
+                "permissions": {"allow": ["mcp__proj__*"]},
+            },
+        )
         result = json.loads(sandbox_check(path="/tmp/x"))
         assert result["results"][0]["status"] == "present"
 
     def test_check_missing(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"filesystem": {"allowWrite": []}}, "permissions": {"allow": []}})
+        write_settings(
+            tmp_path, {"sandbox": {"filesystem": {"allowWrite": []}}, "permissions": {"allow": []}}
+        )
         result = json.loads(sandbox_check(path="/tmp/x"))
         assert result["results"][0]["status"] == "missing"
 
@@ -175,10 +221,12 @@ class TestListAndCheck:
 class TestReconcile:
     def test_adds_missing_removes_stale(self, tmp_path: Path) -> None:
         write_settings(tmp_path, {"permissions": {"allow": ["mcp__old_server__*"]}})
-        result = json.loads(sandbox_reconcile(
-            expected_servers=["new_server"],
-            stale_servers=["old_server"],
-        ))
+        result = json.loads(
+            sandbox_reconcile(
+                expected_servers=["new_server"],
+                stale_servers=["old_server"],
+            )
+        )
         assert result["added"] >= 1
         assert result["removed"] >= 1
         data = read_settings(tmp_path)

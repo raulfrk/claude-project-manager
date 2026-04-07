@@ -49,18 +49,41 @@ def create_worktree(
         return json.dumps({"result": "Error: branch name cannot be empty.", "worktree_path": None})
     repo = get_repo(repo_label)
     if repo is None:
-        return json.dumps({"result": f"Error: no repo with label '{repo_label}'. Run /worktree:add-repo first.", "worktree_path": None})
+        return json.dumps(
+            {
+                "result": (
+                    f"Error: no repo with label '{repo_label}'. Run /worktree:add-repo first."
+                ),
+                "worktree_path": None,
+            }
+        )
 
     worktree_path = _resolve_worktree_path(repo_label, branch, path)
     if Path(worktree_path).exists():
-        return json.dumps({"result": f"Error: path already exists: {worktree_path}", "worktree_path": None})
+        return json.dumps(
+            {"result": f"Error: path already exists: {worktree_path}", "worktree_path": None}
+        )
 
     try:
         git.add_worktree(repo.path, worktree_path, branch, new_branch=new_branch)
     except GitError as e:
         return json.dumps({"result": f"Error: {e}", "worktree_path": None})
 
-    return json.dumps({"result": f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label}).", "worktree_path": worktree_path})
+    # Clean the new worktree so it matches HEAD exactly
+    warnings: list[str] = []
+    try:
+        git.reset_hard(worktree_path)
+    except GitError as e:
+        warnings.append(f"git reset --hard failed: {e}")
+    try:
+        git.clean_untracked(worktree_path)
+    except GitError as e:
+        warnings.append(f"git clean -fd failed: {e}")
+
+    msg = f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label})."
+    if warnings:
+        msg += " Warnings: " + "; ".join(warnings)
+    return json.dumps({"result": msg, "worktree_path": worktree_path})
 
 
 def list_worktrees(repo_label: str | None = None) -> str:
@@ -109,13 +132,20 @@ def remove_worktree(path: str, force: bool = False) -> str:
     """Remove a worktree by path."""
     result = _find_worktree(path)
     if not result:
-        return json.dumps({"result": f"No managed worktree found at: {path}", "worktree_path": None})
+        return json.dumps(
+            {"result": f"No managed worktree found at: {path}", "worktree_path": None}
+        )
     abs_path, repo_path = result
     try:
         git.remove_worktree(repo_path, abs_path, force=force)
         return json.dumps({"result": f"Removed worktree at {abs_path}.", "worktree_path": abs_path})
     except GitError as e:
-        return json.dumps({"result": f"Error: {e}\nTip: use force=true for unclean worktrees.", "worktree_path": abs_path})
+        return json.dumps(
+            {
+                "result": f"Error: {e}\nTip: use force=true for unclean worktrees.",
+                "worktree_path": abs_path,
+            }
+        )
 
 
 def prune_worktrees(repo_label: str | None = None) -> str:
@@ -180,48 +210,85 @@ def merge_worktree(path: str, base_branch: str | None = None) -> str:
     try:
         head_ref = subprocess.run(
             ["git", "-C", abs_path, "symbolic-ref", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if head_ref.returncode != 0:
-            return json.dumps({"result": "error", "message": f"Worktree is in detached HEAD state: {abs_path}"})
+            return json.dumps(
+                {"result": "error", "message": f"Worktree is in detached HEAD state: {abs_path}"}
+            )
         branch_name = head_ref.stdout.strip().removeprefix("refs/heads/")
     except FileNotFoundError:
-        return json.dumps({"result": "error", "message": f"git not found or invalid path: {abs_path}"})
+        return json.dumps(
+            {"result": "error", "message": f"git not found or invalid path: {abs_path}"}
+        )
 
     # Resolve base_branch if not provided
     if not base_branch:
         try:
             origin_head = subprocess.run(
                 ["git", "-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if origin_head.returncode == 0:
                 base_branch = origin_head.stdout.strip().removeprefix("refs/remotes/origin/")
             else:
                 default_branch = subprocess.run(
                     ["git", "-C", repo_path, "config", "init.defaultBranch"],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
                 if default_branch.returncode == 0 and default_branch.stdout.strip():
                     base_branch = default_branch.stdout.strip()
                 else:
-                    return json.dumps({"result": "error", "message": "Cannot determine default branch. Provide base_branch explicitly."})
+                    return json.dumps(
+                        {
+                            "result": "error",
+                            "message": (
+                                "Cannot determine default branch. Provide base_branch explicitly."
+                            ),
+                        }
+                    )
         except FileNotFoundError:
-            return json.dumps({"result": "error", "message": f"git not found or invalid path: {repo_path}"})
+            return json.dumps(
+                {"result": "error", "message": f"git not found or invalid path: {repo_path}"}
+            )
 
     # Rebase worktree onto base_branch
     try:
         git.rebase_worktree(repo_path, abs_path, base_branch)
     except GitConflictError as e:
-        return json.dumps({"result": "conflict", "message": str(e), "worktree_path": abs_path, "branch": branch_name})
+        return json.dumps(
+            {
+                "result": "conflict",
+                "message": str(e),
+                "worktree_path": abs_path,
+                "branch": branch_name,
+            }
+        )
 
     # Fast-forward merge into base repo
     try:
         git.merge_ff_only(repo_path, branch_name)
     except GitError as e:
-        return json.dumps({"result": "ff_only_failed", "message": str(e), "worktree_path": abs_path, "branch": branch_name})
+        return json.dumps(
+            {
+                "result": "ff_only_failed",
+                "message": str(e),
+                "worktree_path": abs_path,
+                "branch": branch_name,
+            }
+        )
 
-    return json.dumps({"result": "merged", "worktree_path": abs_path, "branch": branch_name, "base_branch": base_branch})
+    return json.dumps(
+        {
+            "result": "merged",
+            "worktree_path": abs_path,
+            "branch": branch_name,
+            "base_branch": base_branch,
+        }
+    )
 
 
 def register(app: FastMCP) -> None:
@@ -260,6 +327,10 @@ def register(app: FastMCP) -> None:
     def wt_unlock(path: str) -> str:
         return unlock_worktree(path)
 
-    @app.tool(description="Rebase a worktree onto base_branch, then fast-forward merge into the base repo.")
+    @app.tool(
+        description=(
+            "Rebase a worktree onto base_branch, then fast-forward merge into the base repo."
+        )
+    )
     def wt_merge(path: str, base_branch: str | None = None) -> str:
         return merge_worktree(path, base_branch)

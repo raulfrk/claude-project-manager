@@ -9,7 +9,7 @@ agent: general-purpose
 
 Convenience wrapper that chains `/proj:jira-sync` and `/proj:trello-sync` in sequence.
 
-**Full sub-skill chain**: jira-sync -> trello-setup -> trello-fetch -> trello-diff -> trello-push -> trello-link. See each parent skill for details on sub-skill responsibilities.
+**Full sub-skill chain**: jira-sync -> trello-sync. See each parent skill for details.
 
 **1.** Check prerequisites
 

@@ -7,14 +7,16 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from server.lib._types import JsonValue
-
 from server.lib.models import HookRegistry
+
+if TYPE_CHECKING:
+    from server.lib._types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +109,7 @@ def _load_failures(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Could not read %s — starting fresh", target)
     return []
 
@@ -132,7 +134,7 @@ def log_failure(
     entries = _load_failures(target)
 
     entry: dict[str, JsonValue] = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "hook_id": hook_id,
         "trigger_tool": trigger_tool,
         "target_tool": target_tool,
@@ -192,7 +194,7 @@ def _load_verifications(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Could not read %s — starting fresh", target)
     return []
 
@@ -214,7 +216,7 @@ def store_verification_result(
     entries = _load_verifications(target)
 
     entry: dict[str, JsonValue] = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "trigger_tool": trigger_tool,
         "hook_id": hook_id,
         "status": status,
@@ -255,7 +257,7 @@ def _load_invocations(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Could not read %s — starting fresh", target)
     return []
 
@@ -280,7 +282,7 @@ def log_invocation(
     entries = _load_invocations(target)
 
     entry: dict[str, JsonValue] = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "hook_id": hook_id,
         "trigger_tool": trigger_tool,
         "target_tool": target_tool,
@@ -289,7 +291,7 @@ def log_invocation(
     if source_result is not None:
         entry["source_result"] = source_result[:500]
     if payload is not None:
-        payload_str = json.dumps(payload) if not isinstance(payload, str) else payload
+        payload_str = json.dumps(payload)
         entry["payload"] = payload_str[:500]
 
     entries.append(entry)

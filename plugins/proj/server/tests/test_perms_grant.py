@@ -9,12 +9,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from server.lib import state, storage
+from server.lib import state
 from server.lib.models import (
     PermissionsConfig,
     ProjConfig,
     ProjectDates,
-    ProjectEntry,
     ProjectMeta,
     RepoEntry,
     TodoistSync,
@@ -26,7 +25,6 @@ from server.tools.perms_grant import (
     revoke_all_permissions,
     setup_permissions,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,7 +112,8 @@ class TestSetupPermissions:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         counts = setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj", "plugin_sandbox_sandbox"],
         )
 
@@ -139,7 +138,8 @@ class TestSetupPermissions:
         cfg.tracking_dir = "/tmp/tracking"
 
         counts = setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj"],
             batch_setup_fn=mock_fn,
         )
@@ -154,10 +154,12 @@ class TestSetupPermissions:
 
     def test_batch_setup_fn_excludes_reference_repos(self) -> None:
         mock_fn = Mock(return_value="Sandbox paths added: 1, MCP rules added: 0")
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
@@ -175,7 +177,8 @@ class TestSetupPermissions:
         cfg.tracking_dir = "/tmp/tracking"
 
         setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             archive_destination="/home/user/archived",
             batch_setup_fn=mock_fn,
         )
@@ -193,7 +196,12 @@ class TestSetupPermissions:
         counts = setup_permissions(meta, cfg, batch_setup_fn=mock_fn)
 
         mock_fn.assert_not_called()
-        assert counts == {"sandbox_paths": 0, "mcp_rules": 0, "additional_directories": 0}
+        assert counts == {
+            "sandbox_paths": 0,
+            "mcp_rules": 0,
+            "skill_rules": 0,
+            "additional_directories": 0,
+        }
 
     def test_batch_setup_fn_parses_counts_from_result(self) -> None:
         mock_fn = Mock(return_value="Sandbox paths added: 5, MCP rules added: 3")
@@ -201,7 +209,8 @@ class TestSetupPermissions:
         cfg = _make_cfg()
 
         counts = setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["a", "b", "c"],
             batch_setup_fn=mock_fn,
         )
@@ -240,7 +249,6 @@ class TestProjSetupPermissionsTool:
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
-
         result = await call_tool(
             mcp_app_with_grant,
             "proj_setup_permissions",
@@ -275,7 +283,6 @@ def _read_sandbox_allow_write(path: Path) -> list[str]:
     return data.get("sandbox", {}).get("filesystem", {}).get("allowWrite", [])
 
 
-
 class TestSetupPermissionsSandbox:
     def test_adds_sandbox_write_paths(self) -> None:
         """Without batch_setup_fn, returns computed counts for sandbox paths."""
@@ -298,10 +305,12 @@ class TestSetupPermissionsSandbox:
 
     def test_mixed_repos_writable_and_reference(self) -> None:
         """Without batch_setup_fn, reference repos are excluded from computed path count."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
         counts = setup_permissions(meta, cfg, mcp_servers=["plugin_proj_proj"])
@@ -315,7 +324,8 @@ class TestSetupPermissionsSandbox:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg()
         counts = setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj"],
         )
 
@@ -351,7 +361,8 @@ class TestRevokeAllPermissions:
 
         # Setup returns computed counts (no local writes)
         setup_counts = setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj"],
         )
         assert setup_counts["sandbox_paths"] == 2
@@ -374,7 +385,8 @@ class TestRevokeAllPermissions:
         cfg.tracking_dir = "/tmp/tracking"
 
         setup_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj"],
         )
 
@@ -404,7 +416,7 @@ class TestRevokeAllPermissions:
         cfg = _make_cfg()
         cfg.tracking_dir = ""
 
-        counts = revoke_all_permissions(meta, cfg)
+        revoke_all_permissions(meta, cfg)
         allow = _read_allow(settings_path)
         # Unrelated rules should remain
         for rule in unrelated:
@@ -437,10 +449,12 @@ class TestRevokeAllPermissions:
 
     def test_revoke_mixed_repos(self) -> None:
         """Without batch_revoke_fn, reference repos are excluded from computed path count."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
@@ -458,7 +472,8 @@ class TestRevokeAllPermissions:
         cfg.tracking_dir = "/tmp/tracking"
 
         counts = revoke_all_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["plugin_proj_proj"],
             batch_revoke_fn=mock_fn,
         )
@@ -473,10 +488,12 @@ class TestRevokeAllPermissions:
 
     def test_batch_revoke_fn_excludes_reference_repos(self) -> None:
         mock_fn = Mock(return_value="sandbox paths removed: 1, MCP rules removed: 0")
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.tracking_dir = "/tmp/tracking"
 
@@ -516,7 +533,8 @@ class TestRevokeAllPermissions:
         cfg = _make_cfg()
 
         counts = revoke_all_permissions(
-            meta, cfg,
+            meta,
+            cfg,
             mcp_servers=["a", "b"],
             batch_revoke_fn=mock_fn,
         )
@@ -547,7 +565,6 @@ class TestArchiveRevokesPermissions:
         settings_path = tmp_path / ".claude" / "settings.json"
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
-
 
         # Setup permissions (returns computed counts, hooks handle dispatch)
         setup_result = await call_tool(
@@ -586,7 +603,6 @@ class TestArchiveRevokesPermissions:
         _write_settings(settings_path, allow=[])
         monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
 
-
         # Archive without setting up permissions first
         result = await call_tool(mcp_app_with_grant, "proj_archive", name="myproject")
         data = json.loads(result)
@@ -601,10 +617,12 @@ class TestArchiveRevokesPermissions:
 class TestComputeSetupPathsRootAware:
     def test_compute_setup_paths_uses_projects_root(self) -> None:
         """When projects_root is set, returns root instead of per-repo paths."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/projects/repo-a"),
-            RepoEntry(label="lib", path="/home/user/projects/repo-b"),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/projects/repo-a"),
+                RepoEntry(label="lib", path="/home/user/projects/repo-b"),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = "/home/user/projects"
         cfg.tracking_dir = ""
@@ -618,9 +636,11 @@ class TestComputeSetupPathsRootAware:
 
     def test_compute_setup_paths_tracking_root_containment(self) -> None:
         """tracking_root under projects_root is skipped (containment check)."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/projects/repo-a"),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = "/home/user/projects"
         cfg.permissions.tracking_root = "/home/user/projects/tracking"
@@ -633,15 +653,19 @@ class TestComputeSetupPathsRootAware:
 
     def test_compute_setup_paths_archive_containment(self) -> None:
         """archive_dest under projects_root is skipped (containment check)."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/projects/repo-a"),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = "/home/user/projects"
         cfg.tracking_dir = ""
 
         paths = _compute_setup_paths(
-            meta, cfg, archive_destination="/home/user/projects/archived",
+            meta,
+            cfg,
+            archive_destination="/home/user/projects/archived",
         )
 
         assert "/home/user/projects" in paths
@@ -650,9 +674,11 @@ class TestComputeSetupPathsRootAware:
 
     def test_compute_setup_paths_tracking_root_separate(self) -> None:
         """tracking_root outside projects_root is included."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/projects/repo-a"),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/projects/repo-a"),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = "/home/user/projects"
         cfg.permissions.tracking_root = "/home/user/tracking"
@@ -669,10 +695,12 @@ class TestComputeSetupPathsRootAware:
 class TestComputeSetupPathsBackwardCompat:
     def test_compute_setup_paths_no_roots_fallback(self) -> None:
         """When projects_root=None, uses per-repo paths (legacy behavior)."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = None
         cfg.permissions.tracking_root = None
@@ -688,10 +716,12 @@ class TestComputeSetupPathsBackwardCompat:
 
     def test_collect_sandbox_write_paths_no_roots_fallback(self) -> None:
         """When projects_root=None, _collect_sandbox_write_paths uses per-repo paths (legacy)."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/proj"),
-            RepoEntry(label="docs", path="/home/user/docs", reference=True),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/proj"),
+                RepoEntry(label="docs", path="/home/user/docs", reference=True),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = None
         cfg.permissions.tracking_root = None
@@ -747,11 +777,13 @@ class TestComputeSetupPathsWorktreeRoot:
 class TestComputeSetupPathsUserPaths:
     def test_compute_setup_paths_does_not_include_user_paths(self) -> None:
         """Root-mode only returns roots, not per-repo paths -- user custom paths are separate."""
-        meta = _make_meta(repos=[
-            RepoEntry(label="code", path="/home/user/projects/repo-a"),
-            RepoEntry(label="lib", path="/home/user/projects/repo-b"),
-            RepoEntry(label="extra", path="/home/user/other/repo-c"),
-        ])
+        meta = _make_meta(
+            repos=[
+                RepoEntry(label="code", path="/home/user/projects/repo-a"),
+                RepoEntry(label="lib", path="/home/user/projects/repo-b"),
+                RepoEntry(label="extra", path="/home/user/other/repo-c"),
+            ]
+        )
         cfg = _make_cfg()
         cfg.permissions.projects_root = "/home/user/projects"
         cfg.permissions.tracking_root = None

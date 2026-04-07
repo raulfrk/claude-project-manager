@@ -245,7 +245,8 @@ class TestGitTrackingConfig:
     @pytest.mark.anyio
     async def test_config_init_git_tracking(self, mcp_app: Any, cfg: ProjConfig) -> None:
         result = await call_tool(
-            mcp_app, "config_init",
+            mcp_app,
+            "config_init",
             git_tracking_enabled=True,
             git_tracking_github_enabled=True,
             git_tracking_github_repo_format="my-{project-name}",

@@ -8,10 +8,9 @@ from typing import Any
 
 import pytest
 
-from server.lib import state, storage
+from server.lib import state
 from server.lib.models import ProjConfig
 from tests.conftest import call_tool, setup_project
-
 
 
 @pytest.fixture()
@@ -54,7 +53,11 @@ class TestProjLoadSession:
         # Result is JSON - parse and check
         try:
             data = json.loads(result)
-            assert "beta" in str(data) or "Loaded" in data.get("result", "") or "beta" in data.get("name", "")
+            assert (
+                "beta" in str(data)
+                or "Loaded" in data.get("result", "")
+                or "beta" in data.get("name", "")
+            )
         except json.JSONDecodeError:
             assert "beta" in result
             assert "Loaded" in result
@@ -103,7 +106,10 @@ class TestProjLoadSession:
         # Should return ambiguous message with options, not set anything
         try:
             data = json.loads(result)
-            assert "ambiguous" in data.get("error", "").lower() or "did you mean" in data.get("error", "").lower()
+            assert (
+                "ambiguous" in data.get("error", "").lower()
+                or "did you mean" in data.get("error", "").lower()
+            )
         except json.JSONDecodeError:
             assert "ambiguous" in result.lower() or "did you mean" in result.lower()
         assert state.get_session_active() is None

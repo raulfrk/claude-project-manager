@@ -7,12 +7,22 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.lib.models import JsonValue
-
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-_IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"}
+    from server.lib.models import JsonValue
+
+_IGNORE_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    ".tox",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".ruff_cache",
+}
 
 _TECH_MARKERS: list[tuple[str, str]] = [
     ("pyproject.toml", "Python"),
@@ -31,18 +41,30 @@ _TECH_MARKERS: list[tuple[str, str]] = [
 ]
 
 _ENTRY_POINT_NAMES = {
-    "main.py", "app.py", "server.py", "cli.py",
-    "main.ts", "index.ts", "app.ts",
+    "main.py",
+    "app.py",
+    "server.py",
+    "cli.py",
+    "main.ts",
+    "index.ts",
+    "app.ts",
     "main.go",
-    "main.rs", "lib.rs",
-    "index.js", "app.js",
+    "main.rs",
+    "lib.rs",
+    "index.js",
+    "app.js",
 }
 
 _CONFIG_FILES = {
-    "pyproject.toml", "setup.py", "setup.cfg",
-    "package.json", "tsconfig.json",
-    "Cargo.toml", "go.mod",
-    "justfile", "Makefile",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "package.json",
+    "tsconfig.json",
+    "Cargo.toml",
+    "go.mod",
+    "justfile",
+    "Makefile",
     ".github",
 }
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from server.lib._types import JsonValue
-
 from server.lib import storage
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+    from server.lib._types import JsonValue
 
 _MAX_LIMIT = 200
 
@@ -51,11 +51,14 @@ def hooks_invocations(
     combined.sort(key=lambda e: str(e.get("timestamp", "")), reverse=True)
     combined = combined[:limit]
 
-    return json.dumps({
-        "total": len(combined),
-        "limit": limit,
-        "entries": combined,
-    }, indent=2)
+    return json.dumps(
+        {
+            "total": len(combined),
+            "limit": limit,
+            "entries": combined,
+        },
+        indent=2,
+    )
 
 
 # ── Registration ─────────────────────────────────────────────────────────────

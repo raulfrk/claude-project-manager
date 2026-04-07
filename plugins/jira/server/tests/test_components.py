@@ -20,9 +20,7 @@ def component_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraGetComponents:
-    def test_fetches_components(
-        self, mock_jira_client: MagicMock, component_tools: dict
-    ) -> None:
+    def test_fetches_components(self, mock_jira_client: MagicMock, component_tools: dict) -> None:
         data = [{"id": "1", "name": "Backend"}, {"id": "2", "name": "Frontend"}]
         mock_jira_client.get.return_value = data
 
@@ -49,9 +47,13 @@ class TestJiraCreateComponent:
     def test_creates_component_with_description(
         self, mock_jira_client: MagicMock, component_tools: dict
     ) -> None:
-        mock_jira_client.post.return_value = {"id": "4", "name": "Auth", "description": "Auth module"}
+        mock_jira_client.post.return_value = {
+            "id": "4",
+            "name": "Auth",
+            "description": "Auth module",
+        }
 
-        result = component_tools["jira_create_component"](
+        component_tools["jira_create_component"](
             project_key="PROJ", name="Auth", description="Auth module"
         )
 

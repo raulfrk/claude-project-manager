@@ -10,10 +10,15 @@ import pytest
 
 from server.lib.client import TodoistClient
 
-
 _PROXY_VARS = (
-    "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy",
-    "HTTPS_PROXY", "https_proxy", "FTP_PROXY", "ftp_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "FTP_PROXY",
+    "ftp_proxy",
 )
 
 
@@ -32,6 +37,7 @@ def mock_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 def _make_app():
     from mcp.server.fastmcp import FastMCP
+
     from server.tools.projects import register
 
     app = FastMCP("test")

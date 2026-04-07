@@ -36,8 +36,10 @@ class TestJiraInitSuccess:
         config_mod._cached_config = MagicMock()
         client_mod._cached_client = MagicMock()
 
-        with patch("server.tools.init.httpx.get", return_value=mock_resp) as mock_get, \
-             patch("server.tools.init.Path.expanduser", return_value=config_path):
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp) as mock_get,
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
             result = init_tools["jira_init"](
                 personal_access_token="my_pat",
                 base_url="https://jira.example.com/",
@@ -102,9 +104,13 @@ class TestJiraInitCacheClearing:
         config_mod._cached_config = MagicMock()
         client_mod._cached_client = MagicMock()
 
-        with patch("server.tools.init.httpx.get", return_value=mock_resp), \
-             patch("server.tools.init.Path.expanduser", return_value=config_path):
-            init_tools["jira_init"](personal_access_token="pat", base_url="https://jira.example.com")
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp),
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
+            init_tools["jira_init"](
+                personal_access_token="pat", base_url="https://jira.example.com"
+            )
 
         assert config_mod._cached_config is None
         assert client_mod._cached_client is None

@@ -15,7 +15,6 @@ from server.lib.template import _resolve_path
 from server.tools.fire import hooks_fire
 from server.tools.registry import hooks_register
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -79,7 +78,10 @@ class TestFeedbackOnlyOnSuccess:
     async def test_feedback_skipped_on_hook_failure(self, hooks_yaml: Path):
         """Feedback writeback should not fire when the blocking hook fails."""
         hook = _hook(
-            "hook-001", "todo_complete", "todoist_complete", "todoist",
+            "hook-001",
+            "todo_complete",
+            "todoist_complete",
+            "todoist",
             blocking=True,
             feedback_mapping={"task_id": "todoist_task_id"},
             feedback_tool="todo_update",
@@ -93,11 +95,15 @@ class TestFeedbackOnlyOnSuccess:
         )
         save(reg, hooks_yaml)
 
-        failed_result = FireResult(hook_id="hook-001", status_code=500, error="server error", result=None)
+        failed_result = FireResult(
+            hook_id="hook-001", status_code=500, error="server error", result=None
+        )
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire.post_hook", new_callable=AsyncMock, return_value=failed_result) as mock_post,
+            patch(
+                "server.tools.fire.post_hook", new_callable=AsyncMock, return_value=failed_result
+            ) as mock_post,
             patch("server.tools.fire._load_proj_config", return_value={}),
             patch("server.tools.fire._resolve_server_url", return_value="http://localhost:9999"),
         ):
@@ -114,7 +120,10 @@ class TestFeedbackOnlyOnSuccess:
     async def test_feedback_fires_on_success(self, hooks_yaml: Path):
         """Feedback writeback should fire when the blocking hook succeeds."""
         hook = _hook(
-            "hook-001", "todo_complete", "todoist_complete", "todoist",
+            "hook-001",
+            "todo_complete",
+            "todoist_complete",
+            "todoist",
             blocking=True,
             feedback_mapping={"task_id": "todoist_task_id"},
             feedback_tool="todo_update",
@@ -129,10 +138,14 @@ class TestFeedbackOnlyOnSuccess:
         save(reg, hooks_yaml)
 
         hook_result = FireResult(
-            hook_id="hook-001", status_code=200, error=None,
+            hook_id="hook-001",
+            status_code=200,
+            error=None,
             result=json.dumps({"task_id": "ext-999"}),
         )
-        feedback_result = FireResult(hook_id="hook-001-feedback", status_code=200, error=None, result=None)
+        feedback_result = FireResult(
+            hook_id="hook-001-feedback", status_code=200, error=None, result=None
+        )
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
@@ -237,6 +250,8 @@ class TestFeedbackMappingSerialization:
         assert restored.feedback_tool == original.feedback_tool
 
     def test_from_dict_defaults_when_missing(self):
-        h = Hook.from_dict({"id": "hook-001", "trigger_tool": "a", "target_tool": "b", "server": "s"})
+        h = Hook.from_dict(
+            {"id": "hook-001", "trigger_tool": "a", "target_tool": "b", "server": "s"}
+        )
         assert h.feedback_mapping == {}
         assert h.feedback_tool is None

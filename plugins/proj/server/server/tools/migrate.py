@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shutil
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import storage
-from server.lib.models import JsonValue, Todo
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mcp.server.fastmcp import FastMCP
-    from server.lib.models import ProjConfig
+
+    from server.lib.models import JsonValue, ProjConfig, Todo
 
 
 def _assign_ids(
@@ -99,7 +101,9 @@ def _migrate_decisions(decisions: list[dict[str, JsonValue]], id_map: dict[str, 
     return count
 
 
-def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "") -> dict[str, JsonValue]:
+def _cleanup_config(
+    cfg: ProjConfig, dry_run: bool = False, timestamp: str = ""
+) -> dict[str, JsonValue]:
     """Remove deprecated fields from proj.yaml. Returns result dict."""
     config_path = storage.config_path()
     raw = storage._load_yaml(config_path)
@@ -137,7 +141,9 @@ def _cleanup_config(cfg: ProjConfig, dry_run: bool = False, timestamp: str = "")
     return {"cleaned": True, "removed": removed}
 
 
-def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) -> dict[str, JsonValue]:
+def _migrate_project(
+    cfg: ProjConfig, project_name: str, dry_run: bool = False
+) -> dict[str, JsonValue]:
     """Migrate a single project's todo IDs from T-prefix format to numeric dot-notation."""
     todos = storage.load_todos(cfg, project_name)
     meta = storage.load_meta(cfg, project_name)
@@ -170,7 +176,7 @@ def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) 
             "id_count": len(id_map),
             "archive_count": len(archived),
             "decisions_count": len(decisions),
-            "mapping": {old: new for old, new in sorted(id_map.items())},
+            "mapping": dict(sorted(id_map.items())),
         }
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -214,9 +220,7 @@ def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) 
         if decisions:
             decisions_count = _migrate_decisions(decisions, id_map)
             if decisions_count:
-                storage._write_yaml_list(
-                    storage.decisions_path(cfg, project_name), decisions
-                )
+                storage._write_yaml_list(storage.decisions_path(cfg, project_name), decisions)
 
         # Directory renames LAST (after all YAML is committed)
         for old_id, new_id in id_map.items():
@@ -225,10 +229,8 @@ def _migrate_project(cfg: ProjConfig, project_name: str, dry_run: bool = False) 
     except Exception:
         # Reverse directory renames first
         for old_id, new_id in reversed(renamed):
-            try:
+            with contextlib.suppress(Exception):
                 storage.rename_todo_dir(cfg, project_name, new_id, old_id)
-            except Exception:
-                pass  # Best effort
         # Then restore YAML backups
         _restore_backups(backups)
         raise

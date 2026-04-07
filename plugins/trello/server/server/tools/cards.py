@@ -1,8 +1,15 @@
 """Trello cards tools."""
+
 from __future__ import annotations
+
 import json
-from mcp.server.fastmcp import FastMCP
+from typing import TYPE_CHECKING
+
 from server.lib.client import JsonValue, get_client
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
 
 def register(app: FastMCP) -> None:
     @app.tool(description="Get all cards on a list.")
@@ -84,10 +91,12 @@ def register(app: FastMCP) -> None:
                 list_id = card.get("list_id", "")
                 name = card.get("name", "")
                 if not list_id or not name:
-                    failures.append({
-                        "index": idx,
-                        "error": "Missing 'list_id' or 'name'",
-                    })
+                    failures.append(
+                        {
+                            "index": idx,
+                            "error": "Missing 'list_id' or 'name'",
+                        }
+                    )
                     continue
                 params: dict[str, str] = {"idList": list_id, "name": name}
                 desc = card.get("desc", "")
@@ -98,6 +107,6 @@ def register(app: FastMCP) -> None:
                     params["due"] = due
                 created = client.post("/cards", params=params)
                 successes.append(created)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failures.append({"index": idx, "name": card.get("name", ""), "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

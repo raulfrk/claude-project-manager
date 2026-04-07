@@ -1408,7 +1408,7 @@ wheels = [
 
 [[package]]
 name = "zoxide-mcp-server"
-version = "1.0.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "claude-hook-transport" },
