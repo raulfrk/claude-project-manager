@@ -401,7 +401,7 @@ def register(app: FastMCP) -> None:
             {
                 "result": f"Updated todo {todo_id}.",
                 "todo_id": todo_id,
-                **_todo_hook_fields(todo, meta, name),
+                **_todo_hook_fields(todo, meta, name, todos=todos),
             }
         )
 
