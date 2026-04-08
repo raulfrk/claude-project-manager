@@ -63,4 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable verbose output.",
     )
 
+    parser.add_argument(
+        "--no-tui",
+        action="store_true",
+        help="Disable Textual TUI and use the plain Rich-based flow.",
+    )
+
     return parser

@@ -17,6 +17,7 @@ from installer.errors import (
     check_root,
     release_lock,
 )
+from installer.app import InstallerApp
 from installer.uninstall import run_uninstall
 from installer.update import (
     compare_versions,
@@ -127,14 +128,31 @@ def main() -> int:
         if args.full_cleanup and not args.uninstall:
             args.uninstall = True
 
+        # Determine mode for TUI routing
         if args.update:
-            return _update(args)
+            mode = "update"
         elif args.reinstall:
-            return _reinstall(args)
+            mode = "reinstall"
         elif args.uninstall:
-            return _uninstall(args)
+            mode = "uninstall"
         else:
-            return _install(args)
+            mode = "install"
+
+        if args.no_tui:
+            # Plain Rich-based flow
+            if mode == "update":
+                return _update(args)
+            elif mode == "reinstall":
+                return _reinstall(args)
+            elif mode == "uninstall":
+                return _uninstall(args)
+            else:
+                return _install(args)
+        else:
+            # Textual TUI flow
+            app = InstallerApp(mode=mode, args=args)
+            app.run()
+            return EXIT_SUCCESS
 
     except KeyboardInterrupt:
         print("\nCancelled.")
