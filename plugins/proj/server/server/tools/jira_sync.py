@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, cast
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
-from server.lib.models import JsonDict, JsonValue, ProjConfig, ProjectMeta, Todo
+from server.lib.models import JsonDict, ProjConfig, ProjectMeta, Todo
 from server.tools.config import require_project
 
 if TYPE_CHECKING:
@@ -1553,7 +1553,7 @@ def register(app: FastMCP) -> None:
         )
     )
     def proj_jira_full_sync(
-        jira_issues_json: str | dict[str, JsonValue] | list[JsonValue] | None = None,
+        jira_issues_json: str | None = None,
         project_name: str | None = None,
         comments_json: str = "{}",
         retry_failures: str | None = None,
@@ -1668,15 +1668,6 @@ def register(app: FastMCP) -> None:
                             ),
                         }
                     )
-            elif isinstance(jira_issues_json, (dict, list)):
-                raw_parsed: JsonValue = jira_issues_json
-                if isinstance(raw_parsed, dict) and "issues" in raw_parsed:
-                    raw_parsed = raw_parsed["issues"]
-                jira_issues_parsed = (
-                    [x for x in raw_parsed if isinstance(x, dict)]
-                    if isinstance(raw_parsed, list)
-                    else []
-                )
             elif isinstance(jira_issues_json, str):
                 try:
                     raw_parsed = json.loads(jira_issues_json)

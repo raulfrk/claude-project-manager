@@ -3112,7 +3112,7 @@ class TestSelfFetchFullSync:
 
 
 class TestFullSyncInputTypes:
-    """Tests for proj_jira_full_sync accepting dict, list, str, and None inputs."""
+    """Tests for proj_jira_full_sync accepting str and None inputs."""
 
     def _get_full_sync_fn(self):
         from unittest.mock import MagicMock
@@ -3129,7 +3129,7 @@ class TestFullSyncInputTypes:
         self,
         cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Passing a dict with 'issues' key works without validation error."""
+        """Passing a JSON string with 'issues' key works."""
         _cfg, name = cfg_with_project
         issues = [
             _make_epic_issue("PROJ-1", "Auth Epic"),
@@ -3141,7 +3141,7 @@ class TestFullSyncInputTypes:
         ]
         envelope = {"issues": issues, "total": len(issues)}
         fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=envelope, project_name=name))
+        result = json.loads(fn(jira_issues_json=json.dumps(envelope), project_name=name))
         assert result["status"] == "success"
         assert result["summary"]["groups_processed"] >= 1
 
@@ -3149,7 +3149,7 @@ class TestFullSyncInputTypes:
         self,
         cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Passing a bare list of issues works."""
+        """Passing a JSON string of a bare list of issues works."""
         _cfg, name = cfg_with_project
         issues = [
             _make_epic_issue("PROJ-1", "Auth Epic"),
@@ -3160,7 +3160,7 @@ class TestFullSyncInputTypes:
             ),
         ]
         fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=issues, project_name=name))
+        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
         assert result["status"] == "success"
         assert result["summary"]["groups_processed"] >= 1
 
@@ -3213,7 +3213,7 @@ class TestFullSyncInputTypes:
         """Passing an empty dict {} handles gracefully (no 'issues' key)."""
         _cfg, name = cfg_with_project
         fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json={}, project_name=name))
+        result = json.loads(fn(jira_issues_json=json.dumps({}), project_name=name))
         assert result["status"] == "success"
         assert (
             "up to date" in result["summary"].get("message", "").lower()
