@@ -132,9 +132,8 @@ class ConfirmScreen(Screen[ConfirmResult]):
         margin: 0 1;
     }
 
-    #confirm-button-bar Button:focus {
+    #btn-confirm {
         text-style: bold;
-        border: tall $accent;
     }
     """
 
