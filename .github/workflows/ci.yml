@@ -94,6 +94,25 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
+      - name: Generate missing snapshot goldens
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
+            cpm-e2e:latest \
+            sh -c "SNAPSHOT_UPDATE=1 uv run pytest installer/tests/e2e/test_snapshots.py -v"
+
+      - name: Commit generated snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add installer/tests/e2e/snapshots/
+          if git diff --cached --quiet; then
+            echo "No new snapshots to commit"
+          else
+            git commit -m "CI: regenerate snapshot goldens from Docker [skip ci]"
+            git push
+          fi
+
       - name: Run e2e tests
         run: |
           docker run --rm \
@@ -112,4 +131,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapshot-diffs
-          path: installer/tests/snapshots/
+          path: installer/tests/e2e/snapshots/
