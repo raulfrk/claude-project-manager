@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +23,6 @@ from hook_dispatch.dispatch import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -503,7 +503,7 @@ class TestResolveHooksTransport:
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("hook_dispatch.dispatch.os.path.exists", return_value=True),
+            patch("pathlib.Path.exists", return_value=True),
         ):
             url, transport = _resolve_hooks_transport(19100)
 
@@ -518,17 +518,16 @@ class TestResolveHooksTransport:
         """Falls back to glob for PID-tagged sockets when registry is absent."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
 
+        mock_socks = [
+            Path("/tmp/claude-hooks-hooks-111.sock"),
+            Path("/tmp/claude-hooks-hooks-222.sock"),
+        ]
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch(
-                "hook_dispatch.dispatch.glob.glob",
-                return_value=[
-                    "/tmp/claude-hooks-hooks-111.sock",
-                    "/tmp/claude-hooks-hooks-222.sock",
-                ],
-            ),
-            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+            patch("pathlib.Path.glob", return_value=mock_socks),
+            patch("pathlib.Path.stat") as mock_stat,
         ):
+            mock_stat.return_value.st_mtime = 1000
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
@@ -544,16 +543,13 @@ class TestResolveHooksTransport:
         sockets_dir.mkdir(parents=True)
         (sockets_dir / "hooks").write_text("   \n")
 
+        mock_socks = [Path("/tmp/claude-hooks-hooks-333.sock")]
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch(
-                "hook_dispatch.dispatch.glob.glob",
-                return_value=[
-                    "/tmp/claude-hooks-hooks-333.sock",
-                ],
-            ),
-            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+            patch("pathlib.Path.glob", return_value=mock_socks),
+            patch("pathlib.Path.stat") as mock_stat,
         ):
+            mock_stat.return_value.st_mtime = 1000
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
@@ -567,7 +563,7 @@ class TestResolveHooksTransport:
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("hook_dispatch.dispatch.glob.glob", return_value=[]),
+            patch("pathlib.Path.glob", return_value=[]),
         ):
             url, transport = _resolve_hooks_transport(19100)
 
@@ -799,23 +795,37 @@ class TestResolveHooksTransportStaleRegistry:
     def test_stale_registry_falls_back_to_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Registry points to non-existent socket → glob fallback finds real socket."""
+        """Registry points to non-existent socket -> glob fallback finds real socket."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
         # Registry points to sandbox PID socket that doesn't exist on host
         (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-10.sock")
 
+        mock_socks = [Path("/tmp/claude-hooks-hooks-4097643.sock")]
+        orig_exists = Path.exists
+
+        def fake_exists(p: Path) -> bool:
+            if str(p) == "/tmp/claude-hooks-hooks-10.sock":
+                return False
+            return orig_exists(p)
+
+        fake_stat = MagicMock()
+        fake_stat.st_mtime = 1000
+
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("hook_dispatch.dispatch.os.path.exists", return_value=False),
             patch(
-                "hook_dispatch.dispatch.glob.glob",
-                return_value=[
-                    "/tmp/claude-hooks-hooks-4097643.sock",
-                ],
+                "pathlib.Path.exists",
+                autospec=True,
+                side_effect=fake_exists,
             ),
-            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+            patch("pathlib.Path.glob", return_value=mock_socks),
+            patch(
+                "pathlib.Path.stat",
+                autospec=True,
+                return_value=fake_stat,
+            ),
         ):
             _url, transport = _resolve_hooks_transport(19100)
 
@@ -824,7 +834,7 @@ class TestResolveHooksTransportStaleRegistry:
     def test_valid_registry_used_when_socket_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Registry points to existing socket → used directly, no glob needed."""
+        """Registry points to existing socket -> used directly, no glob needed."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
@@ -832,7 +842,7 @@ class TestResolveHooksTransportStaleRegistry:
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("hook_dispatch.dispatch.os.path.exists", return_value=True),
+            patch("pathlib.Path.exists", return_value=True),
         ):
             _url, transport = _resolve_hooks_transport(19100)
 
@@ -844,6 +854,11 @@ class TestResolveHooksTransportStaleRegistry:
         """When multiple sockets exist, glob fallback picks the newest by mtime."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
 
+        mock_socks = [
+            Path("/tmp/claude-hooks-hooks-111.sock"),
+            Path("/tmp/claude-hooks-hooks-222.sock"),
+            Path("/tmp/claude-hooks-hooks-333.sock"),
+        ]
         mtimes = {
             "/tmp/claude-hooks-hooks-111.sock": 1000,
             "/tmp/claude-hooks-hooks-222.sock": 2000,
@@ -852,8 +867,12 @@ class TestResolveHooksTransportStaleRegistry:
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("hook_dispatch.dispatch.glob.glob", return_value=list(mtimes.keys())),
-            patch("hook_dispatch.dispatch.os.path.getmtime", side_effect=lambda p: mtimes[p]),
+            patch("pathlib.Path.glob", return_value=mock_socks),
+            patch(
+                "pathlib.Path.stat",
+                autospec=True,
+                side_effect=lambda p: type("FakeStat", (), {"st_mtime": mtimes[str(p)]})(),
+            ),
         ):
             _url, transport = _resolve_hooks_transport(19100)
 
