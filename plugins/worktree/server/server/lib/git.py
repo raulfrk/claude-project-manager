@@ -145,6 +145,22 @@ def is_git_repo(path: str) -> bool:
         return False
 
 
+def status_porcelain(path: Path) -> str:
+    """Return `git status --porcelain` output. Empty string means clean."""
+    return _run(["-C", str(path), "status", "--porcelain"])
+
+
+def add_all(path: Path) -> None:
+    """Stage all changes (tracked and untracked)."""
+    _run(["-C", str(path), "add", "-A"])
+
+
+def commit(path: Path, message: str) -> str:
+    """Commit staged changes and return the new HEAD SHA."""
+    _run(["-C", str(path), "commit", "-m", message])
+    return _run(["-C", str(path), "rev-parse", "HEAD"]).strip()
+
+
 def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dict[str, str]:
     """Rebase the worktree's branch onto base_branch.
 

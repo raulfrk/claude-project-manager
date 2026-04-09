@@ -605,6 +605,11 @@ Initialize `files_merged_this_batch = set()` and `reexecution_queue = []`.
 For each completed todo in batch order:
   Create pre-merge backup: `git tag pre-merge-{todo_id}`.
 
+  For each completed todo's worktree:
+    Call `wt_auto_commit(worktree_path=<path>, message="[todo-{id}] Auto-commit agent work")`
+    If committed: display "Auto-committed {N} files in worktree for todo {id}"
+    If error: log warning, proceed to merge attempt
+
   Run `git merge --no-ff todo-{id}`:
 
   **IF clean merge** (exit 0): commit. Add all modified files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`. Continue.
@@ -1109,6 +1114,11 @@ Initialize `files_merged_this_batch = set()` and `reexecution_queue = []`.
 
 For each completed todo in batch order:
   Create pre-merge backup: `git tag pre-merge-{todo_id}`.
+
+  For each completed todo's worktree:
+    Call `wt_auto_commit(worktree_path=<path>, message="[todo-{id}] Auto-commit agent work")`
+    If committed: display "Auto-committed {N} files in worktree for todo {id}"
+    If error: log warning, proceed to merge attempt
 
   Run `git merge --no-ff todo-{id}`:
 

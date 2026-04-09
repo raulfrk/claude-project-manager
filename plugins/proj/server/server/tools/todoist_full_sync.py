@@ -200,6 +200,7 @@ class SyncPlan:
     push_create_phase2: list[dict[str, JsonValue]] = field(default_factory=list)
     push_update: list[dict[str, JsonValue]] = field(default_factory=list)
     push_complete: list[str] = field(default_factory=list)
+    push_reopen: list[str] = field(default_factory=list)
     ghost_close: list[str] = field(default_factory=list)
     potential_links: list[dict[str, JsonValue]] = field(default_factory=list)
     root_only_cleanup: list[dict[str, str]] = field(default_factory=list)
@@ -214,6 +215,7 @@ class SyncPlan:
                 self.push_create_phase2,
                 self.push_update,
                 self.push_complete,
+                self.push_reopen,
                 self.ghost_close,
                 self.potential_links,
                 self.root_only_cleanup,
@@ -229,6 +231,7 @@ class SyncPlan:
             "push_create_phase2": self.push_create_phase2,
             "push_update": self.push_update,
             "push_complete": self.push_complete,
+            "push_reopen": self.push_reopen,
             "ghost_close": self.ghost_close,
             "potential_links": self.potential_links,
             "root_only_cleanup": self.root_only_cleanup,
@@ -240,6 +243,7 @@ class SyncPlan:
                 "push_create_phase2_count": len(self.push_create_phase2),
                 "push_update_count": len(self.push_update),
                 "push_complete_count": len(self.push_complete),
+                "push_reopen_count": len(self.push_reopen),
                 "ghost_close_count": len(self.ghost_close),
                 "potential_links_count": len(self.potential_links),
                 "root_only_cleanup_count": len(self.root_only_cleanup),
@@ -390,6 +394,26 @@ def _infer_parent_link_from_children(
     return local_by_id.get(parent_id)
 
 
+def _collect_descendant_todoist_ids(todo: Todo, local_by_id: dict[str, Todo]) -> list[str]:
+    """Walk todo.children recursively, collecting todoist_task_ids of terminal descendants."""
+    result: list[str] = []
+    seen: set[str] = set()
+    stack = list(todo.children) if todo.children else []
+    while stack:
+        child_id = stack.pop()
+        if child_id in seen:
+            continue
+        seen.add(child_id)
+        child = local_by_id.get(child_id)
+        if child is None:
+            continue
+        if child.todoist_task_id and child.status in TERMINAL_STATUSES:
+            result.append(child.todoist_task_id)
+        if child.children:
+            stack.extend(child.children)
+    return list(dict.fromkeys(result))
+
+
 def compute_diff(
     todoist_tasks: list[dict[str, JsonValue]],
     cfg: ProjConfig,
@@ -526,8 +550,8 @@ def compute_diff(
                     # updated to match, preventing an immediate push next sync.
                     "todoist_updated_at": todoist_updated,
                 }
-                # Check if Todoist task is completed
-                if task.get("is_completed"):
+                # Check if Todoist task is completed — only pull if Todoist is newer
+                if task.get("is_completed") and _ts_newer(todoist_updated, local_todo.updated):
                     update_entry["complete"] = True
                 plan.pull_update.append(update_entry)
 
@@ -639,9 +663,35 @@ def compute_diff(
                     update_entry_push["dueString"] = local_todo.due_date
                 plan.push_update.append(update_entry_push)
             elif local_todo.status in TERMINAL_STATUSES:
-                # Local is done, Todoist still open
-                if not task.get("is_completed"):
+                # Local is done, Todoist still open — push complete if local is newer
+                if not task.get("is_completed") and _ts_newer(local_todo.updated, todoist_updated):
                     plan.push_complete.append(todoist_id)
+            elif local_todo.status not in TERMINAL_STATUSES and task.get("is_completed"):
+                # Local is open, Todoist is completed — push reopen if local is newer
+                if _ts_newer(local_todo.updated, todoist_updated):
+                    plan.push_reopen.append(todoist_id)
+
+    # ── Second pass: catch locally-done todos whose Todoist task wasn't in fetch ──
+    push_complete_set = set(plan.push_complete)
+    for todoist_id, local_todo in local_by_todoist_id.items():
+        if (
+            local_todo.status in TERMINAL_STATUSES
+            and todoist_id not in push_complete_set
+            and todoist_id not in todoist_by_id
+        ):
+            plan.push_complete.append(todoist_id)
+
+    # ── Parent cascade: collect descendant todoist IDs for completed parents ──
+    for todo in todos:
+        if todo.children and todo.status in TERMINAL_STATUSES and todo.todoist_task_id:
+            descendant_ids = _collect_descendant_todoist_ids(todo, local_by_id)
+            plan.push_complete.extend(descendant_ids)
+
+    # Filter push_complete to exclude IDs in root_only_cleanup
+    cleanup_todoist_ids = {entry["todoist_task_id"] for entry in plan.root_only_cleanup}
+    plan.push_complete = [tid for tid in plan.push_complete if tid not in cleanup_todoist_ids]
+    # Deduplicate preserving order
+    plan.push_complete = list(dict.fromkeys(plan.push_complete))
 
     # ── Fix parent linkage for linked todos missing Todoist parent_id ──
     for todoist_id, task in todoist_by_id.items():
@@ -1190,6 +1240,28 @@ def _execute_push_completes(
         return [], errors
 
 
+def _execute_push_reopens(
+    task_ids: list[str],
+) -> tuple[list[str], list[dict[str, JsonValue]]]:
+    """Execute push_reopen operations via todoist_uncomplete_tasks."""
+    if not task_ids:
+        return [], []
+
+    try:
+        _call_todoist_tool("todoist_uncomplete_tasks", {"ids": task_ids})
+        return task_ids, []
+    except Exception as e:
+        errors: list[dict[str, JsonValue]] = [
+            {
+                "operation_type": "push_reopen",
+                "error": str(e),
+                "retryable": True,
+                "retry_payload": {"ids": task_ids},
+            }
+        ]
+        return [], errors
+
+
 def _execute_ghost_close(
     task_ids: list[str],
 ) -> tuple[list[str], list[dict[str, JsonValue]]]:
@@ -1405,6 +1477,7 @@ def _build_summary(
     push_created_phase2: int,
     push_updated: int,
     push_completed: int,
+    push_reopened: int,
     ghost_closed: int,
     root_cleaned: int,
 ) -> dict[str, JsonValue]:
@@ -1423,6 +1496,7 @@ def _build_summary(
             "tasks_created_phase2": push_created_phase2,
             "tasks_updated": push_updated,
             "tasks_completed": push_completed,
+            "tasks_reopened": push_reopened,
             "ghost_closed": ghost_closed,
             "root_only_cleaned": root_cleaned,
         },
@@ -1708,6 +1782,11 @@ def register(app: FastMCP) -> None:
         total_push_completed = len(complete_succeeded)
         all_errors.extend(complete_errors)
 
+        # 10g. Push reopens
+        reopen_succeeded, reopen_errors = _execute_push_reopens(plan.push_reopen)
+        total_push_reopened = len(reopen_succeeded)
+        all_errors.extend(reopen_errors)
+
         # 11. Phase B: Link newly created Todoist IDs and apply staged values
         combined_id_map = {**phase1_id_map, **phase2_id_map}
 
@@ -1788,6 +1867,7 @@ def register(app: FastMCP) -> None:
             total_push_created_p2,
             total_push_updated,
             total_push_completed,
+            total_push_reopened,
             total_ghost_closed,
             total_root_cleaned,
         )

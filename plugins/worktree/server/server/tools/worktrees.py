@@ -291,6 +291,72 @@ def merge_worktree(path: str, base_branch: str | None = None) -> str:
     )
 
 
+def auto_commit(worktree_path: str, message: str = "Auto-commit agent work") -> str:
+    """Auto-commit any uncommitted changes in a worktree."""
+    path = Path(worktree_path).expanduser().resolve()
+    if not path.exists():
+        return json.dumps(
+            {
+                "result": "error",
+                "worktree_path": worktree_path,
+                "error": f"Path does not exist: {path}",
+            }
+        )
+
+    if not git.is_git_repo(str(path)):
+        return json.dumps(
+            {"result": "error", "worktree_path": worktree_path, "error": "Not a git repository"}
+        )
+
+    try:
+        status = git.status_porcelain(path)
+    except GitError as e:
+        return json.dumps(
+            {"result": "error", "worktree_path": worktree_path, "error": f"git status failed: {e}"}
+        )
+
+    if not status.strip():
+        return json.dumps(
+            {
+                "result": "clean",
+                "worktree_path": worktree_path,
+                "committed": False,
+                "files_committed": 0,
+                "commit_sha": None,
+            }
+        )
+
+    file_count = len(status.strip().splitlines())
+
+    try:
+        git.add_all(path)
+    except GitError as e:
+        return json.dumps(
+            {"result": "warning", "worktree_path": worktree_path, "error": f"git add failed: {e}"}
+        )
+
+    try:
+        sha = git.commit(path, message)
+    except GitError as e:
+        return json.dumps(
+            {
+                "result": "warning",
+                "worktree_path": worktree_path,
+                "error": f"git commit failed: {e}",
+            }
+        )
+
+    return json.dumps(
+        {
+            "result": "auto-committed",
+            "worktree_path": worktree_path,
+            "committed": True,
+            "files_committed": file_count,
+            "commit_sha": sha,
+        }
+    )
+
+
 def register(app: FastMCP) -> None:
     """Register worktree tools with the MCP application."""
 
@@ -334,3 +400,12 @@ def register(app: FastMCP) -> None:
     )
     def wt_merge(path: str, base_branch: str | None = None) -> str:
         return merge_worktree(path, base_branch)
+
+    @app.tool(
+        description=(
+            "Auto-commit any uncommitted changes in a worktree."
+            " Safety net for agents that write files without committing."
+        )
+    )
+    def wt_auto_commit(worktree_path: str, message: str = "Auto-commit agent work") -> str:
+        return auto_commit(worktree_path, message)

@@ -25,6 +25,7 @@ from server.lib.models import (
 )
 from server.tools.todoist_full_sync import (
     ApplyInput,
+    _collect_descendant_todoist_ids,
     _compute_todoist_depth,
     _infer_parent_link_from_children,
     _migrate_parent_links,
@@ -170,8 +171,10 @@ class TestProjTodoistFullSync:
         todo2 = _make_todo(cfg, name, "Will fail", status="done", todoist_task_id="t_done")
         storage.save_todos(cfg, name, [todo1, todo2])
 
-        # Todoist has the done task still open
-        todoist_tasks = [_make_todoist_task("t_done", "Will fail")]
+        # Todoist has the done task still open (with older timestamp so local wins)
+        todoist_tasks = [
+            _make_todoist_task("t_done", "Will fail", updated_at="2020-01-01T00:00:00Z")
+        ]
 
         call_count = {"n": 0}
 
@@ -1212,3 +1215,306 @@ class TestFullSyncParentChild:
         todos = storage.load_todos(cfg, name)
         child = next(t for t in todos if t.title == "Orphan child")
         assert child.parent is None
+
+
+# ── 492.6: Completion sync, reopen, cascade, timestamp tests ──────────────────
+
+
+class TestCompletionSync:
+    """Tests for second-pass completion scan, push_reopen, timestamp resolution,
+    parent cascade, and deduplication in compute_diff."""
+
+    # 1. test_child_push_complete — second-pass catches done todo not in Todoist fetch
+    def test_child_push_complete(self, cfg_with_project: tuple) -> None:
+        """Done child not in Todoist fetch → second-pass adds to push_complete."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp")
+        child = _make_todo(
+            cfg, name, "Child", parent=parent.id, todoist_task_id="tc", status="done"
+        )
+        parent.children.append(child.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        # Todoist returns parent but NOT child
+        todoist_tasks = [_make_todoist_task("tp", "Parent")]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "tc" in plan.push_complete
+
+    # 2. test_grandchild_push_complete — all three levels found via second-pass
+    def test_grandchild_push_complete(self, cfg_with_project: tuple) -> None:
+        """Parent → child → grandchild, all done with todoist_task_ids, none in Todoist fetch."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "P", todoist_task_id="tp", status="done")
+        child = _make_todo(cfg, name, "C", parent=parent.id, todoist_task_id="tc", status="done")
+        grandchild = _make_todo(
+            cfg, name, "GC", parent=child.id, todoist_task_id="tgc", status="done"
+        )
+        parent.children.append(child.id)
+        child.children.append(grandchild.id)
+        storage.save_todos(cfg, name, [parent, child, grandchild])
+
+        # Todoist returns none of them
+        todoist_tasks: list[dict] = []
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # All three should be in push_complete (second-pass for missing from fetch,
+        # plus cascade for descendants of done parents)
+        assert "tp" in plan.push_complete
+        assert "tc" in plan.push_complete
+        assert "tgc" in plan.push_complete
+
+    # 3. test_push_reopen — local open, Todoist completed, local newer
+    def test_push_reopen(self, cfg_with_project: tuple) -> None:
+        """Local todo pending, Todoist task completed, local is newer → push_reopen."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(
+            cfg,
+            name,
+            "Reopened task",
+            todoist_task_id="t1",
+            status="pending",
+            priority="low",
+            updated="2099-06-01T00:00:00",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [
+            _make_todoist_task(
+                "t1",
+                "Reopened task",
+                priority=4,
+                is_completed=True,
+                updated_at="2099-01-01T00:00:00Z",
+            ),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t1" in plan.push_reopen
+
+    # 4. test_pull_completion_timestamp — Todoist completed and newer → pull update with complete
+    def test_pull_completion_timestamp(self, cfg_with_project: tuple) -> None:
+        """Todoist completed and newer → pull_update has complete=True."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(
+            cfg,
+            name,
+            "To be completed",
+            todoist_task_id="t1",
+            status="pending",
+            updated="2090-01-01T00:00:00",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [
+            _make_todoist_task(
+                "t1",
+                "To be completed",
+                is_completed=True,
+                updated_at="2099-06-01T00:00:00Z",
+            ),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Should be in pull_update with complete=True
+        assert len(plan.pull_update) == 1
+        assert plan.pull_update[0]["complete"] is True
+
+    # 5. test_parent_cascade — done parent cascades to done children
+    def test_parent_cascade(self, cfg_with_project: tuple) -> None:
+        """Done parent cascades children's todoist_ids to push_complete."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp", status="done")
+        child1 = _make_todo(cfg, name, "C1", parent=parent.id, todoist_task_id="tc1", status="done")
+        child2 = _make_todo(cfg, name, "C2", parent=parent.id, todoist_task_id="tc2", status="done")
+        parent.children = [child1.id, child2.id]
+        storage.save_todos(cfg, name, [parent, child1, child2])
+
+        # All three are in Todoist (not completed there)
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent", updated_at="2000-01-01T00:00:00Z"),
+            _make_todoist_task("tc1", "C1", updated_at="2000-01-01T00:00:00Z", parent_id="tp"),
+            _make_todoist_task("tc2", "C2", updated_at="2000-01-01T00:00:00Z", parent_id="tp"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Parent push_complete from first-pass (local done, Todoist open, local newer)
+        # Children from cascade
+        assert "tp" in plan.push_complete
+        assert "tc1" in plan.push_complete
+        assert "tc2" in plan.push_complete
+
+    # 6. test_timestamp_conflict_local_wins — local done, local newer → push_complete
+    def test_timestamp_conflict_local_wins(self, cfg_with_project: tuple) -> None:
+        """Local todo done with newer timestamp → in push_complete."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(
+            cfg,
+            name,
+            "Done locally",
+            todoist_task_id="t1",
+            status="done",
+            updated="2099-06-01T00:00:00",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [
+            _make_todoist_task("t1", "Done locally", updated_at="2090-01-01T00:00:00Z"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t1" in plan.push_complete
+
+    # 7. test_timestamp_conflict_todoist_wins — local done, Todoist newer → NOT in push_complete
+    def test_timestamp_conflict_todoist_wins(self, cfg_with_project: tuple) -> None:
+        """Local todo done but Todoist timestamp is newer → not in push_complete."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(
+            cfg,
+            name,
+            "Done locally old",
+            todoist_task_id="t1",
+            status="done",
+            updated="2090-01-01T00:00:00",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [
+            _make_todoist_task("t1", "Done locally old", updated_at="2099-06-01T00:00:00Z"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Todoist is newer, so local done is not pushed
+        assert "t1" not in plan.push_complete
+
+    # 8. test_root_only_no_double_complete — root_only_cleanup ID excluded from push_complete
+    def test_root_only_no_double_complete(self, cfg_with_project: tuple) -> None:
+        """Child in root_only_cleanup should NOT also appear in push_complete."""
+        cfg, name = cfg_with_project
+
+        meta = storage.load_meta(cfg, name)
+        meta.todoist = ProjectTodoistConfig(root_only=True)
+        storage.save_meta(cfg, meta)
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp", status="done")
+        child = _make_todo(
+            cfg,
+            name,
+            "Child",
+            parent=parent.id,
+            todoist_task_id="tc",
+            status="done",
+        )
+        parent.children = [child.id]
+        storage.save_todos(cfg, name, [parent, child])
+
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent", updated_at="2000-01-01T00:00:00Z"),
+            _make_todoist_task("tc", "Child", updated_at="2000-01-01T00:00:00Z", parent_id="tp"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # tc is in root_only_cleanup (child with parent_id in root_only mode)
+        cleanup_ids = {e["todoist_task_id"] for e in plan.root_only_cleanup}
+        assert "tc" in cleanup_ids
+        # tc must NOT also be in push_complete
+        assert "tc" not in plan.push_complete
+
+    # 9. test_collect_descendant_todoist_ids — unit test for the helper
+    def test_collect_descendant_todoist_ids(self) -> None:
+        """_collect_descendant_todoist_ids collects only done descendants with todoist IDs."""
+        today = str(date.today())
+
+        parent = Todo(id="1", title="P", created=today, updated=today, status="done")
+        child_done = Todo(
+            id="1.1",
+            title="C1",
+            created=today,
+            updated=today,
+            status="done",
+            todoist_task_id="tc1",
+        )
+        child_pending = Todo(
+            id="1.2",
+            title="C2",
+            created=today,
+            updated=today,
+            status="pending",
+            todoist_task_id="tc2",
+        )
+        child_no_id = Todo(
+            id="1.3",
+            title="C3",
+            created=today,
+            updated=today,
+            status="done",
+        )
+        grandchild = Todo(
+            id="1.1.1",
+            title="GC",
+            created=today,
+            updated=today,
+            status="done",
+            todoist_task_id="tgc",
+        )
+        parent.children = ["1.1", "1.2", "1.3"]
+        child_done.children = ["1.1.1"]
+
+        local_by_id = {
+            t.id: t for t in [parent, child_done, child_pending, child_no_id, grandchild]
+        }
+
+        result = _collect_descendant_todoist_ids(parent, local_by_id)
+
+        # Only done descendants with todoist_task_id: tc1 and tgc
+        # child_pending (pending) and child_no_id (no todoist_task_id) excluded
+        assert "tc1" in result
+        assert "tgc" in result
+        assert "tc2" not in result
+        assert len(result) == 2
+
+    # 10. test_push_complete_deduplication — same ID from first-pass and cascade
+    def test_push_complete_deduplication(self, cfg_with_project: tuple) -> None:
+        """Same todoist_id from both first-pass and cascade → no duplicates in push_complete."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp", status="done")
+        child = _make_todo(
+            cfg,
+            name,
+            "Child",
+            parent=parent.id,
+            todoist_task_id="tc",
+            status="done",
+            updated="2099-06-01T00:00:00",
+        )
+        parent.children = [child.id]
+        storage.save_todos(cfg, name, [parent, child])
+
+        # Child is in Todoist (open, old timestamp) — first-pass will add tc to push_complete.
+        # Cascade will also try to add tc. Result should have no duplicates.
+        todoist_tasks = [
+            _make_todoist_task("tp", "Parent", updated_at="2000-01-01T00:00:00Z"),
+            _make_todoist_task("tc", "Child", updated_at="2000-01-01T00:00:00Z", parent_id="tp"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "tc" in plan.push_complete
+        # No duplicates
+        assert plan.push_complete.count("tc") == 1

@@ -13,6 +13,7 @@ from server.lib import storage
 from server.lib.git import GitError
 from server.lib.models import BaseRepo, WorktreeConfig, WorktreeEntry
 from server.tools.worktrees import (
+    auto_commit,
     create_worktree,
     get_worktree,
     list_worktrees,
@@ -500,3 +501,152 @@ class TestRemoveWorktreeEdgeCases:
         data = json.loads(result)
         assert "has changes" in data["result"]
         assert "force=true" in data["result"]
+
+
+# ---------------------------------------------------------------------------
+# auto_commit tests
+# ---------------------------------------------------------------------------
+
+
+class TestAutoCommit:
+    def test_dirty_worktree(self, tmp_path: Path) -> None:
+        """Dirty worktree is staged, committed, and returns committed=true."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="M file.py\n"),
+            patch("server.tools.worktrees.git.add_all") as mock_add,
+            patch("server.tools.worktrees.git.commit", return_value="abc1234") as mock_commit,
+        ):
+            result = auto_commit(str(wt), "test commit")
+        data = json.loads(result)
+        assert data["committed"] is True
+        assert data["files_committed"] == 1
+        assert data["commit_sha"] == "abc1234"
+        assert data["result"] == "auto-committed"
+        mock_add.assert_called_once()
+        mock_commit.assert_called_once()
+
+    def test_clean_worktree(self, tmp_path: Path) -> None:
+        """Clean worktree returns committed=false."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value=""),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["committed"] is False
+        assert data["result"] == "clean"
+        assert data["files_committed"] == 0
+        assert data["commit_sha"] is None
+
+    def test_untracked_only(self, tmp_path: Path) -> None:
+        """Untracked files are committed."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="?? new_file.py\n"),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="def5678"),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["committed"] is True
+        assert data["files_committed"] == 1
+
+    def test_deletions_only(self, tmp_path: Path) -> None:
+        """Deleted files are committed."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value=" D deleted.py\n"),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="aaa1111"),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["committed"] is True
+        assert data["files_committed"] == 1
+
+    def test_missing_path(self, tmp_path: Path) -> None:
+        """Non-existent path returns error."""
+        result = auto_commit(str(tmp_path / "nonexistent"))
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "does not exist" in data["error"]
+
+    def test_not_git_repo(self, tmp_path: Path) -> None:
+        """Path that is not a git repo returns error."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with patch("server.tools.worktrees.git.is_git_repo", return_value=False):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "Not a git repository" in data["error"]
+
+    def test_git_commit_failure(self, tmp_path: Path) -> None:
+        """GitError during commit returns warning, no crash."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="M file.py\n"),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", side_effect=GitError("commit failed")),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["result"] == "warning"
+        assert "commit failed" in data["error"]
+
+    def test_git_add_failure(self, tmp_path: Path) -> None:
+        """GitError during add returns warning, no crash."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="M file.py\n"),
+            patch("server.tools.worktrees.git.add_all", side_effect=GitError("add failed")),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["result"] == "warning"
+        assert "add failed" in data["error"]
+
+    def test_multiple_files(self, tmp_path: Path) -> None:
+        """Multiple changed files are counted correctly."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        status = "M file1.py\nM file2.py\n?? file3.py\n"
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value=status),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="bbb2222"),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["committed"] is True
+        assert data["files_committed"] == 3
+
+    def test_status_failure(self, tmp_path: Path) -> None:
+        """GitError during status_porcelain returns error."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch(
+                "server.tools.worktrees.git.status_porcelain",
+                side_effect=GitError("status failed"),
+            ),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "status failed" in data["error"]

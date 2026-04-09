@@ -12,14 +12,17 @@ from server.lib.git import (
     GitConflictError,
     GitError,
     _parse_porcelain,
+    add_all,
     add_worktree,
     clean_untracked,
+    commit,
     is_git_repo,
     list_worktrees,
     merge_ff_only,
     rebase_worktree,
     remove_worktree,
     reset_hard,
+    status_porcelain,
 )
 
 PORCELAIN_SAMPLE = """\
@@ -488,3 +491,60 @@ class TestMergeFFOnly:
 
         with pytest.raises(GitError, match="Fast-forward merge failed"):
             merge_ff_only(str(repo), "feature")
+
+
+# ---------------------------------------------------------------------------
+# status_porcelain / add_all / commit unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestStatusPorcelain:
+    def test_calls_git_status(self) -> None:
+        with patch("server.lib.git._run", return_value="M file.py\n") as mock_run:
+            result = status_porcelain(Path("/some/path"))
+        mock_run.assert_called_once_with(["-C", "/some/path", "status", "--porcelain"])
+        assert result == "M file.py\n"
+
+    def test_clean_repo_returns_empty(self) -> None:
+        with patch("server.lib.git._run", return_value=""):
+            result = status_porcelain(Path("/some/path"))
+        assert result == ""
+
+    def test_raises_git_error(self) -> None:
+        with (
+            patch("server.lib.git._run", side_effect=GitError("status failed")),
+            pytest.raises(GitError, match="status failed"),
+        ):
+            status_porcelain(Path("/some/path"))
+
+
+class TestAddAll:
+    def test_calls_git_add(self) -> None:
+        with patch("server.lib.git._run", return_value="") as mock_run:
+            add_all(Path("/some/path"))
+        mock_run.assert_called_once_with(["-C", "/some/path", "add", "-A"])
+
+    def test_raises_git_error(self) -> None:
+        with (
+            patch("server.lib.git._run", side_effect=GitError("add failed")),
+            pytest.raises(GitError, match="add failed"),
+        ):
+            add_all(Path("/some/path"))
+
+
+class TestCommit:
+    def test_calls_git_commit_and_returns_sha(self) -> None:
+        with patch("server.lib.git._run") as mock_run:
+            mock_run.side_effect = ["", "abc1234def\n"]
+            result = commit(Path("/some/path"), "test message")
+        assert result == "abc1234def"
+        assert mock_run.call_count == 2
+        mock_run.assert_any_call(["-C", "/some/path", "commit", "-m", "test message"])
+        mock_run.assert_any_call(["-C", "/some/path", "rev-parse", "HEAD"])
+
+    def test_commit_failure_raises(self) -> None:
+        with (
+            patch("server.lib.git._run", side_effect=GitError("nothing to commit")),
+            pytest.raises(GitError, match="nothing to commit"),
+        ):
+            commit(Path("/some/path"), "test")
