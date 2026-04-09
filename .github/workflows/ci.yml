@@ -139,7 +139,17 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Upload snapshots
+      - name: Generate visual diff report
+        if: failure()
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
+            cpm-e2e:latest \
+            uv run python installer/tests/e2e/snapshot_diff.py \
+              installer/tests/e2e/snapshots \
+              installer/tests/e2e/snapshots/diff-report.html
+
+      - name: Upload snapshots and diff report
         if: always()
         uses: actions/upload-artifact@v4
         with:

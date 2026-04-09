@@ -78,10 +78,14 @@ def _assert_snapshot(svg: str, name: str) -> None:
             f"Run with SNAPSHOT_UPDATE=1 to generate."
         )
     expected = golden.read_text(encoding="utf-8")
-    assert svg == expected, (
-        f"Snapshot mismatch for {name!r}. "
-        f"Delete {golden} and re-run with SNAPSHOT_UPDATE=1 to regenerate."
-    )
+    if svg != expected:
+        actual_path = _SNAPSHOT_DIR / f"{name}_actual.svg"
+        actual_path.write_text(svg, encoding="utf-8")
+        pytest.fail(
+            f"Snapshot mismatch for {name!r}. "
+            f"Actual saved to {actual_path}. "
+            f"Run with SNAPSHOT_UPDATE=1 to accept changes."
+        )
 
 
 # ---------------------------------------------------------------------------
