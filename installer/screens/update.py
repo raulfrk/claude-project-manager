@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Static
+from textual.widgets import Button, DataTable, Footer, Static
 
 # Checkbox symbols
 _CHECKED = "\u2611"  # ☑
@@ -33,13 +34,15 @@ class UpdateScreen(Screen[list[str]]):
         height: 3;
         content-align: center middle;
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         padding: 1 2;
     }
 
     #update-table-container {
         height: 1fr;
-        margin: 0 2;
+        margin: 1 2;
+        border: round $primary-background;
     }
 
     DataTable {
@@ -50,7 +53,9 @@ class UpdateScreen(Screen[list[str]]):
         dock: bottom;
         height: 1;
         padding: 0 2;
-        color: $text-muted;
+        color: $accent;
+        background: $surface;
+        text-style: italic;
     }
 
     #update-button-bar {
@@ -87,7 +92,6 @@ class UpdateScreen(Screen[list[str]]):
         self._row_index: dict[int, str] = {}  # row_idx -> plugin_name
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static("Plugin Updates Available", id="update-title")
         with Vertical(id="update-table-container"):
             yield DataTable(id="update-table", cursor_type="row", zebra_stripes=True)
@@ -110,12 +114,15 @@ class UpdateScreen(Screen[list[str]]):
         for idx, plugin_name in enumerate(self._plugins):
             old_ver, new_ver = self._diffs[plugin_name]
             checked = _CHECKED if plugin_name in self._selected else _UNCHECKED
+            styled_old = Text(old_ver, style="dim")
+            styled_arrow = Text("->", style="yellow bold")
+            styled_new = Text(new_ver, style="green bold")
             table.add_row(
                 checked,
                 plugin_name,
-                old_ver,
-                "->",
-                new_ver,
+                styled_old,
+                styled_arrow,
+                styled_new,
                 key=f"update-{plugin_name}",
             )
             self._row_index[idx] = plugin_name

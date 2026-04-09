@@ -63,6 +63,29 @@ class TestParseMcpEntries:
         settings.write_text(json.dumps({"other": "data"}))
         assert _parse_mcp_entries(settings) == []
 
+    def test_non_dict_mcp_servers(self, tmp_path: Path):
+        """mcpServers value is not a dict — returns empty."""
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"mcpServers": "not-a-dict"}))
+        assert _parse_mcp_entries(settings) == []
+
+    def test_filters_non_plugin_entries(self, tmp_path: Path):
+        """Only entries starting with 'plugin_' are returned."""
+        settings = tmp_path / "settings.json"
+        settings.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "plugin_sandbox_sandbox": {},
+                        "some_other_server": {},
+                        "my_custom_mcp": {},
+                    }
+                }
+            )
+        )
+        result = _parse_mcp_entries(settings)
+        assert result == ["plugin_sandbox_sandbox"]
+
 
 class TestValidateYaml:
     def test_valid_yaml(self, tmp_path: Path):
@@ -107,6 +130,22 @@ class TestDetectExisting:
         settings.write_text(json.dumps({"mcpServers": {"plugin_proj_proj": {}}}))
         state = detect_existing()
         assert state.mcp_entries == ["plugin_proj_proj"]
+
+    def test_detects_cache_dir(self, mock_home: Path):
+        cache = mock_home / ".claude" / "plugins" / "cache" / "claude-project-manager"
+        cache.mkdir(parents=True)
+        state = detect_existing()
+        assert state.cache_dir is not None
+        assert state.cache_dir == cache
+
+    def test_discovers_sorted_plugins(self, mock_home: Path):
+        """Installed plugins are returned in sorted order."""
+        cache = mock_home / ".claude" / "plugins" / "cache" / "claude-project-manager"
+        (cache / "worktree").mkdir(parents=True)
+        (cache / "proj").mkdir(parents=True)
+        (cache / "hooks").mkdir(parents=True)
+        state = detect_existing()
+        assert state.installed_plugins == ["hooks", "proj", "worktree"]
 
 
 class TestIsClean:

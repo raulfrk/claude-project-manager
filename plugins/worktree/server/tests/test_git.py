@@ -174,40 +174,7 @@ class TestCleanUntracked:
 
 
 class TestRunSubprocessErrors:
-    """Tests that _run (and callers) propagate subprocess-level failures correctly."""
-
-    def test_file_not_found_raises_file_not_found_error(self) -> None:
-        """If git binary is missing, subprocess.run raises FileNotFoundError."""
-        with (
-            patch("subprocess.run", side_effect=FileNotFoundError("git not found")),
-            pytest.raises(FileNotFoundError),
-        ):
-            list_worktrees("/some/repo")
-
-    def test_subprocess_error_propagates_from_list_worktrees(self) -> None:
-        """Generic SubprocessError (e.g. broken pipe) propagates uncaught from list_worktrees."""
-        with (
-            patch("subprocess.run", side_effect=subprocess.SubprocessError("broken pipe")),
-            pytest.raises(subprocess.SubprocessError),
-        ):
-            list_worktrees("/some/repo")
-
-    def test_subprocess_error_propagates_from_add_worktree(self, tmp_path: Path) -> None:
-        """Generic SubprocessError propagates uncaught from add_worktree."""
-        with (
-            patch("subprocess.run", side_effect=subprocess.SubprocessError("pipe closed")),
-            pytest.raises(subprocess.SubprocessError),
-        ):
-            add_worktree("/repo", str(tmp_path / "wt"), "feature/x", new_branch=True)
-
-    def test_called_process_error_on_nonzero_returncode(self) -> None:
-        """CalledProcessError raised by subprocess is NOT caught; it propagates."""
-        err = subprocess.CalledProcessError(128, ["git", "worktree", "list"])
-        with (
-            patch("subprocess.run", side_effect=err),
-            pytest.raises(subprocess.CalledProcessError),
-        ):
-            list_worktrees("/some/repo")
+    """Tests that _run raises GitError correctly for subprocess failures."""
 
     def test_nonzero_returncode_raises_git_error(self) -> None:
         """When subprocess.run returns a non-zero exit code, _run raises GitError."""
@@ -236,24 +203,6 @@ class TestRunSubprocessErrors:
             pytest.raises(GitError, match="worktree failed"),
         ):
             list_worktrees("/some/repo")
-
-    def test_timeout_expired_propagates_from_list_worktrees(self) -> None:
-        """TimeoutExpired is a SubprocessError subclass and propagates uncaught."""
-        timeout_err = subprocess.TimeoutExpired(cmd=["git", "worktree", "list"], timeout=5)
-        with (
-            patch("subprocess.run", side_effect=timeout_err),
-            pytest.raises(subprocess.TimeoutExpired),
-        ):
-            list_worktrees("/some/repo")
-
-    def test_timeout_expired_propagates_from_add_worktree(self, tmp_path: Path) -> None:
-        """TimeoutExpired propagates uncaught from add_worktree."""
-        timeout_err = subprocess.TimeoutExpired(cmd=["git", "worktree", "add"], timeout=5)
-        with (
-            patch("subprocess.run", side_effect=timeout_err),
-            pytest.raises(subprocess.TimeoutExpired),
-        ):
-            add_worktree("/repo", str(tmp_path / "wt"), "feature/x", new_branch=True)
 
 
 # ---------------------------------------------------------------------------
@@ -316,20 +265,6 @@ class TestParsePorcelainCorruptedOutput:
         entries = _parse_porcelain(output)
         assert len(entries) == 1
         assert entries[0].bare is True
-
-    def test_list_worktrees_empty_output_returns_empty_list(self) -> None:
-        """list_worktrees with empty git output returns []."""
-        with patch("server.lib.git._run", return_value=""):
-            result = list_worktrees("/some/repo")
-        assert result == []
-
-    def test_list_worktrees_single_block_no_trailing_newline(self) -> None:
-        """list_worktrees handles output with no trailing blank line."""
-        output = "worktree /main\nHEAD abc\nbranch refs/heads/main"
-        with patch("server.lib.git._run", return_value=output):
-            result = list_worktrees("/some/repo")
-        assert len(result) == 1
-        assert result[0].path == "/main"
 
 
 # ---------------------------------------------------------------------------

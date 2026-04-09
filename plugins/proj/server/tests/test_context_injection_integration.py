@@ -14,6 +14,7 @@ from server.lib.models import (
 )
 from server.tools.context_injection import (
     ContextInjection,
+    _load_decision_items,
     _read_all_knowledge,
     inject_context,
 )
@@ -322,3 +323,26 @@ class TestEndToEnd:
         texts = [i.text for i in items]
         assert any("Main knowledge" in t for t in texts)
         assert any("Session knowledge" in t for t in texts)
+
+    def test_load_decisions_skips_bad_timestamps(self, tmp_path: Path) -> None:
+        """Decisions with unparseable timestamps are silently skipped."""
+        tracking = tmp_path / "testproj"
+        _write_decisions(
+            tracking,
+            [
+                {"timestamp": "2026-04-07T10:00:00", "decision": "Good decision"},
+                {"timestamp": "not-a-date", "decision": "Bad timestamp"},
+                {"timestamp": "", "decision": "Empty timestamp"},
+                {"decision": "Missing timestamp"},
+                {"timestamp": "2026-04-06", "decision": "Date-only ok"},
+            ],
+        )
+
+        cfg = _make_cfg(str(tmp_path))
+        items = _load_decision_items(cfg, "testproj")
+
+        # Only entries with parseable timestamps should survive
+        assert len(items) == 2
+        texts = [i.text for i in items]
+        assert any("Good decision" in t for t in texts)
+        assert any("Date-only ok" in t for t in texts)

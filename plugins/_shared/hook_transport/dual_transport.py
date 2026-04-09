@@ -158,7 +158,10 @@ async def _run_dual_async(
         _cleanup_stale_socket(sock_path)
         _write_socket_registry(plugin_name, sock_path)
         _register_socket_cleanup(sock_path)
-        atexit.register(_delete_socket_registry, plugin_name)
+        # NOTE: Do NOT delete registry on atexit — causes race condition when
+        # Claude Code restarts (old process deletes registry after new process
+        # writes it). Stale registry files are harmless: they point to dead
+        # sockets that fail-fast on connect, and get overwritten on next start.
         config = uvicorn.Config(
             hook_app,
             uds=sock_path,

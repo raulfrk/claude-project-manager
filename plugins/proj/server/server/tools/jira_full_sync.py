@@ -51,13 +51,21 @@ def _fetch_jira_issues(
 
 def _resolve_jira_socket() -> str:
     """Read Jira plugin socket path from registry, fall back to legacy."""
+
     registry_file = Path.home() / ".claude" / "sockets" / "jira"
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and Path(path).exists():
             return path
     except (FileNotFoundError, OSError):
         pass
+    candidates = sorted(
+        Path("/tmp").glob("claude-hooks-jira-*.sock"),  # noqa: S108
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return str(candidates[0])
     return "/tmp/claude-hooks-jira.sock"  # noqa: S108
 
 

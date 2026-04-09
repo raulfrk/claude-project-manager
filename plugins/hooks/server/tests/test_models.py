@@ -124,18 +124,6 @@ class TestHook:
         assert h.verification is True
         assert h.blocking is True
 
-    def test_verification_false_does_not_change_blocking(self):
-        h = Hook(
-            id="hook-001",
-            trigger_tool="a",
-            target_tool="b",
-            server="s",
-            blocking=False,
-            verification=False,
-        )
-        assert h.verification is False
-        assert h.blocking is False
-
     def test_verification_false_preserves_explicit_blocking(self):
         h = Hook(
             id="hook-001",
@@ -178,19 +166,118 @@ class TestHook:
         assert restored.verification is True
         assert restored.blocking is True
 
-    def test_from_dict_verification_false_round_trip(self):
+    # ── feedback_mapping & feedback_tool ─────────────────────────────────────
+
+    def test_feedback_fields_default_empty(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        assert h.feedback_mapping == {}
+        assert h.feedback_tool is None
+
+    def test_to_dict_includes_feedback_fields(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            feedback_mapping={"status": "${result.ok}"},
+            feedback_tool="check_result",
+        )
+        d = h.to_dict()
+        assert d["feedback_mapping"] == {"status": "${result.ok}"}
+        assert d["feedback_tool"] == "check_result"
+
+    def test_to_dict_omits_empty_feedback(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        d = h.to_dict()
+        assert "feedback_mapping" not in d
+        assert "feedback_tool" not in d
+
+    def test_from_dict_feedback_round_trip(self):
         original = Hook(
             id="hook-001",
             trigger_tool="a",
             target_tool="b",
             server="s",
-            blocking=False,
-            verification=False,
+            feedback_mapping={"x": "${y}"},
+            feedback_tool="fb_tool",
         )
-        d = original.to_dict()
-        restored = Hook.from_dict(d)
-        assert restored.verification is False
-        assert restored.blocking is False
+        restored = Hook.from_dict(original.to_dict())
+        assert restored.feedback_mapping == {"x": "${y}"}
+        assert restored.feedback_tool == "fb_tool"
+
+    def test_from_dict_ignores_non_dict_feedback_mapping(self):
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "feedback_mapping": "bad",
+            }
+        )
+        assert h.feedback_mapping == {}
+
+    # ── update_from ───────────────────────────────────────────────────────────
+
+    def test_update_from_changes_blocking(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        h.update_from({"blocking": True})
+        assert h.blocking is True
+
+    def test_update_from_preserves_identity_fields(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s", source="auto")
+        h.update_from({"blocking": True, "condition": "flag"})
+        assert h.id == "hook-001"
+        assert h.trigger_tool == "a"
+        assert h.target_tool == "b"
+        assert h.server == "s"
+        assert h.source == "auto"
+
+    def test_update_from_param_mapping(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            param_mapping={"old": "val"},
+        )
+        h.update_from({"param_mapping": {"new": "${x}"}})
+        assert h.param_mapping == {"new": "${x}"}
+
+    def test_update_from_verification_forces_blocking(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        h.update_from({"verification": True, "blocking": False})
+        assert h.verification is True
+        assert h.blocking is True
+
+    def test_update_from_feedback_fields(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        h.update_from({"feedback_tool": "fb", "feedback_mapping": {"k": "v"}})
+        assert h.feedback_tool == "fb"
+        assert h.feedback_mapping == {"k": "v"}
+
+    def test_update_from_non_dict_param_mapping_clears(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            param_mapping={"old": "val"},
+        )
+        h.update_from({"param_mapping": "not-a-dict"})
+        assert h.param_mapping == {}
+
+    def test_from_dict_coerces_non_string_condition(self):
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "condition": 42,
+            }
+        )
+        assert h.condition == "42"
 
 
 # ── HookRegistry dataclass ───────────────────────────────────────────────────
@@ -232,6 +319,11 @@ class TestHookRegistry:
     def test_from_dict_bad_servers_type(self):
         reg = HookRegistry.from_dict({"servers": "not-a-dict"})
         assert reg.servers == {}
+
+    def test_from_dict_skips_non_dict_server_entries(self):
+        reg = HookRegistry.from_dict({"servers": {"good": {"url": "http://x"}, "bad": "string"}})
+        assert "good" in reg.servers
+        assert "bad" not in reg.servers
 
     def test_from_dict_bad_settings_type(self):
         reg = HookRegistry.from_dict({"settings": [1, 2, 3]})

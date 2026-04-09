@@ -399,3 +399,104 @@ class TestMergeWorktree:
         data = json.loads(result)
         assert data["result"] == "error"
         assert "Cannot determine default branch" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Gap tests: untested error/edge paths
+# ---------------------------------------------------------------------------
+
+
+class TestCreateWorktreeEdgeCases:
+    def test_empty_branch_name(self, config_with_repo: Path) -> None:
+        result = create_worktree("myapp", "")
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert "empty" in data["result"].lower()
+        assert data["worktree_path"] is None
+
+    def test_whitespace_branch_name(self, config_with_repo: Path) -> None:
+        result = create_worktree("myapp", "   ")
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
+
+
+class TestListWorktreesEdgeCases:
+    def test_no_repos_configured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config_path = tmp_path / "worktree.yaml"
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
+        monkeypatch.delenv("WORKTREE_CONFIG", raising=False)
+        storage.save(WorktreeConfig(base_repos=[]))
+        result = list_worktrees()
+        assert "No base repos" in result
+
+
+class TestPruneWorktreesEdgeCases:
+    def test_unknown_label(self, config_with_repo: Path) -> None:
+        result = prune_worktrees("unknown")
+        assert "No repo" in result
+
+    def test_no_repos_configured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config_path = tmp_path / "worktree.yaml"
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
+        monkeypatch.delenv("WORKTREE_CONFIG", raising=False)
+        storage.save(WorktreeConfig(base_repos=[]))
+        result = prune_worktrees()
+        assert "No repos configured" in result
+
+
+class TestLockUnlockEdgeCases:
+    def test_lock_not_found(self, config_with_repo: Path) -> None:
+        with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
+            result = lock_worktree("/nonexistent/path")
+        data = json.loads(result)
+        assert "error" in data
+        assert "No managed" in data["error"]
+
+    def test_unlock_not_found(self, config_with_repo: Path) -> None:
+        with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
+            result = unlock_worktree("/nonexistent/path")
+        data = json.loads(result)
+        assert "error" in data
+        assert "No managed" in data["error"]
+
+    def test_lock_git_error(self, config_with_repo: Path) -> None:
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.lock_worktree",
+                side_effect=GitError("already locked"),
+            ),
+        ):
+            result = lock_worktree("/repo/main", reason="test")
+        data = json.loads(result)
+        assert "error" in data
+        assert "already locked" in data["error"]
+
+    def test_unlock_git_error(self, config_with_repo: Path) -> None:
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.unlock_worktree",
+                side_effect=GitError("not locked"),
+            ),
+        ):
+            result = unlock_worktree("/repo/main")
+        data = json.loads(result)
+        assert "error" in data
+        assert "not locked" in data["error"]
+
+
+class TestRemoveWorktreeEdgeCases:
+    def test_git_error_includes_tip(self, config_with_repo: Path) -> None:
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.remove_worktree",
+                side_effect=GitError("has changes"),
+            ),
+        ):
+            result = remove_worktree("/repo/main")
+        data = json.loads(result)
+        assert "has changes" in data["result"]
+        assert "force=true" in data["result"]

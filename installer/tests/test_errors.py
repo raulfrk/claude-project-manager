@@ -53,6 +53,14 @@ class TestExceptionHierarchy:
     def test_lock_error_is_installer_error(self):
         assert issubclass(LockError, InstallerError)
 
+    def test_installer_error_str(self):
+        err = InstallerError("something broke")
+        assert str(err) == "something broke"
+
+    def test_network_error_default_message(self):
+        err = NetworkError("connection refused")
+        assert str(err) == "connection refused"
+
 
 class TestCheckPrerequisites:
     def test_missing_claude(self):

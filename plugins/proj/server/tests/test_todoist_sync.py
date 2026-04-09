@@ -24,8 +24,13 @@ from server.tools.todoist_full_sync import (
     ApplyInput,
     SyncPlan,
     _apply_description_sync,
+    _content_differs,
     _ghost_check,
+    _parse_todoist_due,
+    _parse_todoist_labels,
+    _parse_todoist_priority,
     _todoist_date,
+    _ts_newer,
     apply_changes,
     compute_diff,
 )
@@ -138,6 +143,66 @@ class TestHelpers:
         assert notes == "existing notes\n\n---\nnew desc"
         assert synced == "new desc"
 
+    def test_todoist_date_offset_format(self) -> None:
+        assert _todoist_date("2026-03-07T12:00:00+00:00") == "2026-03-07T12:00:00"
+
+    def test_ts_newer_true(self) -> None:
+        assert _ts_newer("2026-03-08T00:00:00", "2026-03-07T00:00:00") is True
+
+    def test_ts_newer_false(self) -> None:
+        assert _ts_newer("2026-03-07T00:00:00", "2026-03-08T00:00:00") is False
+
+    def test_ts_newer_fallback_on_bad_input(self) -> None:
+        assert _ts_newer("zzz", "aaa") is True  # string comparison fallback
+
+    @pytest.mark.parametrize(
+        ("raw_priority", "expected"),
+        [
+            (4, "low"),
+            (3, "medium"),
+            (2, "high"),
+            (1, "high"),
+            ("low", "low"),
+            ("medium", "medium"),
+            ("high", "high"),
+        ],
+    )
+    def test_parse_todoist_priority(self, raw_priority: object, expected: str) -> None:
+        assert _parse_todoist_priority({"priority": raw_priority}) == expected
+
+    def test_parse_todoist_priority_p_string(self) -> None:
+        assert _parse_todoist_priority({"priority": "p3"}) == "medium"
+
+    def test_parse_todoist_priority_missing(self) -> None:
+        assert _parse_todoist_priority({}) == "low"
+
+    def test_parse_todoist_labels(self) -> None:
+        assert _parse_todoist_labels({"labels": ["bug", "urgent"]}) == ["bug", "urgent"]
+
+    def test_parse_todoist_labels_missing(self) -> None:
+        assert _parse_todoist_labels({}) == []
+
+    def test_parse_todoist_due_present(self) -> None:
+        assert _parse_todoist_due({"due": {"date": "2026-06-15"}}) == "2026-06-15"
+
+    def test_parse_todoist_due_missing(self) -> None:
+        assert _parse_todoist_due({}) is None
+
+    def test_content_differs_identical(self) -> None:
+        todo = Todo(id="1", title="Task", priority="low", tags=[], due_date=None)
+        task = _make_todoist_task("t1", "Task", priority=4, labels=[], due=None)
+        assert _content_differs(todo, task) is False
+
+    def test_content_differs_title_changed(self) -> None:
+        todo = Todo(id="1", title="Old title", priority="low")
+        task = _make_todoist_task("t1", "New title", priority=4)
+        assert _content_differs(todo, task) is True
+
+    def test_content_differs_priority_changed(self) -> None:
+        todo = Todo(id="1", title="Task", priority="high")
+        task = _make_todoist_task("t1", "Task", priority=4)  # priority 4 → "low"
+        assert _content_differs(todo, task) is True
+
 
 # ── Standalone function tests ────────────────────────────────────────────────
 
@@ -190,11 +255,6 @@ class TestComputeDiff:
         plan = compute_diff([], cfg, name)
         assert len(plan.push_create) == 1
         assert "project_id" not in plan.push_create[0]
-
-    def test_returns_sync_plan_type(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        cfg, name = cfg_with_project
-        plan = compute_diff([], cfg, name)
-        assert isinstance(plan, SyncPlan)
 
 
 class TestPotentialLinks:
@@ -290,13 +350,6 @@ class TestApplyChanges:
         assert counts["linked"] == 1
         todos = storage.load_todos(cfg, name)
         assert todos[0].todoist_task_id == "t99"
-
-    def test_returns_counts_dict(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        cfg, name = cfg_with_project
-        data = ApplyInput()
-        counts = apply_changes(data, cfg, name)
-        assert isinstance(counts, dict)
-        assert counts["created"] == 0
 
 
 class TestSyncPlan:

@@ -42,6 +42,12 @@ class TestJiraGetSprints:
         )
         assert json.loads(result) == data
 
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, sprint_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error 404: board not found")
+
+        with pytest.raises(RuntimeError, match="404"):
+            sprint_tools["jira_get_sprints"](board_id="999")
+
 
 class TestJiraMoveToSprint:
     def test_moves_issues_to_sprint(self, mock_jira_client: MagicMock, sprint_tools: dict) -> None:
@@ -55,3 +61,22 @@ class TestJiraMoveToSprint:
         )
         parsed = json.loads(result)
         assert parsed == {"ok": True, "sprint_id": "5", "issues": ["PROJ-1", "PROJ-2"]}
+
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, sprint_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error 404: sprint not found")
+
+        with pytest.raises(RuntimeError, match="404"):
+            sprint_tools["jira_move_to_sprint"](sprint_id="999", issue_keys=["PROJ-1"])
+
+    def test_empty_issue_keys(self, mock_jira_client: MagicMock, sprint_tools: dict) -> None:
+        mock_jira_client.post.return_value = {}
+
+        result = sprint_tools["jira_move_to_sprint"](sprint_id="5", issue_keys=[])
+
+        mock_jira_client.post.assert_called_once_with(
+            "/rest/agile/1.0/sprint/5/issue",
+            json_body={"issues": []},
+        )
+        parsed = json.loads(result)
+        assert parsed["ok"] is True
+        assert parsed["issues"] == []

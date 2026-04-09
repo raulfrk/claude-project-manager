@@ -34,6 +34,7 @@ test = [
     "pytest-cov>=7.0",
     "pytest-xdist>=3.5",
     "pytest-mock>=3.14",
+    "respx>=0.22",
 ]
 lint = [
     "bandit>=1.7",

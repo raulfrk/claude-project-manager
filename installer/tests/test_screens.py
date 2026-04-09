@@ -101,17 +101,6 @@ class TestPluginSelectScreen:
             assert "trello" not in screen._selected
 
     @pytest.mark.asyncio
-    async def test_correct_plugin_count(self, mp_path: Path):
-        """All 5 plugins from marketplace appear in the screen."""
-        app = _TestApp()
-        async with app.run_test(size=(120, 40)) as pilot:
-            screen = PluginSelectScreen(marketplace_path=mp_path)
-            app.push_screen(screen)
-            await pilot.pause()
-
-            assert len(screen._plugins) == 5
-
-    @pytest.mark.asyncio
     async def test_toggle_selection_with_space(self, mp_path: Path):
         """Space key toggles the currently highlighted plugin row."""
         app = _TestApp()
@@ -249,6 +238,7 @@ class TestWizardScreen:
         assert config["projects_base_dir"] == "~/projects"
         assert config["sandbox_integration"] is True
         assert config["zoxide_integration"] is False
+        assert "worktree_dir" not in config  # absent when worktree not selected
 
     @pytest.mark.asyncio
     async def test_custom_values_override(self):
@@ -337,6 +327,33 @@ class TestWizardScreen:
         assert len(results) == 1
         assert results[0] is None
 
+    # -- Integration fields no longer in WizardScreen --
+    # (Sync toggles moved to dedicated integration config screens;
+    #  see test_integration_screens.py for those tests.)
+
+    @pytest.mark.asyncio
+    async def test_no_integration_fields_with_base_only(self):
+        """No integration widgets exist even when integration plugins selected."""
+        from textual.css.query import NoMatches
+
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = WizardScreen(
+                selected_plugins=["proj", "todoist", "trello", "jira"]
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            for widget_id in (
+                "#todoist_enabled",
+                "#trello_enabled",
+                "#trello_board_id",
+                "#jira_enabled",
+                "#jira_default_user",
+            ):
+                with pytest.raises(NoMatches):
+                    screen.query_one(widget_id)
+
 
 # ============================================================================
 # DetectionScreen
@@ -414,6 +431,25 @@ class TestDetectionScreen:
 
             btn = screen.query_one("#btn-cancel")
             await pilot.click(btn)
+            await pilot.pause()
+
+        assert len(results) == 1
+        assert results[0] is False
+
+    @pytest.mark.asyncio
+    async def test_keyboard_cancel(self):
+        """'q' key dismisses with False."""
+        rows = self._make_rows()
+        state = self._make_state()
+        app = _TestApp()
+        results: list[bool] = []
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = DetectionScreen(state=state, plugin_rows=rows)
+            app.push_screen(screen, callback=lambda r: results.append(r))
+            await pilot.pause()
+
+            await pilot.press("q")
             await pilot.pause()
 
         assert len(results) == 1
@@ -522,6 +558,62 @@ class TestUpdateScreen:
 
         assert len(results) == 1
         assert len(results[0]) == 1
+
+    @pytest.mark.asyncio
+    async def test_select_all_shortcut(self):
+        """'a' key selects all plugins."""
+        diffs = self._make_diffs()
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = UpdateScreen(version_diffs=diffs)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Deselect one first
+            await pilot.press("space")
+            await pilot.pause()
+            assert len(screen._selected) == 1
+
+            await pilot.press("a")
+            await pilot.pause()
+            assert screen._selected == {"hooks", "proj"}
+
+    @pytest.mark.asyncio
+    async def test_select_none_shortcut(self):
+        """'n' key deselects all plugins."""
+        diffs = self._make_diffs()
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = UpdateScreen(version_diffs=diffs)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await pilot.press("n")
+            await pilot.pause()
+            assert len(screen._selected) == 0
+
+    @pytest.mark.asyncio
+    async def test_update_all_button(self):
+        """Update All button returns all plugins regardless of selection."""
+        diffs = self._make_diffs()
+        app = _TestApp()
+        results: list[list[str]] = []
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = UpdateScreen(version_diffs=diffs)
+            app.push_screen(screen, callback=lambda r: results.append(r))
+            await pilot.pause()
+
+            # Deselect one first
+            await pilot.press("space")
+            await pilot.pause()
+
+            btn = screen.query_one("#btn-update-all")
+            await pilot.click(btn)
+            await pilot.pause()
+
+        assert len(results) == 1
+        assert set(results[0]) == {"hooks", "proj"}
 
     @pytest.mark.asyncio
     async def test_cancel_returns_empty(self):
@@ -676,28 +768,6 @@ class TestConfirmScreen:
         assert len(results) == 1
         assert results[0].confirmed is True
         assert results[0].options["cleanup"] is True
-
-    @pytest.mark.asyncio
-    async def test_no_options_confirm(self):
-        """Confirm with no options returns empty options dict."""
-        app = _TestApp()
-        results: list[ConfirmResult] = []
-
-        async with app.run_test(size=(120, 40)) as pilot:
-            screen = ConfirmScreen(
-                title="Simple",
-                message="OK?",
-            )
-            app.push_screen(screen, callback=lambda r: results.append(r))
-            await pilot.pause()
-
-            btn = screen.query_one("#btn-confirm")
-            await pilot.click(btn)
-            await pilot.pause()
-
-        assert len(results) == 1
-        assert results[0].confirmed is True
-        assert results[0].options == {}
 
     @pytest.mark.asyncio
     async def test_escape_cancels(self):

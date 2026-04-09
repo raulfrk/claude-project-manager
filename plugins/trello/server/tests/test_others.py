@@ -205,6 +205,18 @@ class TestDeleteChecklist:
         assert parsed["checklist_id"] == "cl1"
 
 
+class TestDeleteChecklistNotFound:
+    def test_404_returns_warning(self, mock_trello_client: MagicMock) -> None:
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.delete.side_effect = RuntimeError("Trello API error 404: not found")
+
+        result = tools["delete_checklist"]("cl_gone")
+
+        parsed = json.loads(result)
+        assert "warning" in parsed
+        assert parsed["checklist_id"] == "cl_gone"
+
+
 class TestRenameChecklistItem:
     def test_renames_item(self, mock_trello_client: MagicMock) -> None:
         tools = _collect_tools(register_checklists, mock_trello_client)

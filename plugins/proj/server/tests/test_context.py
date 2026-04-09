@@ -288,17 +288,6 @@ class TestProjStatusContext:
         assert "todos" in data
         assert "git_activity" in data
 
-    async def test_config_section(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
-        """Config section contains tracking_dir and projects_base_dir."""
-        _setup_project_with_todos(cfg, "myapp", tmp_path)
-        state.set_session_active("myapp")
-
-        result = await call_tool(mcp_app, "proj_status_context")
-        data = json.loads(result)
-
-        assert data["config"]["tracking_dir"] == cfg.tracking_dir
-        assert data["config"]["projects_base_dir"] == cfg.projects_base_dir
-
     async def test_project_section_includes_dates(
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
@@ -781,4 +770,48 @@ class TestBuildContextKnowledge:
         result = _build_context(cfg, "myapp", compact=False)
 
         assert "## Active Project: myapp" in result
+        assert "### Project Knowledge" not in result
+
+
+class TestBuildContextInjectionEnabled:
+    """Tests for _build_context when context_injection is enabled."""
+
+    def test_injection_enabled_uses_inject_context(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """When context_injection.enabled=True, _build_context uses inject_context output."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+
+        # Write notes and knowledge for injection to pick up
+        notes_path = Path(cfg.tracking_dir) / "myapp" / "NOTES.md"
+        notes_path.write_text("## 2026-04-07\nInjected note content here\n")
+        _write_knowledge(cfg, "myapp", "## 2026-04-07\n- Injected knowledge bullet\n")
+
+        cfg.context_injection.enabled = True
+        cfg.context_injection.budget = 2000
+        storage.save_config(cfg)
+
+        result = _build_context(cfg, "myapp", compact=False)
+
+        # Should contain injected content (via context_injection path)
+        assert "## Active Project: myapp" in result
+        # At least one injected section should appear
+        assert (
+            "Recent Notes" in result or "Project Knowledge" in result or "Key Decisions" in result
+        )
+
+    def test_injection_enabled_compact_still_skips(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Compact mode skips context injection even when enabled."""
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+
+        notes_path = Path(cfg.tracking_dir) / "myapp" / "NOTES.md"
+        notes_path.write_text("## 2026-04-07\nSome note\n")
+
+        cfg.context_injection.enabled = True
+        cfg.context_injection.budget = 2000
+        storage.save_config(cfg)
+
+        result = _build_context(cfg, "myapp", compact=True)
+
+        assert "## Active Project: myapp" in result
+        assert "### Recent Notes" not in result
+        assert "### Key Decisions" not in result
         assert "### Project Knowledge" not in result

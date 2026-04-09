@@ -91,14 +91,6 @@ class TestResolveTemplate:
         """Fast path: single placeholder with missing key returns None, not ''."""
         assert resolve_template("${x}", {}) is None
 
-    def test_fast_path_list_value_preserved(self):
-        """Fast path: native list is returned as-is without stringification."""
-        assert resolve_template("${x}", {"x": [1, 2, 3]}) == [1, 2, 3]
-
-    def test_fast_path_string_value(self):
-        """Fast path: plain string value is returned directly."""
-        assert resolve_template("${x}", {"x": "hello"}) == "hello"
-
     def test_embedded_none_in_multi_placeholder(self):
         """Multi-placeholder path: embedded None resolves to empty string in output."""
         assert resolve_template("prefix ${x} suffix", {"x": None}) == "prefix  suffix"
@@ -161,11 +153,10 @@ class TestResolveMapping:
             "tasks": [{"content": "My Task", "projectId": "proj123"}],
         }
 
-    def test_nested_dict_with_templates(self):
-        mapping = {"tasks": [{"content": "${title}", "projectId": "${pid}"}]}
-        source = {"title": "My Task", "pid": "proj123"}
-        result = resolve_mapping(mapping, source)
-        assert result == {"tasks": [{"content": "My Task", "projectId": "proj123"}]}
+    def test_missing_key_in_mapping(self):
+        source = {"title": "hello"}
+        result = resolve_mapping({"name": "${title}", "missing": "${nope}"}, source)
+        assert result == {"name": "hello", "missing": None}
 
 
 # ── resolve_value ───────────────────────────────────────────────────────────

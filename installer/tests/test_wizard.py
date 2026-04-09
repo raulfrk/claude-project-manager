@@ -76,7 +76,7 @@ class TestSetupProjYaml:
             patch("installer.wizard.Confirm.ask", side_effect=[True, False]),
         ):
             console = MagicMock()
-            _setup_proj_yaml(console)
+            _setup_proj_yaml(console, [])
 
         proj_yaml = mock_home / ".claude" / "proj.yaml"
         assert proj_yaml.exists()
@@ -93,7 +93,7 @@ class TestSetupProjYaml:
 
         with patch("installer.wizard.Confirm.ask", return_value=True):
             console = MagicMock()
-            _setup_proj_yaml(console)
+            _setup_proj_yaml(console, [])
 
         assert proj_yaml.read_text() == "original: content\n"
 
@@ -113,7 +113,7 @@ class TestSetupProjYaml:
             ),
         ):
             console = MagicMock()
-            _setup_proj_yaml(console)
+            _setup_proj_yaml(console, [])
 
         content = proj_yaml.read_text()
         assert "tracking_dir: ~/custom/tracking" in content

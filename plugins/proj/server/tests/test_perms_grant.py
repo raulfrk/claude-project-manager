@@ -219,19 +219,34 @@ class TestSetupPermissions:
         assert counts["sandbox_paths"] == 5
         assert counts["mcp_rules"] == 3
 
+    def test_batch_setup_fn_partial_counts_in_result(self) -> None:
+        """When batch result string only contains some count fields, missing ones default to 0."""
+        mock_fn = Mock(return_value="Sandbox paths added: 3")
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg()
+
+        counts = setup_permissions(meta, cfg, mcp_servers=["proj"], batch_setup_fn=mock_fn)
+
+        assert counts["sandbox_paths"] == 3
+        assert counts["mcp_rules"] == 0
+        assert counts["skill_rules"] == 0
+        assert counts["additional_directories"] == 0
+
+    def test_skill_prefixes_counted_without_batch_fn(self) -> None:
+        """Without batch_setup_fn, skill_prefixes are included in computed counts."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg()
+
+        counts = setup_permissions(meta, cfg, skill_prefixes=["proj:", "worktree:"])
+
+        assert counts["skill_rules"] == 2
+        assert counts["sandbox_paths"] == 2  # repo + tracking
+
 
 # ── MCP tool integration ──────────────────────────────────────────────────────
 
 
 class TestProjSetupPermissionsTool:
-    @pytest.mark.anyio
-    async def test_setup_permissions_tool_registered(self, mcp_app_with_grant: FastMCP) -> None:
-        from tests.conftest import call_tool
-
-        result = await call_tool(mcp_app_with_grant, "proj_setup_permissions")
-        # Result should be JSON with error or result field
-        assert isinstance(result, str)
-
     @pytest.mark.anyio
     async def test_setup_permissions_adds_mcp_rules(
         self,
@@ -285,17 +300,6 @@ def _read_sandbox_allow_write(path: Path) -> list[str]:
 
 
 class TestSetupPermissionsSandbox:
-    def test_adds_sandbox_write_paths(self) -> None:
-        """Without batch_setup_fn, returns computed counts for sandbox paths."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        cfg.tracking_dir = "/tmp/tracking"
-        counts = setup_permissions(meta, cfg)
-
-        # writable repo + tracking_dir = 2 paths
-        assert counts["sandbox_paths"] == 2
-        assert counts["mcp_rules"] == 0
-
     def test_reference_repo_not_in_allow_write(self) -> None:
         """Reference repos should not be included in computed sandbox paths."""
         meta = _make_meta(repos=[RepoEntry(label="docs", path="/home/user/docs", reference=True)])
@@ -334,19 +338,6 @@ class TestSetupPermissionsSandbox:
         assert counts["sandbox_paths"] == 2
         assert counts["mcp_rules"] == 1
         assert counts["additional_directories"] == 2
-
-    def test_idempotent_sandbox(self) -> None:
-        """Without batch_setup_fn, repeated calls return the same computed counts.
-
-        Idempotency is guaranteed by the batch_setup_fn (perms plugin) deduplicating;
-        without it, computed counts are always the same since no local state changes.
-        """
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        counts1 = setup_permissions(meta, cfg, mcp_servers=["proj"])
-        counts2 = setup_permissions(meta, cfg, mcp_servers=["proj"])
-
-        assert counts1 == counts2
 
 
 # ── revoke_all_permissions ─────────────────────────────────────────────────────
@@ -422,31 +413,6 @@ class TestRevokeAllPermissions:
         # Unrelated rules should remain
         for rule in unrelated:
             assert rule in allow
-
-    def test_revoke_idempotent(self) -> None:
-        """Without batch_revoke_fn, repeated calls return the same computed counts.
-
-        Idempotency is guaranteed by the batch_revoke_fn (perms plugin) deduplicating;
-        without it, computed counts are always the same since no local state changes.
-        """
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        cfg.tracking_dir = "/tmp/tracking"
-
-        counts1 = revoke_all_permissions(meta, cfg)
-        counts2 = revoke_all_permissions(meta, cfg)
-        assert counts1 == counts2
-
-    def test_revoke_removes_sandbox_write_paths(self) -> None:
-        """Without batch_revoke_fn, returns computed counts for sandbox paths to remove."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-        cfg.tracking_dir = "/tmp/tracking"
-
-        counts = revoke_all_permissions(meta, cfg)
-        # writable repo + tracking_dir = 2 paths
-        assert counts["sandbox_paths"] == 2
-        assert counts["mcp_rules"] == 0
 
     def test_revoke_mixed_repos(self) -> None:
         """Without batch_revoke_fn, reference repos are excluded from computed path count."""

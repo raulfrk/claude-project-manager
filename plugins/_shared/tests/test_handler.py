@@ -161,6 +161,14 @@ async def test_hook_tool_returns_content_block_multiple(client, mock_tool_manage
 
 
 @pytest.mark.anyio
+async def test_hook_tool_returns_bool(client, mock_tool_manager):
+    mock_tool_manager.call_tool.return_value = True
+    resp = await client.post("/hook", json={"tool": "test_tool", "params": {}})
+    assert resp.status_code == 200
+    assert resp.json()["result"] is True
+
+
+@pytest.mark.anyio
 async def test_hook_invalid_params_type(client):
     resp = await client.post("/hook", json={"tool": "test_tool", "params": "not a dict"})
     assert resp.status_code == 400

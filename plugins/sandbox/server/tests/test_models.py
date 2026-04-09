@@ -83,6 +83,21 @@ class TestSandboxConfig:
         assert out["filesystem"]["allowWrite"] == ["/tmp"]
 
 
+class TestSandboxConfigAutoAllow:
+    def test_auto_allow_bash_roundtrip(self) -> None:
+        data = {"enabled": True, "autoAllowBashIfSandboxed": True}
+        cfg = SandboxConfig.from_dict(data)
+        assert cfg.auto_allow_bash_if_sandboxed is True
+        out = cfg.to_dict()
+        assert out["autoAllowBashIfSandboxed"] is True
+
+    def test_auto_allow_bash_defaults_false(self) -> None:
+        cfg = SandboxConfig.from_dict({})
+        assert cfg.auto_allow_bash_if_sandboxed is False
+        out = cfg.to_dict()
+        assert "autoAllowBashIfSandboxed" not in out
+
+
 class TestSettingsFile:
     def test_from_dict_roundtrip(self) -> None:
         data = {

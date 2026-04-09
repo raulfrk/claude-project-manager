@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from server.lib.models import (
     JiraSync,
     PermissionsConfig,
@@ -152,6 +154,18 @@ class TestDeriveWritePaths:
         assert "/home/user/projects" in paths
         assert "/home/user/projects/tracking" not in paths
 
+    def test_tracking_root_equal_to_projects_root_skipped(self) -> None:
+        """When tracking_root is the same path as projects_root, it is not added twice."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/projects/repo")])
+        cfg = _make_cfg(
+            projects_root="/home/user/projects",
+            tracking_root="/home/user/projects",
+        )
+
+        paths = derive_write_paths(meta, cfg)
+
+        assert paths == {"/home/user/projects"}
+
     def test_worktree_root_included_when_integration_on(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
         cfg = _make_cfg(worktree_integration=True, tracking_dir="/tmp/tracking")
@@ -191,6 +205,15 @@ class TestDeriveWritePaths:
         assert "/home/user/projects" in paths
         assert "/home/user/projects/worktrees" not in paths
 
+    def test_worktree_root_equal_to_repo_path_not_duplicated(self) -> None:
+        """When worktree_root resolves to the same path as a repo, no duplicate."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(worktree_integration=True, tracking_dir="")
+
+        paths = derive_write_paths(meta, cfg, worktree_root_dir="/home/user/proj")
+
+        assert paths == {"/home/user/proj"}
+
     def test_trailing_slashes_stripped(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj/")])
         cfg = _make_cfg(tracking_dir="/tmp/tracking/")
@@ -220,14 +243,6 @@ class TestDeriveWritePaths:
         assert not any(".." in p for p in paths)
         assert "/home/user/projects/repo" in paths
 
-    def test_returns_set(self) -> None:
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg()
-
-        result = derive_write_paths(meta, cfg)
-
-        assert isinstance(result, set)
-
     def test_empty_repos_and_no_tracking(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(tracking_dir="")
@@ -241,14 +256,6 @@ class TestDeriveWritePaths:
 
 
 class TestDeriveMcpRules:
-    def test_auto_allow_mcps_true_includes_proj(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_proj_proj__*" in rules
-
     def test_auto_allow_mcps_false_excludes_plugins(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(
@@ -278,93 +285,27 @@ class TestDeriveMcpRules:
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
-    def test_sandbox_integration_adds_sandbox_rule(self) -> None:
+    @pytest.mark.parametrize(
+        ("cfg_kwarg", "expected_rule"),
+        [
+            ({"sandbox_integration": False}, "mcp__plugin_sandbox_sandbox__*"),
+            ({"worktree_integration": False}, "mcp__plugin_worktree_worktree__*"),
+            ({"todoist_enabled": False}, "mcp__todoist__*"),
+            ({"jira_enabled": False}, "mcp__plugin_jira_jira__*"),
+            ({"trello_enabled": False}, "mcp__plugin_trello_trello__*"),
+        ],
+        ids=["sandbox", "worktree", "todoist", "jira", "trello"],
+    )
+    def test_integration_disabled_excludes_rule(
+        self, cfg_kwarg: dict[str, bool], expected_rule: str
+    ) -> None:
+        """Each integration flag, when disabled, excludes its MCP rule."""
         meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=True)
+        cfg = _make_cfg(auto_allow_mcps=True, **cfg_kwarg)
 
         rules = derive_mcp_rules(meta, cfg)
 
-        assert "mcp__plugin_sandbox_sandbox__*" in rules
-
-    def test_sandbox_integration_false_excludes_sandbox_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_sandbox_sandbox__*" not in rules
-
-    def test_worktree_integration_adds_worktree_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, worktree_integration=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_worktree_worktree__*" in rules
-
-    def test_worktree_integration_false_excludes_worktree_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, worktree_integration=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_worktree_worktree__*" not in rules
-
-    def test_todoist_enabled_adds_todoist_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__todoist__*" in rules
-
-    def test_todoist_disabled_excludes_todoist_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__todoist__*" not in rules
-
-    def test_jira_enabled_adds_jira_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, jira_enabled=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_jira_jira__*" in rules
-
-    def test_jira_disabled_excludes_jira_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, jira_enabled=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_jira_jira__*" not in rules
-
-    def test_trello_enabled_adds_trello_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_trello_trello__*" in rules
-
-    def test_trello_disabled_excludes_trello_rule(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_trello_trello__*" not in rules
-
-    def test_returns_set(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg()
-
-        result = derive_mcp_rules(meta, cfg)
-
-        assert isinstance(result, set)
+        assert expected_rule not in rules
 
     def test_all_integrations_enabled(self) -> None:
         meta = _make_meta(repos=[])
@@ -405,47 +346,12 @@ class TestDeriveMcpRules:
 
 
 class TestDeriveSkillPrefixes:
-    def test_always_includes_proj(self) -> None:
-        cfg = _make_cfg()
-
-        prefixes = derive_skill_prefixes(cfg)
-
-        assert "Skill(proj:*)" in prefixes
-
-    def test_always_includes_hooks(self) -> None:
-        cfg = _make_cfg()
-
-        prefixes = derive_skill_prefixes(cfg)
-
-        assert "Skill(hooks:*)" in prefixes
-
-    def test_always_includes_review(self) -> None:
-        cfg = _make_cfg()
-
-        prefixes = derive_skill_prefixes(cfg)
-
-        assert "Skill(review:*)" in prefixes
-
-    def test_worktree_integration_adds_worktree(self) -> None:
-        cfg = _make_cfg(worktree_integration=True)
-
-        prefixes = derive_skill_prefixes(cfg)
-
-        assert "Skill(worktree:*)" in prefixes
-
     def test_worktree_integration_false_excludes_worktree(self) -> None:
         cfg = _make_cfg(worktree_integration=False)
 
         prefixes = derive_skill_prefixes(cfg)
 
         assert "Skill(worktree:*)" not in prefixes
-
-    def test_returns_set(self) -> None:
-        cfg = _make_cfg()
-
-        result = derive_skill_prefixes(cfg)
-
-        assert isinstance(result, set)
 
     def test_default_config_has_three_prefixes(self) -> None:
         """Default config (no worktree) has proj, hooks, review."""

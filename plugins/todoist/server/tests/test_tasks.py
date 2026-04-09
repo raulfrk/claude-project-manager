@@ -137,6 +137,10 @@ class TestBuildTaskPayload:
         assert payload["project_id"] == "p1"
         assert payload["parent_id"] == "pp1"
 
+    def test_priority_none_excluded(self) -> None:
+        payload = _build_task_payload({"content": "Task", "priority": None})
+        assert "priority" not in payload
+
     def test_empty_dict(self) -> None:
         assert _build_task_payload({}) == {}
 
@@ -638,3 +642,153 @@ class TestAddChildTaskHook:
         assert len(result["failures"]) == 1
         assert "API timeout" in result["failures"][0]["error"]
         assert result["failures"][0]["content"] == "Task"
+
+
+# -- todoist_complete_task_hook ------------------------------------------------
+
+
+class TestCompleteTaskHook:
+    def _get_tool(self, mock_client: MagicMock) -> Any:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["todoist_complete_task_hook"]
+
+    def test_success(self, mock_client: MagicMock) -> None:
+        mock_client.close_task.return_value = {"ok": True}
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(id="t1"))
+
+        assert result["successes"] == [{"id": "t1"}]
+        assert result["failures"] == []
+        mock_client.close_task.assert_called_once_with("t1")
+
+    def test_api_error_returns_failure(self, mock_client: MagicMock) -> None:
+        mock_client.close_task.side_effect = RuntimeError("gone")
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(id="bad"))
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["id"] == "bad"
+        assert "gone" in result["failures"][0]["error"]
+
+
+# -- todoist_update_task_hook --------------------------------------------------
+
+
+class TestUpdateTaskHook:
+    def _get_tool(self, mock_client: MagicMock) -> Any:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["todoist_update_task_hook"]
+
+    def test_success_content_only(self, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _api_task(id="u1", content="New title")
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(id="u1", content="New title"))
+
+        assert len(result["successes"]) == 1
+        assert result["successes"][0]["content"] == "New title"
+        assert result["failures"] == []
+
+    def test_all_optional_fields(self, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _api_task(id="u2", content="Full")
+        tool = self._get_tool(mock_client)
+        result = json.loads(
+            tool.fn(
+                id="u2",
+                content="Full",
+                priority="high",
+                labels=["dev"],
+                description="Desc",
+                dueString="tomorrow",
+            )
+        )
+
+        assert len(result["successes"]) == 1
+        assert result["failures"] == []
+        call_kwargs = mock_client.post.call_args
+        body = call_kwargs.kwargs["json"]
+        assert body["priority"] == 2
+        assert body["labels"] == ["dev"]
+        assert body["description"] == "Desc"
+        assert body["due_string"] == "tomorrow"
+
+    def test_api_error_returns_failure(self, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = RuntimeError("Server error")
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(id="bad", content="X"))
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["id"] == "bad"
+
+    def test_no_optional_fields(self, mock_client: MagicMock) -> None:
+        """Only id is provided, no optional fields — payload should be minimal."""
+        mock_client.post.return_value = _api_task(id="u3", content="Unchanged")
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(id="u3"))
+
+        assert len(result["successes"]) == 1
+        call_kwargs = mock_client.post.call_args
+        body = call_kwargs.kwargs["json"]
+        # Only id-derived path, no content/priority/etc in body
+        assert "content" not in body
+        assert "priority" not in body
+
+
+# -- todoist_verify_complete ---------------------------------------------------
+
+
+class TestVerifyComplete:
+    def _get_tool(self, mock_client: MagicMock) -> Any:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["todoist_verify_complete"]
+
+    def test_completed_task(self, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = {"id": "v1", "is_completed": True}
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(todoist_task_id="v1"))
+
+        assert result["verified"] is True
+        assert result["status"] == "completed"
+        assert result["task_id"] == "v1"
+
+    def test_open_task(self, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = {"id": "v2", "is_completed": False}
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(todoist_task_id="v2"))
+
+        assert result["verified"] is False
+        assert result["status"] == "open"
+
+    def test_api_error_returns_error_status(self, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = RuntimeError("not found")
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(todoist_task_id="bad"))
+
+        assert result["verified"] is False
+        assert result["status"] == "error"
+        assert "not found" in result["error"]
+
+    def test_non_dict_response(self, mock_client: MagicMock) -> None:
+        """API returns a non-dict (e.g. list) — should treat as not completed."""
+        mock_client.get.return_value = [{"id": "v3"}]
+        tool = self._get_tool(mock_client)
+        result = json.loads(tool.fn(todoist_task_id="v3"))
+
+        assert result["verified"] is False
+        assert result["status"] == "open"

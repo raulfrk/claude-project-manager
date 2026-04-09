@@ -42,3 +42,14 @@ class TestExponentialBackoff:
         # 0.5 * 2^0 + jitter = 0.5 + [0, 1)
         assert delay >= 0.5
         assert delay < 1.5
+
+    def test_max_delay_equals_computed_delay(self):
+        """When max_delay exactly equals the computed delay, result should be at most max_delay."""
+        # base=4.0, attempt=0 -> 4.0 + jitter(0..1) => cap at 4.0
+        delay = exponential_backoff(0, base=4.0, max_delay=4.0)
+        assert delay <= 4.0
+
+    def test_large_attempt_saturates_at_max(self):
+        """Very large attempt numbers should still return max_delay."""
+        delay = exponential_backoff(1000, base=1.0, max_delay=10.0)
+        assert delay <= 10.0

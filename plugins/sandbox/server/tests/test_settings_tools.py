@@ -63,6 +63,14 @@ class TestRemoveWritePath:
             "allowWrite", []
         )
 
+    def test_remove_missing_path(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {"sandbox": {"filesystem": {"allowWrite": []}}, "permissions": {"allow": []}},
+        )
+        result = json.loads(sandbox_remove_write_path("/tmp/nonexistent"))
+        assert result["removed"] == 0
+
 
 class TestMcpAllow:
     def test_add_single(self, tmp_path: Path) -> None:
@@ -131,10 +139,20 @@ class TestDomains:
         data = read_settings(tmp_path)
         assert "github.com" in data["sandbox"]["network"]["allowedDomains"]
 
+    def test_add_domain_idempotent(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": ["github.com"]}}})
+        result = json.loads(sandbox_add_domain("github.com"))
+        assert result["added"] is False
+
     def test_remove_domain(self, tmp_path: Path) -> None:
         write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": ["github.com"]}}})
         result = json.loads(sandbox_remove_domain("github.com"))
         assert result["removed"] is True
+
+    def test_remove_domain_missing(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": []}}})
+        result = json.loads(sandbox_remove_domain("github.com"))
+        assert result["removed"] is False
 
 
 class TestBatchOps:
@@ -156,6 +174,14 @@ class TestBatchOps:
         assert result["paths_added"] == 1
         assert result["mcp_added"] == 1
         assert result["domains_added"] == 1
+
+    def test_batch_setup_with_skills(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_batch_setup(skill_prefixes=["proj", "worktree"]))
+        assert result["skills_added"] == 2
+        data = read_settings(tmp_path)
+        assert "Skill(proj:*)" in data["permissions"]["allow"]
+        assert "Skill(worktree:*)" in data["permissions"]["allow"]
 
     def test_batch_revoke(self, tmp_path: Path) -> None:
         write_settings(
@@ -179,6 +205,16 @@ class TestBatchOps:
         assert result["mcp_removed"] == 1
         assert result["domains_removed"] == 1
 
+    def test_batch_revoke_with_skills(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {"permissions": {"allow": ["Skill(proj:*)", "Skill(worktree:*)"]}},
+        )
+        result = json.loads(sandbox_batch_revoke(skill_prefixes=["proj", "worktree"]))
+        assert result["skills_removed"] == 2
+        data = read_settings(tmp_path)
+        assert "Skill(proj:*)" not in data.get("permissions", {}).get("allow", [])
+
 
 class TestListAndCheck:
     def test_list_text(self, tmp_path: Path) -> None:
@@ -199,6 +235,23 @@ class TestListAndCheck:
         assert "write_paths" in data
         assert "sandbox_enabled" in data
 
+    def test_list_json_includes_all_categories(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"enabled": True},
+                "permissions": {
+                    "allow": ["mcp__proj__*", "Skill(proj:*)", "Edit(//tmp/**)"],
+                    "deny": ["Bash(rm -rf *)"],
+                },
+            },
+        )
+        data = json.loads(sandbox_list("json"))
+        assert data["mcp_allow"] == ["mcp__proj__*"]
+        assert data["skill_allow"] == ["Skill(proj:*)"]
+        assert data["edit_rules"] == ["Edit(//tmp/**)"]
+        assert data["deny"] == ["Bash(rm -rf *)"]
+
     def test_check_present(self, tmp_path: Path) -> None:
         write_settings(
             tmp_path,
@@ -217,6 +270,40 @@ class TestListAndCheck:
         result = json.loads(sandbox_check(path="/tmp/x"))
         assert result["results"][0]["status"] == "missing"
 
+    def test_check_server(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": ["mcp__proj__*"]}})
+        result = json.loads(sandbox_check(server="proj"))
+        assert result["results"][0]["type"] == "server"
+        assert result["results"][0]["status"] == "present"
+
+    def test_check_domain(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": ["gh.com"]}}})
+        result = json.loads(sandbox_check(domain="gh.com"))
+        assert result["results"][0]["type"] == "domain"
+        assert result["results"][0]["status"] == "present"
+
+    def test_check_skill(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": ["Skill(proj:*)"]}})
+        result = json.loads(sandbox_check(skill="proj"))
+        assert result["results"][0]["type"] == "skill"
+        assert result["results"][0]["status"] == "present"
+
+    def test_check_no_args_returns_error(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {})
+        result = json.loads(sandbox_check())
+        assert "error" in result
+
+    def test_check_multiple_params(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"filesystem": {"allowWrite": ["/tmp/x"]}},
+                "permissions": {"allow": ["mcp__proj__*"]},
+            },
+        )
+        result = json.loads(sandbox_check(path="/tmp/x", server="proj"))
+        assert len(result["results"]) == 2
+
 
 class TestReconcile:
     def test_adds_missing_removes_stale(self, tmp_path: Path) -> None:
@@ -232,6 +319,43 @@ class TestReconcile:
         data = read_settings(tmp_path)
         assert "mcp__new_server__*" in data["permissions"]["allow"]
         assert "mcp__old_server__*" not in data["permissions"]["allow"]
+
+    def test_infers_stale_servers(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {"permissions": {"allow": ["mcp__old_server__*", "mcp__keep_server__*"]}},
+        )
+        result = json.loads(sandbox_reconcile(expected_servers=["keep_server"]))
+        assert result["removed"] >= 1
+        data = read_settings(tmp_path)
+        assert "mcp__keep_server__*" in data["permissions"]["allow"]
+        assert "mcp__old_server__*" not in data["permissions"]["allow"]
+
+    def test_reconcile_with_paths(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}},
+            },
+        )
+        result = json.loads(sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/proj"]))
+        assert result["added"] >= 1
+        data = read_settings(tmp_path)
+        assert "/tmp/proj" in data["sandbox"]["filesystem"]["allowWrite"]
+
+    def test_reconcile_with_skill_prefixes(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(
+            sandbox_reconcile(
+                expected_servers=[],
+                expected_skill_prefixes=["proj", "worktree"],
+            )
+        )
+        assert result["added"] >= 2
+        data = read_settings(tmp_path)
+        assert "Skill(proj:*)" in data["permissions"]["allow"]
+        assert "Skill(worktree:*)" in data["permissions"]["allow"]
 
 
 class TestSetDeny:

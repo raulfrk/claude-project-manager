@@ -189,6 +189,8 @@ class TestE2EHookFire:
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "empty_sockets"),
+            patch("server.tools.fire.glob.glob", return_value=[]),
         ):
             raw = await hooks_fire("test_trigger", source_result="{}")
 

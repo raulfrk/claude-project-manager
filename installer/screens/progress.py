@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, Header, ProgressBar, Static
+from textual.widgets import Footer, ProgressBar, RichLog, Static
 
 
 class ProgressScreen(Screen[None]):
-    """Display a progress bar during long operations.
+    """Display a progress bar and scrolling log during long operations.
 
     Accepts a description and total steps. Call ``advance()`` to
-    increment progress. Auto-dismisses when progress reaches total.
+    increment progress and ``log()`` to append log lines.
+    Auto-dismisses when progress reaches total.
+
+    All public methods are safe to call before the screen is mounted —
+    calls are buffered and replayed on mount.
 
     Args:
         description: Text displayed above the progress bar.
         total: Total number of steps for the progress bar.
     """
+
+    AUTO_FOCUS = ""
 
     CSS = """
     ProgressScreen {
@@ -26,19 +34,30 @@ class ProgressScreen(Screen[None]):
     }
 
     #progress-container {
-        width: 70;
+        width: 80;
         height: auto;
+        max-height: 85%;
         padding: 2 4;
-        border: tall $accent;
+        border: round $accent;
         background: $surface;
+    }
+
+    ProgressScreen.--complete #progress-container {
+        border: round $success;
     }
 
     #progress-description {
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         content-align: center middle;
         height: 3;
         padding: 0 2;
+        margin: 0 0 1 0;
+    }
+
+    ProgressScreen.--complete #progress-description {
+        background: $success;
     }
 
     #progress-detail {
@@ -46,6 +65,7 @@ class ProgressScreen(Screen[None]):
         padding: 0 2 1 2;
         color: $text-muted;
         content-align: center middle;
+        text-style: italic;
     }
 
     ProgressBar {
@@ -55,8 +75,16 @@ class ProgressScreen(Screen[None]):
     #progress-status {
         height: 1;
         padding: 0 2;
-        color: $text-muted;
+        color: $accent;
         content-align: center middle;
+    }
+
+    #progress-log {
+        height: 12;
+        margin: 1 2 0 2;
+        border: round $primary-background;
+        background: $surface-darken-1;
+        scrollbar-size: 1 1;
     }
     """
 
@@ -72,31 +100,57 @@ class ProgressScreen(Screen[None]):
         self._description = description
         self._total = total
         self._current = 0
+        self._mounted = asyncio.Event()
+        self._log_buffer: list[str] = []
+        self._advance_buffer: list[tuple[int, str]] = []
 
     def compose(self) -> ComposeResult:
-        yield Header()
         with Vertical(id="progress-container"):
             yield Static(self._description, id="progress-description")
             yield Static("", id="progress-detail")
             yield ProgressBar(total=self._total, id="progress-bar")
             yield Static("", id="progress-status")
+            yield RichLog(id="progress-log", wrap=True, markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
         self._update_status()
+        # Replay any buffered calls
+        log_widget = self.query_one("#progress-log", RichLog)
+        for msg in self._log_buffer:
+            log_widget.write(msg)
+        self._log_buffer.clear()
+        for steps, detail in self._advance_buffer:
+            self._do_advance(steps, detail)
+        self._advance_buffer.clear()
+        self._mounted.set()
+
+    async def wait_ready(self) -> None:
+        """Wait until the screen is fully mounted."""
+        await self._mounted.wait()
 
     def _update_status(self) -> None:
         """Update the status text with current/total count."""
         status = self.query_one("#progress-status", Static)
         status.update(f"{self._current}/{self._total}")
 
-    def advance(self, steps: int = 1, detail: str = "") -> None:
-        """Increment the progress bar.
+    def log(self, message: str) -> None:
+        """Append a line to the log area. Safe to call before mount."""
+        if not self._mounted.is_set():
+            self._log_buffer.append(message)
+            return
+        log_widget = self.query_one("#progress-log", RichLog)
+        log_widget.write(message)
 
-        Args:
-            steps: Number of steps to advance (default 1).
-            detail: Optional detail text shown below the description.
-        """
+    def advance(self, steps: int = 1, detail: str = "") -> None:
+        """Increment the progress bar. Safe to call before mount."""
+        if not self._mounted.is_set():
+            self._advance_buffer.append((steps, detail))
+            return
+        self._do_advance(steps, detail)
+
+    def _do_advance(self, steps: int, detail: str) -> None:
+        """Actual advance logic (only called when mounted)."""
         self._current = min(self._current + steps, self._total)
         bar = self.query_one("#progress-bar", ProgressBar)
         bar.advance(steps)
@@ -108,4 +162,5 @@ class ProgressScreen(Screen[None]):
         self._update_status()
 
         if self._current >= self._total:
+            self.add_class("--complete")
             self.dismiss(None)

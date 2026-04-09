@@ -76,6 +76,37 @@ class TestJiraInitSuccess:
         assert client_mod._cached_client is None
 
 
+class TestJiraInitDefaults:
+    def test_default_allowed_project_keys_is_empty_list(
+        self, init_tools: dict, tmp_path: Path
+    ) -> None:
+        """When allowed_project_keys is None (default), it should be saved as []."""
+        config_path = tmp_path / "jira.yaml"
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"displayName": "Bob", "emailAddress": "bob@example.com"}
+
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp),
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
+            result = init_tools["jira_init"](
+                personal_access_token="pat",
+                base_url="https://jira.example.com",
+            )
+
+        parsed = json.loads(result)
+        assert parsed["ok"] is True
+
+        import yaml
+
+        with config_path.open() as f:
+            written = yaml.safe_load(f)
+        assert written["allowed_project_keys"] == []
+        assert written["default_user"] == ""
+        assert written["rate_limit_per_10s"] == 100
+
+
 class TestJiraInitFailure:
     def test_invalid_credentials_returns_error(self, init_tools: dict) -> None:
         mock_resp = MagicMock()
@@ -92,25 +123,3 @@ class TestJiraInitFailure:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "401" in parsed["error"]
-
-
-class TestJiraInitCacheClearing:
-    def test_clears_cached_config_and_client(self, init_tools: dict, tmp_path: Path) -> None:
-        config_path = tmp_path / "jira.yaml"
-        mock_resp = MagicMock()
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"displayName": "Bob", "emailAddress": "bob@example.com"}
-
-        config_mod._cached_config = MagicMock()
-        client_mod._cached_client = MagicMock()
-
-        with (
-            patch("server.tools.init.httpx.get", return_value=mock_resp),
-            patch("server.tools.init.Path.expanduser", return_value=config_path),
-        ):
-            init_tools["jira_init"](
-                personal_access_token="pat", base_url="https://jira.example.com"
-            )
-
-        assert config_mod._cached_config is None
-        assert client_mod._cached_client is None

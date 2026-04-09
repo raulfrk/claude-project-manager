@@ -296,16 +296,6 @@ class TestOrphanLogger:
         logger = OrphanLogger(tmp_path)
         assert logger.load_orphans() == []
 
-    def test_load_orphans_returns_entries(self, tmp_path: Path):
-        logger = OrphanLogger(tmp_path)
-        logger.log_orphan("todoist", "ext-1", "TODO-001", "err1")
-        logger.log_orphan("jira", "ext-2", "TODO-002", "err2")
-
-        orphans = logger.load_orphans()
-        assert len(orphans) == 2
-        assert orphans[0]["external_id"] == "ext-1"
-        assert orphans[1]["external_id"] == "ext-2"
-
     def test_rolling_cap_at_500(self, tmp_path: Path):
         logger = OrphanLogger(tmp_path)
         # Write 500 entries

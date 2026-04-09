@@ -54,13 +54,21 @@ def _as_list(v: JsonValue) -> list[JsonValue]:
 
 def _resolve_trello_socket() -> str:
     """Read Trello plugin socket path from registry, fall back to legacy."""
+
     registry_file = Path.home() / ".claude" / "sockets" / "trello"
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and Path(path).exists():
             return path
     except (FileNotFoundError, OSError):
         pass
+    candidates = sorted(
+        Path("/tmp").glob("claude-hooks-trello-*.sock"),  # noqa: S108
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return str(candidates[0])
     return "/tmp/claude-hooks-trello.sock"  # noqa: S108
 
 

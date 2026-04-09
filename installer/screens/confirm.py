@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Header, Static
+from textual.widgets import Button, Checkbox, Footer, Static
 
 
 @dataclass
@@ -68,18 +68,37 @@ class ConfirmScreen(Screen[ConfirmResult]):
 
     #confirm-dialog {
         width: 70;
-        max-height: 24;
+        max-height: 80%;
+        height: auto;
         padding: 1 2;
-        border: tall $accent;
+        border: round $accent;
         background: $surface;
+    }
+
+    ConfirmScreen.--danger #confirm-dialog {
+        border: round $error;
+    }
+
+    ConfirmScreen.--warning #confirm-dialog {
+        border: round $warning;
     }
 
     #confirm-title {
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         content-align: center middle;
         height: 3;
         padding: 0 2;
+        margin: 0 0 1 0;
+    }
+
+    ConfirmScreen.--danger #confirm-title {
+        background: $error;
+    }
+
+    ConfirmScreen.--warning #confirm-title {
+        background: $warning;
     }
 
     #confirm-message {
@@ -92,16 +111,21 @@ class ConfirmScreen(Screen[ConfirmResult]):
     #confirm-options {
         height: auto;
         padding: 1 2;
+        border-top: solid $primary-background;
+        margin: 1 0 0 0;
     }
 
     #confirm-options Checkbox {
         margin: 0 0 1 0;
+        padding: 0 1;
     }
 
     #confirm-button-bar {
-        height: 3;
+        height: 5;
+        min-height: 5;
         align: center middle;
         padding: 1 2;
+        border-top: solid $primary-background;
     }
 
     #confirm-button-bar Button {
@@ -134,8 +158,14 @@ class ConfirmScreen(Screen[ConfirmResult]):
         self._cancel_label = cancel_label
         self._confirm_variant = confirm_variant
 
+    def on_mount(self) -> None:
+        """Apply variant-based styling classes."""
+        if self._confirm_variant == "error":
+            self.add_class("--danger")
+        elif self._confirm_variant == "warning":
+            self.add_class("--warning")
+
     def compose(self) -> ComposeResult:
-        yield Header()
         with Vertical(id="confirm-dialog"):
             yield Static(self._title_text, id="confirm-title")
             yield Static(self._message_text, id="confirm-message")

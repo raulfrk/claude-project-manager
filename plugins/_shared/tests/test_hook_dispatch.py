@@ -12,7 +12,9 @@ import pytest
 from hook_dispatch.dispatch import (
     _build_hooks_field,
     _dispatch_hook,
+    _format_error,
     _inject_hooks,
+    _merge_feedback,
     _resolve_hooks_transport,
     _serialize_result,
     enable_hook_dispatch,
@@ -297,6 +299,30 @@ def test_serialize_bool():
     assert _serialize_result(True) == "true"
 
 
+def test_serialize_float():
+    assert _serialize_result(3.14) == "3.14"
+
+
+def test_serialize_json_string_passthrough():
+    """A string that is already valid JSON dict passes through as-is."""
+    json_str = '{"key": "val"}'
+    result = _serialize_result(json_str)
+    assert result == json_str
+
+
+def test_serialize_json_array_string_passthrough():
+    """A string that is already a valid JSON array passes through as-is."""
+    json_str = "[1, 2, 3]"
+    result = _serialize_result(json_str)
+    assert result == json_str
+
+
+def test_serialize_plain_string_gets_quoted():
+    """A plain string (not JSON) gets JSON-encoded (quoted)."""
+    result = _serialize_result("hello world")
+    assert result == '"hello world"'
+
+
 def test_serialize_content_block_single():
     block = MagicMock()
     block.text = "hello"
@@ -311,6 +337,17 @@ def test_serialize_content_block_multiple():
     block2.text = "b"
     result = _serialize_result([block1, block2])
     assert result == json.dumps(["a", "b"])
+
+
+def test_serialize_unknown_type_falls_back_to_str():
+    """Unknown types are converted via str() and JSON-encoded."""
+
+    class Custom:
+        def __str__(self):
+            return "custom-repr"
+
+    result = _serialize_result(Custom())  # type: ignore[arg-type]
+    assert result == json.dumps("custom-repr")
 
 
 # ── Dispatch payload format ──────────────────────────────────────────────────
@@ -464,7 +501,10 @@ class TestResolveHooksTransport:
         registry_file = sockets_dir / "hooks"
         registry_file.write_text("/tmp/claude-hooks-hooks-99999.sock")
 
-        with patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("hook_dispatch.dispatch.os.path.exists", return_value=True),
+        ):
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
@@ -472,31 +512,63 @@ class TestResolveHooksTransport:
         # Verify the transport was configured with the registry socket path
         assert transport._pool._uds == "/tmp/claude-hooks-hooks-99999.sock"
 
-    def test_fallback_when_registry_missing(
+    def test_fallback_when_registry_missing_uses_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Falls back to legacy socket path when registry file is absent."""
+        """Falls back to glob for PID-tagged sockets when registry is absent."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
-        # tmp_path has no .claude/sockets/hooks — triggers FileNotFoundError
 
-        with patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "hook_dispatch.dispatch.glob.glob",
+                return_value=[
+                    "/tmp/claude-hooks-hooks-111.sock",
+                    "/tmp/claude-hooks-hooks-222.sock",
+                ],
+            ),
+            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+        ):
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
         assert isinstance(transport, httpx.AsyncHTTPTransport)
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks.sock"
+        assert "claude-hooks-hooks-" in transport._pool._uds
 
-    def test_fallback_when_registry_empty(
+    def test_fallback_when_registry_empty_uses_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Falls back to legacy socket path when registry file is empty."""
+        """Falls back to glob when registry file is empty."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
-        registry_file = sockets_dir / "hooks"
-        registry_file.write_text("   \n")
+        (sockets_dir / "hooks").write_text("   \n")
 
-        with patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "hook_dispatch.dispatch.glob.glob",
+                return_value=[
+                    "/tmp/claude-hooks-hooks-333.sock",
+                ],
+            ),
+            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+        ):
+            url, transport = _resolve_hooks_transport(19100)
+
+        assert url == "http://localhost/hook"
+        assert "claude-hooks-hooks-" in transport._pool._uds
+
+    def test_fallback_legacy_when_no_glob_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Falls back to legacy path when registry missing AND no glob matches."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("hook_dispatch.dispatch.glob.glob", return_value=[]),
+        ):
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
@@ -595,6 +667,199 @@ class TestDispatchHookReturn:
         assert "_error" in result
         assert "malformed" in result["_error"]
 
+    @pytest.mark.anyio
+    async def test_returns_none_on_unexpected_exception(self):
+        """_dispatch_hook returns None on unexpected exceptions (not Connect/Timeout)."""
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = RuntimeError("unexpected internal error")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
+
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_unwraps_http_envelope_with_string_result(self):
+        """_dispatch_hook unwraps {"ok": true, "result": "<JSON string>"} envelope."""
+        inner = json.dumps(
+            {
+                "hooks_fired": 2,
+                "top_level": True,
+                "errors": [],
+                "results": [{"hook_id": "h1"}],
+            }
+        )
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True, "result": inner}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
+
+        assert isinstance(result, dict)
+        assert result["hooks_fired"] == 2
+        assert result["top_level"] is True
+
+    @pytest.mark.anyio
+    async def test_unwraps_http_envelope_with_dict_result(self):
+        """_dispatch_hook unwraps {"ok": true, "result": {dict}} envelope."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": {
+                "hooks_fired": 1,
+                "top_level": True,
+                "errors": [],
+                "results": [],
+            },
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
+
+        assert result["hooks_fired"] == 1
+        assert result["top_level"] is True
+
+    @pytest.mark.anyio
+    async def test_unwrap_falls_through_on_non_json_string_result(self):
+        """Non-JSON string in result field returns outer envelope as-is."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True, "result": "plain text not json"}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
+
+        # Falls through to return outer envelope
+        assert result["ok"] is True
+        assert result["result"] == "plain text not json"
+
+    @pytest.mark.anyio
+    async def test_unwrap_falls_through_on_no_result_key(self):
+        """Response without 'result' key is returned as-is (e.g. error responses)."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False, "error": "something broke"}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "hook_dispatch.dispatch._resolve_hooks_transport",
+                return_value=("http://localhost/hook", None),
+            ),
+            patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await _dispatch_hook("my_tool", "result", 19100)
+
+        assert result["ok"] is False
+        assert result["error"] == "something broke"
+
+
+class TestResolveHooksTransportStaleRegistry:
+    """Tests for registry pointing to non-existent socket (sandbox PID mismatch)."""
+
+    def test_stale_registry_falls_back_to_glob(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Registry points to non-existent socket → glob fallback finds real socket."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        sockets_dir = tmp_path / ".claude" / "sockets"
+        sockets_dir.mkdir(parents=True)
+        # Registry points to sandbox PID socket that doesn't exist on host
+        (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-10.sock")
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("hook_dispatch.dispatch.os.path.exists", return_value=False),
+            patch(
+                "hook_dispatch.dispatch.glob.glob",
+                return_value=[
+                    "/tmp/claude-hooks-hooks-4097643.sock",
+                ],
+            ),
+            patch("hook_dispatch.dispatch.os.path.getmtime", return_value=1000),
+        ):
+            _url, transport = _resolve_hooks_transport(19100)
+
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks-4097643.sock"
+
+    def test_valid_registry_used_when_socket_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Registry points to existing socket → used directly, no glob needed."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+        sockets_dir = tmp_path / ".claude" / "sockets"
+        sockets_dir.mkdir(parents=True)
+        (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-99999.sock")
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("hook_dispatch.dispatch.os.path.exists", return_value=True),
+        ):
+            _url, transport = _resolve_hooks_transport(19100)
+
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks-99999.sock"
+
+    def test_glob_picks_newest_socket(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When multiple sockets exist, glob fallback picks the newest by mtime."""
+        monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+
+        mtimes = {
+            "/tmp/claude-hooks-hooks-111.sock": 1000,
+            "/tmp/claude-hooks-hooks-222.sock": 2000,
+            "/tmp/claude-hooks-hooks-333.sock": 1500,
+        }
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("hook_dispatch.dispatch.glob.glob", return_value=list(mtimes.keys())),
+            patch("hook_dispatch.dispatch.os.path.getmtime", side_effect=lambda p: mtimes[p]),
+        ):
+            _url, transport = _resolve_hooks_transport(19100)
+
+        # 222 has highest mtime
+        assert transport._pool._uds == "/tmp/claude-hooks-hooks-222.sock"
+
 
 # ── _build_hooks_field ───────────────────────────────────────────────────────
 
@@ -656,7 +921,8 @@ class TestBuildHooksField:
         err_entry = next(e for e in field["chain"] if e["hook_id"] == "h2")
         assert ok_entry["status"] == "ok"
         assert err_entry["status"] == "error"
-        assert err_entry["error"] == "timeout"
+        assert "timeout" in err_entry["error"]
+        assert "Hook h2:" in err_entry["error"]
 
     def test_defensive_missing_keys(self):
         """Missing keys in response use fallback values."""
@@ -682,9 +948,64 @@ class TestBuildHooksField:
         field = _build_hooks_field(response, "tool")
         assert field is not None
         assert len(field["errors"]) == 3
-        assert field["errors"][0] == "direct fail"
+        assert "direct fail" in field["errors"][0]
+        assert "Hook h1:" in field["errors"][0]
         assert "target_c failed" in field["errors"][1]
         assert "deeper error" in field["errors"][2]
+
+    def test_returns_field_when_skipped_hooks_only(self):
+        """When hooks_fired=0 but skipped_hooks is non-empty, still inject _hooks."""
+        response = {
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+            "top_level": True,
+            "skipped_hooks": [
+                {"hook_id": "h1", "reason": "condition sync.todoist.enabled evaluated false"},
+                {"hook_id": "h2", "reason": "condition sandbox_integration evaluated false"},
+            ],
+        }
+        field = _build_hooks_field(response, "tool")
+        assert field is not None
+        assert field["hooks_fired"] == 0
+        assert len(field["chain"]) == 2
+        assert field["chain"][0]["hook_id"] == "h1"
+        assert field["chain"][0]["status"] == "skipped"
+        assert "todoist" in field["chain"][0]["reason"]
+        assert field["chain"][1]["hook_id"] == "h2"
+        assert field["chain"][1]["status"] == "skipped"
+        assert field["errors"] == []
+
+    def test_skipped_hooks_with_no_reason_gets_default(self):
+        """Skipped hook without a reason field gets a default reason string."""
+        response = {
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+            "top_level": True,
+            "skipped_hooks": [{"hook_id": "h1"}],
+        }
+        field = _build_hooks_field(response, "tool")
+        assert field is not None
+        assert field["chain"][0]["reason"] == "condition evaluated false"
+
+    def test_skipped_hooks_mixed_with_fired(self):
+        """Skipped hooks appear in chain alongside fired hooks."""
+        response = {
+            "hooks_fired": 1,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "ok"}],
+            "top_level": True,
+            "skipped_hooks": [{"hook_id": "h2", "reason": "condition was false"}],
+        }
+        field = _build_hooks_field(response, "tool")
+        assert field is not None
+        assert field["hooks_fired"] == 1
+        assert len(field["chain"]) == 2
+        ok_entry = next(e for e in field["chain"] if e["hook_id"] == "h1")
+        skip_entry = next(e for e in field["chain"] if e["hook_id"] == "h2")
+        assert ok_entry["status"] == "ok"
+        assert skip_entry["status"] == "skipped"
 
     def test_cascade_errors_empty_not_merged(self):
         """Empty cascade_errors list does not add anything to errors."""
@@ -739,6 +1060,15 @@ class TestInjectHooks:
         assert isinstance(result, dict)
         assert result["key"] == "val"
         assert "_hooks" in result
+
+    def test_wraps_content_block_list(self):
+        """ContentBlock list gets serialized and wrapped with _hooks."""
+        block = MagicMock()
+        block.text = "block text"
+        result = _inject_hooks([block], self._hooks_field())
+        parsed = json.loads(result)
+        assert parsed["result"] == "block text"
+        assert "_hooks" in parsed
 
     def test_truncates_chain_when_result_too_large(self):
         """Large result causes chain to be truncated to preserve 100KB limit."""
@@ -808,3 +1138,216 @@ class TestWrapInjectsHooks:
         parsed = json.loads(result)
         assert parsed == {"status": "clean"}
         assert "_hooks" not in parsed
+
+
+# ── _format_error ───────────────────────────────────────────────────────────
+
+
+class TestFormatError:
+    def test_401_includes_api_token_fix(self):
+        msg = _format_error("HTTP 401 Unauthorized", "hook-001")
+        assert "Hook hook-001:" in msg
+        assert "401" in msg
+        assert "API token" in msg.lower() or "check API token" in msg
+
+    def test_429_includes_rate_limit_fix(self):
+        msg = _format_error("HTTP 429 Too Many Requests", "hook-002")
+        assert "Hook hook-002:" in msg
+        assert "rate" in msg.lower()
+
+    def test_connect_error_includes_server_running_fix(self):
+        msg = _format_error("ConnectError: connection refused", "hook-003")
+        assert "Hook hook-003:" in msg
+        assert "server" in msg.lower() and "running" in msg.lower()
+
+    def test_unknown_error_plain_format(self):
+        msg = _format_error("some weird failure", "hook-004")
+        assert msg == "Hook hook-004: some weird failure"
+        # No "Fix:" suggestion for unknown errors
+        assert "Fix:" not in msg
+
+    def test_403_includes_permissions_fix(self):
+        msg = _format_error("403 Forbidden", "hook-005")
+        assert "Hook hook-005:" in msg
+        assert "permission" in msg.lower()
+
+    def test_timeout_includes_health_fix(self):
+        msg = _format_error("Request timed out after 30s", "hook-006")
+        assert "Hook hook-006:" in msg
+        assert "timeout" in msg.lower() or "health" in msg.lower()
+
+
+# ── _merge_feedback ─────────────────────────────────────────────────────────
+
+
+class TestMergeFeedback:
+    def test_merge_successful_todoist_feedback(self):
+        """Successful Todoist feedback merges todoist_task_id into result."""
+        original = json.dumps({"status": "ok", "todoist_task_id": None})
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"todoist_task_id": "t123"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] == "t123"
+        assert parsed["status"] == "ok"
+
+    def test_merge_successful_trello_feedback(self):
+        """Successful Trello feedback merges trello_card_id into result."""
+        original = json.dumps({"status": "ok", "trello_card_id": None})
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"trello_card_id": "c456"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["trello_card_id"] == "c456"
+
+    def test_merge_multiple_feedbacks(self):
+        """Both Todoist and Trello feedback in same response merge both IDs."""
+        original = json.dumps({"status": "ok", "todoist_task_id": None, "trello_card_id": None})
+        fire_response = {
+            "feedback": [
+                {"ok": True, "params": {"todoist_task_id": "t123"}},
+                {"ok": True, "params": {"trello_card_id": "c456"}},
+            ],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] == "t123"
+        assert parsed["trello_card_id"] == "c456"
+
+    def test_merge_failed_hook_no_change(self):
+        """Feedback entry with ok=False does not modify the original result."""
+        original = json.dumps({"status": "ok", "todoist_task_id": None})
+        fire_response = {
+            "feedback": [{"ok": False, "params": {"todoist_task_id": "t123"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] is None
+
+    def test_merge_no_hooks_configured(self):
+        """fire_response=None returns original unchanged."""
+        original = json.dumps({"status": "ok"})
+        result = _merge_feedback(original, None)
+        assert result == original
+
+    def test_merge_empty_feedback_list(self):
+        """Empty feedback list returns original unchanged."""
+        original = json.dumps({"status": "ok"})
+        fire_response = {"feedback": []}
+        result = _merge_feedback(original, fire_response)
+        assert result == original
+
+    def test_merge_no_feedback_key(self):
+        """fire_response dict without feedback key returns original unchanged."""
+        original = json.dumps({"status": "ok"})
+        fire_response = {"hooks_fired": 1, "errors": [], "results": []}
+        result = _merge_feedback(original, fire_response)
+        assert result == original
+
+    def test_merge_non_json_result(self):
+        """Non-JSON original_result is returned as-is."""
+        original = "plain text result, not JSON"
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"todoist_task_id": "t123"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        assert result == original
+
+    def test_merge_dict_result(self):
+        """Original result that is a dict (not string) is returned as-is (no crash)."""
+        original_dict = {"status": "ok", "todoist_task_id": None}
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"todoist_task_id": "t123"}}],
+        }
+        result = _merge_feedback(original_dict, fire_response)  # type: ignore[arg-type]
+        assert result == original_dict  # type: ignore[comparison-overlap]
+
+    def test_merge_preserves_existing_values(self):
+        """Existing non-null values are NOT overwritten by feedback."""
+        original = json.dumps({"status": "ok", "todoist_task_id": "existing"})
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"todoist_task_id": "new_value"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] == "existing"
+
+    def test_merge_skips_internal_keys(self):
+        """Internal routing keys (todo_id, project_name) are not merged."""
+        original = json.dumps({"status": "ok", "todoist_task_id": None})
+        fire_response = {
+            "feedback": [
+                {
+                    "ok": True,
+                    "params": {
+                        "todoist_task_id": "t123",
+                        "todo_id": "should-not-appear",
+                        "project_name": "should-not-appear",
+                    },
+                }
+            ],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] == "t123"
+        assert "todo_id" not in parsed
+        assert "project_name" not in parsed
+
+    def test_merge_entry_missing_params_key(self):
+        """Feedback entry without params key is silently skipped."""
+        original = json.dumps({"status": "ok", "todoist_task_id": None})
+        fire_response = {"feedback": [{"ok": True}]}  # no params
+        result = _merge_feedback(original, fire_response)
+        assert result == original
+
+    def test_merge_non_dict_entry_skipped(self):
+        """Non-dict feedback entries are silently skipped."""
+        original = json.dumps({"status": "ok"})
+        fire_response = {"feedback": ["not a dict", 42, None]}
+        result = _merge_feedback(original, fire_response)
+        assert result == original
+
+    def test_merge_adds_new_keys(self):
+        """Feedback can add keys that don't exist in the original result."""
+        original = json.dumps({"status": "ok"})
+        fire_response = {
+            "feedback": [{"ok": True, "params": {"new_field": "added"}}],
+        }
+        result = _merge_feedback(original, fire_response)
+        parsed = json.loads(result)
+        assert parsed["new_field"] == "added"
+
+
+# ── Wrapper integration with feedback merge ─────────────────────────────────
+
+
+class TestWrapToolFnMergesFeedback:
+    @pytest.mark.anyio
+    async def test_wrap_tool_fn_merges_feedback(self, mock_mcp):
+        """Wrapper merges feedback from dispatch response into the final tool result."""
+        enable_hook_dispatch(mock_mcp)
+
+        @mock_mcp.tool()
+        async def todo_add_tool() -> str:
+            return json.dumps({"id": "473", "title": "Test", "todoist_task_id": None})
+
+        fire_response = {
+            "hooks_fired": 1,
+            "errors": [],
+            "results": [{"hook_id": "h1", "result": "ok"}],
+            "top_level": True,
+            "feedback": [{"ok": True, "params": {"todoist_task_id": "t999"}}],
+        }
+        with patch(
+            "hook_dispatch.dispatch._dispatch_hook",
+            new_callable=AsyncMock,
+            return_value=fire_response,
+        ):
+            result = await mock_mcp._registered_tools["todo_add_tool"]()
+
+        parsed = json.loads(result)
+        assert parsed["todoist_task_id"] == "t999"
+        assert "_hooks" in parsed
+        assert parsed["_hooks"]["hooks_fired"] == 1

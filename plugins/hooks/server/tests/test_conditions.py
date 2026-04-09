@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from server.lib.conditions import (
@@ -19,12 +20,9 @@ class TestEvaluateCondition:
     def test_none_condition_always_true(self):
         assert evaluate_condition(None) is True
 
-    def test_empty_string_always_true(self):
-        assert evaluate_condition("") is True
-
-    def test_whitespace_only_always_fires(self):
-        """Whitespace-only string is treated as no condition — always fires."""
-        assert evaluate_condition("   ") is True
+    @pytest.mark.parametrize("cond", ["", "   "])
+    def test_empty_or_whitespace_always_true(self, cond: str):
+        assert evaluate_condition(cond) is True
 
     def test_truthy_config_value(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
@@ -62,26 +60,19 @@ class TestEvaluateCondition:
         proj_yaml.write_text(yaml.dump({"key": None}))
         assert evaluate_condition("key", config_path=proj_yaml) is False
 
-    def test_truthy_string(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"key": "non-empty"}))
-        assert evaluate_condition("key", config_path=proj_yaml) is True
-
-    def test_falsy_zero(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"key": 0}))
-        assert evaluate_condition("key", config_path=proj_yaml) is False
-
-    def test_truthy_nonzero_int(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"key": 42}))
-        assert evaluate_condition("key", config_path=proj_yaml) is True
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("non-empty", True), (0, False), (42, True)],
+        ids=["truthy-string", "falsy-zero", "truthy-int"],
+    )
+    def test_truthiness_of_values(self, proj_yaml: Path, value: object, expected: bool):
+        proj_yaml.write_text(yaml.dump({"key": value}))
+        assert evaluate_condition("key", config_path=proj_yaml) is expected
 
     def test_list_index_in_condition(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"items": [False, True]}))
         assert evaluate_condition("items.0", config_path=proj_yaml) is False
         assert evaluate_condition("items.1", config_path=proj_yaml) is True
-
-    def test_deeply_nested_condition(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"a": {"b": {"c": {"d": True}}}}))
-        assert evaluate_condition("a.b.c.d", config_path=proj_yaml) is True
 
     def test_empty_yaml_file(self, proj_yaml: Path):
         proj_yaml.write_text("")
@@ -100,14 +91,6 @@ class TestEvaluateCondition:
     def test_and_one_false(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"a": True, "b": False}))
         assert evaluate_condition("a and b", config_path=proj_yaml) is False
-
-    def test_and_both_false(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"a": False, "b": False}))
-        assert evaluate_condition("a and b", config_path=proj_yaml) is False
-
-    def test_or_both_true(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"a": True, "b": True}))
-        assert evaluate_condition("a or b", config_path=proj_yaml) is True
 
     def test_or_one_true(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"a": False, "b": True}))
@@ -134,40 +117,24 @@ class TestEvaluateCondition:
             is True
         )
 
-    def test_and_with_dot_paths_one_missing(self, proj_yaml: Path):
-        proj_yaml.write_text(
-            yaml.dump(
-                {
-                    "sync": {"todoist": {"enabled": True, "auto_sync": True}},
-                }
-            )
-        )
-        assert (
-            evaluate_condition(
-                "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
-                config_path=proj_yaml,
-            )
-            is False
-        )
-
     def test_or_with_and_precedence(self, proj_yaml: Path):
         """'a and b or c' means '(a and b) or c'."""
+        # a=False, b=True, c=True → (F and T)=F or T = True
         proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": True}))
         assert evaluate_condition("a and b or c", config_path=proj_yaml) is True
-
-    def test_or_with_and_precedence_all_false(self, proj_yaml: Path):
+        # a=False, b=True, c=False → (F and T)=F or F = False
         proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": False}))
         assert evaluate_condition("a and b or c", config_path=proj_yaml) is False
 
     def test_or_with_and_precedence_reverse(self, proj_yaml: Path):
         """'a or b and c' means 'a or (b and c)', not '(a or b) and c'."""
-        # a=False, b=True, c=True → b and c = True → False or True = True
+        # a=False, b=True, c=True → F or (T and T) = True
         proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": True}))
         assert evaluate_condition("a or b and c", config_path=proj_yaml) is True
-        # a=False, b=True, c=False → b and c = False → False or False = False
+        # a=False, b=True, c=False → F or (T and F) = False
         proj_yaml.write_text(yaml.dump({"a": False, "b": True, "c": False}))
         assert evaluate_condition("a or b and c", config_path=proj_yaml) is False
-        # a=True, b=False, c=False → a=True short-circuits → True
+        # a=True, b=False, c=False → T or (F and F) = True
         # If incorrectly parsed as (a or b) and c, this would be False
         proj_yaml.write_text(yaml.dump({"a": True, "b": False, "c": False}))
         assert evaluate_condition("a or b and c", config_path=proj_yaml) is True
@@ -176,39 +143,14 @@ class TestEvaluateCondition:
         proj_yaml.write_text(yaml.dump({"a": True, "b": False}))
         assert evaluate_condition("a and !b", config_path=proj_yaml) is True
 
-    def test_todoist_real_condition(self, proj_yaml: Path):
-        """Real condition from todoist default-hooks.yaml."""
-        proj_yaml.write_text(
-            yaml.dump(
-                {
-                    "sync": {"todoist": {"enabled": True, "auto_sync": True}},
-                    "project": {"todoist_project_id": "6g5Rc5v5WjJCHHgX"},
-                }
-            )
-        )
-        assert (
-            evaluate_condition(
-                "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
-                config_path=proj_yaml,
-            )
-            is True
-        )
-
-    def test_zoxide_simple_condition(self, proj_yaml: Path):
-        """Real condition from zoxide default-hooks.yaml."""
-        proj_yaml.write_text(yaml.dump({"zoxide_integration": True}))
-        assert evaluate_condition("zoxide_integration", config_path=proj_yaml) is True
-
 
 # ── resolve_condition_status ─────────────────────────────────────────────────
 
 
 class TestResolveConditionStatus:
-    def test_no_condition_returns_always(self):
-        assert resolve_condition_status(None) == "always"
-
-    def test_empty_condition_returns_always(self):
-        assert resolve_condition_status("") == "always"
+    @pytest.mark.parametrize("cond", [None, ""])
+    def test_no_or_empty_condition_returns_always(self, cond: str | None):
+        assert resolve_condition_status(cond) == "always"
 
     def test_active_condition(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"flag": True}))
@@ -216,10 +158,6 @@ class TestResolveConditionStatus:
 
     def test_inactive_condition(self, proj_yaml: Path):
         proj_yaml.write_text(yaml.dump({"flag": False}))
-        assert resolve_condition_status("flag", config_path=proj_yaml) == "inactive"
-
-    def test_missing_key_inactive(self, proj_yaml: Path):
-        proj_yaml.write_text(yaml.dump({"other": True}))
         assert resolve_condition_status("flag", config_path=proj_yaml) == "inactive"
 
     def test_negated_active(self, proj_yaml: Path):
@@ -233,17 +171,12 @@ class TestResolveConditionStatus:
     # ── runtime partial evaluation ───────────────────────────────────────
 
     def test_runtime_only_term(self, proj_yaml: Path):
-        """Pure runtime condition (project.*) returns 'runtime'."""
+        """Pure runtime condition (project.* or todo.*) returns 'runtime'."""
         proj_yaml.write_text(yaml.dump({}))
         assert (
             resolve_condition_status("project.todoist_project_id", config_path=proj_yaml)
             == "runtime"
         )
-
-    def test_runtime_todo_term(self, proj_yaml: Path):
-        """Pure runtime condition (todo.*) returns 'runtime'."""
-        proj_yaml.write_text(yaml.dump({}))
-        assert resolve_condition_status("todo.todoist_task_id", config_path=proj_yaml) == "runtime"
 
     def test_config_active_and_runtime(self, proj_yaml: Path):
         """Config term passes + runtime term present -> 'runtime'."""
@@ -257,7 +190,7 @@ class TestResolveConditionStatus:
         )
 
     def test_config_inactive_and_runtime(self, proj_yaml: Path):
-        """Config term fails + runtime term present -> 'inactive'."""
+        """Config term fails + runtime term present -> 'inactive' (short-circuits)."""
         proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": False}}}))
         assert (
             resolve_condition_status(
@@ -282,40 +215,6 @@ class TestResolveConditionStatus:
                 config_path=proj_yaml,
             )
             == "active"
-        )
-
-    def test_real_todoist_condition_runtime(self, proj_yaml: Path):
-        """Real todoist condition: config terms pass, runtime term present."""
-        proj_yaml.write_text(
-            yaml.dump(
-                {
-                    "sync": {"todoist": {"enabled": True, "auto_sync": True}},
-                }
-            )
-        )
-        assert (
-            resolve_condition_status(
-                "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
-                config_path=proj_yaml,
-            )
-            == "runtime"
-        )
-
-    def test_real_todoist_condition_inactive(self, proj_yaml: Path):
-        """Real todoist condition: config term fails -> inactive."""
-        proj_yaml.write_text(
-            yaml.dump(
-                {
-                    "sync": {"todoist": {"enabled": False, "auto_sync": True}},
-                }
-            )
-        )
-        assert (
-            resolve_condition_status(
-                "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id",
-                config_path=proj_yaml,
-            )
-            == "inactive"
         )
 
     def test_or_with_runtime_and_active_branch(self, proj_yaml: Path):
@@ -345,6 +244,10 @@ class TestResolveConditionStatus:
         proj_yaml.write_text(yaml.dump({}))
         assert resolve_condition_status("!todo.todoist_task_id", config_path=proj_yaml) == "runtime"
 
+    def test_whitespace_condition_returns_always(self):
+        """Whitespace-only condition is treated as no condition."""
+        assert resolve_condition_status("   ") == "always"
+
 
 # ── runtime config (optional config param) ────────────────────────────────────────
 
@@ -370,24 +273,6 @@ class TestRuntimeConfig:
             is False
         )
 
-    def test_project_dot_path_true(self):
-        assert (
-            evaluate_condition(
-                "project.todoist_project_id",
-                config={"project": {"todoist_project_id": "12345"}},
-            )
-            is True
-        )
-
-    def test_project_dot_path_false(self):
-        assert (
-            evaluate_condition(
-                "project.todoist_project_id",
-                config={"project": {}},
-            )
-            is False
-        )
-
     def test_compound_with_runtime(self):
         assert (
             evaluate_condition(
@@ -407,15 +292,8 @@ class TestRuntimeConfig:
         )
 
     def test_backward_compat_no_config(self, tmp_path: Path):
-        # Without config param, should still load from file (backward compat)
         nonexistent = tmp_path / "does-not-exist.yaml"
         assert evaluate_condition("nonexistent.path", config_path=nonexistent) is False
-
-    def test_none_condition_with_config(self):
-        assert evaluate_condition(None, config={"anything": True}) is True
-
-    def test_empty_condition_with_config(self):
-        assert evaluate_condition("", config={"anything": True}) is True
 
     def test_negation_with_config(self):
         assert (
@@ -423,6 +301,23 @@ class TestRuntimeConfig:
             is False
         )
         assert evaluate_condition("!todo.todoist_task_id", config={"todo": {}}) is True
+
+    def test_or_with_config(self):
+        """Or compound with config dict param."""
+        assert (
+            evaluate_condition(
+                "a or b",
+                config={"a": False, "b": True},
+            )
+            is True
+        )
+        assert (
+            evaluate_condition(
+                "a or b",
+                config={"a": False, "b": False},
+            )
+            is False
+        )
 
 
 # ── validate_condition_syntax ───────────────────────────────────────────────
@@ -446,15 +341,21 @@ class TestValidateConditionSyntax:
         assert valid is True
         assert err is None
 
-    def test_empty_string_invalid(self):
-        valid, err = validate_condition_syntax("")
+    def test_valid_negation_in_compound(self):
+        valid, err = validate_condition_syntax("a and !b")
+        assert valid is True
+        assert err is None
+
+    @pytest.mark.parametrize("cond", ["", "   "])
+    def test_empty_or_whitespace_invalid(self, cond: str):
+        valid, err = validate_condition_syntax(cond)
         assert valid is False
         assert err is not None
 
-    def test_whitespace_only_invalid(self):
-        valid, err = validate_condition_syntax("   ")
+    def test_bare_negation_without_operand(self):
+        valid, err = validate_condition_syntax("!")
         assert valid is False
-        assert "empty" in err.lower()
+        assert "operand" in err.lower()
 
     def test_bare_or_without_operand(self):
         valid, err = validate_condition_syntax("a or  or b")

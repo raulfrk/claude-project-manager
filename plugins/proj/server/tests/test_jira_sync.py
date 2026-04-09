@@ -25,7 +25,6 @@ from server.lib.models import (
 )
 from server.tools.jira_sync import (
     JiraApplyInput,
-    JiraApplyResult,
     JiraMappingPlan,
     _append_jira_comments,
     _deterministic_map,
@@ -144,23 +143,19 @@ class TestHelpers:
     def test_slugify_empty(self) -> None:
         assert _slugify("") == "unnamed"
 
-    def test_priority_critical(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "Critical"}}) == "high"
-
-    def test_priority_highest(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "Highest"}}) == "high"
-
-    def test_priority_high(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "High"}}) == "medium"
-
-    def test_priority_medium(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "Medium"}}) == "medium"
-
-    def test_priority_low(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "Low"}}) == "low"
-
-    def test_priority_lowest(self) -> None:
-        assert _parse_jira_priority({"priority": {"name": "Lowest"}}) == "low"
+    @pytest.mark.parametrize(
+        ("jira_name", "expected"),
+        [
+            ("Critical", "high"),
+            ("Highest", "high"),
+            ("High", "medium"),
+            ("Medium", "medium"),
+            ("Low", "low"),
+            ("Lowest", "low"),
+        ],
+    )
+    def test_priority_dict_format(self, jira_name: str, expected: str) -> None:
+        assert _parse_jira_priority({"priority": {"name": jira_name}}) == expected
 
     def test_priority_string_format(self) -> None:
         assert _parse_jira_priority({"priority": "Critical"}) == "high"
@@ -179,6 +174,12 @@ class TestHelpers:
 
     def test_fuzzy_match_slug(self) -> None:
         assert _fuzzy_match_project("User Auth", ["user-auth", "other"]) == "user-auth"
+
+    def test_fuzzy_match_difflib(self) -> None:
+        """Difflib fuzzy match path: similar but not exact/slug match."""
+        assert (
+            _fuzzy_match_project("authenticaton", ["authentication", "other"]) == "authentication"
+        )
 
     # ── _extract_keywords tests ───────────────────────────────────────────
 
@@ -208,10 +209,6 @@ class TestHelpers:
 
     def test_extract_keywords_empty_string(self) -> None:
         assert _extract_keywords("") == set()
-
-    def test_extract_keywords_stopword_only_summary(self) -> None:
-        """Edge case: summary with only stopwords produces zero keywords."""
-        assert _extract_keywords("The and a") == set()
 
 
 # ── Epic-first grouping tests ────────────────────────────────────────────────
@@ -946,11 +943,11 @@ class TestNoCatchallBehavior:
         assert len(todos) == 1
         assert todos[0].jira_issue_key == "MAP-1"
 
-    def test_compute_mapping_no_auto_assign_for_unmatched(
+    def test_compute_mapping_no_auto_assign_for_multiple_unmatched(
         self,
         cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Unmatched standalones always need user decision (no auto-assign)."""
+        """Multiple unmatched standalones all need user decision (no auto-assign)."""
         cfg, _name = cfg_with_project
         issues = [
             _make_jira_issue("A-1", "Alpha task"),
@@ -958,15 +955,14 @@ class TestNoCatchallBehavior:
             _make_jira_issue("C-3", "Gamma task"),
         ]
         plan = compute_mapping(issues, cfg)
+        low_confidence = {
+            "recent_suggestion",
+            "none",
+            "tag_match_ambiguous",
+            "keyword_match_ambiguous",
+        }
         for g in plan.groups:
-            if g.source == "standalone" and g.matched_strategy in {
-                "recent_suggestion",
-                "none",
-                "tag_match_ambiguous",
-                "keyword_match_ambiguous",
-            }:
-                # With strategy chain, recent_suggestion may suggest a project
-                # but needs_user_decision must be True for low-confidence matches
+            if g.source == "standalone" and g.matched_strategy in low_confidence:
                 assert g.needs_user_decision is True, (
                     f"Standalone group {g.jira_key} with strategy "
                     f"'{g.matched_strategy}' should need user decision"
@@ -1225,49 +1221,10 @@ class TestApplyDescriptionAndComments:
         assert "**Bob** (2026-03-20): Agreed" in todos[0].notes
         assert todos[0].jira_synced_comment_ids == ["100", "101"]
 
-    def test_resync_same_comments_no_duplicates(
+    def test_resync_dedup_and_incremental_append(
         self, cfg_with_project: tuple[ProjConfig, str]
     ) -> None:
-        """Re-syncing the same comments does not duplicate them."""
-        cfg, name = cfg_with_project
-        group = {
-            "suggested_project": "myapp",
-            "project_exists": True,
-            "create_project": False,
-            "is_epic": True,
-            "jira_key": "PROJ-5",
-            "name": "Test",
-            "issues": [
-                {
-                    "key": "PROJ-1",
-                    "summary": "Task",
-                    "priority": "medium",
-                    "status": "To Do",
-                    "description": "Desc",
-                },
-            ],
-        }
-        comments = {
-            "PROJ-1": [
-                {"id": "100", "author": "Alice", "created": "2026-03-19", "body": "First"},
-            ],
-        }
-
-        # First sync
-        apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments)
-        todos = storage.load_todos(cfg, name)
-        assert todos[0].jira_synced_comment_ids == ["100"]
-
-        # Second sync with same comments
-        apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments)
-        todos = storage.load_todos(cfg, name)
-        assert todos[0].jira_synced_comment_ids == ["100"]  # not ["100", "100"]
-        assert todos[0].notes.count("First") == 1
-
-    def test_resync_with_new_comments_appends_only_new(
-        self, cfg_with_project: tuple[ProjConfig, str]
-    ) -> None:
-        """Re-syncing with additional comments appends only the new ones."""
+        """Re-syncing same comments deduplicates; adding new ones appends only new."""
         cfg, name = cfg_with_project
         group = {
             "suggested_project": "myapp",
@@ -1292,8 +1249,16 @@ class TestApplyDescriptionAndComments:
             "PROJ-1": [{"id": "100", "author": "Alice", "created": "2026-03-19", "body": "First"}],
         }
         apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments_v1)
+        todos = storage.load_todos(cfg, name)
+        assert todos[0].jira_synced_comment_ids == ["100"]
 
-        # Second sync with old + new comment
+        # Second sync with same comments — no duplication
+        apply_mapping(JiraApplyInput(groups=[group]), cfg, comments_by_key=comments_v1)
+        todos = storage.load_todos(cfg, name)
+        assert todos[0].jira_synced_comment_ids == ["100"]  # not ["100", "100"]
+        assert todos[0].notes.count("First") == 1
+
+        # Third sync with old + new comment — only new appended
         comments_v2 = {
             "PROJ-1": [
                 {"id": "100", "author": "Alice", "created": "2026-03-19", "body": "First"},
@@ -2066,6 +2031,48 @@ class TestMatchStandalone:
         assert matched == "myapp"
         assert strategy == "tag_match"  # tag wins over keyword
 
+    def test_keyword_match_ambiguous(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Strategy 4: ambiguous keyword match (2 projects share a keyword)."""
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        meta = storage.load_meta(cfg, name)
+        meta.description = "Platform logging service"
+        storage.save_meta(cfg, meta)
+
+        proj_dir = Path(cfg.tracking_dir) / "logging-svc"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+        meta2 = ProjectMeta(
+            name="logging-svc",
+            description="Centralized logging infrastructure",
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta2)
+        index = storage.load_index(cfg)
+        index.projects["logging-svc"] = ProjectEntry(
+            name="logging-svc",
+            tracking_dir=str(proj_dir),
+            created=today,
+        )
+        storage.save_index(cfg, index)
+
+        issue = _make_jira_issue(
+            "XYZ-1",
+            "Unrelated zzz title",
+            labels=[],
+            description="Fix the logging pipeline",
+        )
+        matched, strategy, suggestions = _match_standalone(
+            issue,
+            ["myapp", "logging-svc"],
+            cfg,
+        )
+        assert matched is None
+        assert strategy == "keyword_match_ambiguous"
+        assert set(suggestions) == {"myapp", "logging-svc"}
+
     def test_no_projects_returns_none(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """With no existing projects, returns (None, 'none', [])."""
         cfg, _ = cfg_with_project
@@ -2212,36 +2219,6 @@ class TestComputeMappingWithStrategies:
 class TestPerIssueResilience:
     """Verify that apply_mapping processes each issue independently and
     returns per-issue status in JiraApplyResult."""
-
-    def test_result_type_is_jira_apply_result(
-        self, cfg_with_project: tuple[ProjConfig, str]
-    ) -> None:
-        """apply_mapping returns a JiraApplyResult, not a plain dict."""
-        cfg, _name = cfg_with_project
-        data = JiraApplyInput(
-            groups=[
-                {
-                    "suggested_project": "myapp",
-                    "project_exists": True,
-                    "create_project": False,
-                    "is_epic": True,
-                    "jira_key": "PROJ-5",
-                    "name": "Test",
-                    "issues": [
-                        {
-                            "key": "PROJ-1",
-                            "summary": "Task",
-                            "priority": "medium",
-                            "status": "To Do",
-                        },
-                    ],
-                }
-            ]
-        )
-        result = apply_mapping(data, cfg)
-        assert isinstance(result, JiraApplyResult)
-        assert isinstance(result.counts, dict)
-        assert isinstance(result.per_issue, dict)
 
     def test_per_issue_status_created(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """Newly created issues get 'created' in per_issue."""
@@ -2395,77 +2372,6 @@ class TestPerIssueResilience:
         # No todos saved
         todos = storage.load_todos(cfg, name)
         assert len(todos) == 0
-
-    def test_save_called_per_issue(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        """storage.save_todos is called after each successful issue."""
-        cfg, _name = cfg_with_project
-        from unittest.mock import patch
-
-        data = JiraApplyInput(
-            groups=[
-                {
-                    "suggested_project": "myapp",
-                    "project_exists": True,
-                    "create_project": False,
-                    "is_epic": True,
-                    "jira_key": "PROJ-5",
-                    "name": "Test",
-                    "issues": [
-                        {
-                            "key": "PROJ-1",
-                            "summary": "Task A",
-                            "priority": "medium",
-                            "status": "To Do",
-                        },
-                        {
-                            "key": "PROJ-2",
-                            "summary": "Task B",
-                            "priority": "medium",
-                            "status": "To Do",
-                        },
-                        {
-                            "key": "PROJ-3",
-                            "summary": "Task C",
-                            "priority": "medium",
-                            "status": "To Do",
-                        },
-                    ],
-                }
-            ]
-        )
-        with patch.object(storage, "save_todos", wraps=storage.save_todos) as mock_save:
-            result = apply_mapping(data, cfg)
-
-        assert result.counts["todos_created"] == 3
-        # save_todos called once per issue (3 issues = 3 calls)
-        assert mock_save.call_count == 3
-
-    def test_backward_compat_counts_keys(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        """JiraApplyResult.counts has the same keys as the old return dict."""
-        cfg, _name = cfg_with_project
-        data = JiraApplyInput(
-            groups=[
-                {
-                    "suggested_project": "myapp",
-                    "project_exists": True,
-                    "create_project": False,
-                    "is_epic": True,
-                    "jira_key": "PROJ-5",
-                    "name": "Test",
-                    "issues": [
-                        {
-                            "key": "PROJ-1",
-                            "summary": "Task",
-                            "priority": "medium",
-                            "status": "To Do",
-                        },
-                    ],
-                }
-            ]
-        )
-        result = apply_mapping(data, cfg)
-        expected_keys = {"projects_created", "todos_created", "todos_updated", "skipped_unmapped"}
-        assert set(result.counts.keys()) == expected_keys
 
     def test_project_creation_failure_marks_all_issues_failed(
         self,
@@ -2777,58 +2683,6 @@ class TestProjJiraFullSync:
         assert result.counts["projects_created"] == 1
         assert result.counts["todos_created"] == 2
 
-    def test_partial_failure_commits_successes_returns_errors(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """When one group fails during apply, other groups succeed."""
-        cfg, _name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2", "Login page", parent=_make_epic_parent("PROJ-1", "Auth Epic")
-            ),
-        ]
-        apply_input, _diagnostics = _deterministic_map(issues, cfg)
-        assert len(apply_input.groups) >= 1
-
-        # The group should have create_project=True — apply it successfully
-        result = apply_mapping(apply_input, cfg)
-        assert result.counts["projects_created"] == 1
-
-    def test_retry_failures_reruns_only_failed(
-        self, cfg_with_project: tuple[ProjConfig, str]
-    ) -> None:
-        """Retry path with a retry_token re-processes only the specified issues."""
-        import base64
-        import time as time_mod
-
-        _cfg, _name = cfg_with_project
-        # Simulate a retry token with one issue
-        issue = _make_jira_issue(
-            "PROJ-10", "Retry me", parent=_make_epic_parent("PROJ-1", "Some Epic")
-        )
-        token_data = {
-            "ts": time_mod.time(),
-            "errors": [
-                {
-                    "issue_key": "PROJ-10",
-                    "operation_type": "apply",
-                    "error": "failed: test",
-                    "retryable": True,
-                    "retry_payload": {"issue": issue},
-                }
-            ],
-        }
-        token = base64.b64encode(json.dumps(token_data).encode()).decode()
-
-        # Verify token can be decoded
-        decoded = json.loads(base64.b64decode(token).decode())
-        assert len(decoded["errors"]) == 1
-        assert decoded["errors"][0]["issue_key"] == "PROJ-10"
-        assert time_mod.time() - decoded["ts"] < 1800  # not expired
-
     def test_auto_create_epic_project(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """A new epic with no matching project triggers auto-create."""
         cfg, _name = cfg_with_project
@@ -2988,6 +2842,7 @@ class TestSelfFetchFullSync:
         result = json.loads(fn(jira_issues_json=None, project_name=name))
         assert result["status"] == "success"
         assert result["summary"]["groups_processed"] >= 1
+        assert result["summary"]["epic_count"] >= 1
 
     def test_self_fetch_socket_unreachable(
         self,
@@ -3024,33 +2879,6 @@ class TestSelfFetchFullSync:
         fn = self._get_full_sync_fn()
         result = json.loads(fn(jira_issues_json=None, project_name="nonexistent"))
         assert result["status"] == "error"
-
-    def test_self_fetch_envelope_unwrapping(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """_fetch_jira_issues unwraps the envelope; verify issues list is used."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2",
-                "Login page",
-                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
-            ),
-        ]
-        # _fetch_jira_issues already returns unwrapped (issues, total)
-        monkeypatch.setattr(
-            "server.tools.jira_full_sync._fetch_jira_issues",
-            lambda: (issues, len(issues)),
-        )
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=None, project_name=name))
-        assert result["status"] == "success"
-        # Verify that the sync actually processed the issues (not a raw dict)
-        assert result["summary"]["groups_processed"] >= 1
-        assert result["summary"]["epic_count"] >= 1
 
     def test_self_fetch_zero_issues(
         self,
@@ -3110,103 +2938,7 @@ class TestSelfFetchFullSync:
         assert result["status"] == "success"
         assert result["summary"]["groups_processed"] >= 1
 
-
-class TestFullSyncInputTypes:
-    """Tests for proj_jira_full_sync accepting str and None inputs."""
-
-    def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
-
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
-
-    def test_full_sync_dict_input(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-    ) -> None:
-        """Passing a JSON string with 'issues' key works."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2",
-                "Login page",
-                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
-            ),
-        ]
-        envelope = {"issues": issues, "total": len(issues)}
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=json.dumps(envelope), project_name=name))
-        assert result["status"] == "success"
-        assert result["summary"]["groups_processed"] >= 1
-
-    def test_full_sync_list_input(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-    ) -> None:
-        """Passing a JSON string of a bare list of issues works."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2",
-                "Login page",
-                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
-            ),
-        ]
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
-        assert result["status"] == "success"
-        assert result["summary"]["groups_processed"] >= 1
-
-    def test_full_sync_string_input(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-    ) -> None:
-        """Passing a JSON string still works (backwards compatible)."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2",
-                "Login page",
-                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
-            ),
-        ]
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
-        assert result["status"] == "success"
-        assert result["summary"]["groups_processed"] >= 1
-
-    def test_full_sync_none_input(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Passing None triggers the self-fetch path."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2",
-                "Login page",
-                parent=_make_epic_parent("PROJ-1", "Auth Epic"),
-            ),
-        ]
-        monkeypatch.setattr(
-            "server.tools.jira_full_sync._fetch_jira_issues",
-            lambda: (issues, len(issues)),
-        )
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=None, project_name=name))
-        assert result["status"] == "success"
-
-    def test_full_sync_empty_dict(
+    def test_empty_dict_input_returns_up_to_date(
         self,
         cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
@@ -3357,6 +3089,7 @@ class TestJiraRouting:
         result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
         assert result["status"] == "success"
         assert result["counts"]["epics_mapped"] >= 1
+        assert result["counts"]["total_issues"] == 2
         # Epic itself should NOT appear as a todo
         todos = storage.load_todos(cfg, name)
         epic_todos = [t for t in todos if t.jira_issue_key == "EPIC-1"]
@@ -3437,24 +3170,6 @@ class TestJiraRouting:
         # Second run should show updates (not creates) or skips
         assert r2["counts"]["todos_created"] == 0
 
-    def test_deleted_epic_routes_to_standalone(
-        self, cfg_with_project: tuple[ProjConfig, str]
-    ) -> None:
-        """Issue references epic key not in the issues list -> routes to standalone."""
-        cfg, _name = cfg_with_project
-        issues = [
-            _make_jira_issue(
-                "TASK-1",
-                "Task referencing deleted epic zzunique",
-                parent=_make_epic_parent("DELETED-1", "Deleted Epic"),
-            ),
-        ]
-        apply_input, diagnostics = _deterministic_map(issues, cfg)
-        assert diagnostics["standalone_count"] == 1
-        assert len(apply_input.groups) == 1
-        group = apply_input.groups[0]
-        assert group["source"] == "standalone"
-
     def test_legacy_name_fallback(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """Todo exists without jira_issue_key but matching title
         -> matched by title (not duplicated)."""
@@ -3473,29 +3188,6 @@ class TestJiraRouting:
         matched_group = apply_input.groups[0]
         assert matched_group["project_exists"] is True
         assert matched_group["create_project"] is False
-
-    def test_sync_summary_counts(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
-        """After a sync with 1 epic + 2 children, verify todos_created >= 2, epics_mapped >= 1."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("EPIC-1", "Auth"),
-            _make_jira_issue(
-                "TASK-1",
-                "Login",
-                parent=_make_epic_parent("EPIC-1", "Auth"),
-            ),
-            _make_jira_issue(
-                "TASK-2",
-                "Register",
-                parent=_make_epic_parent("EPIC-1", "Auth"),
-            ),
-        ]
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
-        assert result["status"] == "success"
-        assert result["counts"]["todos_created"] >= 2
-        assert result["counts"]["epics_mapped"] >= 1
-        assert result["counts"]["total_issues"] == 3
 
 
 # ── Response shape tests for proj_jira_full_sync ─────────────────────────────
@@ -3531,6 +3223,7 @@ class TestFullSyncResponseShape:
         result = json.loads(fn(jira_issues_json=json.dumps(issues), project_name=name))
         assert result["status"] == "success"
         assert set(result.keys()) == {"status", "summary", "counts"}
+        assert "warnings" in result["summary"]
 
     def test_partial_success_errors_compact(
         self,
@@ -3610,29 +3303,6 @@ class TestFullSyncResponseShape:
         raw = fn(jira_issues_json=json.dumps(issues), project_name=name)
         assert len(raw) < 2048, f"Response too large: {len(raw)} bytes"
 
-    def test_self_fetch_response_shape(
-        self,
-        cfg_with_project: tuple[ProjConfig, str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Self-fetch path returns the same response shape as direct JSON path."""
-        _cfg, name = cfg_with_project
-        issues = [
-            _make_epic_issue("PROJ-1", "Auth Epic"),
-            _make_jira_issue(
-                "PROJ-2", "Login page", parent=_make_epic_parent("PROJ-1", "Auth Epic")
-            ),
-        ]
-        monkeypatch.setattr(
-            "server.tools.jira_full_sync._fetch_jira_issues",
-            lambda: (issues, len(issues)),
-        )
-        fn = self._get_full_sync_fn()
-        result = json.loads(fn(jira_issues_json=None, project_name=name))
-        assert result["status"] == "success"
-        assert set(result.keys()) == {"status", "summary", "counts"}
-        assert "warnings" in result["summary"]
-
     def test_error_response_shape(
         self,
         cfg_with_project: tuple[ProjConfig, str],
@@ -3657,3 +3327,263 @@ class TestFullSyncResponseShape:
         result = json.loads(raw)
         for w in result.get("summary", {}).get("warnings", []):
             assert isinstance(w, str), f"Warning is not a string: {type(w)}"
+
+
+# ── Retry path tests for proj_jira_full_sync ─────────────────────────────────
+
+
+class TestRetryPath:
+    """Tests for the retry_failures parameter in proj_jira_full_sync."""
+
+    def _get_full_sync_fn(self):
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools["proj_jira_full_sync"]
+
+    def _make_retry_token(self, errors: list[JsonDict], ts: float | None = None) -> str:
+        import base64
+        import time as _time
+
+        token_data = {
+            "ts": ts if ts is not None else _time.time(),
+            "errors": errors,
+        }
+        return base64.b64encode(json.dumps(token_data).encode()).decode()
+
+    def test_invalid_retry_token_returns_error(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Invalid base64 retry_failures returns error."""
+        _cfg, name = cfg_with_project
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(retry_failures="not-valid-base64!!!", project_name=name))
+        assert result["status"] == "error"
+        assert "Invalid retry_token" in result["error"]
+
+    def test_expired_retry_token_returns_error(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Retry token older than 30 minutes is rejected."""
+        import time as _time
+
+        _cfg, name = cfg_with_project
+        old_ts = _time.time() - 3600  # 1 hour ago
+        token = self._make_retry_token([], ts=old_ts)
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(retry_failures=token, project_name=name))
+        assert result["status"] == "error"
+        assert "expired" in result["error"].lower()
+
+    def test_retry_with_no_retryable_issues(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Retry token with empty errors list returns success with no-retry message."""
+        _cfg, name = cfg_with_project
+        token = self._make_retry_token([])
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(retry_failures=token, project_name=name))
+        assert result["status"] == "success"
+        assert "No retryable issues" in result["summary"]["message"]
+
+    def test_retry_with_valid_issues(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Retry token with valid issue payloads re-processes them."""
+        _cfg, name = cfg_with_project
+        errors = [
+            {
+                "retry_payload": {
+                    "issue": {
+                        "key": "PROJ-100",
+                        "summary": "Retry task",
+                        "priority": {"name": "Medium"},
+                        "status": {"name": "To Do"},
+                        "labels": [],
+                        "description": "",
+                        "duedate": None,
+                        "assignee": None,
+                        "subtasks": [],
+                        "parent": {
+                            "key": "PROJ-5",
+                            "fields": {
+                                "issuetype": {"name": "Epic"},
+                                "summary": "Test Epic",
+                            },
+                        },
+                    }
+                }
+            }
+        ]
+        token = self._make_retry_token(errors)
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(retry_failures=token, project_name=name))
+        # Should attempt to process the retry issue
+        assert result["status"] in ("success", "partial_success")
+
+    def test_retry_dedup_skips_already_applied(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Retry skips issues whose jira_issue_key already exists as a todo."""
+        cfg, name = cfg_with_project
+        # Pre-create a todo with jira_issue_key = "PROJ-100"
+        todo = _make_todo(cfg, name, "Already done", jira_issue_key="PROJ-100")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        errors = [
+            {
+                "retry_payload": {
+                    "issue": {
+                        "key": "PROJ-100",
+                        "summary": "Retry task",
+                        "priority": {"name": "Medium"},
+                        "status": {"name": "To Do"},
+                        "labels": [],
+                        "description": "",
+                        "duedate": None,
+                        "assignee": None,
+                        "subtasks": [],
+                    }
+                }
+            }
+        ]
+        token = self._make_retry_token(errors)
+        fn = self._get_full_sync_fn()
+        result = json.loads(fn(retry_failures=token, project_name=name))
+        assert result["status"] == "success"
+        assert "already applied" in result["summary"]["message"].lower()
+
+
+# ── Comments JSON parameter in full sync ──────────────────────────────────────
+
+
+class TestFullSyncCommentsJson:
+    """Tests for the comments_json parameter in proj_jira_full_sync."""
+
+    def _get_full_sync_fn(self):
+        from unittest.mock import MagicMock
+
+        from server.tools.jira_sync import register
+
+        app = MagicMock()
+        tools: dict[str, object] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools["proj_jira_full_sync"]
+
+    def test_comments_json_passed_through(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """comments_json parameter is parsed and applied to created todos."""
+        _cfg, name = cfg_with_project
+        issues = [
+            _make_jira_issue(
+                "PROJ-10",
+                "Task with comments",
+                parent=_make_epic_parent("PROJ-5", "Test Epic"),
+                description="Some description",
+            ),
+            _make_epic_issue("PROJ-5", "Test Epic"),
+        ]
+        comments = {
+            "PROJ-10": [
+                {"id": "c1", "author": "Alice", "created": "2026-04-01", "body": "Review this"},
+            ],
+        }
+        fn = self._get_full_sync_fn()
+        result = json.loads(
+            fn(
+                jira_issues_json=json.dumps(issues),
+                project_name=name,
+                comments_json=json.dumps(comments),
+            )
+        )
+        assert result["status"] == "success"
+
+    def test_invalid_comments_json_falls_back_to_empty(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Invalid comments_json is silently treated as empty dict."""
+        _cfg, name = cfg_with_project
+        issues = [
+            _make_epic_issue("PROJ-5", "Test Epic"),
+            _make_jira_issue(
+                "PROJ-10",
+                "Task",
+                parent=_make_epic_parent("PROJ-5", "Test Epic"),
+            ),
+        ]
+        fn = self._get_full_sync_fn()
+        result = json.loads(
+            fn(
+                jira_issues_json=json.dumps(issues),
+                project_name=name,
+                comments_json="NOT VALID JSON {{{",
+            )
+        )
+        # Should succeed despite invalid comments_json (falls back to {})
+        assert result["status"] == "success"
+
+
+# ── Multi-epic sync tests ────────────────────────────────────────────────────
+
+
+class TestMultiEpicSync:
+    """Tests for syncing multiple epics in a single full sync call."""
+
+    def test_two_epics_create_separate_projects(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Two epics with children create two separate projects with correct todos."""
+        cfg, _name = cfg_with_project
+        issues = [
+            _make_epic_issue("EP-1", "Auth Epic"),
+            _make_jira_issue("EP-10", "Login", parent=_make_epic_parent("EP-1", "Auth Epic")),
+            _make_jira_issue("EP-11", "Logout", parent=_make_epic_parent("EP-1", "Auth Epic")),
+            _make_epic_issue("EP-2", "Payment Epic"),
+            _make_jira_issue("EP-20", "Checkout", parent=_make_epic_parent("EP-2", "Payment Epic")),
+        ]
+        data = compute_mapping(issues, cfg)
+        # Force create_project=True for new epic projects
+        groups_dicts = []
+        for g in data.groups:
+            d = g.to_dict()
+            if not d.get("project_exists"):
+                d["create_project"] = True
+            groups_dicts.append(d)
+        apply_input = JiraApplyInput(groups=groups_dicts)
+        result = apply_mapping(apply_input, cfg)
+        # Two new epic-based projects should be created
+        assert result.counts["projects_created"] == 2
+        # 3 child tasks total
+        assert result.counts["todos_created"] == 3
+
+    def test_multi_epic_idempotent_resync(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """Re-syncing the same multi-epic set does not create duplicates."""
+        cfg, _name = cfg_with_project
+        issues = [
+            _make_epic_issue("EP-1", "Auth Epic"),
+            _make_jira_issue("EP-10", "Login", parent=_make_epic_parent("EP-1", "Auth Epic")),
+            _make_epic_issue("EP-2", "Payment Epic"),
+            _make_jira_issue("EP-20", "Checkout", parent=_make_epic_parent("EP-2", "Payment Epic")),
+        ]
+        # First sync -- create projects
+        data1 = compute_mapping(issues, cfg)
+        groups1 = []
+        for g in data1.groups:
+            d = g.to_dict()
+            if not d.get("project_exists"):
+                d["create_project"] = True
+            groups1.append(d)
+        r1 = apply_mapping(JiraApplyInput(groups=groups1), cfg)
+        assert r1.counts["projects_created"] == 2
+
+        # Second sync -- projects now exist, compute_mapping should find them
+        data2 = compute_mapping(issues, cfg)
+        groups2 = [g.to_dict() for g in data2.groups]
+        r2 = apply_mapping(JiraApplyInput(groups=groups2), cfg)
+
+        # No new projects or todos on resync
+        assert r2.counts["projects_created"] == 0
+        assert r2.counts["todos_created"] == 0

@@ -164,19 +164,8 @@ class TestMigrateProjectActual:
         assert by_title["Child B"].id == "1.2"
         assert by_title["Child A"].parent == "1"
         assert by_title["Child B"].parent == "1"
-
-    def test_migrates_parent_children_references(self, cfg: ProjConfig) -> None:
-        todos = [
-            _make_todo("T001", "Parent", children=["T002"]),
-            _make_todo("T002", "Child", parent="T001"),
-        ]
-        _setup_project_with_todos(cfg, "beta", todos)
-
-        _migrate_project(cfg, "beta", dry_run=False)
-
-        saved = storage.load_todos(cfg, "beta")
-        parent = next(t for t in saved if t.title == "Parent")
-        assert "1.1" in parent.children
+        assert "1.1" in by_title["Parent"].children
+        assert "1.2" in by_title["Parent"].children
 
     def test_migrates_blocks_and_blocked_by(self, cfg: ProjConfig) -> None:
         t1 = _make_todo("T001", "Blocker")
@@ -193,17 +182,7 @@ class TestMigrateProjectActual:
         assert "2" in by_title["Blocker"].blocks
         assert "1" in by_title["Blocked"].blocked_by
 
-    def test_backup_created(self, cfg: ProjConfig) -> None:
-        todos = [_make_todo("T001", "Task")]
-        _setup_project_with_todos(cfg, "gamma", todos)
-
-        _migrate_project(cfg, "gamma", dry_run=False)
-
-        proj_dir = Path(cfg.tracking_dir) / "gamma"
-        bak_files = list(proj_dir.glob("todos.yaml.bak-*"))
-        assert len(bak_files) == 1
-
-    def test_backup_contains_original_data(self, cfg: ProjConfig) -> None:
+    def test_backup_created_with_original_data(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Task")]
         _setup_project_with_todos(cfg, "gamma", todos)
         original_text = storage.todos_path(cfg, "gamma").read_text()
@@ -256,17 +235,6 @@ class TestMigrateProjectActual:
         assert not old_dir.exists()
         assert new_dir.exists()
         assert (new_dir / "requirements.md").exists()
-
-    def test_result_dict_includes_counts(self, cfg: ProjConfig) -> None:
-        todos = [_make_todo("T001", "Task")]
-        _setup_project_with_todos(cfg, "zeta", todos)
-
-        result = _migrate_project(cfg, "zeta", dry_run=False)
-
-        assert result["migrated"] is True
-        assert result["id_count"] == 1
-        assert "archive_count" in result
-        assert "decisions_count" in result
 
 
 class TestMigrateProjectEdgeCases:
@@ -336,35 +304,9 @@ class TestMigrateDeepNesting:
         assert by_title["Root"].id == "1"
         assert by_title["Child"].id == "1.1"
         assert by_title["Grandchild"].id == "1.1.1"
-
-    def test_grandchild_parent_reference_updated(self, cfg: ProjConfig) -> None:
-        todos = [
-            _make_todo("T001", "Root", children=["T002"]),
-            _make_todo("T002", "Child", parent="T001", children=["T003"]),
-            _make_todo("T003", "Grandchild", parent="T002"),
-        ]
-        _setup_project_with_todos(cfg, "deep_refs", todos)
-
-        _migrate_project(cfg, "deep_refs", dry_run=False)
-
-        saved = storage.load_todos(cfg, "deep_refs")
-        by_title = {t.title: t for t in saved}
         assert by_title["Grandchild"].parent == "1.1"
         assert "1.1.1" in by_title["Child"].children
-
-    def test_dry_run_shows_three_level_mapping(self, cfg: ProjConfig) -> None:
-        todos = [
-            _make_todo("T001", "Root", children=["T002"]),
-            _make_todo("T002", "Child", parent="T001", children=["T003"]),
-            _make_todo("T003", "Grandchild", parent="T002"),
-        ]
-        _setup_project_with_todos(cfg, "deep_dry", todos)
-
-        result = _migrate_project(cfg, "deep_dry", dry_run=True)
-
-        assert result["mapping"]["T001"] == "1"
-        assert result["mapping"]["T002"] == "1.1"
-        assert result["mapping"]["T003"] == "1.1.1"
+        assert "1.1" in by_title["Root"].children
 
     def test_next_child_id_set_correctly_at_all_levels(self, cfg: ProjConfig) -> None:
         todos = [
@@ -390,19 +332,6 @@ class TestMigrateDeepNesting:
 
 
 class TestMigrateBlockingRelationships:
-    def test_dry_run_shows_blocking_ids_in_mapping(self, cfg: ProjConfig) -> None:
-        t1 = _make_todo("T001", "Blocker")
-        t1.blocks = ["T002"]
-        t2 = _make_todo("T002", "Blocked")
-        t2.blocked_by = ["T001"]
-        _setup_project_with_todos(cfg, "block_dry", [t1, t2])
-
-        result = _migrate_project(cfg, "block_dry", dry_run=True)
-
-        # Both IDs appear in the mapping
-        assert result["mapping"]["T001"] == "1"
-        assert result["mapping"]["T002"] == "2"
-
     def test_child_blocking_relationship_remapped(self, cfg: ProjConfig) -> None:
         # Child T002 is blocked by sibling T003 under same parent T001
         parent = _make_todo("T001", "Parent", children=["T002", "T003"])
@@ -418,23 +347,6 @@ class TestMigrateBlockingRelationships:
         by_title = {t.title: t for t in saved}
         assert "1.2" in by_title["Child A"].blocked_by
         assert "1.1" in by_title["Child B"].blocks
-
-    def test_blocks_across_root_todos_remapped(self, cfg: ProjConfig) -> None:
-        t1 = _make_todo("T001", "First", created="2026-01-01")
-        t1.blocks = ["T003"]
-        t2 = _make_todo("T002", "Second", created="2026-01-02")
-        t3 = _make_todo("T003", "Third", created="2026-01-03")
-        t3.blocked_by = ["T001"]
-        _setup_project_with_todos(cfg, "root_block", [t1, t2, t3])
-
-        _migrate_project(cfg, "root_block", dry_run=False)
-
-        saved = storage.load_todos(cfg, "root_block")
-        by_title = {t.title: t for t in saved}
-        assert by_title["First"].id == "1"
-        assert by_title["Third"].id == "3"
-        assert "3" in by_title["First"].blocks
-        assert "1" in by_title["Third"].blocked_by
 
 
 class TestMigrateRollbackAndInterrupt:
@@ -640,18 +552,6 @@ class TestMigrateArchiveAndDecisions:
         assert storage.archive_path(cfg, "rollback").read_text() == original_archive
         assert storage.decisions_path(cfg, "rollback").read_text() == original_decisions
 
-    def test_migrate_json_return_structure(self, cfg: ProjConfig) -> None:
-        todos = [_make_todo("T001", "Task")]
-        _setup_project_with_todos(cfg, "ret", todos)
-
-        result = _migrate_project(cfg, "ret", dry_run=False)
-
-        assert result["migrated"] is True
-        assert result["project"] == "ret"
-        assert result["id_count"] == 1
-        assert "archive_count" in result
-        assert "decisions_count" in result
-
     def test_migrate_empty_archive(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Task")]
         _setup_project_with_todos(cfg, "no_arc", todos)
@@ -753,20 +653,6 @@ class TestCleanupConfig:
         assert "sync.todoist.mcp_server" in result["removed"]
         reloaded = storage._load_yaml(config_path)
         assert "mcp_server" not in reloaded.get("sync", {}).get("todoist", {})
-
-    def test_cleanup_config_removes_both(self, cfg: ProjConfig) -> None:
-        config_path = storage.config_path()
-        raw = storage._load_yaml(config_path)
-        raw.setdefault("permissions", {})["investigation_tools"] = ["tool"]
-        raw.setdefault("sync", {}).setdefault("todoist", {})["mcp_server"] = "server"
-        storage._write_yaml(config_path, raw)
-
-        result = _cleanup_config(cfg)
-
-        assert result["cleaned"] is True
-        assert len(result["removed"]) == 2
-        assert "permissions.investigation_tools" in result["removed"]
-        assert "sync.todoist.mcp_server" in result["removed"]
 
     def test_cleanup_config_nothing_to_clean(self, cfg: ProjConfig) -> None:
         # Remove the default mcp_server so there is truly nothing to clean

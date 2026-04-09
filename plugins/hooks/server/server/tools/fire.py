@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
 import os
@@ -58,11 +59,22 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
     registry_file = _SOCKET_REGISTRY_DIR / server_name
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and os.path.exists(path):
             return f"unix://{path}"
     except (FileNotFoundError, OSError):
         logger.debug("Socket registry lookup failed", exc_info=True)
-    # Fallback: use server name as-is (allows direct URL or name-based routing)
+
+    # Fallback: glob for newest PID-tagged socket
+    prefix = f"/tmp/claude-hooks-{server_name}-"  # noqa: S108
+    candidates = sorted(
+        glob.glob(f"{prefix}*.sock"),
+        key=lambda p: os.path.getmtime(p),
+        reverse=True,
+    )
+    if candidates:
+        return f"unix://{candidates[0]}"
+
+    # Last resort: use server name as-is (allows direct URL or name-based routing)
     return server_name
 
 
@@ -262,15 +274,20 @@ async def _fire_hooks_internal(
     verification_matched = [h for h in matched if h.verification]
 
     fired = 0
-    skipped = 0
     errors: list[dict[str, JsonValue]] = []
     blocking_hooks: list[Hook] = []
-
     non_blocking_hooks: list[Hook] = []
+    skipped_hooks: list[dict[str, JsonValue]] = []
 
     for hook in primary_matched:
         if not evaluate_condition(hook.condition, config=base_config):
-            skipped += 1
+            skipped_hooks.append(
+                {
+                    "hook_id": hook.id,
+                    "target_tool": hook.target_tool,
+                    "reason": f"condition '{hook.condition}' evaluated false",
+                }
+            )
             continue
         if hook.blocking:
             blocking_hooks.append(hook)
@@ -552,10 +569,16 @@ async def _fire_hooks_internal(
             logger.debug("Cascade failure (non-fatal)", exc_info=True)
 
     # Schedule non-blocking hooks (fire-and-forget)
+    non_blocking_dispatched = 0
+    non_blocking_results: list[dict[str, JsonValue]] = []
     for hook in non_blocking_hooks:
         task = asyncio.create_task(_launch_nonblocking(hook, source, source_result))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
+        non_blocking_dispatched += 1
+        non_blocking_results.append(
+            {"hook_id": hook.id, "target_tool": hook.target_tool, "status": "dispatched"}
+        )
 
     # Phase 2: Fire verification hooks with enriched source_result
     verification_results: list[dict[str, JsonValue]] = []
@@ -576,15 +599,20 @@ async def _fire_hooks_internal(
     errors_jv: JsonValue = cast("JsonValue", errors)
     summary: dict[str, JsonValue] = {
         "hooks_fired": fired,
-        "skipped": skipped,
+        "skipped": len(skipped_hooks),
+        "skipped_hooks": cast("JsonValue", skipped_hooks),
         "errors": errors_jv,
-        "results": [
-            {"hook_id": k, "result": v, "target_tool": target_tool_by_id.get(k)}
-            for k, v in results_by_id.items()
-        ],
+        "results": cast(
+            "JsonValue",
+            [
+                {"hook_id": k, "result": v, "target_tool": target_tool_by_id.get(k)}
+                for k, v in results_by_id.items()
+            ]
+            + non_blocking_results,
+        ),
         "depth": depth,
         "max_depth": max_depth,
-        "non_blocking_dispatched": len(non_blocking_hooks),
+        "non_blocking_dispatched": non_blocking_dispatched,
         "top_level": depth == 0,
     }
     if verification_results:

@@ -57,6 +57,18 @@ async def test_start_http_system_exit(capsys):
 
 
 @pytest.mark.anyio
+async def test_start_http_permission_error(capsys):
+    """PermissionError (sandbox blocking) logs to stderr and returns cleanly."""
+    server = AsyncMock()
+    server.serve = AsyncMock(side_effect=PermissionError("Operation not permitted"))
+    await _start_http(server, "unix:///tmp/test.sock")
+    captured = capsys.readouterr()
+    assert "test.sock" in captured.err
+    assert "unavailable" in captured.err
+    assert "sandbox" in captured.err
+
+
+@pytest.mark.anyio
 async def test_start_http_calls_serve():
     """Normal case: server.serve() is awaited."""
     server = AsyncMock()
@@ -444,3 +456,68 @@ class TestSocketRegistry:
         content = registry_file.read_text()
         assert "hooks" in content
         assert str(os.getpid()) in content
+
+    @pytest.mark.anyio
+    async def test_run_dual_async_does_not_register_atexit_delete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Registry deletion is NOT registered via atexit (fix for race condition)."""
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+
+        registered_atexit_calls: list[tuple] = []
+        original_register = __import__("atexit").register
+
+        def tracking_register(func, *args, **kwargs):
+            name = func.__name__ if hasattr(func, "__name__") else str(func)
+            registered_atexit_calls.append((name, args))
+            return original_register(func, *args, **kwargs)
+
+        with (
+            patch("hook_transport.dual_transport.stdio_server") as mock_stdio,
+            patch("hook_transport.dual_transport.uvicorn") as mock_uvicorn,
+            patch("hook_transport.dual_transport.create_hook_app") as mock_create,
+            patch("hook_transport.dual_transport._cleanup_stale_socket"),
+            patch("hook_transport.dual_transport._register_socket_cleanup"),
+            patch("atexit.register", side_effect=tracking_register),
+        ):
+            mock_create.return_value = MagicMock()
+            mock_server = AsyncMock()
+            mock_server.serve = AsyncMock(return_value=None)
+            mock_server.should_exit = False
+            mock_uvicorn.Config.return_value = MagicMock()
+            mock_uvicorn.Server.return_value = mock_server
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+            mock_ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_stdio.return_value = mock_ctx
+
+            mock_mcp = MagicMock()
+            mock_mcp._mcp_server.run = AsyncMock(return_value=None)
+            mock_mcp._mcp_server.create_initialization_options.return_value = {}
+
+            await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+
+        # Verify _delete_socket_registry was NOT registered via atexit
+        delete_calls = [c for c in registered_atexit_calls if "_delete_socket_registry" in c[0]]
+        assert len(delete_calls) == 0, (
+            f"_delete_socket_registry should not be registered via atexit, "
+            f"but found: {delete_calls}"
+        )
+
+        # Registry file should still exist (not deleted)
+        assert (tmp_path / "hooks").exists()
+
+    def test_registry_persists_after_delete_not_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Simulates old process NOT deleting registry — new process finds it."""
+        monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
+
+        # Old process writes registry
+        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-old.sock")
+        assert (tmp_path / "hooks").exists()
+
+        # New process overwrites registry (no deletion in between)
+        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-new.sock")
+        assert (tmp_path / "hooks").read_text() == "/tmp/claude-hooks-hooks-new.sock"

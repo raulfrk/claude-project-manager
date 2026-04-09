@@ -43,6 +43,14 @@ class TestJiraLinkIssues:
             "link_type": "Blocks",
         }
 
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error 404: issue not found")
+
+        with pytest.raises(RuntimeError, match="404"):
+            link_tools["jira_link_issues"](
+                inward_key="NOPE-1", outward_key="PROJ-2", link_type="Blocks"
+            )
+
 
 class TestJiraGetLinkTypes:
     def test_fetches_link_types(self, mock_jira_client: MagicMock, link_tools: dict) -> None:

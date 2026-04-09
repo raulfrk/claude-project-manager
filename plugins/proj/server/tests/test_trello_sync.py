@@ -34,6 +34,7 @@ from server.tools.trello_sync import (
     _topo_sort_todos,
     apply_changes,
     build_card_description,
+    build_project_card_description,
     compute_desc_hash,
     compute_diff,
     format_card_title,
@@ -832,24 +833,24 @@ class TestTrelloSyncPlan:
         plan = TrelloSyncPlan()
         assert plan.is_empty()
 
-    def test_is_empty_false_push_create(self) -> None:
-        plan = TrelloSyncPlan(push_create_card=[{"todo_id": "1"}])
-        assert not plan.is_empty()
-
-    def test_is_empty_false_pull_complete(self) -> None:
-        plan = TrelloSyncPlan(pull_complete=["1"])
-        assert not plan.is_empty()
-
-    def test_is_empty_false_conflicts(self) -> None:
-        plan = TrelloSyncPlan(conflicts=[{"todo_id": "1"}])
-        assert not plan.is_empty()
-
-    def test_is_empty_false_project_card_create(self) -> None:
-        plan = TrelloSyncPlan(project_card_create=True)
-        assert not plan.is_empty()
-
-    def test_is_empty_false_lists_to_create(self) -> None:
-        plan = TrelloSyncPlan(lists_to_create=["Tasks"])
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("push_create_card", [{"todo_id": "1"}]),
+            ("pull_complete", ["1"]),
+            ("conflicts", [{"todo_id": "1"}]),
+            ("project_card_create", True),
+            ("lists_to_create", ["Tasks"]),
+            ("push_update_card", [{"todo_id": "1"}]),
+            ("push_move_card", [{"todo_id": "1"}]),
+            ("push_archive_card", [{"card_id": "c1"}]),
+            ("pull_update", [{"todo_id": "1"}]),
+            ("pull_reopen", ["1"]),
+            ("project_card_update", True),
+        ],
+    )
+    def test_is_empty_false(self, field: str, value: object) -> None:
+        plan = TrelloSyncPlan(**{field: value})
         assert not plan.is_empty()
 
     def test_to_dict_has_summary(self) -> None:
@@ -1032,3 +1033,323 @@ class TestMCPToolApply:
         apply_fn = self._get_apply_fn()
         result = apply_fn(apply_json="not json", project_name=name)
         assert "Invalid JSON" in result
+
+    def test_apply_with_push_confirmed(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Synced task", trello_card_id="card_1")
+        storage.save_todos(cfg, name, [todo])
+
+        apply_fn = self._get_apply_fn()
+        data: dict[str, object] = {}
+        result = json.loads(
+            apply_fn(apply_json=json.dumps(data), push_confirmed=True, project_name=name)
+        )
+        assert result["status"] == "ok"
+        todos = storage.load_todos(cfg, name)
+        assert todos[0].trello_sync_state is not None
+
+
+# ── TestBuildProjectCardDescription ──────────────────────────────────────────
+
+
+class TestBuildProjectCardDescription:
+    def test_basic_project_card(self) -> None:
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[RepoEntry(label="code", path="/tmp/code")],
+            dates=ProjectDates(created="2026-01-01T00:00:00", last_updated="2026-01-01T00:00:00"),
+        )
+        todos = [
+            Todo(id="1", title="Task A", status="pending"),
+            Todo(id="2", title="Task B", status="done"),
+        ]
+        desc = build_project_card_description(meta, todos, "myapp")
+        assert "**Project**: myapp" in desc
+        assert "**Status**: active" in desc
+        assert "2 total" in desc
+        assert "1 done" in desc
+        assert "1 pending" in desc
+
+    def test_root_todos_listed(self) -> None:
+        meta = ProjectMeta(
+            name="proj",
+            repos=[RepoEntry(label="code", path="/tmp/code")],
+            dates=ProjectDates(created="2026-01-01T00:00:00", last_updated="2026-01-01T00:00:00"),
+        )
+        root = Todo(id="1", title="Root task", children=["1.1"])
+        child = Todo(id="1.1", title="Child", parent="1")
+        desc = build_project_card_description(meta, [root, child], "proj")
+        assert "## Root Todos" in desc
+        assert "[1] Root task" in desc
+        # Child should not be in root section
+        assert "[1.1] Child" not in desc
+
+    def test_empty_todos(self) -> None:
+        meta = ProjectMeta(
+            name="empty",
+            repos=[RepoEntry(label="code", path="/tmp/code")],
+            dates=ProjectDates(created="2026-01-01T00:00:00", last_updated="2026-01-01T00:00:00"),
+        )
+        desc = build_project_card_description(meta, [], "empty")
+        assert "0 total" in desc
+        assert "## Root Todos" not in desc
+
+    def test_truncation(self) -> None:
+        meta = ProjectMeta(
+            name="big",
+            repos=[RepoEntry(label="code", path="/tmp/code")],
+            dates=ProjectDates(created="2026-01-01T00:00:00", last_updated="2026-01-01T00:00:00"),
+        )
+        # Create many todos to potentially exceed desc limit
+        todos = [Todo(id=str(i), title="x" * 500) for i in range(100)]
+        desc = build_project_card_description(meta, todos, "big")
+        assert len(desc) <= 16384
+
+
+# ── TestComputeDiffListMoves ─────────────────────────────────────────────────
+
+
+class TestComputeDiffListMoves:
+    def test_first_sync_done_todo_pushes_to_done_list(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """First sync: done todo with card in active list should push move to Done."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "Finished", trello_card_id="card_1", status="done")
+        storage.save_todos(cfg, name, [todo])
+
+        cards = [
+            {"id": "card_1", "name": "[myapp] [1] Finished", "desc": "old", "idList": "list_tasks"}
+        ]
+        lists = [
+            {"id": "list_tasks", "name": "proj-tasks"},
+            {"id": "list_done", "name": "Done"},
+        ]
+        plan = compute_diff(_make_trello_data(cards=cards, lists=lists), cfg, name)
+        assert len(plan.push_move_card) >= 1
+        move_ids = [str(m["todo_id"]) for m in plan.push_move_card]
+        assert todo.id in move_ids
+
+    def test_local_only_list_change_pushes_move(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Local status changed to done -> push move card to Done list."""
+        cfg, name = cfg_with_project
+        synced_title = format_card_title(name, "1", "Task")
+        todo = _make_todo(cfg, name, "Task", trello_card_id="card_1", status="done")
+        expected_desc = build_card_description(todo, name)
+        todo.trello_sync_state = TrelloSyncState(
+            last_sync="2026-01-01T00:00:00",
+            synced_name=synced_title,
+            card_id="card_1",
+            list_id="list_tasks",
+            desc_hash=compute_desc_hash(expected_desc),
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        cards = [
+            {"id": "card_1", "name": synced_title, "desc": expected_desc, "idList": "list_tasks"}
+        ]
+        lists = [
+            {"id": "list_tasks", "name": "proj-tasks"},
+            {"id": "list_done", "name": "Done"},
+        ]
+        plan = compute_diff(_make_trello_data(cards=cards, lists=lists), cfg, name)
+        assert len(plan.push_move_card) >= 1
+
+
+# ── TestMCPToolDiffSummaryOnly ──────────────────────────────────────────────
+
+
+class TestMCPToolDiffSummaryOnly:
+    def _get_tools(self) -> dict[str, Callable[..., str]]:
+        from unittest.mock import MagicMock
+
+        from server.tools.trello_sync import register
+
+        app = MagicMock()
+        tools: dict[str, Callable[..., str]] = {}
+        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
+        register(app)
+        return tools
+
+    def test_summary_only_returns_only_summary(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        _cfg, name = cfg_with_project
+        tools = self._get_tools()
+        diff = tools["proj_trello_diff"]
+        result = json.loads(
+            diff(
+                trello_cards_json=_make_trello_data(cards=[], lists=[]),
+                summary_only=True,
+                project_name=name,
+            )
+        )
+        assert "summary" in result
+        # summary_only should NOT include full plan details
+        assert "push_create_card" not in result
+
+
+# ── _resolve_target_list tests ───────────────────────────────────────────────
+
+
+class TestResolveTargetList:
+    """Tests for _resolve_target_list with global and per-project list mappings."""
+
+    def test_uses_global_list_mappings_by_default(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """When meta has no per-project list_mappings, uses global cfg."""
+        from server.tools.trello_sync import _resolve_target_list
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        todo = _make_todo(cfg, name, "Active task", status="pending")
+        result = _resolve_target_list(todo, cfg, meta)
+        assert result == cfg.trello.list_mappings.tasks
+
+    def test_done_todo_maps_to_done_list(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        """A done todo maps to the done list."""
+        from server.tools.trello_sync import _resolve_target_list
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        todo = _make_todo(cfg, name, "Done task", status="done")
+        result = _resolve_target_list(todo, cfg, meta)
+        assert result == cfg.trello.list_mappings.done
+
+    def test_cancelled_todo_maps_to_done_list(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """A cancelled todo also maps to the done list (terminal status)."""
+        from server.tools.trello_sync import _resolve_target_list
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        todo = _make_todo(cfg, name, "Cancelled task", status="cancelled")
+        result = _resolve_target_list(todo, cfg, meta)
+        assert result == cfg.trello.list_mappings.done
+
+    def test_per_project_list_mappings_override(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Per-project trello.list_mappings overrides global config."""
+        from server.tools.trello_sync import _resolve_target_list
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        # Set per-project list_mappings override
+        meta.trello.list_mappings = TrelloListMappings(
+            tasks="Custom-Tasks",
+            done="Custom-Done",
+        )
+        storage.save_meta(cfg, meta)
+        meta = storage.load_meta(cfg, name)
+
+        pending_todo = _make_todo(cfg, name, "Active task", status="pending")
+        result = _resolve_target_list(pending_todo, cfg, meta)
+        assert result == "Custom-Tasks"
+
+        done_todo = _make_todo(cfg, name, "Done task", status="done")
+        result = _resolve_target_list(done_todo, cfg, meta)
+        assert result == "Custom-Done"
+
+    def test_per_project_none_falls_back_to_global(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """When meta.trello.list_mappings is None, falls back to global."""
+        from server.tools.trello_sync import _resolve_target_list
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        meta.trello.list_mappings = None
+        storage.save_meta(cfg, meta)
+        meta = storage.load_meta(cfg, name)
+
+        todo = _make_todo(cfg, name, "Task", status="pending")
+        result = _resolve_target_list(todo, cfg, meta)
+        assert result == cfg.trello.list_mappings.tasks
+
+
+# ── Unlinked card scanning tests ─────────────────────────────────────────────
+
+
+class TestUnlinkedCardScanning:
+    """Tests for unlinked Trello card scanning in compute_diff."""
+
+    def test_unlinked_card_with_matching_title_not_linked(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """An unlinked card whose title parses to a valid todo ID is logged but not auto-linked.
+
+        The card is skipped during the Trello cards scan (no pull actions created),
+        but the local todo still generates a push_create_card since it has no
+        trello_card_id link locally.
+        """
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "My task", status="pending")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        # Card matches todo by title format but the todo has no trello_card_id
+        cards = [
+            {
+                "id": "card_unlinked",
+                "name": format_card_title(name, todo.id, todo.title),
+                "desc": "",
+                "idList": "list_tasks",
+                "list": {"name": "proj-tasks"},
+            }
+        ]
+        lists = [
+            {"id": "list_tasks", "name": "proj-tasks"},
+            {"id": "list_done", "name": "Done"},
+        ]
+        plan = compute_diff(
+            _make_trello_data(cards=cards, lists=lists),
+            cfg,
+            name,
+        )
+        # The unlinked card does NOT cause pull_complete or pull_create actions
+        assert len(plan.pull_complete) == 0
+        assert len(plan.pull_create) == 0
+        assert len(plan.pull_create_root) == 0
+        # The local todo without trello_card_id generates a push
+        assert len(plan.push_create_card) == 1
+        assert str(plan.push_create_card[0]["todo_id"]) == todo.id
+
+    def test_unlinked_card_with_unparseable_title_skipped(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """An unlinked card with a non-parseable title is silently skipped."""
+        cfg, name = cfg_with_project
+        todo = _make_todo(cfg, name, "My task", status="pending")
+        todos = storage.load_todos(cfg, name)
+        todos.append(todo)
+        storage.save_todos(cfg, name, todos)
+
+        # Card with non-standard title (not parseable)
+        cards = [
+            {
+                "id": "card_random",
+                "name": "Some random card title",
+                "desc": "",
+                "idList": "list_tasks",
+                "list": {"name": "proj-tasks"},
+            }
+        ]
+        lists = [
+            {"id": "list_tasks", "name": "proj-tasks"},
+            {"id": "list_done", "name": "Done"},
+        ]
+        plan = compute_diff(
+            _make_trello_data(cards=cards, lists=lists),
+            cfg,
+            name,
+        )
+        # Should still produce a push_create_card for the local todo
+        # (since it has no trello_card_id), but the random card should be ignored
+        local_push_ids = {str(c.get("todo_id")) for c in plan.push_create_card}
+        assert todo.id in local_push_ids

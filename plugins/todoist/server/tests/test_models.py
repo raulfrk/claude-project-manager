@@ -145,6 +145,21 @@ class TestTodoistTaskFromApi:
         task = TodoistTask.from_api(data)
         assert task.due is None
 
+    def test_updated_at_camel_case(self) -> None:
+        data = {"id": "1", "content": "Task", "updatedAt": "2026-01-01T00:00:00Z"}
+        task = TodoistTask.from_api(data)
+        assert task.updated_at == "2026-01-01T00:00:00Z"
+
+    def test_updated_at_snake_case(self) -> None:
+        data = {"id": "1", "content": "Task", "updated_at": "2026-04-01T12:00:00Z"}
+        task = TodoistTask.from_api(data)
+        assert task.updated_at == "2026-04-01T12:00:00Z"
+
+    def test_missing_updated_at_defaults_to_empty(self) -> None:
+        data = {"id": "1", "content": "Task"}
+        task = TodoistTask.from_api(data)
+        assert task.updated_at == ""
+
 
 # -- TodoistTask.to_dict ------------------------------------------------------
 

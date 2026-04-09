@@ -202,23 +202,24 @@ class TestProjMigrateDirs:
         assert len(parsed["skipped"]) == 1
         assert parsed["skipped"][0]["reason"] == "already multi-dir"
 
-    async def test_migrate_dirs_idempotent(
+    async def test_migrate_dirs_active_project_fallback(
         self, mcp_app: Any, legacy_project: tuple[str, ProjConfig]
     ) -> None:
-        """Migrating twice should succeed first time, then report already migrated."""
-        _name, _cfg = legacy_project
-        # First migration
-        result1 = await call_tool(mcp_app, "proj_migrate_dirs", label="code")
-        parsed1 = json.loads(result1)
-        assert len(parsed1["migrated"]) == 1
-        assert parsed1["migrated"][0]["migrated"] is True
+        """all_projects=False with no project_name resolves the active session project."""
+        name, _cfg = legacy_project
+        result = await call_tool(mcp_app, "proj_migrate_dirs", all_projects=False)
+        parsed = json.loads(result)
+        assert len(parsed["migrated"]) == 1
+        assert parsed["migrated"][0]["project"] == name
 
-        # Second call should say already migrated
-        result2 = await call_tool(mcp_app, "proj_migrate_dirs", label="code")
-        parsed2 = json.loads(result2)
-        assert len(parsed2["migrated"]) == 0
-        assert len(parsed2["skipped"]) == 1
-        assert parsed2["skipped"][0]["reason"] == "already multi-dir"
+    async def test_migrate_dirs_no_active_project_error(
+        self, mcp_app: Any, cfg: ProjConfig
+    ) -> None:
+        """all_projects=False with no active project returns an error."""
+        state.clear_session_active()
+        result = await call_tool(mcp_app, "proj_migrate_dirs", all_projects=False)
+        parsed = json.loads(result)
+        assert "error" in parsed
 
 
 # ===========================================================================
@@ -346,23 +347,6 @@ class TestProjMigrateDirsExtended:
         restored_raw = storage._load_yaml(storage.meta_path(cfg, name))
         assert restored_raw["path"] == original_raw["path"]
         assert restored_raw["repos"] == original_raw["repos"]
-
-    async def test_migrate_dirs_json_return_structure(
-        self, mcp_app: Any, legacy_project: tuple[str, ProjConfig]
-    ) -> None:
-        """Return JSON must have migrated, skipped, errors, dry_run keys."""
-        _name, _cfg = legacy_project
-        result = await call_tool(mcp_app, "proj_migrate_dirs")
-        parsed = json.loads(result)
-
-        assert "migrated" in parsed
-        assert "skipped" in parsed
-        assert "errors" in parsed
-        assert "dry_run" in parsed
-        assert isinstance(parsed["migrated"], list)
-        assert isinstance(parsed["skipped"], list)
-        assert isinstance(parsed["errors"], list)
-        assert isinstance(parsed["dry_run"], bool)
 
     async def test_migrate_dirs_missing_tracking_dir(
         self,

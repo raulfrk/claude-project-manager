@@ -40,6 +40,40 @@ class TestListBoards:
         assert json.loads(result) == []
 
 
+class TestListBoardsWhitelistFiltering:
+    def test_filters_to_allowed_boards(
+        self,
+        mock_trello_client: MagicMock,
+        board_tools: dict,
+    ) -> None:
+        mock_trello_client._config.allowed_board_ids = ["b1"]
+        mock_trello_client.get.return_value = [
+            {"id": "b1", "name": "Allowed"},
+            {"id": "b2", "name": "Blocked"},
+        ]
+
+        result = board_tools["list_boards"]()
+
+        parsed = json.loads(result)
+        assert len(parsed) == 1
+        assert parsed[0]["id"] == "b1"
+
+    def test_empty_whitelist_returns_nothing(
+        self,
+        mock_trello_client: MagicMock,
+        board_tools: dict,
+    ) -> None:
+        mock_trello_client._config.allowed_board_ids = ["b99"]
+        mock_trello_client.get.return_value = [
+            {"id": "b1", "name": "Board"},
+        ]
+
+        result = board_tools["list_boards"]()
+
+        parsed = json.loads(result)
+        assert parsed == []
+
+
 class TestGetBoard:
     def test_returns_single_board(self, mock_trello_client: MagicMock, board_tools: dict) -> None:
         board_data = {"id": "b1", "name": "Project", "desc": "A board"}

@@ -7,6 +7,8 @@ from typing import IO
 
 from rich.console import Console
 
+from rich.prompt import Confirm
+
 from installer.cli import build_parser
 from installer.detect import detect_existing, display_detection
 from installer.errors import (
@@ -18,12 +20,21 @@ from installer.errors import (
     release_lock,
 )
 from installer.app import InstallerApp
-from installer.uninstall import run_uninstall
+from installer.plugin_cli import (
+    add_marketplace,
+    check_marketplace_registered,
+    get_available_plugins,
+    get_installed_plugins,
+    install_plugin,
+    remove_marketplace,
+    uninstall_plugin,
+    update_plugin,
+)
+from installer.uninstall import cleanup_config_files
+from installer.tui import load_plugins, select_plugins
 from installer.update import (
     compare_versions,
     display_version_diff,
-    run_reinstall,
-    run_update,
 )
 from installer.wizard import run_wizard
 
@@ -35,8 +46,96 @@ EXIT_ERROR = 2
 
 def _install(args) -> int:
     """Run the install flow."""
-    print("Not implemented: install")
-    return EXIT_SUCCESS
+    console = Console()
+
+    # 1. Determine plugin list
+    if args.plugins:
+        selected = list(args.plugins)
+    else:
+        plugins = load_plugins(branch=getattr(args, "branch", None))
+        selected = select_plugins(plugins, console=console)
+
+    if not selected:
+        console.print("[dim]No plugins selected. Nothing to install.[/dim]")
+        return EXIT_SUCCESS
+
+    # 2. Run the setup wizard
+    run_wizard(selected, skip=args.skip_wizard)
+
+    # 3. Ensure marketplace is registered (with optional branch)
+    branch = getattr(args, "branch", None)
+    with console.status("[bold]Checking marketplace registration..."):
+        if not check_marketplace_registered():
+            branch_msg = f" (branch: {branch})" if branch else ""
+            console.print(f"Marketplace not registered. Adding...{branch_msg}")
+            add_marketplace(branch=branch)
+            console.print("[green]Marketplace registered.[/green]")
+        elif branch:
+            console.print(f"Re-adding marketplace for branch: {branch}")
+            remove_marketplace()
+            add_marketplace(branch=branch)
+            console.print(f"[green]Marketplace updated to branch {branch}.[/green]")
+        else:
+            console.print("[dim]Marketplace already registered.[/dim]")
+
+    # 4. Check already-installed plugins and build name→ID map
+    installed_ids = get_installed_plugins()
+    available_ids = get_available_plugins()
+    name_to_id: dict[str, str] = {}
+    for pid in available_ids + installed_ids:
+        name_to_id.setdefault(pid.split("@")[0], pid)
+    installed_names = {pid.split("@")[0] for pid in installed_ids}
+
+    # 5. Install each plugin
+    results: dict[str, str] = {}  # name -> "installed" | "failed" | "skipped"
+    for name in selected:
+        plugin_id = name_to_id.get(name)
+        if plugin_id is None:
+            console.print(f"  [red]✗[/red] {name} not found in marketplace")
+            results[name] = "failed"
+            continue
+
+        if name in installed_names:
+            if not Confirm.ask(
+                f"Plugin [bold]{name}[/bold] already installed. Reinstall?",
+                default=False,
+                console=console,
+            ):
+                results[name] = "skipped"
+                continue
+            # Uninstall first for reinstall
+            with console.status(f"[bold]Uninstalling {name}...[/bold]"):
+                uninstall_plugin(plugin_id)
+
+        while True:
+            try:
+                with console.status(f"[bold]Installing {name}...[/bold]"):
+                    install_plugin(plugin_id)
+                console.print(f"  [green]✓[/green] {name} installed")
+                results[name] = "installed"
+                break
+            except InstallerError as exc:
+                console.print(f"  [red]✗[/red] {name} failed: {exc}")
+                if Confirm.ask("Retry this plugin?", default=False, console=console):
+                    continue
+                results[name] = "failed"
+                break
+
+    # 6. Summary
+    n_installed = sum(1 for v in results.values() if v == "installed")
+    n_failed = sum(1 for v in results.values() if v == "failed")
+    n_skipped = sum(1 for v in results.values() if v == "skipped")
+    console.print(
+        f"\n[bold]Summary:[/bold] {n_installed} installed, "
+        f"{n_failed} failed, {n_skipped} skipped"
+    )
+
+    if n_installed > 0:
+        console.print(
+            "\n[bold cyan]Restart Claude Code for plugins to take effect.[/bold cyan]"
+        )
+
+    return EXIT_ERROR if n_failed > 0 else EXIT_SUCCESS
 
 
 def _update(args) -> int:
@@ -66,10 +165,33 @@ def _update(args) -> int:
         return EXIT_SUCCESS
 
     console.print(f"\n[bold]Updating:[/bold] {', '.join(plugins)}")
-    results = run_update(plugins, state, console)
+    results: dict[str, bool] = {}
+    for name in plugins:
+        try:
+            console.print(f"  Updating [cyan]{name}[/cyan]...")
+            update_plugin(name)
+            console.print(f"  [green]✓[/green] {name} updated")
+            results[name] = True
+        except InstallerError as exc:
+            console.print(f"  [red]✗[/red] {name}: {exc}")
+            if Confirm.ask("  Retry?", default=False):
+                try:
+                    update_plugin(name)
+                    console.print(f"  [green]✓[/green] {name} updated")
+                    results[name] = True
+                except InstallerError as retry_exc:
+                    console.print(f"  [red]✗[/red] {name}: {retry_exc}")
+                    results[name] = False
+            else:
+                results[name] = False
 
-    failed = [p for p, ok in results.items() if not ok]
-    if failed:
+    succeeded = sum(1 for ok in results.values() if ok)
+    failed_count = sum(1 for ok in results.values() if not ok)
+    console.print(
+        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
+    )
+
+    if failed_count:
         return EXIT_ERROR
     return EXIT_SUCCESS
 
@@ -90,14 +212,40 @@ def _reinstall(args) -> int:
     plugins = args.plugins if args.plugins else list(state.installed_plugins)
 
     console.print(f"\n[bold]Reinstalling:[/bold] {', '.join(plugins)}")
-    results = run_reinstall(plugins, state, console)
+    results: dict[str, bool] = {}
+    for name in plugins:
+        try:
+            console.print(f"  Uninstalling [cyan]{name}[/cyan]...")
+            uninstall_plugin(name)
+            console.print(f"  Installing [cyan]{name}[/cyan]...")
+            install_plugin(name)
+            console.print(f"  [green]✓[/green] {name} reinstalled")
+            results[name] = True
+        except InstallerError as exc:
+            console.print(f"  [red]✗[/red] {name}: {exc}")
+            if Confirm.ask("  Retry?", default=False):
+                try:
+                    uninstall_plugin(name)
+                    install_plugin(name)
+                    console.print(f"  [green]✓[/green] {name} reinstalled")
+                    results[name] = True
+                except InstallerError as retry_exc:
+                    console.print(f"  [red]✗[/red] {name}: {retry_exc}")
+                    results[name] = False
+            else:
+                results[name] = False
 
     # Run wizard after reinstall if configs were reset
     if not args.skip_wizard:
         run_wizard(plugins, skip=False)
 
-    failed = [p for p, ok in results.items() if not ok]
-    if failed:
+    succeeded = sum(1 for ok in results.values() if ok)
+    failed_count = sum(1 for ok in results.values() if not ok)
+    console.print(
+        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
+    )
+
+    if failed_count:
         return EXIT_ERROR
     return EXIT_SUCCESS
 
@@ -105,7 +253,49 @@ def _reinstall(args) -> int:
 def _uninstall(args) -> int:
     """Run the uninstall flow."""
     console = Console()
-    run_uninstall(full_cleanup=args.full_cleanup, console=console)
+    state = detect_existing()
+    display_detection(state, console)
+
+    if not state.installed_plugins:
+        console.print(
+            "[yellow]No installed plugins found. Nothing to uninstall.[/yellow]"
+        )
+        return EXIT_SUCCESS
+
+    plugins = list(state.installed_plugins)
+    console.print(f"\n[bold]Uninstalling:[/bold] {', '.join(plugins)}")
+    results: dict[str, bool] = {}
+    for name in plugins:
+        try:
+            console.print(f"  Uninstalling [cyan]{name}[/cyan]...")
+            uninstall_plugin(name)
+            console.print(f"  [green]✓[/green] {name} uninstalled")
+            results[name] = True
+        except InstallerError as exc:
+            console.print(f"  [red]✗[/red] {name}: {exc}")
+            if Confirm.ask("  Retry?", default=False):
+                try:
+                    uninstall_plugin(name)
+                    console.print(f"  [green]✓[/green] {name} uninstalled")
+                    results[name] = True
+                except InstallerError as retry_exc:
+                    console.print(f"  [red]✗[/red] {name}: {retry_exc}")
+                    results[name] = False
+            else:
+                results[name] = False
+
+    if args.full_cleanup:
+        console.print("\n[bold]Cleaning up config files...[/bold]")
+        cleanup_config_files(console)
+
+    succeeded = sum(1 for ok in results.values() if ok)
+    failed_count = sum(1 for ok in results.values() if not ok)
+    console.print(
+        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
+    )
+
+    if failed_count:
+        return EXIT_ERROR
     return EXIT_SUCCESS
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import urllib.request
+import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,17 +55,43 @@ def _classify_category(plugin_name: str, marketplace_category: str) -> str:
     return "integrations"
 
 
-def load_plugins(marketplace_path: Path | None = None) -> list[PluginInfo]:
-    """Parse plugin metadata from the bundled marketplace.json.
+_GITHUB_RAW_URL = (
+    "https://raw.githubusercontent.com/raulfrk/claude-project-manager"
+    "/{branch}/.claude-plugin/marketplace.json"
+)
+
+
+def _fetch_marketplace_json(branch: str) -> dict | None:
+    """Fetch marketplace.json from GitHub for *branch*. Returns None on failure."""
+    url = _GITHUB_RAW_URL.format(branch=branch)
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, OSError):
+        return None
+
+
+def load_plugins(
+    marketplace_path: Path | None = None, branch: str | None = None
+) -> list[PluginInfo]:
+    """Parse plugin metadata from marketplace.json.
+
+    If *branch* is given, fetches from GitHub raw URL for that branch.
+    Falls back to the local bundled file on network failure.
 
     Args:
         marketplace_path: Override path to marketplace.json (for testing).
+        branch: Git branch to fetch from GitHub (e.g. "dev", "main").
 
     Returns:
         List of PluginInfo sorted by category order then name.
     """
-    path = marketplace_path or _MARKETPLACE_PATH
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = None
+    if branch and marketplace_path is None:
+        data = _fetch_marketplace_json(branch)
+    if data is None:
+        path = marketplace_path or _MARKETPLACE_PATH
+        data = json.loads(path.read_text(encoding="utf-8"))
 
     plugins: list[PluginInfo] = []
     for entry in data.get("plugins", []):

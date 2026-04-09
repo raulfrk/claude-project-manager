@@ -33,6 +33,16 @@ class TestJiraAddAttachment:
         )
         assert json.loads(result) == [{"id": "10001", "filename": "report.pdf"}]
 
+    def test_api_error_propagates(
+        self, mock_jira_client: MagicMock, attachment_tools: dict
+    ) -> None:
+        mock_jira_client.post_multipart.side_effect = RuntimeError(
+            "Jira API error 404: issue not found"
+        )
+
+        with pytest.raises(RuntimeError, match="404"):
+            attachment_tools["jira_add_attachment"](issue_key="NOPE-1", file_path="/tmp/report.pdf")
+
 
 class TestJiraListAttachments:
     def test_returns_attachment_list(
@@ -52,6 +62,26 @@ class TestJiraListAttachments:
         self, mock_jira_client: MagicMock, attachment_tools: dict
     ) -> None:
         mock_jira_client.get.return_value = {"fields": {}}
+
+        result = attachment_tools["jira_list_attachments"](issue_key="PROJ-42")
+
+        assert json.loads(result) == []
+
+    def test_returns_empty_for_non_dict_response(
+        self, mock_jira_client: MagicMock, attachment_tools: dict
+    ) -> None:
+        """When API returns a non-dict (e.g. a string), returns empty list."""
+        mock_jira_client.get.return_value = "unexpected string"
+
+        result = attachment_tools["jira_list_attachments"](issue_key="PROJ-42")
+
+        assert json.loads(result) == []
+
+    def test_returns_empty_for_non_dict_fields(
+        self, mock_jira_client: MagicMock, attachment_tools: dict
+    ) -> None:
+        """When fields value is not a dict, returns empty list."""
+        mock_jira_client.get.return_value = {"fields": "not a dict"}
 
         result = attachment_tools["jira_list_attachments"](issue_key="PROJ-42")
 

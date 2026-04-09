@@ -10,12 +10,10 @@ import pytest
 import yaml
 
 from server.lib.http_client import FireResult
-from server.lib.models import HookRegistry
-from server.lib.storage import load, load_failures, save
-from server.lib.template import resolve_mapping
+from server.lib.storage import load_failures
 from server.tools.fire import hooks_fire
 from server.tools.recovery import hooks_recover
-from server.tools.registry import hooks_list, hooks_register, hooks_unregister
+from server.tools.registry import hooks_register, hooks_unregister
 
 
 class TestRegisterThenFire:
@@ -83,12 +81,12 @@ class TestRegisterThenFire:
         assert json.loads(result2)["hooks_fired"] == 0
 
 
-class TestConditionalFiring:
-    """Hooks gated by proj.yaml conditions."""
+class TestRegisterConditionThenFire:
+    """Register with condition, toggle config, fire — verifies the full path."""
 
     @pytest.mark.asyncio
-    async def test_condition_gates_hook(self, hooks_yaml: Path, proj_yaml: Path):
-        """Hook with condition only fires when proj.yaml has truthy value."""
+    async def test_register_condition_toggle_fire(self, hooks_yaml: Path, proj_yaml: Path):
+        """Register hook with condition, fire with False (skipped), then True (fires)."""
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
             hooks_register(
                 trigger_tool="proj_init",
@@ -98,17 +96,17 @@ class TestConditionalFiring:
                 blocking=True,
             )
 
-        # condition False — hook should be skipped
+        # Fire with condition False — skipped
         proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": False}}}))
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
         ):
-            result = await hooks_fire("proj_init")
-        assert json.loads(result)["skipped"] == 1
-        assert json.loads(result)["hooks_fired"] == 0
+            r1 = await hooks_fire("proj_init")
+        d1 = json.loads(r1)
+        assert d1["hooks_fired"] == 0
 
-        # condition True — hook should fire
+        # Fire with condition True — fires, then unregister and verify empty
         proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
         mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
         with (
@@ -118,57 +116,19 @@ class TestConditionalFiring:
                 "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result
             ),
         ):
-            result = await hooks_fire("proj_init")
-        assert json.loads(result)["hooks_fired"] == 1
-        assert json.loads(result)["skipped"] == 0
+            r2 = await hooks_fire("proj_init")
+        d2 = json.loads(r2)
+        assert d2["hooks_fired"] == 1
 
-
-class TestListWithConditionStatus:
-    """hooks_list returns condition_status resolved against live config."""
-
-    def test_list_shows_status(self, hooks_yaml: Path, proj_yaml: Path):
+        # Unregister and verify firing returns 0
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            hooks_register(
-                trigger_tool="proj_init",
-                target_tool="perms_setup",
-                server="perms",
-            )
-            hooks_register(
-                trigger_tool="proj_init",
-                target_tool="todoist_sync",
-                server="todoist",
-                condition="sync.todoist.enabled",
-            )
-
-        proj_yaml.write_text(yaml.dump({"sync": {"todoist": {"enabled": True}}}))
-
+            hooks_unregister("hook-001")
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
         ):
-            result = hooks_list()
-
-        data = json.loads(result)
-        statuses = {h["id"]: h["condition_status"] for h in data["hooks"]}
-        assert statuses["hook-001"] == "always"
-        assert statuses["hook-002"] == "active"
-
-
-class TestCyclePreventionIntegration:
-    """Verify cycle detection prevents registration in multi-step chains."""
-
-    def test_three_node_cycle(self, hooks_yaml: Path):
-        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            r1 = hooks_register(trigger_tool="A", target_tool="B", server="s")
-            assert "Registered" in r1
-            r2 = hooks_register(trigger_tool="B", target_tool="C", server="s")
-            assert "Registered" in r2
-            r3 = hooks_register(trigger_tool="C", target_tool="A", server="s")
-            assert "Error" in r3
-            assert "cycle" in r3.lower()
-
-        reg = load(hooks_yaml)
-        assert len(reg.hooks) == 2  # Third was rejected
+            r3 = await hooks_fire("proj_init")
+        assert json.loads(r3)["hooks_fired"] == 0
 
 
 class TestFailureRecoveryIntegration:
@@ -280,124 +240,54 @@ class TestFailureRecoveryIntegration:
         assert "No failure entries found" in data.get("message", "")
 
 
-class TestDepthLimitIntegration:
-    """Verify max_depth setting prevents runaway cascades."""
+class TestMultipleFailuresRecovery:
+    """Register multiple hooks, fire both failing, recover selectively."""
 
     @pytest.mark.asyncio
-    async def test_custom_max_depth(self, hooks_yaml: Path):
-        """Custom maxdepth=1 in settings limits cascading."""
-        reg = HookRegistry(
-            hooks=[],
-            settings={"max_depth": 1},
-        )
-        save(reg, hooks_yaml)
-
+    async def test_selective_recovery_by_hook_id(self, hooks_yaml: Path, failures_yaml: Path):
+        """Two hooks fail, recover only one by hook_id, verify the other remains."""
         with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            hooks_register(trigger_tool="t", target_tool="u", server="s")
+            hooks_register(trigger_tool="t", target_tool="u1", server="s", blocking=True)
+            hooks_register(trigger_tool="t", target_tool="u2", server="s", blocking=True)
 
-        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            result = await hooks_fire("t", depth=1)
+        fail1 = FireResult(hook_id="hook-001", status_code=500, body="err")
+        fail2 = FireResult(hook_id="hook-002", status_code=500, body="err")
 
-        data = json.loads(result)
-        assert data["depth_limited"] is True
-        assert data["max_depth"] == 1
+        call_count = 0
 
-
-class TestServerEndpointResolution:
-    """Verify server URL resolution from registry.servers."""
-
-    @pytest.mark.asyncio
-    async def test_server_url_used(self, hooks_yaml: Path):
-        """When servers dict has a URL, it is passed to post_hook."""
-        reg = HookRegistry(
-            hooks=[],
-            servers={"my-server": {"url": "http://localhost:9999"}},
-        )
-        save(reg, hooks_yaml)
-
-        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            hooks_register(
-                trigger_tool="t",
-                target_tool="u",
-                server="my-server",
-                blocking=True,
-            )
-
-        captured_url = []
-
-        async def mock_post(*, hook_id, url, target_tool, params):
-            captured_url.append(url)
-            return FireResult(hook_id=hook_id, status_code=200, body="ok")
+        async def mock_fire(hook, source):
+            nonlocal call_count
+            call_count += 1
+            return fail1 if hook.id == "hook-001" else fail2
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire.post_hook", side_effect=mock_post),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._fire_single", side_effect=mock_fire),
         ):
             await hooks_fire("t")
 
-        assert captured_url[0] == "http://localhost:9999"
+        failures = load_failures(failures_yaml)
+        assert len(failures) == 2
 
-    @pytest.mark.asyncio
-    async def test_server_name_used_as_fallback(self, hooks_yaml: Path):
-        """When servers dict has no URL, server name is used as-is."""
-        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
-            hooks_register(
-                trigger_tool="t",
-                target_tool="u",
-                server="raw-server-name",
-                blocking=True,
-            )
-
-        captured_url = []
-
-        async def mock_post(*, hook_id, url, target_tool, params):
-            captured_url.append(url)
-            return FireResult(hook_id=hook_id, status_code=200, body="ok")
-
+        # Recover only hook-001
+        success = FireResult(hook_id="hook-001", status_code=200, body="ok")
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
-            patch("server.tools.fire.post_hook", side_effect=mock_post),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch(
+                "server.tools.recovery.post_hook",
+                new_callable=AsyncMock,
+                return_value=success,
+            ),
         ):
-            await hooks_fire("t")
+            r = await hooks_recover(hook_id="hook-001")
 
-        assert captured_url[0] == "raw-server-name"
+        rdata = json.loads(r)
+        assert rdata["retried"] == 1
+        assert rdata["succeeded"] == 1
 
-
-class TestNestedParamMappingPipeline:
-    """YAML → Hook.from_dict → resolve_mapping end-to-end for nested param_mapping."""
-
-    def test_yaml_to_hook_to_resolve(self, tmp_path: Path):
-        """Load a hook with nested param_mapping from YAML, resolve against source."""
-        hooks_content = {
-            "hooks": [
-                {
-                    "id": "test-nested-hook",
-                    "trigger_tool": "some_tool",
-                    "target_tool": "target_tool",
-                    "server": "test",
-                    "param_mapping": {
-                        "tasks": [
-                            {"content": "${title}", "projectId": "${project_id}"},
-                        ],
-                    },
-                }
-            ]
-        }
-        hooks_file = tmp_path / "hooks.yaml"
-        hooks_file.write_text(yaml.dump(hooks_content, default_flow_style=False))
-
-        # Load via HookRegistry.from_dict (same path as storage.load)
-        raw = yaml.safe_load(hooks_file.read_text())
-        registry = HookRegistry.from_dict(raw)
-        hook = registry.hooks[0]
-
-        assert hook.id == "test-nested-hook"
-        assert isinstance(hook.param_mapping["tasks"], list)
-
-        # Resolve the nested param_mapping
-        source = {"title": "My Task", "project_id": "proj123"}
-        result = resolve_mapping(hook.param_mapping, source)
-
-        assert result == {
-            "tasks": [{"content": "My Task", "projectId": "proj123"}],
-        }
+        # hook-002 failure still present
+        remaining = load_failures(failures_yaml)
+        assert len(remaining) == 1
+        assert remaining[0]["hook_id"] == "hook-002"

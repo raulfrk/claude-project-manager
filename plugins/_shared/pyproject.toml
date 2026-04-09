@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hook_transport", "hook_dispatch"]
+packages = ["hook_transport", "hook_dispatch", "test_contracts"]
 
 [dependency-groups]
 dev = [

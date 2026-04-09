@@ -923,13 +923,21 @@ def apply_changes(
 
 def _resolve_todoist_socket() -> str:
     """Read Todoist plugin socket path from registry, fall back to legacy."""
+
     registry_file = Path.home() / ".claude" / "sockets" / "todoist"
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and Path(path).exists():
             return path
     except (FileNotFoundError, OSError):
         pass
+    candidates = sorted(
+        Path("/tmp").glob("claude-hooks-todoist-*.sock"),  # noqa: S108
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return str(candidates[0])
     return "/tmp/claude-hooks-todoist.sock"  # noqa: S108
 
 

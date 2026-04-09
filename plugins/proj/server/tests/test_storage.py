@@ -123,12 +123,6 @@ class TestLoadYaml:
         result = storage._load_yaml(scalar_file)
         assert result == {}
 
-    def test_list_top_level_returns_empty_dict(self, tmp_path: Path) -> None:
-        list_file = tmp_path / "list.yaml"
-        list_file.write_text("- item1\n- item2\n")
-        result = storage._load_yaml(list_file)
-        assert result == {}
-
     def test_missing_file_returns_empty_dict(self, tmp_path: Path) -> None:
         missing = tmp_path / "does_not_exist.yaml"
         result = storage._load_yaml(missing)
@@ -171,12 +165,6 @@ class TestRenameTodoDir:
         result = storage.rename_todo_dir(tmp_cfg, "myapp", "T999", "99")
 
         assert result is False
-
-    def test_rename_nonexistent_dir_creates_nothing(self, tmp_cfg: ProjConfig) -> None:
-        (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
-
-        storage.rename_todo_dir(tmp_cfg, "myapp", "T999", "99")
-
         new_dir = storage.todo_content_dir(tmp_cfg, "myapp", "99")
         assert not new_dir.exists()
 

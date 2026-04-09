@@ -176,6 +176,7 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 | Skill | Usage | Description |
 |-------|-------|-------------|
 | `todo` | `/proj:todo <subcommand>` | All todo CRUD: add, done, update, list, tree, block, delete. |
+| `prioritize` | `/proj:prioritize` | Analyze all open todos, propose optimal execution order and blocking relationships via plan mode. |
 
 ### Workflow
 

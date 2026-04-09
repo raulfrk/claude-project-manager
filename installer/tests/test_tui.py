@@ -78,9 +78,10 @@ class TestCheckDependencyWarnings:
         )
         assert "hooks" in output
 
-    def test_no_warning_for_analyse_only(self, mock_console):
-        """analyse alone without hooks should not trigger a warning."""
+    def test_no_warning_for_standalone_plugins(self, mock_console):
+        """Standalone plugins without hooks should not trigger a dependency warning."""
         _check_dependency_warnings(["analyse"], mock_console)
+        _check_dependency_warnings(["worktree"], mock_console)
 
 
 class TestSelectPlugins:

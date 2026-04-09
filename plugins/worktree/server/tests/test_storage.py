@@ -54,3 +54,28 @@ def test_save_writes_valid_yaml(config_path: Path) -> None:
         data = yaml.safe_load(f)
     assert data["version"] == 1
     assert data["base_repos"][0]["label"] == "x"
+
+
+def test_env_var_overrides_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    custom = tmp_path / "custom.yaml"
+    monkeypatch.setenv("WORKTREE_CONFIG", str(custom))
+    config = WorktreeConfig(default_worktree_dir="/custom/trees")
+    storage.save(config)
+    assert custom.exists()
+    loaded = storage.load()
+    assert loaded.default_worktree_dir == "/custom/trees"
+
+
+def test_from_dict_non_list_base_repos() -> None:
+    """WorktreeConfig.from_dict handles non-list base_repos gracefully."""
+    config = WorktreeConfig.from_dict({"base_repos": "not a list"})
+    assert config.base_repos == []
+
+
+def test_from_dict_filters_non_dict_entries() -> None:
+    """WorktreeConfig.from_dict skips non-dict entries in base_repos."""
+    config = WorktreeConfig.from_dict(
+        {"base_repos": [{"label": "ok", "path": "/ok"}, "invalid", 42]}
+    )
+    assert len(config.base_repos) == 1
+    assert config.base_repos[0].label == "ok"

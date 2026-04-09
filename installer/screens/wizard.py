@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, Static, Switch
+from textual.widgets import Button, Footer, Input, Label, Static, Switch
 
 
 # Plugins that require proj.yaml configuration
@@ -28,18 +28,26 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
     }
 
     #wizard-form {
-        width: 70;
-        max-height: 80%;
+        width: 72;
+        max-height: 85%;
         padding: 1 2;
-        border: solid $accent;
+        border: round $accent;
         background: $surface;
+    }
+
+    #wizard-scroll {
+        height: 1fr;
+        max-height: 100%;
+        min-height: 3;
     }
 
     #wizard-title {
         text-align: center;
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         padding: 1 0;
+        margin: 0 0 1 0;
     }
 
     .field-group {
@@ -50,27 +58,36 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
     .field-label {
         height: 1;
         padding: 0 1;
-        color: $text;
+        color: $accent;
+        text-style: bold;
     }
 
     .field-hint {
         height: 1;
         padding: 0 1;
         color: $text-muted;
+        text-style: italic;
     }
 
     Input {
         margin: 0 1;
+        border: tall $primary-background;
+    }
+
+    Input:focus {
+        border: tall $accent;
     }
 
     .switch-row {
         height: 3;
         padding: 0 1;
+        margin: 0 0 0 0;
     }
 
     .switch-row Label {
         padding: 1 1;
         width: 1fr;
+        color: $text;
     }
 
     .switch-row Switch {
@@ -78,9 +95,12 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
     }
 
     #button-bar {
-        height: 3;
+        height: auto;
+        min-height: 3;
         align: center middle;
         margin: 1 0 0 0;
+        border-top: solid $primary-background;
+        padding: 1 2;
     }
 
     #button-bar Button {
@@ -105,7 +125,6 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         self._needs_worktree = "worktree" in selected_plugins
 
     def compose(self) -> ComposeResult:
-        yield Header()
         with Vertical(id="wizard-form"):
             yield Static("Configuration Wizard", id="wizard-title")
             yield Static(
@@ -113,41 +132,42 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
                 classes="field-hint",
             )
 
-            # -- Path fields --
-            if self._needs_proj:
-                with Vertical(classes="field-group"):
-                    yield Label("Tracking directory", classes="field-label")
-                    yield Input(
-                        placeholder="~/projects/tracking",
-                        id="tracking_dir",
-                    )
+            with VerticalScroll(id="wizard-scroll"):
+                # -- Path fields --
+                if self._needs_proj:
+                    with Vertical(classes="field-group"):
+                        yield Label("Tracking directory", classes="field-label")
+                        yield Input(
+                            placeholder="~/projects/tracking",
+                            id="tracking_dir",
+                        )
 
-                with Vertical(classes="field-group"):
-                    yield Label("Projects base directory", classes="field-label")
-                    yield Input(
-                        placeholder="~/projects",
-                        id="projects_base_dir",
-                    )
+                    with Vertical(classes="field-group"):
+                        yield Label("Projects base directory", classes="field-label")
+                        yield Input(
+                            placeholder="~/projects",
+                            id="projects_base_dir",
+                        )
 
-            if self._needs_worktree:
-                with Vertical(classes="field-group"):
-                    yield Label("Default worktree directory", classes="field-label")
-                    yield Input(
-                        placeholder="~/worktrees",
-                        id="worktree_dir",
-                    )
+                if self._needs_worktree:
+                    with Vertical(classes="field-group"):
+                        yield Label("Default worktree directory", classes="field-label")
+                        yield Input(
+                            placeholder="~/worktrees",
+                            id="worktree_dir",
+                        )
 
-            # -- Toggle switches --
-            if self._needs_proj:
-                with Horizontal(classes="switch-row"):
-                    yield Label("Sandbox integration")
-                    yield Switch(value=True, id="sandbox_integration")
+                # -- Toggle switches --
+                if self._needs_proj:
+                    with Horizontal(classes="switch-row"):
+                        yield Label("Sandbox integration")
+                        yield Switch(value=True, id="sandbox_integration")
 
-                with Horizontal(classes="switch-row"):
-                    yield Label("Zoxide integration")
-                    yield Switch(value=False, id="zoxide_integration")
+                    with Horizontal(classes="switch-row"):
+                        yield Label("Zoxide integration")
+                        yield Switch(value=False, id="zoxide_integration")
 
-            # -- Buttons --
+            # -- Buttons (always visible outside scroll) --
             with Horizontal(id="button-bar"):
                 yield Button("Submit", variant="primary", id="btn-submit")
                 yield Button("Cancel", variant="default", id="btn-cancel")

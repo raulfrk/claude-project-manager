@@ -239,11 +239,13 @@ class JiraSync:
     """Global Jira sync configuration stored under sync.jira in proj.yaml."""
 
     enabled: bool = False
+    auto_sync: bool = True
     default_user: str = ""
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
+            "auto_sync": self.auto_sync,
             "default_user": self.default_user,
         }
 
@@ -251,6 +253,7 @@ class JiraSync:
     def from_dict(cls, data: JsonDict) -> JiraSync:
         return cls(
             enabled=bool(data.get("enabled", False)),
+            auto_sync=bool(data.get("auto_sync", True)),
             default_user=str(data.get("default_user", "")),
         )
 

@@ -99,3 +99,22 @@ class TestHelpers:
 
         with pytest.raises(ValueError, match="\\*"):
             storage.mcp_allow_entry("evil*")
+
+    def test_skill_allow_entry(self) -> None:
+        assert storage.skill_allow_entry("proj") == "Skill(proj:*)"
+
+    def test_skill_allow_entry_rejects_empty(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="empty"):
+            storage.skill_allow_entry("")
+
+    def test_skill_allow_entry_rejects_special_chars(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError):
+            storage.skill_allow_entry("evil*")
+        with pytest.raises(ValueError):
+            storage.skill_allow_entry("evil(")
+        with pytest.raises(ValueError):
+            storage.skill_allow_entry("evil)")

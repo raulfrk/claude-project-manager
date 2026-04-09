@@ -264,15 +264,9 @@ def register(app: FastMCP) -> None:
         if filter:
             params["filter"] = filter
         response = client.get("/tasks", params=params or None)
-        # API v1 returns {"results": [...]}, API v2 returns bare list
+        # REST API v2 returns a bare JSON array
         raw_tasks: list[JsonValue]
-        if isinstance(response, dict) and "results" in response:
-            results = response["results"]
-            raw_tasks = results if isinstance(results, list) else []
-        elif isinstance(response, list):
-            raw_tasks = response
-        else:
-            raw_tasks = []
+        raw_tasks = response if isinstance(response, list) else []
         tasks = [TodoistTask.from_api(t).to_dict() for t in raw_tasks if isinstance(t, dict)]
         return json.dumps(tasks)
 

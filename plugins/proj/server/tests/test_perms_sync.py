@@ -22,6 +22,7 @@ from server.lib.models import (
 )
 from server.tools._perms_common import (
     derive_mcp_rules,
+    derive_skill_prefixes,
     derive_write_paths,
 )
 from server.tools.perms_sync import (
@@ -124,44 +125,36 @@ class TestDeriveExpectedRules:
         assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__todoist__*" not in rules
 
-    def test_todoist_enabled_adds_todoist_mcp_rule(self) -> None:
+    def test_integration_enabled_adds_mcp_rules(self) -> None:
+        """Each integration flag adds its MCP rule when enabled."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
+        cfg = _make_cfg(
+            auto_allow_mcps=True,
+            todoist_enabled=True,
+            jira_enabled=True,
+            trello_enabled=True,
+        )
 
         rules = derive_mcp_rules(meta, cfg)
 
         assert "mcp__todoist__*" in rules
-
-    def test_jira_enabled_adds_jira_mcp_rule(self) -> None:
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, jira_enabled=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
         assert "mcp__plugin_jira_jira__*" in rules
-
-    def test_jira_disabled_no_jira_mcp_rule(self) -> None:
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, jira_enabled=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__plugin_jira_jira__*" not in rules
-
-    def test_trello_enabled_adds_trello_mcp_rule(self) -> None:
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
         assert "mcp__plugin_trello_trello__*" in rules
 
-    def test_trello_disabled_no_trello_mcp_rule(self) -> None:
+    def test_integration_disabled_excludes_mcp_rules(self) -> None:
+        """Disabled integrations do not add MCP rules."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, trello_enabled=False)
+        cfg = _make_cfg(
+            auto_allow_mcps=True,
+            todoist_enabled=False,
+            jira_enabled=False,
+            trello_enabled=False,
+        )
 
         rules = derive_mcp_rules(meta, cfg)
 
+        assert "mcp__todoist__*" not in rules
+        assert "mcp__plugin_jira_jira__*" not in rules
         assert "mcp__plugin_trello_trello__*" not in rules
 
     def test_auto_allow_mcps_false_no_plugin_mcp_rules(self) -> None:
@@ -188,31 +181,7 @@ class TestDeriveExpectedRules:
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
 
-    def test_no_path_rules_regardless_of_trailing_slash(self) -> None:
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj/")])
-        cfg = _make_cfg(auto_allow_mcps=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        # No Read/Edit rules — only MCP rules
-        assert not any(r.startswith("Read(") or r.startswith("Edit(") for r in rules)
-        assert "mcp__claude_ai_Excalidraw__*" in rules
-        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
-
     def test_no_repos_auto_allow_only_mcp_rules(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        # MCP rules always present
-        assert "mcp__plugin_proj_proj__*" in rules
-        assert "mcp__claude_ai_Excalidraw__*" in rules
-        assert "mcp__claude_ai_Mermaid_Chart__*" in rules
-        # No Bash rules — only MCP rules now
-        assert not any(r.startswith("Bash(") for r in rules)
-
-    def test_no_repos_auto_allow_with_integrations(self) -> None:
         meta = _make_meta(repos=[])
         cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=True, worktree_integration=True)
 
@@ -223,6 +192,7 @@ class TestDeriveExpectedRules:
         assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__claude_ai_Excalidraw__*" in rules
         assert "mcp__claude_ai_Mermaid_Chart__*" in rules
+        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
 
     def test_sandbox_integration_only_adds_perms_mcp_rule(self) -> None:
         meta = _make_meta(repos=[])
@@ -242,40 +212,6 @@ class TestDeriveExpectedRules:
         assert "mcp__plugin_worktree_worktree__*" in rules
         assert "mcp__plugin_sandbox_sandbox__*" not in rules
 
-    def test_no_repos_no_mcps_only_global_mcp_rules(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        # Only global Claude.ai MCP rules
-        assert rules == {"mcp__claude_ai_Excalidraw__*", "mcp__claude_ai_Mermaid_Chart__*"}
-        # No Read/Edit/Bash rules
-        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
-
-    def test_worktree_integration_false_no_path_rules(self) -> None:
-        """derive_mcp_rules returns only MCP rules, not path rules."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=False)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        # Only global MCP rules — no path rules of any kind
-        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
-        assert "mcp__claude_ai_Excalidraw__*" in rules
-
-    def test_worktree_integration_true_no_path_rules(self) -> None:
-        """derive_mcp_rules returns only MCP rules, even with worktree_integration=True."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=True)
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        # Only MCP rules — no path or Bash rules
-        assert not any(r.startswith(("Read(", "Edit(", "Bash(")) for r in rules)
-        # worktree MCP rule present (auto_allow_mcps=False, so no plugin MCPs)
-        assert "mcp__claude_ai_Excalidraw__*" in rules
-
 
 # ── derive_mcp_rules — custom mcp_server ────────────────────────────────
 
@@ -290,24 +226,6 @@ class TestDeriveExpectedRulesCustomServer:
         rules = derive_mcp_rules(meta, cfg)
 
         assert "mcp__todoist__*" in rules
-        assert "mcp__sentry__*" not in rules
-
-    def test_todoist_default_mcp_server_emits_fixed_rule(self) -> None:
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-        meta = _make_meta(repos=[])
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__todoist__*" in rules
-
-    def test_todoist_disabled_emits_no_rule(self) -> None:
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
-        cfg.todoist.mcp_server = "sentry"
-        meta = _make_meta(repos=[])
-
-        rules = derive_mcp_rules(meta, cfg)
-
-        assert "mcp__todoist__*" not in rules
         assert "mcp__sentry__*" not in rules
 
 
@@ -331,26 +249,8 @@ class TestRunSync:
         assert "✅" in result
         assert "in sync" in result
 
-    def test_missing_mcp_rules_only_reported(self) -> None:
-        """With auto_allow_mcps=False, only global MCP rules are expected and reported missing."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=set(),
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "❌" in result
-        assert "MCP rules" in result
-        assert "mcp__claude_ai_Excalidraw__*" in result
-        assert "Read(" not in result
-        assert "Edit(" not in result
-
     def test_missing_mcp_rules_reported(self) -> None:
+        """Missing MCP rules are reported with category header; no Read/Edit rules."""
         meta = _make_meta(repos=[])
         cfg = _make_cfg(
             auto_allow_mcps=True,
@@ -370,6 +270,8 @@ class TestRunSync:
         assert "❌" in result
         assert "mcp__plugin_proj_proj__*" in result
         assert "MCP rules" in result
+        assert "Read(" not in result
+        assert "Edit(" not in result
 
     def test_extras_in_actual_are_ignored(self) -> None:
         """Extra rules in settings.json beyond what's expected are fine."""
@@ -402,56 +304,6 @@ class TestRunSync:
 
         assert "sandbox_add_mcp_allow" in result
 
-    def test_todoist_rule_appears_when_enabled(self) -> None:
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=set(),
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "mcp__todoist__*" in result
-
-    def test_sandbox_integration_false_mcp_perms_not_reported_missing(self) -> None:
-        """When sandbox_integration=False, mcp__perms__* is not
-        expected so it is not reported missing."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True, sandbox_integration=False, worktree_integration=False)
-        expected = derive_mcp_rules(meta, cfg)
-        assert "mcp__plugin_sandbox_sandbox__*" not in expected
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=expected,
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "✅" in result
-        assert "in sync" in result
-
-    def test_worktree_integration_false_in_sync_without_worktree_bash_rules(self) -> None:
-        """When worktree_integration=False, Bash rules for worktree-only paths are not expected."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=False)
-        expected = derive_mcp_rules(meta, cfg)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=expected,
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "✅" in result
-        assert "in sync" in result
-
     def test_partial_mcp_rules_present_reports_only_missing(self) -> None:
         """When some MCP rules are present but others missing, only missing ones are reported."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -468,41 +320,6 @@ class TestRunSync:
         assert "❌" in result
         assert "mcp__claude_ai_Mermaid_Chart__*" in result
         assert "mcp__claude_ai_Excalidraw__*" not in result
-
-    def test_worktree_integration_true_no_bash_rules_expected(self) -> None:
-        """Bash rules are no longer expected in permissions.allow,
-        even with worktree_integration=True."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False, worktree_integration=True)
-        expected = derive_mcp_rules(meta, cfg)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=expected,
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "✅" in result
-        assert "in sync" in result
-
-    def test_run_sync_reports_fixed_todoist_rule_regardless_of_config(self) -> None:
-        """Custom mcp_server config is ignored — always uses fixed mcp__todoist__* rule."""
-        meta = _make_meta(repos=[])
-        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=True)
-        cfg.todoist.mcp_server = "sentry"  # ignored
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=set(),
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "mcp__todoist__*" in result
-        assert "mcp__sentry__*" not in result
 
     def test_apply_true_writes_missing_mcp_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -569,38 +386,6 @@ class TestRunSync:
         assert "✅" in result
         assert "in sync" in result
 
-    def test_apply_false_does_not_write(self) -> None:
-        """apply=False (default) reports missing rules but does NOT modify anything."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=False)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=set(),
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-            apply=False,
-        )
-
-        assert "❌" in result
-
-    def test_empty_actual_rules_reports_all_missing(self) -> None:
-        """Empty actual_rules means all expected rules are reported missing."""
-        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
-        cfg = _make_cfg(auto_allow_mcps=True)
-
-        result = run_sync(
-            meta,
-            cfg,
-            actual_rules=set(),
-            actual_sandbox_paths=set(),
-            sandbox_mode=False,
-        )
-
-        assert "❌" in result
-        assert "mcp__plugin_proj_proj__*" in result
-
     def test_sandbox_mode_false_ignores_sandbox_paths(self) -> None:
         """When sandbox_mode=False, actual_sandbox_paths are ignored."""
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -623,16 +408,6 @@ class TestRunSync:
 
 
 class TestProjPermsSyncTool:
-    @pytest.mark.anyio
-    async def test_tool_registered(self, mcp_app: FastMCP) -> None:
-        from tests.conftest import call_tool
-
-        # Without actual_rules the tool should return an error
-        result = await call_tool(mcp_app, "proj_perms_sync")
-        # Result should be JSON - parse and check
-        assert isinstance(result, str)
-        assert len(result) > 0
-
     @pytest.mark.anyio
     async def test_tool_missing_actual_rules_returns_error(
         self,
@@ -854,6 +629,122 @@ class TestDeriveExpectedSandboxPaths:
         assert "/home/user/proj" in paths
 
 
+# ── Skill allow rules ────────────────────────────────────────────────────────
+
+
+class TestDeriveSkillPrefixes:
+    def test_always_includes_proj_hooks_review(self) -> None:
+        cfg = _make_cfg(worktree_integration=False)
+
+        prefixes = derive_skill_prefixes(cfg)
+
+        assert "Skill(proj:*)" in prefixes
+        assert "Skill(hooks:*)" in prefixes
+        assert "Skill(review:*)" in prefixes
+        assert "Skill(worktree:*)" not in prefixes
+
+    def test_worktree_integration_adds_worktree_skill(self) -> None:
+        cfg = _make_cfg(worktree_integration=True)
+
+        prefixes = derive_skill_prefixes(cfg)
+
+        assert "Skill(worktree:*)" in prefixes
+
+
+class TestRunSyncSkillAllow:
+    def test_missing_skill_rules_reported(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected_mcp = derive_mcp_rules(meta, cfg)
+
+        result = run_sync(
+            meta,
+            cfg,
+            actual_rules=expected_mcp,
+            actual_sandbox_paths=set(),
+            actual_skill_allow=set(),
+            sandbox_mode=False,
+        )
+
+        assert "❌" in result
+        assert "Skill rules" in result
+        assert "Skill(proj:*)" in result
+
+    def test_skill_rules_in_sync(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected_mcp = derive_mcp_rules(meta, cfg)
+        expected_skills = derive_skill_prefixes(cfg)
+
+        result = run_sync(
+            meta,
+            cfg,
+            actual_rules=expected_mcp,
+            actual_sandbox_paths=set(),
+            actual_skill_allow=expected_skills,
+            sandbox_mode=False,
+        )
+
+        assert "✅" in result
+        assert "in sync" in result
+
+    def test_skill_allow_none_skips_check(self) -> None:
+        """When actual_skill_allow is None (not provided), skill check is skipped."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected_mcp = derive_mcp_rules(meta, cfg)
+
+        result = run_sync(
+            meta,
+            cfg,
+            actual_rules=expected_mcp,
+            actual_sandbox_paths=set(),
+            actual_skill_allow=None,
+            sandbox_mode=False,
+        )
+
+        assert "✅" in result
+
+
+class TestRunSyncAdditionalDirs:
+    def test_missing_additional_dirs_reported(self) -> None:
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False, tracking_dir="/tmp/tracking")
+        expected_mcp = derive_mcp_rules(meta, cfg)
+
+        result = run_sync(
+            meta,
+            cfg,
+            actual_rules=expected_mcp,
+            actual_sandbox_paths=set(),
+            actual_additional_dirs=set(),
+            sandbox_mode=False,
+        )
+
+        assert "❌" in result
+        assert "Additional directories" in result
+
+    def test_additional_dirs_none_skips_check(self) -> None:
+        """When actual_additional_dirs is None (not provided), check is skipped."""
+        meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
+        cfg = _make_cfg(auto_allow_mcps=True, todoist_enabled=False)
+        expected_mcp = derive_mcp_rules(meta, cfg)
+
+        result = run_sync(
+            meta,
+            cfg,
+            actual_rules=expected_mcp,
+            actual_sandbox_paths=set(),
+            actual_additional_dirs=None,
+            sandbox_mode=False,
+        )
+
+        assert "✅" in result
+
+
+# ── Sandbox mode tests ────────────────────────────────────────────────────────
+
+
 class TestRunSyncSandbox:
     def test_in_sync_sandbox_mode(self) -> None:
         meta = _make_meta(repos=[RepoEntry(label="code", path="/home/user/proj")])
@@ -995,49 +886,6 @@ class TestRunSyncWorktreeRoot:
 
         assert "✅" in result
         assert "Applied" in result
-
-
-# ── T21: Migration workflow (derive functions in root mode) ──────────────────
-
-
-class TestDeriveAdditionalDirsUsesRoots:
-    def test_derive_additional_dirs_uses_roots(self) -> None:
-        """When projects_root is set, additional dirs use root instead of per-repo."""
-        meta = _make_meta(
-            repos=[
-                RepoEntry(label="code", path="/home/user/projects/repo-a"),
-                RepoEntry(label="docs", path="/home/user/projects/repo-b"),
-            ]
-        )
-        cfg = _make_cfg(
-            tracking_dir="/tmp/tracking",
-            projects_root="/home/user/projects",
-        )
-
-        dirs = derive_write_paths(meta, cfg)
-
-        assert "/home/user/projects" in dirs
-        assert "/home/user/projects/repo-a" not in dirs
-        assert "/home/user/projects/repo-b" not in dirs
-        assert "/tmp/tracking" in dirs
-
-    def test_derive_additional_dirs_tracking_root_containment(self) -> None:
-        """tracking_root under projects_root is skipped in additional dirs too."""
-        meta = _make_meta(
-            repos=[
-                RepoEntry(label="code", path="/home/user/projects/repo-a"),
-            ]
-        )
-        cfg = _make_cfg(
-            tracking_dir="/tmp/tracking",
-            projects_root="/home/user/projects",
-            tracking_root="/home/user/projects/tracking",
-        )
-
-        dirs = derive_write_paths(meta, cfg)
-
-        assert "/home/user/projects" in dirs
-        assert "/home/user/projects/tracking" not in dirs
 
 
 class TestRunSyncDenyWarning:

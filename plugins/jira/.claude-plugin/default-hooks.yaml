@@ -1,0 +1,75 @@
+hooks:
+  - id: jira-on-todo-add
+    trigger_tool: todo_add
+    target_tool: jira_create_issue
+    server: jira
+    param_mapping:
+      project_key: "${jira_project_key}"
+      summary: "${title}"
+      description: "${notes}"
+      priority: "${priority}"
+      labels: "${tags}"
+      parent_key: "${jira_issue_key}"
+    feedback_tool: todo_update
+    feedback_mapping:
+      key: jira_issue_key
+    blocking: true
+    condition: "sync.jira.enabled and sync.jira.auto_sync and project.jira_issue_key"
+
+  - id: jira-on-todo-complete
+    trigger_tool: todo_complete
+    target_tool: jira_bulk_update_issues
+    server: jira
+    param_mapping:
+      updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"resolution": {"name": "Done"}}}]}'
+    blocking: true
+    condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
+
+  - id: jira-on-todo-update
+    trigger_tool: todo_update
+    target_tool: jira_bulk_update_issues
+    server: jira
+    param_mapping:
+      updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"summary": "${title}", "description": "${notes}"}}]}'
+    blocking: true
+    condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
+
+  - id: jira-on-todo-delete
+    trigger_tool: todo_delete
+    target_tool: jira_bulk_update_issues
+    server: jira
+    param_mapping:
+      updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"resolution": {"name": "Won''t Do"}}}]}'
+    blocking: true
+    condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
+
+  - id: jira-on-proj-init
+    trigger_tool: proj_init
+    target_tool: jira_create_issue
+    server: jira
+    param_mapping:
+      project_key: "${jira_project_key}"
+      summary: "${project_name}"
+      issue_type: "Epic"
+    feedback_tool: proj_update_meta
+    feedback_mapping:
+      key: jira_issue_key
+    blocking: true
+    condition: "sync.jira.enabled"
+
+  - id: jira-on-proj-load
+    trigger_tool: proj_load_session
+    target_tool: jira_get_issue
+    server: jira
+    param_mapping:
+      issue_key: "${jira_issue_key}"
+    blocking: true
+    condition: "sync.jira.enabled and project.jira_issue_key"
+
+  - id: jira-full-sync-on-proj-load
+    trigger_tool: proj_load_session
+    target_tool: proj_jira_full_sync
+    server: proj
+    param_mapping: {}
+    blocking: true
+    condition: "sync.jira.enabled and sync.jira.auto_sync and project.jira_issue_key"

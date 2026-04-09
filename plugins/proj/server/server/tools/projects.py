@@ -44,13 +44,21 @@ def _resolve_hooks_socket_path() -> str:
 
     Falls back to the legacy path if the registry file does not exist.
     """
+
     registry_file = Path.home() / ".claude" / "sockets" / "hooks"
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and Path(path).exists():
             return path
     except (FileNotFoundError, OSError):
         pass
+    candidates = sorted(
+        Path("/tmp").glob("claude-hooks-hooks-*.sock"),  # noqa: S108
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return str(candidates[0])
     return "/tmp/claude-hooks-hooks.sock"  # noqa: S108
 
 

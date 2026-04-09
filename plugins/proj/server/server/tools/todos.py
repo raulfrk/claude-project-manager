@@ -32,6 +32,7 @@ def _todo_hook_fields(
         "trello_project_card_id": meta.trello_card_id,
         "trello_card_id": todo.trello_card_id,
         "jira_issue_key": todo.jira_issue_key,
+        "jira_project_key": meta.jira_issue_key.split("-")[0] if meta.jira_issue_key else None,
         "project_name": name,
         "todoist_project_id": meta.todoist_project_id,
     }
@@ -186,8 +187,9 @@ def register(app: FastMCP) -> None:
     Registers todo_add, todo_list, todo_get, todo_update,
     todo_complete, todo_block, todo_unblock, todo_delete, todo_ready,
     todo_add_child, todo_batch_add_children, todo_tree,
-    todo_set_content_flag, todo_check_executable, and
-    proj_identify_batches.
+    todo_set_content_flag, todo_check_executable,
+    proj_identify_batches, todo_analyze_graph, and
+    proj_find_archived_by_title.
     """
 
     @app.tool(description="Add a new todo to a project.")
@@ -1102,3 +1104,186 @@ def register(app: FastMCP) -> None:
             reverse=True,
         )
         return json.dumps({"exact_match": None, "fuzzy_matches": fuzzy, "count": len(fuzzy)})
+
+    @app.tool(
+        description=(
+            "Analyze the blocking graph of all non-done todos. "
+            "Returns per-todo metrics (critical path depth, transitive fan-out), "
+            "tiers, cycles, critical path, and orphans."
+        )
+    )
+    def todo_analyze_graph(project_name: str | None = None) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        all_todos = storage.load_todos(cfg, name)
+
+        # Filter to non-terminal todos
+        active_todos = [t for t in all_todos if t.status not in TERMINAL_STATUSES]
+        active_ids = {t.id for t in active_todos}
+        todo_map = {t.id: t for t in active_todos}
+
+        # Build adjacency: blocker -> list of dependents (within active set)
+        adjacency: dict[str, list[str]] = {tid: [] for tid in active_ids}
+        in_degree: dict[str, int] = dict.fromkeys(active_ids, 0)
+
+        for t in active_todos:
+            for blocker_id in t.blocked_by:
+                if blocker_id in active_ids:
+                    adjacency[blocker_id].append(t.id)
+                    in_degree[t.id] += 1
+
+        # Also build reverse adjacency scoped to active set (blocks within active)
+        blocks_map: dict[str, list[str]] = {tid: [] for tid in active_ids}
+        for t in active_todos:
+            for blocker_id in t.blocked_by:
+                if blocker_id in active_ids:
+                    blocks_map[blocker_id].append(t.id)
+
+        # --- Kahn's algorithm for tiers and cycle detection ---
+        from collections import deque
+
+        kahn_in_degree = dict(in_degree)
+        queue: deque[str] = deque(tid for tid in active_ids if kahn_in_degree[tid] == 0)
+        tiers: list[list[str]] = []
+        visited_count = 0
+
+        while queue:
+            batch = sorted(queue)
+            tiers.append(batch)
+            visited_count += len(batch)
+            queue.clear()
+            next_level: list[str] = []
+            for tid in batch:
+                for dependent in adjacency[tid]:
+                    kahn_in_degree[dependent] -= 1
+                    if kahn_in_degree[dependent] == 0:
+                        next_level.append(dependent)
+            queue.extend(next_level)
+
+        # Detect cycles
+        cycles: list[str] = []
+        if visited_count < len(active_ids):
+            cycle_nodes = {tid for tid in active_ids if kahn_in_degree[tid] > 0}
+            reported: set[str] = set()
+            for start in sorted(cycle_nodes):
+                if start in reported:
+                    continue
+                path: list[str] = []
+                visited_trace: set[str] = set()
+                node = start
+                while node not in visited_trace and node in cycle_nodes:
+                    path.append(node)
+                    visited_trace.add(node)
+                    nexts = [
+                        b for b in todo_map[node].blocked_by if b in cycle_nodes and b in active_ids
+                    ]
+                    node = nexts[0] if nexts else node
+                    if node == start or node not in cycle_nodes:
+                        break
+                path.append(start)
+                for n in path:
+                    reported.add(n)
+                cycles.append(" → ".join(path))
+
+        # --- Critical path depth (longest path from node to any leaf, DFS + memo) ---
+        # Skip cycle nodes to avoid infinite recursion in DFS
+        cycle_node_set = {tid for tid in active_ids if kahn_in_degree[tid] > 0}
+        acyclic_ids = active_ids - cycle_node_set
+        cp_depth: dict[str, int] = {}
+
+        def _critical_depth(tid: str) -> int:
+            if tid in cp_depth:
+                return cp_depth[tid]
+            dependents = [d for d in adjacency[tid] if d in acyclic_ids]
+            if not dependents:
+                cp_depth[tid] = 0
+                return 0
+            depth = 1 + max(_critical_depth(d) for d in dependents)
+            cp_depth[tid] = depth
+            return depth
+
+        for tid in acyclic_ids:
+            _critical_depth(tid)
+        # Cycle nodes get depth -1 (indeterminate)
+        for tid in cycle_node_set:
+            cp_depth[tid] = -1
+
+        # --- Transitive fan-out (count of all downstream dependents, DFS + memo) ---
+        fan_out: dict[str, int] = {}
+        fan_out_cache: dict[str, set[str]] = {}
+
+        def _fan_out_set(tid: str) -> set[str]:
+            if tid in fan_out_cache:
+                return fan_out_cache[tid]
+            dependents = [d for d in adjacency[tid] if d in acyclic_ids]
+            if not dependents:
+                fan_out_cache[tid] = set()
+                fan_out[tid] = 0
+                return set()
+            all_downstream: set[str] = set()
+            for d in dependents:
+                all_downstream.add(d)
+                all_downstream |= _fan_out_set(d)
+            fan_out_cache[tid] = all_downstream
+            fan_out[tid] = len(all_downstream)
+            return all_downstream
+
+        for tid in acyclic_ids:
+            _fan_out_set(tid)
+        # Cycle nodes get fan_out -1 (indeterminate)
+        for tid in cycle_node_set:
+            fan_out[tid] = -1
+
+        # --- Critical path: longest chain from any root to any leaf ---
+        roots = [tid for tid in active_ids if in_degree[tid] == 0]
+        critical_path: list[str] = []
+        if roots:
+            # Find root with highest critical_path_depth
+            best_root = max(roots, key=lambda tid: cp_depth.get(tid, 0))
+            # Trace path by following dependent with highest critical_path_depth
+            current = best_root
+            critical_path.append(current)
+            while True:
+                dependents = [d for d in adjacency[current] if d in active_ids]
+                if not dependents:
+                    break
+                next_node = max(dependents, key=lambda d: cp_depth.get(d, 0))
+                critical_path.append(next_node)
+                current = next_node
+
+        critical_path_set = set(critical_path)
+
+        # --- Orphans: no blocked_by and no blocks within active set ---
+        orphans = sorted(tid for tid in active_ids if in_degree[tid] == 0 and not adjacency[tid])
+
+        # Build per-todo result
+        todo_results: list[dict[str, JsonValue]] = []
+        for t in sorted(active_todos, key=lambda t: t.id):
+            scoped_blocked_by = [b for b in t.blocked_by if b in active_ids]
+            scoped_blocks = list(adjacency[t.id])
+            todo_results.append(
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "priority": t.priority,
+                    "blocked_by": scoped_blocked_by,
+                    "blocks": scoped_blocks,
+                    "tags": t.tags,
+                    "children": t.children,
+                    "critical_path_depth": cp_depth.get(t.id, 0),
+                    "transitive_fan_out": fan_out.get(t.id, 0),
+                    "is_on_critical_path": t.id in critical_path_set,
+                }
+            )
+
+        return json.dumps(
+            {
+                "todos": todo_results,
+                "tiers": tiers,
+                "cycles": cycles,
+                "critical_path": critical_path,
+                "orphans": orphans,
+            }
+        )

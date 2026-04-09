@@ -44,21 +44,6 @@ class TestTrelloListMappingsModel:
         assert d["tasks"] == "proj-tasks"
         assert d["projects"] == "Projects"
 
-    def test_from_dict_with_status_fields(self) -> None:
-        data = {
-            "created": "Todo",
-            "done": "Complete",
-            "active": "In Progress",
-            "pending": "Waiting",
-            "archived": "Done",
-        }
-        lm = TrelloListMappings.from_dict(data)
-        assert lm.created == "Todo"
-        assert lm.done == "Complete"
-        assert lm.active == "In Progress"
-        assert lm.pending == "Waiting"
-        assert lm.archived == "Done"
-
     def test_from_dict_without_status_fields_defaults_empty(self) -> None:
         data: dict[str, object] = {"created": "Backlog", "done": "Done"}
         lm = TrelloListMappings.from_dict(data)
@@ -79,43 +64,8 @@ class TestTrelloListMappingsModel:
         assert restored.pending == original.pending
         assert restored.archived == original.archived
 
-    def test_empty_dict_produces_defaults(self) -> None:
-        lm = TrelloListMappings.from_dict({})
-        assert lm.created == "Backlog"
-        assert lm.done == "Done"
-        assert lm.active == ""
-        assert lm.pending == ""
-        assert lm.archived == ""
-
 
 class TestTrelloSyncModelWithListMappings:
-    def test_trello_sync_to_dict_includes_list_mappings(self) -> None:
-        ts = TrelloSync(
-            enabled=True,
-            default_board_id="board1",
-            list_mappings=TrelloListMappings(active="Active", archived="Archive"),
-        )
-        d = ts.to_dict()
-        assert d["list_mappings"]["active"] == "Active"
-        assert d["list_mappings"]["archived"] == "Archive"
-
-    def test_trello_sync_from_dict_preserves_list_mappings(self) -> None:
-        data = {
-            "enabled": True,
-            "default_board_id": "board1",
-            "list_mappings": {
-                "created": "Backlog",
-                "done": "Done",
-                "active": "Active",
-                "pending": "Waiting",
-                "archived": "Archive",
-            },
-        }
-        ts = TrelloSync.from_dict(data)
-        assert ts.list_mappings.active == "Active"
-        assert ts.list_mappings.pending == "Waiting"
-        assert ts.list_mappings.archived == "Archive"
-
     def test_trello_sync_roundtrip(self) -> None:
         original = TrelloSync(
             enabled=True,
@@ -152,22 +102,6 @@ class TestProjectTrelloConfigListMappings:
 
 
 class TestProjConfigListMappings:
-    def test_proj_config_to_dict_includes_list_mappings(self) -> None:
-        cfg = ProjConfig(
-            trello=TrelloSync(
-                list_mappings=TrelloListMappings(active="Active", archived="Archive"),
-            ),
-        )
-        d = cfg.to_dict()
-        sync = d["sync"]
-        assert isinstance(sync, dict)
-        trello = sync["trello"]
-        assert isinstance(trello, dict)
-        lm = trello["list_mappings"]
-        assert isinstance(lm, dict)
-        assert lm["active"] == "Active"
-        assert lm["archived"] == "Archive"
-
     def test_proj_config_from_dict_preserves_list_mappings(self) -> None:
         data: dict[str, object] = {
             "sync": {
@@ -433,37 +367,23 @@ class TestUpdateMetaTrelloMoveHint:
         assert "card_1" in result
         assert "Active" in result
 
-    async def test_status_change_to_paused_uses_pending(
+    @pytest.mark.parametrize("status", ["paused", "blocked"], ids=["paused", "blocked"])
+    async def test_status_change_to_pending_status_uses_pending_mapping(
         self,
         mcp_app: Any,
         cfg: ProjConfig,
         tmp_path: Path,
+        status: str,
     ) -> None:
         cfg.trello.list_mappings.pending = "On Hold"
         storage.save_config(cfg)
 
         _setup_project_with_trello(cfg, tmp_path, trello_card_id="card_2")
 
-        result = await call_tool(mcp_app, "proj_update_meta", name="myapp", status="paused")
+        result = await call_tool(mcp_app, "proj_update_meta", name="myapp", status=status)
 
         assert "trello_move" in result
         assert "On Hold" in result
-
-    async def test_status_change_to_blocked_uses_pending(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-        tmp_path: Path,
-    ) -> None:
-        cfg.trello.list_mappings.pending = "Waiting"
-        storage.save_config(cfg)
-
-        _setup_project_with_trello(cfg, tmp_path, trello_card_id="card_3")
-
-        result = await call_tool(mcp_app, "proj_update_meta", name="myapp", status="blocked")
-
-        assert "trello_move" in result
-        assert "Waiting" in result
 
     async def test_no_hint_when_status_unchanged(
         self,

@@ -75,6 +75,17 @@ class TestListRepos:
         assert str(tmp_path) in result
 
 
+class TestAddRepoEdgeCases:
+    def test_rejects_empty_label(self, tmp_path: Path, empty_config: Path) -> None:
+        result = add_repo("", str(tmp_path))
+        assert "Error" in result
+        assert "empty" in result.lower()
+
+    def test_rejects_whitespace_label(self, tmp_path: Path, empty_config: Path) -> None:
+        result = add_repo("   ", str(tmp_path))
+        assert "Error" in result
+
+
 class TestConfigGet:
     def test_returns_expanded_default_worktree_dir(self, empty_config: Path) -> None:
         config = WorktreeConfig(default_worktree_dir="~/worktrees")

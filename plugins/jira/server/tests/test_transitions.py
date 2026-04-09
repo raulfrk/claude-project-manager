@@ -80,3 +80,11 @@ class TestJiraTransitionIssue:
         assert "error" in parsed
         assert "Invalid fields JSON" in parsed["error"]
         mock_jira_client.post.assert_not_called()
+
+    def test_api_error_propagates(
+        self, mock_jira_client: MagicMock, transition_tools: dict
+    ) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error 404: not found")
+
+        with pytest.raises(RuntimeError, match="404"):
+            transition_tools["jira_transition_issue"](issue_key="NOPE-1", transition_id="21")

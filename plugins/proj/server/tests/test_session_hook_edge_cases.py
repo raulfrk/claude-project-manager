@@ -109,25 +109,21 @@ class TestLoadTodosCorruption:
 
         assert storage.load_todos(cfg, "myapp") == []
 
-    def test_todos_file_scalar_top_level_returns_empty(self, cfg: ProjConfig) -> None:
-        """When todos.yaml contains only a scalar string, load_todos returns [].
+    @pytest.mark.parametrize(
+        "content",
+        ["this is just a plain string\n", "- id: T001\n  title: Foo\n"],
+        ids=["scalar", "bare_list"],
+    )
+    def test_todos_file_non_dict_top_level_returns_empty(
+        self, cfg: ProjConfig, content: str
+    ) -> None:
+        """When todos.yaml top-level is not a mapping, load_todos returns [].
 
         _load_yaml returns {} for non-dict content; load_todos returns [].
         """
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text("this is just a plain string\n")
-
-        assert storage.load_todos(cfg, "myapp") == []
-
-    def test_todos_file_list_top_level_returns_empty(self, cfg: ProjConfig) -> None:
-        """When todos.yaml is a bare YAML list (not a mapping), load_todos returns [].
-
-        _load_yaml returns {} for non-dict content; load_todos returns [].
-        """
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text("- id: T001\n  title: Foo\n")
+        (proj_dir / "todos.yaml").write_text(content)
 
         assert storage.load_todos(cfg, "myapp") == []
 
@@ -167,18 +163,6 @@ class TestLoadIndexCorruption:
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text("active: myapp\nprojects: {bad: [unclosed\n")
-
-        index = storage.load_index(cfg)
-        assert index.projects == {}
-
-    def test_index_file_scalar_top_level_returns_empty(self, cfg: ProjConfig) -> None:
-        """When active-projects.yaml is a plain scalar, load_index returns empty index.
-
-        _load_yaml returns {} for non-dict content; from_dict({}) produces an empty index.
-        """
-        index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text("just a string\n")
 
         index = storage.load_index(cfg)
         assert index.projects == {}
@@ -231,11 +215,6 @@ class TestLoadMetaCorruption:
         assert meta.name == ""
         assert meta.status == "active"
         assert meta.priority == "medium"
-
-    def test_project_meta_from_dict_missing_name_returns_empty_string(self) -> None:
-        """ProjectMeta.from_dict({}) returns name='' instead of raising KeyError."""
-        meta = ProjectMeta.from_dict({})
-        assert meta.name == ""
 
     def test_invalid_yaml_in_meta_returns_empty_meta(self, cfg: ProjConfig) -> None:
         """Syntactically invalid meta.yaml is swallowed and returns ProjectMeta with name=''.
@@ -339,21 +318,6 @@ class TestCmdSessionStartCorruption:
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
         # Overwrite meta.yaml with one missing the required 'name' field
         (proj_dir / "meta.yaml").write_text("status: active\npriority: medium\n")
-
-        from server.cli import cmd_session_start
-
-        # Should not raise — graceful degradation
-        cmd_session_start(cwd=str(tmp_path), compact=False)
-
-    def test_valid_meta_corrupted_todos_scalar_returns_gracefully(
-        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """When todos.yaml is a bare scalar string, cmd_session_start completes gracefully.
-
-        _load_yaml returns {} for non-dict content; load_todos returns [].
-        """
-        proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        (proj_dir / "todos.yaml").write_text("just a string\n")
 
         from server.cli import cmd_session_start
 
@@ -500,29 +464,6 @@ class TestMCPContextToolsCorruption:
         result = await call_tool(mcp_app, "ctx_session_start")
         assert "myapp" in result
 
-    async def test_session_start_meta_missing_name_does_not_succeed(
-        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """ctx_session_start does not produce context when meta.yaml has no 'name'.
-
-        KeyError propagates from ProjectMeta.from_dict.  FastMCP may raise or
-        return an error string; either is acceptable — we just assert no normal
-        project context comes back.
-        """
-        setup_project(cfg, "myapp", str(tmp_path))
-        state.set_session_active("myapp")
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        (proj_dir / "meta.yaml").write_text("status: active\npriority: medium\n")
-
-        try:
-            result = await call_tool(mcp_app, "ctx_session_start")
-            # Normal context would contain "myapp"; an error string is ok.
-            assert _is_error_result(result) or result == "", (
-                f"Expected error or empty result, got: {result!r}"
-            )
-        except (KeyError, Exception):
-            pass  # Exception propagation is also acceptable.
-
     async def test_session_end_meta_missing_optional_fields_returns_updated(
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
@@ -537,27 +478,6 @@ class TestMCPContextToolsCorruption:
 
         result = await call_tool(mcp_app, "ctx_session_end")
         assert "myapp" in result or "Updated" in result
-
-    async def test_session_end_meta_missing_name_does_not_succeed(
-        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """ctx_session_end does not return 'Updated' when meta.yaml has no 'name'.
-
-        KeyError propagates from from_dict.  FastMCP may raise or error-string.
-        """
-        setup_project(cfg, "myapp", str(tmp_path))
-        state.set_session_active("myapp")
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        (proj_dir / "meta.yaml").write_text("status: active\n")
-
-        try:
-            result = await call_tool(mcp_app, "ctx_session_end")
-            # Should NOT be a success message
-            assert "Updated" not in result or _is_error_result(result), (
-                f"Expected error, got success: {result!r}"
-            )
-        except (KeyError, Exception):
-            pass  # Exception propagation is also acceptable.
 
     async def test_session_start_no_config_returns_empty(
         self, mcp_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -579,3 +499,91 @@ class TestMCPContextToolsCorruption:
 
         result = await call_tool(mcp_app, "ctx_session_end")
         assert "No config" in result
+
+
+# ---------------------------------------------------------------------------
+# Storage-level: load_todos when file doesn't exist
+# ---------------------------------------------------------------------------
+
+
+class TestLoadTodosFileNotExist:
+    """load_todos returns [] when the todos.yaml file does not exist at all."""
+
+    def test_missing_todos_file_returns_empty(self, cfg: ProjConfig) -> None:
+        """When the project dir exists but todos.yaml does not, returns []."""
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        # Do NOT create todos.yaml
+        assert not (proj_dir / "todos.yaml").exists()
+
+        todos = storage.load_todos(cfg, "myapp")
+        assert todos == []
+
+    def test_missing_project_dir_returns_empty(self, cfg: ProjConfig) -> None:
+        """When the entire project directory doesn't exist, returns []."""
+        # Do NOT create the project directory at all
+        todos = storage.load_todos(cfg, "nonexistent-project")
+        assert todos == []
+
+
+# ---------------------------------------------------------------------------
+# Storage-level: _load_yaml permission errors
+# ---------------------------------------------------------------------------
+
+
+class TestLoadYamlPermissionError:
+    """_load_yaml does not catch PermissionError -- it propagates."""
+
+    def test_permission_error_propagates_from_load_yaml(
+        self, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """PermissionError from _load_yaml propagates (not swallowed)."""
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        todos_file = proj_dir / "todos.yaml"
+        todos_file.write_text("todos: []\n")
+        todos_file.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                storage.load_todos(cfg, "myapp")
+        finally:
+            todos_file.chmod(0o644)
+
+    def test_permission_error_on_index(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """PermissionError when reading active-projects.yaml propagates."""
+        index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        index_path.write_text("projects: {}\n")
+        index_path.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                storage.load_index(cfg)
+        finally:
+            index_path.chmod(0o644)
+
+
+# ---------------------------------------------------------------------------
+# CLI-level: cmd_session_end with corrupted todos
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSessionEndCorruptedTodos:
+    """cmd_session_end edge cases specifically with corrupted todos."""
+
+    def test_corrupted_todos_yaml_does_not_crash_session_end(
+        self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When todos.yaml is corrupted, cmd_session_end still completes."""
+        proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
+        today = str(date.today())
+        (proj_dir / "meta.yaml").write_text(
+            f"name: myapp\nrepos:\n  - label: code\n    path: {tmp_path}\n"
+            f"dates:\n  created: '{today}'\n  last_updated: '2000-01-01'\n"
+        )
+        # Corrupt the todos file
+        (proj_dir / "todos.yaml").write_text("todos:\n  - id: 1\n  bad: [unclosed\n")
+
+        from server.cli import cmd_session_end
+
+        # Should not raise
+        cmd_session_end(cwd=str(tmp_path))

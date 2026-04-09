@@ -1,7 +1,7 @@
 ---
 name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
-allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_ready, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__proj_update_meta, mcp__plugin_proj_proj__tracking_git_flush
+allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_ready, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__proj_update_meta, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_proj_proj__proj_identify_batches
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 context: fork
 agent: general-purpose
@@ -30,11 +30,33 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
 **done** `<id>` — mark a todo complete (e.g. "done 2")
   - Call `mcp__plugin_proj_proj__todo_complete`
 
-**list** [all|pending|ready|blocked] — list todos with optional filter
+**list** [all|pending|ready|blocked] [--prio|--priorities] — list todos with optional filter
   - Default (no filter): call `mcp__plugin_proj_proj__todo_tree` — shows open tasks as a hierarchy, filtering out done todos
   - `all`: call `mcp__plugin_proj_proj__todo_tree` — shows all todos including done as a hierarchy
   - `ready`: call `mcp__plugin_proj_proj__todo_ready` — shows todos with no blockers as a flat list
   - `blocked`: call `mcp__plugin_proj_proj__todo_list` with `status: "pending"` then filter to those with non-empty `blocked_by`
+  - `--prio` or `--priorities` (can combine with `all`):
+    1. Call `mcp__plugin_proj_proj__todo_tree` with `include_done=False` (or `include_done=True` if `all` filter also present)
+    2. Flatten the tree to collect all todo objects and their nested `_children`
+    3. Build the open set: all todo IDs from the flattened tree
+    4. For each todo, filter its `blocked_by` list to only include IDs present in the open set (this resolves stale blockers from done/deleted todos)
+    5. Call `mcp__plugin_proj_proj__proj_identify_batches` with all IDs from the open set
+    6. If `cycles` is non-empty in the result, display a `### Circular Dependencies` warning section listing each cycle
+    7. For each batch (tier) in the result, display as a section:
+       ```
+       ### Tier 0 — Start immediately
+       - 🔲 **479** — Add /proj:prioritize skill *(high)* [blocks 474, 469, 471]
+       - 🔲 **482** — Todo list by priority skill *(high)*
+
+       ### Tier 1 — After Tier 0
+       - 🔲 **474** — Verify hook feedback writeback *(medium)* [blocked by 479]
+       ```
+    8. Within each tier, sort todos by priority (high → medium → low), then by ID numerically
+    9. If `all` filter was also present: show done todos in a separate `### Completed` section after all tiers, using the same display format (✅ icon)
+  - Examples:
+    - `/proj:todo list --prio` — show open todos grouped by blocking tiers
+    - `/proj:todo list all --prio` — show all todos (including done) grouped by tiers, with completed todos in a separate section
+    - `/proj:todo list --priorities` — alias for --prio
   - Display as nested bullet points with 2-space indent per level. Use status icons (✅ = done, 🔄 = in_progress, 🔲 = pending), bold ID, title, priority in italics. Always use the full, exact title from the todo — never abbreviate or summarize. If `"manual" in tags`, append `[manual]` after the priority. Blocked todos include `[blocked by X]` inline. Todos that block others include `[blocks Y]` inline. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
   - Example:
     ```

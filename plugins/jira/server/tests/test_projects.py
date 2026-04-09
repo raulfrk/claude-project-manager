@@ -22,6 +22,21 @@ def project_tools(mock_jira_client: MagicMock) -> dict[str, callable]:
 
 
 class TestJiraListProjects:
+    def test_non_list_api_response_returns_empty(
+        self, mock_jira_client: MagicMock, project_tools: dict
+    ) -> None:
+        mock_jira_client._config = JiraConfig(
+            personal_access_token="pat",
+            base_url="https://jira.example.com",
+            allowed_project_keys=["PROJ"],
+        )
+        mock_jira_client.get.return_value = {"error": "unexpected"}
+
+        result = project_tools["jira_list_projects"]()
+
+        parsed = json.loads(result)
+        assert parsed == []
+
     def test_returns_filtered_projects(
         self, mock_jira_client: MagicMock, project_tools: dict
     ) -> None:

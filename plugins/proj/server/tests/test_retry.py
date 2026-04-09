@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from server.lib.retry import log_orphaned_resource, retry_link
+from server.lib.resilience import CircuitBreakerManager
+from server.lib.retry import CircuitOpenError, log_orphaned_resource, retry_link
 
 # ---------------------------------------------------------------------------
 # retry_link
@@ -15,6 +16,16 @@ from server.lib.retry import log_orphaned_resource, retry_link
 
 
 class TestRetryLink:
+    def test_zero_retries_warns_and_raises(self):
+        fn = MagicMock(return_value="ok")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with pytest.raises(RuntimeError, match="loop body never executed"):
+                retry_link(fn, max_retries=0, backoff=0)
+        fn.assert_not_called()
+        assert len(w) == 1
+        assert "exhausted 0 retries" in str(w[0].message)
+
     def test_succeeds_first_attempt(self):
         fn = MagicMock(return_value="ok")
         assert retry_link(fn) == "ok"
@@ -66,6 +77,36 @@ class TestRetryLink:
             retry_link(fn, max_retries=1, backoff=0)
         # No orphan file should be created anywhere
         assert not (tmp_path / ".orphaned-resources.yaml").exists()
+
+    def test_circuit_open_skips_call(self, tmp_path: Path):
+        mgr = CircuitBreakerManager(tmp_path, failure_threshold=1)
+        mgr.record_failure("todoist", "down")
+        fn = MagicMock(return_value="ok")
+        with pytest.raises(CircuitOpenError, match="todoist"):
+            retry_link(fn, max_retries=3, backoff=0, circuit_breaker_manager=mgr, service="todoist")
+        fn.assert_not_called()
+
+    def test_circuit_breaker_records_success(self, tmp_path: Path):
+        mgr = CircuitBreakerManager(tmp_path, failure_threshold=3)
+        fn = MagicMock(return_value="ok")
+        result = retry_link(
+            fn,
+            max_retries=2,
+            backoff=0,
+            circuit_breaker_manager=mgr,
+            service="todoist",
+        )
+        assert result == "ok"
+        assert mgr._breakers["todoist"].state == "HEALTHY"
+        assert mgr._breakers["todoist"].last_success is not None
+
+    def test_circuit_breaker_records_failure_on_exhaustion(self, tmp_path: Path):
+        mgr = CircuitBreakerManager(tmp_path, failure_threshold=3)
+        fn = MagicMock(side_effect=RuntimeError("timeout"))
+        with pytest.raises(RuntimeError):
+            retry_link(fn, max_retries=2, backoff=0, circuit_breaker_manager=mgr, service="todoist")
+        assert mgr._breakers["todoist"].failure_count == 1
+        assert mgr._breakers["todoist"].last_error == "timeout"
 
 
 # ---------------------------------------------------------------------------

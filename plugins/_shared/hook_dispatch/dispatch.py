@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Callable, Coroutine, Sequence
 from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, runtime_checkable
 
@@ -76,7 +77,6 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
     session's socket path. Falls back to legacy path if registry missing.
     In TCP mode (HOOK_TRANSPORT=tcp): returns http://127.0.0.1:{hooks_port}/hook
     """
-    import os
     from pathlib import Path
 
     transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
@@ -85,15 +85,32 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
 
     # Unix mode: read registry file for current session's socket path
     registry_file = Path.home() / ".claude" / "sockets" / "hooks"
-    sock_path = "/tmp/claude-hooks-hooks.sock"  # legacy fallback
+    sock_path: str | None = None
     try:
         path = registry_file.read_text().strip()
-        if path:
+        if path and Path(path).exists():
             sock_path = path
     except (FileNotFoundError, OSError):
+        pass
+
+    # Fallback: glob for newest PID-tagged socket if registry missing/empty/stale
+    if not sock_path:
+        candidates = sorted(
+            Path("/tmp").glob("claude-hooks-hooks-*.sock"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in candidates:
+            sock_path = str(candidate)
+            break  # newest first
+
+    if not sock_path:
+        sock_path = "/tmp/claude-hooks-hooks.sock"  # last-resort legacy
         logger.warning(
-            "hooks socket registry not found at %s, falling back to legacy path",
+            "hooks socket registry not found at %s and no PID-tagged sockets in /tmp, "
+            "falling back to legacy path %s",
             registry_file,
+            sock_path,
         )
 
     return "http://localhost/hook", httpx.AsyncHTTPTransport(uds=sock_path)
@@ -127,6 +144,20 @@ async def _dispatch_hook(
             resp = await client.post(hooks_url, json=payload)
             try:
                 data: dict[str, JsonValue] = resp.json()
+                # Unwrap the HTTP handler envelope: {"ok": true, "result": <inner>}
+                # The inner result is the hooks_fire_tool return value (may be a
+                # JSON string that needs parsing, or already a dict).
+                if isinstance(data, dict) and "result" in data:
+                    inner = data["result"]
+                    if isinstance(inner, str):
+                        try:
+                            parsed = json.loads(inner)
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    elif isinstance(inner, dict):
+                        return inner
                 return data
             except Exception:
                 logger.warning("Hook dispatch for %s: malformed JSON response", tool_name)
@@ -142,6 +173,32 @@ async def _dispatch_hook(
     except Exception:
         logger.warning("Hook dispatch failed for %s", tool_name, exc_info=True)
         return None
+
+
+def _format_error(error: str, hook_id: str) -> str:
+    """Format hook error with actionable fix suggestion."""
+    err_lower = error.lower()
+    if "401" in error or "unauthorized" in err_lower:
+        return (
+            f"Hook {hook_id}: {error}. "
+            "Fix: check API token in the service config YAML (~/.claude/*.yaml)."
+        )
+    if "403" in error or "forbidden" in err_lower:
+        return f"Hook {hook_id}: {error}. Fix: check API permissions for the configured token."
+    if "429" in error or "rate" in err_lower:
+        return (
+            f"Hook {hook_id}: {error}. "
+            "Fix: wait and retry, or increase rate_limit_per_10s in config."
+        )
+    if (
+        "connecterror" in err_lower
+        or "unreachable" in err_lower
+        or "connection refused" in err_lower
+    ):
+        return f"Hook {hook_id}: {error}. Fix: ensure the target MCP server is running."
+    if "timeout" in err_lower or "timed out" in err_lower:
+        return f"Hook {hook_id}: {error}. Fix: check server health or increase timeout."
+    return f"Hook {hook_id}: {error}"
 
 
 def _build_hooks_field(
@@ -166,8 +223,15 @@ def _build_hooks_field(
     if not has_error and not fire_response.get("top_level"):
         return None
 
-    # Skip injection when zero hooks fired and no errors (common case — clean exit)
-    if not has_error and hooks_fired == 0 and not errors_list:
+    # Check for skipped hooks (registered but all conditions evaluated false)
+    raw_skipped = fire_response.get("skipped_hooks", [])
+    skipped_hooks: list[dict[str, JsonValue]] = [
+        s for s in (raw_skipped if isinstance(raw_skipped, list) else []) if isinstance(s, dict)
+    ]
+
+    # Skip injection when zero hooks fired, no errors, AND no skipped hooks
+    # (common case — clean exit)
+    if not has_error and hooks_fired == 0 and not errors_list and not skipped_hooks:
         return None
 
     # Build chain from results (ok) + errors
@@ -187,11 +251,20 @@ def _build_hooks_field(
         }
         chain.append(entry)
     for e in errors_list:
+        hid = str(e.get("hook_id"))
+        raw_err = str(e.get("error")) if e.get("error") else None
         entry = {
-            "hook_id": str(e.get("hook_id")),
+            "hook_id": hid,
             "target_tool": str(e.get("target_tool")) if e.get("target_tool") else None,
             "status": "error",
-            "error": str(e.get("error")) if e.get("error") else None,
+            "error": _format_error(raw_err, hid) if raw_err else None,
+        }
+        chain.append(entry)
+    for s in skipped_hooks:
+        entry = {
+            "hook_id": str(s.get("hook_id")),
+            "status": "skipped",
+            "reason": str(s.get("reason")) if s.get("reason") else "condition evaluated false",
         }
         chain.append(entry)
 
@@ -199,7 +272,10 @@ def _build_hooks_field(
     if has_error:
         error_strings = [str(fire_response["_error"])]
     else:
-        error_strings = [str(e.get("error", str(e))) for e in errors_list]
+        error_strings = [
+            _format_error(str(e.get("error", str(e))), str(e.get("hook_id", "unknown")))
+            for e in errors_list
+        ]
 
     # Merge cascade errors from nested hook dispatch
     raw_cascade = fire_response.get("cascade_errors", [])
@@ -212,12 +288,68 @@ def _build_hooks_field(
     return {
         "_claude_instructions": (
             "Hook chain completed. Check _hooks.errors and chain entries with "
-            "status=error for failures. Explain any errors to the user."
+            "status=error for failures. Explain any errors to the user and suggest fixes."
         ),
         "hooks_fired": hooks_fired,
         "chain": chain,
         "errors": error_strings,
     }
+
+
+# Keys in feedback params that are internal routing context, not mergeable data
+_FEEDBACK_INTERNAL_KEYS = frozenset({"todo_id", "project_name"})
+
+
+def _merge_feedback(original_result: str, fire_response: dict[str, JsonValue] | None) -> str:
+    """Merge feedback params from hook fire response into the original tool result.
+
+    Extracts params from successful feedback entries and overlays them onto the
+    original result JSON — only replacing keys that are null or adding new keys.
+    Returns the original string unchanged if it's not valid JSON, if there's no
+    feedback, or on any error.
+    """
+    try:
+        if fire_response is None:
+            return original_result
+        raw_feedback = fire_response.get("feedback")
+        if not raw_feedback or not isinstance(raw_feedback, list):
+            return original_result
+
+        # Collect all mergeable params from successful feedback entries
+        merged_params: dict[str, JsonValue] = {}
+        for entry in raw_feedback:
+            if not isinstance(entry, dict):
+                continue
+            if not entry.get("ok"):
+                continue
+            params = entry.get("params")
+            if not isinstance(params, dict):
+                continue
+            for key, value in params.items():
+                if key in _FEEDBACK_INTERNAL_KEYS:
+                    continue
+                merged_params[key] = value
+
+        if not merged_params:
+            return original_result
+
+        # Parse original result as JSON
+        try:
+            parsed = json.loads(original_result)
+        except (json.JSONDecodeError, ValueError):
+            return original_result
+
+        if not isinstance(parsed, dict):
+            return original_result
+
+        # Overlay: replace null values and add new keys
+        for key, value in merged_params.items():
+            if key not in parsed or parsed[key] is None:
+                parsed[key] = value
+
+        return json.dumps(parsed)
+    except Exception:
+        return original_result
 
 
 def _inject_hooks(
@@ -356,10 +488,13 @@ def _wrap_tool_fn[**P, R](
         ) -> R | str | dict[str, JsonValue]:
             result: R = await fn(*args, **kwargs)
             fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
+            serialized = _serialize_result(result)  # type: ignore[arg-type]
+            merged = _merge_feedback(serialized, fire_response)
+            effective_result: _RawToolOutput = merged if merged != serialized else result  # type: ignore[assignment]
             hooks_field = _build_hooks_field(fire_response, tool_name)
             if hooks_field is not None:
-                return _inject_hooks(result, hooks_field)  # type: ignore[arg-type]
-            return result
+                return _inject_hooks(effective_result, hooks_field)
+            return effective_result  # type: ignore[return-value]
 
         async_wrapper.__name__ = fn.__name__
         async_wrapper.__doc__ = fn.__doc__
@@ -377,10 +512,13 @@ def _wrap_tool_fn[**P, R](
     ) -> R | str | dict[str, JsonValue]:
         result: R = fn(*args, **kwargs)
         fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
+        serialized = _serialize_result(result)  # type: ignore[arg-type]
+        merged = _merge_feedback(serialized, fire_response)
+        effective_result: _RawToolOutput = merged if merged != serialized else result  # type: ignore[assignment]
         hooks_field = _build_hooks_field(fire_response, tool_name)
         if hooks_field is not None:
-            return _inject_hooks(result, hooks_field)  # type: ignore[arg-type]
-        return result
+            return _inject_hooks(effective_result, hooks_field)
+        return effective_result  # type: ignore[return-value]
 
     sync_to_async_wrapper.__name__ = fn.__name__
     sync_to_async_wrapper.__doc__ = fn.__doc__

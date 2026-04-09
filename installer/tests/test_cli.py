@@ -83,6 +83,33 @@ class TestBuildParser:
         args = parser.parse_args(["--verbose"])
         assert args.verbose is True
 
+    def test_no_tui_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--no-tui"])
+        assert args.no_tui is True
+
+    def test_no_tui_default(self):
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.no_tui is False
+
+    def test_branch_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--branch", "dev"])
+        assert args.branch == "dev"
+
+    def test_branch_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.branch is None
+
+    def test_full_cleanup_with_uninstall(self):
+        """--full-cleanup and --uninstall can be combined."""
+        parser = build_parser()
+        args = parser.parse_args(["--uninstall", "--full-cleanup"])
+        assert args.uninstall is True
+        assert args.full_cleanup is True
+
     def test_version_exits(self):
         parser = build_parser()
         with pytest.raises(SystemExit) as exc_info:

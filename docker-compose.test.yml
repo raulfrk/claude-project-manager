@@ -1,0 +1,12 @@
+# E2E test runner for the cpm-install TUI installer.
+# Usage: docker compose -f docker-compose.test.yml up --build
+services:
+  test-e2e:
+    build:
+      context: .
+      dockerfile: installer/tests/e2e/Dockerfile
+    volumes:
+      # Mount snapshots directory so updates from inside the container
+      # are written back to the host for version control.
+      - ./installer/tests/snapshots:/app/installer/tests/snapshots
+    command: uv run pytest installer/tests/e2e/ -v

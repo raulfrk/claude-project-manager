@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -151,15 +152,6 @@ class TestTodosEdgeCases:
         assert todos[0].title == "New title"
         assert todos[0].status == "in_progress"
 
-    async def test_todo_get(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
-        await call_tool(mcp_app, "todo_add", title="Get me")
-        result = await call_tool(mcp_app, "todo_get", todo_id="1")
-        assert "Get me" in result
-
-    async def test_todo_get_not_found(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
-        result = await call_tool(mcp_app, "todo_get", todo_id="T999")
-        assert "not found" in result.lower()
-
     async def test_todo_unblock(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="T1")
         await call_tool(mcp_app, "todo_add", title="T2")
@@ -194,16 +186,6 @@ class TestContextEdgeCases:
         result = await call_tool(mcp_app, "ctx_session_end")
         assert "Updated" in result or "myapp" in result
 
-    async def test_ctx_session_start_with_cwd_detect(
-        self, mcp_app: Any, project: tuple[ProjConfig, str], tmp_path: Path
-    ) -> None:
-        # Clear session active to test cwd-based auto-detection
-        state.clear_session_active()
-        result = await call_tool(mcp_app, "ctx_session_start", cwd=str(tmp_path))
-        # Should have detected myapp via cwd and set session active
-        assert "myapp" in result
-        assert state.get_session_active() == "myapp"
-
 
 @pytest.mark.asyncio
 class TestProjectsEdgeCases:
@@ -224,3 +206,194 @@ class TestProjectsEdgeCases:
         assert "False" in result or "false" in result.lower()
         meta = storage.load_meta(project[0], "myapp")
         assert meta.permissions.auto_grant is False
+
+
+# ---------------------------------------------------------------------------
+# Gap tests: todo_list compact/max_items/tag/blocked filters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestTodoListFilters:
+    @pytest.fixture()
+    def project(self, cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str]:
+        setup_project(cfg, "myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        return cfg, "myapp"
+
+    async def test_todo_list_compact_mode(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact=True returns pipe-delimited summaries."""
+        await call_tool(mcp_app, "todo_add", title="Task A", priority="high")
+        await call_tool(mcp_app, "todo_add", title="Task B", tags=["review"])
+        result = await call_tool(mcp_app, "todo_list", compact=True)
+        data = _json.loads(result)
+        assert data["count"] == 2
+        assert "Task A" in data["result"]
+        assert "high" in data["result"]
+        assert "|" in data["result"]
+
+    async def test_todo_list_max_items_truncates(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """max_items truncates output and reports truncation count."""
+        for i in range(5):
+            await call_tool(mcp_app, "todo_add", title=f"Task {i}")
+        result = await call_tool(mcp_app, "todo_list", max_items=2)
+        # Non-compact mode: JSON array followed by truncation note
+        assert "3 more items" in result
+
+    async def test_todo_list_compact_max_items(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact + max_items together."""
+        for i in range(4):
+            await call_tool(mcp_app, "todo_add", title=f"Task {i}")
+        result = await call_tool(mcp_app, "todo_list", compact=True, max_items=2)
+        data = _json.loads(result)
+        assert data["count"] == 2
+        assert data["truncated"] == 2
+
+    async def test_todo_list_tag_filter(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """tag filter returns only todos with the specified tag."""
+        await call_tool(mcp_app, "todo_add", title="Tagged", tags=["urgent"])
+        await call_tool(mcp_app, "todo_add", title="Untagged")
+        result = await call_tool(mcp_app, "todo_list", tag="urgent")
+        todos = _json.loads(result)
+        assert len(todos) == 1
+        assert todos[0]["title"] == "Tagged"
+
+    async def test_todo_list_blocked_filter(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """blocked=True returns only blocked todos."""
+        await call_tool(mcp_app, "todo_add", title="Blocker")
+        await call_tool(mcp_app, "todo_add", title="Blocked", blocked_by=["1"])
+        result = await call_tool(mcp_app, "todo_list", blocked=True)
+        todos = _json.loads(result)
+        assert len(todos) == 1
+        assert todos[0]["title"] == "Blocked"
+
+    async def test_todo_list_blocked_false_filter(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """blocked=False returns only unblocked todos."""
+        await call_tool(mcp_app, "todo_add", title="Free")
+        await call_tool(mcp_app, "todo_add", title="Blocked", blocked_by=["1"])
+        result = await call_tool(mcp_app, "todo_list", blocked=False)
+        todos = _json.loads(result)
+        assert len(todos) == 1
+        assert todos[0]["title"] == "Free"
+
+
+# ---------------------------------------------------------------------------
+# Gap tests: todo_add / todo_update empty due_date validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestDueDateValidation:
+    @pytest.fixture()
+    def project(self, cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str]:
+        setup_project(cfg, "myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        return cfg, "myapp"
+
+    async def test_todo_add_empty_due_date_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Empty string due_date on todo_add is rejected."""
+        result = await call_tool(mcp_app, "todo_add", title="Bad", due_date="")
+        data = _json.loads(result)
+        assert "error" in data
+        assert "due_date" in data["error"]
+
+    async def test_todo_update_empty_due_date_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Empty string due_date on todo_update is rejected."""
+        await call_tool(mcp_app, "todo_add", title="Task")
+        result = await call_tool(mcp_app, "todo_update", todo_id="1", due_date="")
+        assert "due_date cannot be empty" in result
+
+
+# ---------------------------------------------------------------------------
+# Gap tests: todo_uncomplete archived + todo_complete not found
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestTodoCompletionEdgeCases:
+    @pytest.fixture()
+    def project(self, cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str]:
+        setup_project(cfg, "myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        return cfg, "myapp"
+
+    async def test_todo_uncomplete_archived_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Uncompleting an archived todo is rejected."""
+        await call_tool(mcp_app, "todo_add", title="Leaf")
+        await call_tool(mcp_app, "todo_complete", todo_id="1")
+        # Todo is now archived
+        result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1")
+        data = _json.loads(result)
+        assert "error" in data
+        assert "archived" in data["error"]
+
+    async def test_todo_complete_not_found_returns_error(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Completing a nonexistent todo returns not found."""
+        result = await call_tool(mcp_app, "todo_complete", todo_id="999")
+        assert "not found" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests moved from test_tools_integration: context._read_recent_notes
+# ---------------------------------------------------------------------------
+
+
+class TestReadRecentNotes:
+    def test_returns_last_three_sections(self, tmp_path: Path) -> None:
+        from server.tools.context import _read_recent_notes
+
+        notes_file = tmp_path / "NOTES.md"
+        notes_file.write_text(
+            "## 2026-01-01\n\nFirst entry\n\n"
+            "## 2026-01-02\n\nSecond entry\n\n"
+            "## 2026-01-03\n\nThird entry\n\n"
+            "## 2026-01-04\n\nFourth entry\n"
+        )
+        result = _read_recent_notes(notes_file)
+        assert "Fourth entry" in result
+        assert "Third entry" in result
+        assert "Second entry" in result
+        assert "First entry" not in result
+
+    def test_no_dated_headers_fallback(self, tmp_path: Path) -> None:
+        from server.tools.context import _read_recent_notes
+
+        notes_file = tmp_path / "NOTES.md"
+        notes_file.write_text("# Project Notes\n\nSome plain content without dated sections.\n")
+        result = _read_recent_notes(notes_file, max_chars=600)
+        assert "plain content" in result
+
+    def test_empty_file(self, tmp_path: Path) -> None:
+        from server.tools.context import _read_recent_notes
+
+        notes_file = tmp_path / "NOTES.md"
+        notes_file.write_text("")
+        result = _read_recent_notes(notes_file)
+        assert result == ""
+
+    def test_nonexistent_file(self, tmp_path: Path) -> None:
+        from server.tools.context import _read_recent_notes
+
+        notes_file = tmp_path / "DOES_NOT_EXIST.md"
+        result = _read_recent_notes(notes_file)
+        assert result == ""

@@ -52,3 +52,9 @@ class TestJiraRemoveWatcher:
             "/rest/api/2/issue/PROJ-42/watchers", params={"username": "alice"}
         )
         assert json.loads(result) == {"deleted": True, "issue_key": "PROJ-42", "username": "alice"}
+
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
+        mock_jira_client.delete.side_effect = RuntimeError("Jira API error 403: forbidden")
+
+        with pytest.raises(RuntimeError, match="403"):
+            watcher_tools["jira_remove_watcher"](issue_key="PROJ-42", username="alice")

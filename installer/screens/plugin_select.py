@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Static
+from textual.widgets import Button, DataTable, Footer, Static
 
 from installer.tui import (
     CATEGORY_ORDER,
@@ -38,13 +39,15 @@ class PluginSelectScreen(Screen[list[str]]):
         height: 3;
         content-align: center middle;
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         padding: 1 2;
     }
 
     #table-container {
         height: 1fr;
-        margin: 0 2;
+        margin: 1 2;
+        border: round $primary-background;
     }
 
     DataTable {
@@ -57,6 +60,8 @@ class PluginSelectScreen(Screen[list[str]]):
         max-height: 3;
         padding: 0 2;
         color: $warning;
+        background: $warning 15%;
+        border-top: solid $warning 50%;
         display: none;
     }
 
@@ -75,7 +80,9 @@ class PluginSelectScreen(Screen[list[str]]):
         dock: bottom;
         height: 1;
         padding: 0 2;
-        color: $text-muted;
+        color: $accent;
+        background: $surface;
+        text-style: italic;
     }
     """
 
@@ -91,12 +98,14 @@ class PluginSelectScreen(Screen[list[str]]):
         self,
         marketplace_path: Path | None = None,
         preselect: set[str] | None = None,
+        branch: str | None = None,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self._marketplace_path = marketplace_path
+        self._branch = branch
         self._preselect = preselect if preselect is not None else DEFAULT_PRESELECT
         self._plugins: list[PluginInfo] = []
         # Map row index (0-based, skipping category rows) -> plugin name
@@ -107,7 +116,6 @@ class PluginSelectScreen(Screen[list[str]]):
         self._category_rows: set[int] = set()
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static("Select plugins to install", id="title-bar")
         with Vertical(id="table-container"):
             table = DataTable(id="plugin-table", cursor_type="row", zebra_stripes=True)
@@ -121,7 +129,7 @@ class PluginSelectScreen(Screen[list[str]]):
 
     def on_mount(self) -> None:
         """Load plugins and populate the table."""
-        self._plugins = load_plugins(self._marketplace_path)
+        self._plugins = load_plugins(self._marketplace_path, branch=self._branch)
         self._selected = {p.name for p in self._plugins if p.name in self._preselect}
         self._populate_table()
         self._update_status()
@@ -142,9 +150,10 @@ class PluginSelectScreen(Screen[list[str]]):
                     current_category.title(),
                 )
                 # Category separator row
+                styled_label = Text(f"  {cat_label}  ", style="bold reverse")
                 table.add_row(
                     "",
-                    f"── {cat_label} ──",
+                    styled_label,
                     "",
                     "",
                     "",

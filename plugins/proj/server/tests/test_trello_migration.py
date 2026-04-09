@@ -431,3 +431,26 @@ class TestMigrateChecklistToCard:
         assert result["attachments_created"] == 0
         assert len(result["errors"]) == 1
         assert "attachment failed" in result["errors"][0]
+
+    def test_get_lists_api_error(self, cfg_with_project):
+        """When fetching board lists fails, migration returns early with error."""
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+
+        t1 = _make_todo(cfg, name, "Todo", trello_checklist_item_id="item1")
+        todos = [t1]
+        _save_todos(cfg, name, todos)
+
+        call_trello = _fake_trello_tool({"get_lists": [RuntimeError("board not accessible")]})
+
+        result = migrate_checklist_to_card(
+            cfg,
+            name,
+            meta,
+            todos,
+            call_trello=call_trello,
+        )
+
+        assert result["migrated"] == 0
+        assert "board not accessible" in result["errors"][0]
+        assert result["backup_path"]  # backup was still created before the error

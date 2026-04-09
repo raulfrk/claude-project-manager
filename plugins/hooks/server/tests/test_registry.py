@@ -328,3 +328,101 @@ class TestVerificationList:
         data = json.loads(result)
         assert data["hooks"] == []
         assert len(data["verification_hooks"]) == 1
+
+
+# ── Feedback validation ─────────────────────────────────────────────────────
+
+
+class TestFeedbackValidation:
+    def test_feedback_mapping_invalid_json(self, hooks_yaml: Path):
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                blocking=True,
+                feedback_mapping="not-json",
+            )
+        assert "Error" in result
+        assert "not valid JSON" in result
+
+    def test_feedback_mapping_non_dict(self, hooks_yaml: Path):
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                blocking=True,
+                feedback_mapping="[1, 2]",
+            )
+        assert "Error" in result
+        assert "must be a JSON object" in result
+
+    def test_feedback_requires_blocking(self, hooks_yaml: Path):
+        """feedback_mapping with blocking=False (and verification=False) is rejected."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                blocking=False,
+                feedback_mapping='{"task_id": "task_id"}',
+                feedback_tool="todo_update",
+            )
+        assert "Error" in result
+        assert "blocking" in result.lower()
+
+    def test_feedback_allowed_with_verification(self, hooks_yaml: Path):
+        """feedback_mapping with verification=True is allowed (verification forces blocking)."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                blocking=False,
+                verification=True,
+                feedback_mapping='{"task_id": "task_id"}',
+                feedback_tool="todo_update",
+            )
+        assert "Registered" in result
+
+
+# ── Condition syntax validation ─────────────────────────────────────────────
+
+
+class TestConditionValidation:
+    def test_empty_condition_rejected(self, hooks_yaml: Path):
+        """Empty/whitespace condition is rejected at registration."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                condition="   ",
+            )
+        data = json.loads(result)
+        assert "error" in data or "Invalid" in str(data)
+
+    def test_parentheses_condition_rejected(self, hooks_yaml: Path):
+        """Conditions with parentheses are rejected."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                condition="(a.b or c.d) and e.f",
+            )
+        data = json.loads(result)
+        assert "error" in data or "Parentheses" in str(data)
+
+    def test_empty_operand_rejected(self, hooks_yaml: Path):
+        """Condition with empty operand around 'and' is rejected."""
+        with patch("server.lib.storage._HOOKS_FILE", hooks_yaml):
+            result = hooks_register(
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                condition="a.b and  and c.d",
+            )
+        data = json.loads(result)
+        assert "error" in data or "Empty" in str(data)

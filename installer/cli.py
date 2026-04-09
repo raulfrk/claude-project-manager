@@ -69,4 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable Textual TUI and use the plain Rich-based flow.",
     )
 
+    parser.add_argument(
+        "--branch",
+        metavar="BRANCH",
+        default=None,
+        help="Git branch/ref to install from (e.g. --branch dev).",
+    )
+
     return parser

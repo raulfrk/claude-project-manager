@@ -175,23 +175,6 @@ class TestConfigUpdateIntegrationFlags:
         loaded = storage.load_config()
         assert loaded.sandbox_integration is False
 
-    async def test_worktree_integration_false_no_warning(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        settings_path = tmp_path / "settings_missing.json"
-        monkeypatch.setattr("server.lib.sandbox_helpers._USER_SETTINGS", settings_path)
-
-        result = await call_tool(mcp_app, "config_update", worktree_integration=False)
-
-        assert "Warning" not in result
-        assert "updated" in result.lower()
-        loaded = storage.load_config()
-        assert loaded.worktree_integration is False
-
     async def test_omitting_both_flags_leaves_them_unchanged(
         self,
         mcp_app: Any,

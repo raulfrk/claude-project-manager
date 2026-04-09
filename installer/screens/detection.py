@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Static
+from textual.widgets import Button, DataTable, Footer, Static
 
 from installer.detect import InstallState, _safe_stat, _validate_yaml
 
@@ -51,21 +52,24 @@ class DetectionScreen(Screen[bool]):
         height: 3;
         content-align: center middle;
         text-style: bold;
-        color: $accent;
+        color: $text;
+        background: $accent;
         padding: 1 2;
     }
 
     #components-container {
         height: auto;
         max-height: 10;
-        margin: 0 2 1 2;
+        margin: 1 2 1 2;
         padding: 1 2;
-        border: tall $surface;
+        border: round $primary-background;
+        background: $surface;
     }
 
     #table-container {
         height: 1fr;
         margin: 0 2;
+        border: round $primary-background;
     }
 
     DataTable {
@@ -77,7 +81,9 @@ class DetectionScreen(Screen[bool]):
         height: auto;
         max-height: 3;
         padding: 0 2;
-        color: $text-muted;
+        color: $accent;
+        background: $surface;
+        text-style: italic;
     }
 
     #detection-button-bar {
@@ -112,7 +118,6 @@ class DetectionScreen(Screen[bool]):
         self._title_text = title_text
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static(self._title_text, id="detection-title")
         yield Static("", id="components-container")
         with Vertical(id="table-container"):
@@ -165,16 +170,25 @@ class DetectionScreen(Screen[bool]):
         table = self.query_one("#detection-table", DataTable)
         table.add_columns("Plugin", "Installed", "Available", "Status")
 
+        _STATUS_STYLES = {
+            "up-to-date": ("green", "bold"),
+            "outdated": ("yellow", "bold"),
+            "not installed": ("red", ""),
+            "unknown": ("dim", "italic"),
+        }
+
         for row in self._plugin_rows:
             installed = row.installed_version or "-"
             available = row.available_version or "-"
             status = row.status
+            color, style = _STATUS_STYLES.get(status, ("", ""))
+            styled_status = Text(status, style=f"{color} {style}".strip())
 
             table.add_row(
                 row.plugin,
                 installed,
                 available,
-                status,
+                styled_status,
                 key=f"detect-{row.plugin}",
             )
 

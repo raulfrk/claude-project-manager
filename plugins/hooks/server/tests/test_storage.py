@@ -473,3 +473,56 @@ class TestLoadInvocations:
         for i in range(5):
             log_invocation(hook_id=f"h-{i}", trigger_tool="t", target_tool="u", server="s", path=p)
         assert len(load_invocations(limit=0, path=p)) == 5
+
+
+# ── Edge cases for load functions ───────────────────────────────────────────
+
+
+class TestLoadEdgeCases:
+    def test_load_failures_non_list_returns_empty(self, failures_yaml: Path):
+        """When failures file contains a dict instead of list, return empty."""
+        failures_yaml.write_text(yaml.dump({"key": "value"}))
+        result = load_failures(failures_yaml)
+        assert result == []
+
+    def test_load_invocations_non_list_returns_empty(self, tmp_path: Path):
+        """When invocations file contains a dict instead of list, return empty."""
+        p = tmp_path / "inv.yaml"
+        p.write_text(yaml.dump({"key": "value"}))
+        result = load_invocations(path=p)
+        assert result == []
+
+    def test_load_verification_non_list_returns_empty(self, verifications_yaml: Path):
+        """When verifications file contains a dict instead of list, return empty."""
+        verifications_yaml.write_text(yaml.dump({"key": "value"}))
+        result = load_verification_results(path=verifications_yaml)
+        assert result == []
+
+
+class TestAtomicWrite:
+    def test_save_creates_parent_dirs_deeply(self, tmp_path: Path):
+        """save() creates deeply nested parent directories."""
+        deep_path = tmp_path / "a" / "b" / "c" / "hooks.yaml"
+        from server.lib.models import HookRegistry
+
+        save(HookRegistry(), deep_path)
+        assert deep_path.exists()
+        reg = load(deep_path)
+        assert reg.hooks == []
+
+    def test_concurrent_appends_preserved(self, failures_yaml: Path):
+        """Multiple log_failure calls don't lose entries."""
+        for i in range(10):
+            log_failure(
+                hook_id=f"hook-{i:03d}",
+                trigger_tool="t",
+                target_tool="u",
+                server="s",
+                error=f"err-{i}",
+                path=failures_yaml,
+            )
+        entries = load_failures(failures_yaml)
+        assert len(entries) == 10
+        # Verify ordering — oldest first, newest last
+        assert entries[0]["hook_id"] == "hook-000"
+        assert entries[9]["hook_id"] == "hook-009"

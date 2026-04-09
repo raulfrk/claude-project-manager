@@ -45,15 +45,9 @@ def register(app: FastMCP) -> None:
     def todoist_find_projects(name: str | None = None) -> str:
         client = get_client()
         response = client.get("/projects")
-        # API v1 returns {"results": [...]}, API v2 returns bare list
+        # REST API v2 returns a bare JSON array
         projects: list[JsonValue]
-        if isinstance(response, dict) and "results" in response:
-            results = response["results"]
-            projects = results if isinstance(results, list) else []
-        elif isinstance(response, list):
-            projects = response
-        else:
-            projects = []
+        projects = response if isinstance(response, list) else []
         if name is not None:
             lower = name.lower()
             projects = [

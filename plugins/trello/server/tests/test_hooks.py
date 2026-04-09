@@ -77,6 +77,112 @@ class TestDefaultHooksYaml:
         assert ids == expected
 
 
+# -- trello_add_card_hook ----------------------------------------------------
+
+
+class TestAddCardHook:
+    def _get_tool(self) -> callable:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.hooks import register
+
+        app = FastMCP("test")
+        register(app)
+        return app._tool_manager._tools["trello_add_card_hook"].fn
+
+    def test_no_board_id_returns_error(self, mocker: MagicMock) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={},
+        )
+        tool = self._get_tool()
+        result = json.loads(tool(name="project"))
+        assert "error" in result
+        assert "default_board_id" in result["error"]
+
+    def test_creates_card_on_default_list(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={
+                "default_board_id": "board-1",
+                "default_list": "Active",
+            },
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "Active"},
+        ]
+        mock_trello_client.post.return_value = {"id": "card-new"}
+        tool = self._get_tool()
+        result = json.loads(tool(name="my project"))
+        assert result["card_id"] == "card-new"
+        mock_trello_client.post.assert_called_once_with(
+            "/cards",
+            params={"idList": "list-1", "name": "my project"},
+        )
+
+    def test_default_list_not_found(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={
+                "default_board_id": "board-1",
+                "default_list": "Active",
+            },
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "Other"},
+        ]
+        tool = self._get_tool()
+        result = json.loads(tool(name="project"))
+        assert "error" in result
+        assert "Active" in result["error"]
+
+    def test_api_error_returns_error(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={
+                "default_board_id": "board-1",
+                "default_list": "Active",
+            },
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "Active"},
+        ]
+        mock_trello_client.post.side_effect = RuntimeError("API error 500")
+        tool = self._get_tool()
+        result = json.loads(tool(name="project"))
+        assert "error" in result
+        assert "500" in result["error"]
+
+    def test_uses_active_as_default_list_name(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={"default_board_id": "board-1"},
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "Active"},
+        ]
+        mock_trello_client.post.return_value = {"id": "card-1"}
+        tool = self._get_tool()
+        result = json.loads(tool(name="project"))
+        assert result["card_id"] == "card-1"
+
+
 # -- trello_add_todo_card_hook ------------------------------------------------
 
 
@@ -122,6 +228,30 @@ class TestAddTodoCardHook:
         mock_trello_client.post.assert_called_once_with(
             "/cards",
             params={"idList": "list-1", "name": "task 1"},
+        )
+
+    def test_creates_card_with_desc_and_due(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={
+                "default_board_id": "board-1",
+                "list_mappings": {"tasks": "proj-tasks"},
+            },
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "proj-tasks"},
+        ]
+        mock_trello_client.post.return_value = {"id": "card-new"}
+        tool = self._get_tool()
+        result = json.loads(tool(name="task 1", desc="details", due="2026-04-01"))
+        assert result["card_id"] == "card-new"
+        mock_trello_client.post.assert_called_once_with(
+            "/cards",
+            params={"idList": "list-1", "name": "task 1", "desc": "details", "due": "2026-04-01"},
         )
 
     def test_tasks_list_not_found(
@@ -195,6 +325,40 @@ class TestAddChildCardHook:
         mock_trello_client.post.assert_any_call(
             "/cards/parent-1/attachments",
             params={"url": "https://trello.com/c/abc", "name": "child task"},
+        )
+
+    def test_creates_card_with_desc_and_due(
+        self,
+        mock_trello_client: MagicMock,
+        mocker: MagicMock,
+    ) -> None:
+        mocker.patch(
+            "server.tools.hooks._get_trello_sync_config",
+            return_value={
+                "default_board_id": "board-1",
+                "list_mappings": {"tasks": "proj-tasks"},
+            },
+        )
+        mock_trello_client.get.return_value = [
+            {"id": "list-1", "name": "proj-tasks"},
+        ]
+        mock_trello_client.post.return_value = {
+            "id": "child-card",
+            "shortUrl": "https://trello.com/c/abc",
+        }
+        tool = self._get_tool()
+        result = json.loads(
+            tool(parent_card_id=None, name="child", desc="some desc", due="2026-06-01")
+        )
+        assert result["card_id"] == "child-card"
+        mock_trello_client.post.assert_called_once_with(
+            "/cards",
+            params={
+                "idList": "list-1",
+                "name": "child",
+                "desc": "some desc",
+                "due": "2026-06-01",
+            },
         )
 
     def test_creates_card_without_parent(

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from server.lib import storage
-from server.lib.models import ProjConfig, ProjectEntry, validate_project_name
+from server.lib import state, storage
+from server.lib.models import ProjConfig, ProjectEntry, Todo, validate_project_name
 
 
 @pytest.fixture()
@@ -137,8 +141,6 @@ class TestProjInitHooksSync:
 
 class TestTodoOperations:
     def test_add_and_list(self, cfg: ProjConfig, tmp_path: Path) -> None:
-        from server.lib.models import Todo
-
         _run_proj_init("myapp", str(tmp_path))
         from server.lib.ids import next_todo_id
 
@@ -169,28 +171,18 @@ class TestValidateProjectName:
 
     # --- valid names --------------------------------------------------------
 
-    def test_valid_simple(self) -> None:
-        assert validate_project_name("myproject") is None
-
-    def test_valid_with_hyphens_and_numbers(self) -> None:
-        assert validate_project_name("my-project-123") is None
-
-    def test_valid_with_underscores(self) -> None:
-        assert validate_project_name("my_project") is None
-
-    def test_valid_mixed_case(self) -> None:
-        assert validate_project_name("MyProject") is None
+    @pytest.mark.parametrize(
+        "name",
+        ["myproject", "my-project-123", "my_project", "MyProject"],
+    )
+    def test_valid_names(self, name: str) -> None:
+        assert validate_project_name(name) is None
 
     # --- empty / whitespace -------------------------------------------------
 
-    def test_empty_string(self) -> None:
-        assert validate_project_name("") is not None
-
-    def test_whitespace_only(self) -> None:
-        assert validate_project_name("   ") is not None
-
-    def test_tab_only(self) -> None:
-        assert validate_project_name("\t") is not None
+    @pytest.mark.parametrize("name", ["", "   ", "\t"])
+    def test_empty_or_whitespace(self, name: str) -> None:
+        assert validate_project_name(name) is not None
 
     # --- path traversal -----------------------------------------------------
 
@@ -200,18 +192,11 @@ class TestValidateProjectName:
     def test_double_dot_suffix(self) -> None:
         assert validate_project_name("foo..bar") is not None
 
-    # --- path separators ----------------------------------------------------
+    # --- path separators / null byte ----------------------------------------
 
-    def test_forward_slash(self) -> None:
-        assert validate_project_name("foo/bar") is not None
-
-    def test_backslash(self) -> None:
-        assert validate_project_name("foo\\bar") is not None
-
-    # --- null byte ----------------------------------------------------------
-
-    def test_null_byte(self) -> None:
-        assert validate_project_name("foo\x00bar") is not None
+    @pytest.mark.parametrize("name", ["foo/bar", "foo\\bar", "foo\x00bar"])
+    def test_path_separators_and_null(self, name: str) -> None:
+        assert validate_project_name(name) is not None
 
     # --- dot-prefixed / reserved --------------------------------------------
 
@@ -226,31 +211,15 @@ class TestValidateProjectName:
 
     # --- control characters -------------------------------------------------
 
-    def test_newline(self) -> None:
-        assert validate_project_name("foo\nbar") is not None
-
-    def test_carriage_return(self) -> None:
-        assert validate_project_name("foo\rbar") is not None
-
-    def test_del_character(self) -> None:
-        assert validate_project_name("foo\x7fbar") is not None
-
-    def test_low_control_character(self) -> None:
-        assert validate_project_name("foo\x01bar") is not None
+    @pytest.mark.parametrize("name", ["foo\nbar", "foo\rbar", "foo\x7fbar", "foo\x01bar"])
+    def test_control_characters(self, name: str) -> None:
+        assert validate_project_name(name) is not None
 
     # --- unicode ------------------------------------------------------------
 
-    def test_valid_unicode_latin(self) -> None:
-        # Accented Latin characters should be accepted (not control chars, no slashes)
-        assert validate_project_name("projet-été") is None
-
-    def test_valid_unicode_cjk(self) -> None:
-        # CJK characters should be accepted
-        assert validate_project_name("プロジェクト") is None
-
-    def test_valid_unicode_emoji_adjacent(self) -> None:
-        # Names with high codepoint chars (above ASCII) should be accepted
-        assert validate_project_name("project-2024-café") is None
+    @pytest.mark.parametrize("name", ["projet-été", "プロジェクト", "project-2024-café"])
+    def test_valid_unicode(self, name: str) -> None:
+        assert validate_project_name(name) is None
 
     # --- length -------------------------------------------------------------
 
@@ -276,17 +245,9 @@ class TestValidateProjectName:
 
     # --- tricky dot patterns ------------------------------------------------
 
-    def test_triple_dot(self) -> None:
-        # "..." contains ".." — must be rejected
-        assert validate_project_name("...") is not None
-
-    def test_double_dot_prefix(self) -> None:
-        # "..hidden" contains ".." — caught by path-traversal check
-        assert validate_project_name("..hidden") is not None
-
-    def test_dot_dot_only(self) -> None:
-        # ".." alone is a path-traversal sequence
-        assert validate_project_name("..") is not None
+    @pytest.mark.parametrize("name", ["...", "..hidden", ".."])
+    def test_double_dot_patterns(self, name: str) -> None:
+        assert validate_project_name(name) is not None
 
     # --- error message content ----------------------------------------------
 
@@ -314,11 +275,6 @@ class TestValidateProjectName:
         msg = validate_project_name("foo\x1bbar")  # ESC char
         assert msg is not None
         assert "control" in msg.lower() or "ordinal" in msg.lower()
-
-    def test_returns_none_not_false(self) -> None:
-        # Explicitly check return type for valid name
-        result = validate_project_name("valid-name")
-        assert result is None
 
 
 class TestProjArchivePreflight:
@@ -398,8 +354,6 @@ class TestProjArchivePreflight:
 
     def test_open_todos_counted(self, cfg: ProjConfig, tmp_path: Path) -> None:
         import json
-
-        from server.lib.models import Todo
 
         _run_proj_init("myapp", str(tmp_path))
         todos = [
@@ -551,3 +505,576 @@ class TestProjInitValidation:
         assert "project_name" in data
         assert data["project_name"] == "validproject"
         assert "result" in data
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _get_tools() -> dict[str, Callable[..., Any]]:
+    """Register all project tools and return a name->fn dict (sync wrappers)."""
+    from mcp.server.fastmcp import FastMCP
+
+    from server.tools.projects import register
+
+    app = FastMCP("test-tools")
+    register(app)
+    tools: dict[str, Callable[..., Any]] = {}
+    for name in app._tool_manager._tools:
+        tool_obj = app._tool_manager.get_tool(name)
+        if tool_obj is None:
+            continue
+
+        def _make_sync(t: Any = tool_obj) -> Callable[..., str]:
+            def _call(**kwargs: Any) -> str:
+                result = asyncio.run(t.run(kwargs, {}))
+                if isinstance(result, list):
+                    return "".join(getattr(c, "text", str(c)) for c in result)
+                return str(result)
+
+            return _call
+
+        tools[name] = _make_sync()
+    return tools
+
+
+# ── TestProjList ─────────────────────────────────────────────────────────────
+
+
+class TestProjList:
+    def test_no_projects(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        result = tools["proj_list"]()
+        assert "No projects found" in result
+
+    def test_lists_created_project(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        result = tools["proj_list"]()
+        assert "myapp" in result
+
+    def test_excludes_archived_by_default(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        index = storage.load_index(cfg)
+        index.projects["myapp"].archived = True
+        storage.save_index(cfg, index)
+        tools = _get_tools()
+        result = tools["proj_list"]()
+        assert "No projects found" in result
+
+    def test_includes_archived_when_requested(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        index = storage.load_index(cfg)
+        index.projects["myapp"].archived = True
+        storage.save_index(cfg, index)
+        tools = _get_tools()
+        result = tools["proj_list"](include_archived=True)
+        assert "myapp" in result
+
+
+# ── TestProjListFull ─────────────────────────────────────────────────────────
+
+
+class TestProjListFull:
+    def test_empty_projects(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_list_full"]())
+        assert data["count"] == 0
+        assert data["projects"] == []
+
+    def test_returns_project_metadata(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_list_full"]())
+        assert data["count"] == 1
+        assert data["projects"][0]["name"] == "myapp"
+        assert "repos" in data["projects"][0]
+
+    def test_invalid_integration_filter(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_list_full"](integration_filter="invalid"))
+        assert "error" in data
+
+
+# ── TestProjGet ──────────────────────────────────────────────────────────────
+
+
+class TestProjGet:
+    def test_no_active_project(self, cfg: ProjConfig) -> None:
+        state.clear_session_active()
+        tools = _get_tools()
+        data = json.loads(tools["proj_get"]())
+        assert "error" in data
+
+    def test_returns_project_details(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_get"](name="myapp"))
+        assert data["name"] == "myapp"
+
+    def test_not_found(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_get"](name="nonexistent"))
+        assert "error" in data
+
+
+# ── TestProjGetActive ────────────────────────────────────────────────────────
+
+
+class TestProjGetActive:
+    def test_no_active(self, cfg: ProjConfig) -> None:
+        state.clear_session_active()
+        tools = _get_tools()
+        data = json.loads(tools["proj_get_active"]())
+        assert "error" in data
+
+    def test_returns_active_project(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        tools = _get_tools()
+        result = tools["proj_get_active"]()
+        data = json.loads(result)
+        assert "error" not in data, f"Unexpected error: {data}"
+        assert data["name"] == "myapp"
+
+
+# ── TestProjUpdateMeta ───────────────────────────────────────────────────────
+
+
+class TestProjUpdateMeta:
+    def test_update_description(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_update_meta"](name="myapp", description="New desc"))
+        assert "Updated" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert meta.description == "New desc"
+
+    def test_update_status(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_update_meta"](name="myapp", status="paused"))
+        assert "Updated" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert meta.status == "paused"
+
+    def test_update_multiple_fields(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        tools["proj_update_meta"](
+            name="myapp",
+            priority="high",
+            tags=["backend", "urgent"],
+            target_date="2026-12-31",
+        )
+        meta = storage.load_meta(cfg, "myapp")
+        assert meta.priority == "high"
+        assert meta.tags == ["backend", "urgent"]
+        assert meta.dates.target == "2026-12-31"
+
+    def test_not_found(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_update_meta"](name="nonexistent", description="x"))
+        assert data["status"] == "not_found"
+
+
+# ── TestProjArchive ──────────────────────────────────────────────────────────
+
+
+class TestProjArchive:
+    def test_archives_project(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_archive"](name="myapp"))
+        assert "Archived" in data["result"]
+        index = storage.load_index(cfg)
+        assert index.projects["myapp"].archived is True
+
+    def test_clears_session_active(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        tools = _get_tools()
+        tools["proj_archive"](name="myapp")
+        assert state.get_session_active() is None
+
+    def test_not_found(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_archive"](name="nonexistent"))
+        assert "error" in data
+
+
+# ── TestProjAddRepo ──────────────────────────────────────────────────────────
+
+
+class TestProjAddRepo:
+    def test_adds_repo(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        new_repo = tmp_path / "extra"
+        new_repo.mkdir()
+        tools = _get_tools()
+        data = json.loads(
+            tools["proj_add_repo"](repo_path=str(new_repo), label="extra", project_name="myapp")
+        )
+        assert "Added" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert len(meta.repos) == 2
+        assert meta.repos[1].label == "extra"
+
+    def test_duplicate_path_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(
+            tools["proj_add_repo"](repo_path=str(tmp_path), label="dupe", project_name="myapp")
+        )
+        assert "error" in data
+        assert "already registered" in data["error"]
+
+    def test_duplicate_label_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        other = tmp_path / "other"
+        other.mkdir()
+        tools = _get_tools()
+        data = json.loads(
+            tools["proj_add_repo"](repo_path=str(other), label="code", project_name="myapp")
+        )
+        assert "error" in data
+        assert "Label" in data["error"]
+
+    def test_nonexistent_path_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(
+            tools["proj_add_repo"](repo_path="/nonexistent/path", label="bad", project_name="myapp")
+        )
+        assert "error" in data
+
+
+# ── TestProjRemoveRepo ───────────────────────────────────────────────────────
+
+
+class TestProjRemoveRepo:
+    def test_removes_repo(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        extra = tmp_path / "extra"
+        extra.mkdir()
+        tools = _get_tools()
+        tools["proj_add_repo"](repo_path=str(extra), label="extra", project_name="myapp")
+        data = json.loads(tools["proj_remove_repo"](label="extra", project_name="myapp"))
+        assert "Removed" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert len(meta.repos) == 1
+
+    def test_cannot_remove_last_repo(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_remove_repo"](label="code", project_name="myapp"))
+        assert "error" in data
+        assert "last repo" in data["error"]
+
+    def test_label_not_found(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_remove_repo"](label="nope", project_name="myapp"))
+        assert "error" in data
+
+
+# ── TestProjLoadSession ──────────────────────────────────────────────────────
+
+
+class TestProjLoadSession:
+    def test_loads_project(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        state.clear_session_active()
+        tools = _get_tools()
+        data = json.loads(tools["proj_load_session"](name="myapp"))
+        assert data["project_name"] == "myapp"
+        assert state.get_session_active() == "myapp"
+
+    def test_not_found_suggests(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_load_session"](name="myap"))
+        # Fuzzy match should auto-resolve to "myapp"
+        assert data["project_name"] == "myapp"
+
+    def test_not_found_no_match(self, cfg: ProjConfig) -> None:
+        tools = _get_tools()
+        data = json.loads(tools["proj_load_session"](name="zzz_nonexistent"))
+        assert "error" in data
+
+
+# ── TestProjSetPermissions ───────────────────────────────────────────────────
+
+
+class TestProjSetPermissions:
+    def test_set_auto_grant(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_set_permissions"](auto_grant=True, project_name="myapp"))
+        assert "Set permissions" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert meta.permissions.auto_grant is True
+
+
+# ── TestProjInitDirs ────────────────────────────────────────────────────────
+
+
+class TestProjInitDirs:
+    """Integration tests: proj_init with the dirs parameter (multi-directory)."""
+
+    def _call_proj_init(self, tmp_path: Path, **kwargs: Any) -> str:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.projects import register
+
+        app = FastMCP("test-dirs")
+        register(app)
+        tool_fn = app._tool_manager.get_tool("proj_init")
+        assert tool_fn is not None
+
+        async def _run() -> str:
+            result = await tool_fn.run(kwargs, {})
+            if isinstance(result, list):
+                return "".join(getattr(c, "text", str(c)) for c in result)
+            return str(result)
+
+        return asyncio.run(_run())
+
+    def test_dirs_creates_multi_repo_project(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        dir1 = tmp_path / "frontend"
+        dir2 = tmp_path / "backend"
+        dir1.mkdir()
+        dir2.mkdir()
+        result = self._call_proj_init(
+            tmp_path,
+            name="multi-repo",
+            dirs=[
+                {"path": str(dir1), "label": "frontend"},
+                {"path": str(dir2), "label": "backend"},
+            ],
+        )
+        data = json.loads(result)
+        assert "project_name" in data
+        assert data["project_name"] == "multi-repo"
+        meta = storage.load_meta(cfg, "multi-repo")
+        assert len(meta.repos) == 2
+        labels = {r.label for r in meta.repos}
+        assert labels == {"frontend", "backend"}
+
+    def test_dirs_and_path_mutually_exclusive(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        dir1 = tmp_path / "dir1"
+        dir1.mkdir()
+        result = self._call_proj_init(
+            tmp_path,
+            name="conflict",
+            path=str(dir1),
+            dirs=[{"path": str(dir1), "label": "code"}],
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "either" in data["error"].lower() or "not both" in data["error"].lower()
+
+    def test_dirs_duplicate_label_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        dir1 = tmp_path / "dir1"
+        dir2 = tmp_path / "dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+        result = self._call_proj_init(
+            tmp_path,
+            name="dup-label",
+            dirs=[{"path": str(dir1), "label": "code"}, {"path": str(dir2), "label": "code"}],
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "Duplicate label" in data["error"]
+
+    def test_dirs_missing_path_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        result = self._call_proj_init(
+            tmp_path,
+            name="missing-path",
+            dirs=[{"path": "", "label": "code"}],
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "path" in data["error"].lower()
+
+    def test_dirs_missing_label_rejected(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        dir1 = tmp_path / "dir1"
+        dir1.mkdir()
+        result = self._call_proj_init(
+            tmp_path,
+            name="missing-label",
+            dirs=[{"path": str(dir1), "label": ""}],
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "label" in data["error"].lower()
+
+
+# ── TestProjInitProjectsBaseDir ─────────────────────────────────────────────
+
+
+class TestProjInitProjectsBaseDir:
+    """Integration tests: proj_init fallback to projects_base_dir when no path given."""
+
+    def _call_proj_init(self, **kwargs: Any) -> str:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.projects import register
+
+        app = FastMCP("test-base-dir")
+        register(app)
+        tool_fn = app._tool_manager.get_tool("proj_init")
+        assert tool_fn is not None
+
+        async def _run() -> str:
+            result = await tool_fn.run(kwargs, {})
+            if isinstance(result, list):
+                return "".join(getattr(c, "text", str(c)) for c in result)
+            return str(result)
+
+        return asyncio.run(_run())
+
+    def test_no_path_no_base_dir_returns_error(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """No path and no projects_base_dir configured returns an error."""
+        # Default cfg has no projects_base_dir
+        result = self._call_proj_init(name="no-path-proj")
+        data = json.loads(result)
+        assert "error" in data
+        assert "projects_base_dir" in data["error"]
+
+    def test_projects_base_dir_fallback(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When projects_base_dir is set and no path given, uses base_dir/name."""
+        base_dir = tmp_path / "projects"
+        base_dir.mkdir()
+
+        # Update config with projects_base_dir
+        cfg_obj = storage.load_config()
+        cfg_obj.projects_base_dir = str(base_dir)
+        storage.save_config(cfg_obj)
+
+        result = self._call_proj_init(name="auto-path-proj")
+        data = json.loads(result)
+        assert "project_name" in data
+        assert data["project_name"] == "auto-path-proj"
+        # Verify the repo path was derived from projects_base_dir
+        meta = storage.load_meta(cfg, "auto-path-proj")
+        assert len(meta.repos) == 1
+        expected_path = str((base_dir / "auto-path-proj").resolve())
+        assert meta.repos[0].path == expected_path
+        assert meta.repos[0].label == "code"
+
+
+# ── TestProjPurgeArchiveTool ────────────────────────────────────────────────
+
+
+class TestProjPurgeArchiveTool:
+    """Tests for proj_purge_archive using direct tool registration."""
+
+    def _call_purge(self, **kwargs: Any) -> str:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.projects import register
+
+        app = FastMCP("test-purge")
+        register(app)
+        tool_fn = app._tool_manager.get_tool("proj_purge_archive")
+        assert tool_fn is not None
+
+        async def _run() -> str:
+            result = await tool_fn.run(kwargs, {})
+            if isinstance(result, list):
+                return "".join(getattr(c, "text", str(c)) for c in result)
+            return str(result)
+
+        return asyncio.run(_run())
+
+    def test_purge_not_configured(self, cfg: ProjConfig) -> None:
+        """When purge_after_days is None, returns not-configured error."""
+        result = json.loads(self._call_purge())
+        assert "error" in result
+        assert "not configured" in result["error"].lower()
+
+    def test_purge_dry_run_lists_candidates(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Dry-run (confirm=False) lists eligible candidates without deleting."""
+        from datetime import timedelta
+
+        # Configure purge
+        cfg_obj = storage.load_config()
+        cfg_obj.archive.purge_after_days = 30
+        storage.save_config(cfg_obj)
+
+        # Create an archived project with old archive_date
+        _run_proj_init("old-proj", str(tmp_path / "old"))
+        index = storage.load_index(cfg)
+        entry = index.projects["old-proj"]
+        entry.archived = True
+        entry.purgeable = True
+        from datetime import date
+
+        entry.archive_date = (date.today() - timedelta(days=60)).isoformat()
+        storage.save_index(cfg, index)
+
+        result = json.loads(self._call_purge())
+        assert result.get("dry_run") is True
+        assert result["count"] == 1
+        assert result["candidates"][0]["name"] == "old-proj"
+
+    def test_purge_confirm_deletes(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """confirm=True actually purges eligible projects."""
+        from datetime import timedelta
+
+        cfg_obj = storage.load_config()
+        cfg_obj.archive.purge_after_days = 30
+        storage.save_config(cfg_obj)
+
+        _run_proj_init("doomed", str(tmp_path / "doomed"))
+        index = storage.load_index(cfg)
+        entry = index.projects["doomed"]
+        entry.archived = True
+        entry.purgeable = True
+        from datetime import date
+
+        entry.archive_date = (date.today() - timedelta(days=60)).isoformat()
+        storage.save_index(cfg, index)
+
+        tracking_dir = Path(cfg.tracking_dir) / "doomed"
+        assert tracking_dir.exists()
+
+        result = json.loads(self._call_purge(confirm=True))
+        assert "doomed" in result.get("purged", [])
+        assert not tracking_dir.exists()
+        index = storage.load_index(cfg)
+        assert "doomed" not in index.projects
+
+    def test_purge_skips_non_purgeable(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """Archived project with purgeable=False is not purged."""
+        from datetime import timedelta
+
+        cfg_obj = storage.load_config()
+        cfg_obj.archive.purge_after_days = 30
+        storage.save_config(cfg_obj)
+
+        _run_proj_init("protected", str(tmp_path / "protected"))
+        index = storage.load_index(cfg)
+        entry = index.projects["protected"]
+        entry.archived = True
+        entry.purgeable = False
+        from datetime import date
+
+        entry.archive_date = (date.today() - timedelta(days=60)).isoformat()
+        storage.save_index(cfg, index)
+
+        result = json.loads(self._call_purge())
+        candidates = [c["name"] for c in result.get("candidates", [])]
+        assert "protected" not in candidates
+
+    def test_purge_no_candidates(self, cfg: ProjConfig) -> None:
+        """When no projects are eligible, returns empty result."""
+        cfg_obj = storage.load_config()
+        cfg_obj.archive.purge_after_days = 30
+        storage.save_config(cfg_obj)
+
+        result = json.loads(self._call_purge())
+        assert "No projects eligible" in result.get("result", "")

@@ -217,6 +217,96 @@ class TestPostHook:
         assert mock_client.post.call_args[0][0] == "http://127.0.0.1:19101/hook"
 
     @pytest.mark.asyncio
+    async def test_post_hook_timeout(self):
+        """Timeout returns a FireResult with error, not an exception."""
+        with patch(
+            "server.lib.http_client.httpx.AsyncClient",
+        ) as mock_cls:
+            import httpx as _httpx
+
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = _httpx.ReadTimeout("timed out")
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            fr = await post_hook(
+                hook_id="h1",
+                url="http://localhost:9000/hook",
+                target_tool="slow_tool",
+                params={},
+            )
+
+        assert fr.ok is False
+        assert "Timeout" in (fr.error or "")
+        assert fr.status_code is None
+
+    @pytest.mark.asyncio
+    async def test_post_hook_connection_error(self):
+        """HTTP connection error returns FireResult.error gracefully."""
+        with patch(
+            "server.lib.http_client.httpx.AsyncClient",
+        ) as mock_cls:
+            import httpx as _httpx
+
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = _httpx.ConnectError("refused")
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            fr = await post_hook(
+                hook_id="h1",
+                url="http://localhost:9000/hook",
+                target_tool="dead_tool",
+                params={},
+            )
+
+        assert fr.ok is False
+        assert "HTTP error" in (fr.error or "")
+
+    @pytest.mark.asyncio
+    async def test_post_hook_unexpected_exception(self):
+        """Non-httpx exception is caught and returned in FireResult.error."""
+        with patch(
+            "server.lib.http_client.httpx.AsyncClient",
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = RuntimeError("boom")
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            fr = await post_hook(
+                hook_id="h1",
+                url="http://localhost:9000/hook",
+                target_tool="broken",
+                params={},
+            )
+
+        assert fr.ok is False
+        assert "Unexpected error" in (fr.error or "")
+
+
+class TestFireResultOk:
+    def test_ok_false_when_status_code_none(self):
+        """ok is False when status_code is None (e.g. connection failure)."""
+        fr = FireResult(hook_id="h1", status_code=None, error=None)
+        assert fr.ok is False
+
+    def test_ok_false_when_status_400(self):
+        fr = FireResult(hook_id="h1", status_code=400, error=None)
+        assert fr.ok is False
+
+    def test_ok_true_when_status_200_no_error(self):
+        fr = FireResult(hook_id="h1", status_code=200, error=None)
+        assert fr.ok is True
+
+    def test_ok_false_when_error_set(self):
+        fr = FireResult(hook_id="h1", status_code=200, error="something")
+        assert fr.ok is False
+
+    @pytest.mark.asyncio
     async def test_post_hook_4xx_with_json_error(self):
         """4xx response with JSON error body captures error message."""
         mock_resp = MagicMock()

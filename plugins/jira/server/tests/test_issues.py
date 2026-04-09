@@ -51,6 +51,12 @@ class TestJiraSearch:
         assert kwargs["params"]["maxResults"] == 50
         assert kwargs["params"]["startAt"] == 0
 
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error 500: server error")
+
+        with pytest.raises(RuntimeError, match="500"):
+            issue_tools["jira_search"](jql="project = PROJ")
+
 
 class TestJiraGetIssue:
     def test_fetches_issue_by_key(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
@@ -172,6 +178,18 @@ class TestJiraGetUserIssues:
         jql = params["jql"]
         assert "project in" not in jql
 
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client._config = JiraConfig(
+            personal_access_token="pat",
+            base_url="https://jira.example.com",
+            allowed_project_keys=["PROJ"],
+            default_user="alice",
+        )
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error 403: forbidden")
+
+        with pytest.raises(RuntimeError, match="403"):
+            issue_tools["jira_get_user_issues"](username="alice")
+
 
 class TestJiraCreateIssue:
     def test_create_issue_minimal(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
@@ -257,6 +275,18 @@ class TestJiraCreateIssue:
         assert "error" in parsed
         assert "400" in parsed["error"]
 
+    def test_unexpected_response_type_returns_error(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        """When API returns a non-dict (e.g. a list), create_issue returns an error."""
+        mock_jira_client.post.return_value = [{"unexpected": "list"}]
+
+        result = issue_tools["jira_create_issue"](project_key="PROJ", summary="Weird response")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "Unexpected response type" in parsed["error"]
+
 
 class TestJiraBulkCreateIssues:
     def test_posts_bulk_payload(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
@@ -315,6 +345,26 @@ class TestJiraBulkCreateIssues:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "issueUpdates" in parsed["error"]
+
+    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error 500: server error")
+
+        payload = json.dumps(
+            {
+                "issueUpdates": [
+                    {
+                        "fields": {
+                            "project": {"key": "PROJ"},
+                            "summary": "X",
+                            "issuetype": {"name": "Task"},
+                        }
+                    }
+                ]
+            }
+        )
+
+        with pytest.raises(RuntimeError, match="500"):
+            issue_tools["jira_bulk_create_issues"](issues_json=payload)
 
 
 class TestJiraBulkUpdateIssues:
@@ -434,3 +484,36 @@ class TestJiraBulkUpdateIssues:
 
         parsed = json.loads(result)
         assert "error" in parsed
+
+    def test_mixed_validation_and_api_failures(
+        self, mock_jira_client: MagicMock, issue_tools: dict
+    ) -> None:
+        """Mix of missing key, empty fields, API error, and success in one batch."""
+        mock_jira_client.put.side_effect = [
+            RuntimeError("Jira API error 403: forbidden"),
+            None,
+        ]
+
+        payload = json.dumps(
+            {
+                "updates": [
+                    {"fields": {"summary": "No key"}},  # missing key
+                    {"key": "PROJ-1", "fields": {}},  # empty fields
+                    {"key": "PROJ-2", "fields": {"summary": "Fails"}},  # API error
+                    {"key": "PROJ-3", "fields": {"summary": "OK"}},  # success
+                ]
+            }
+        )
+
+        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+
+        parsed = json.loads(result)
+        assert len(parsed["failures"]) == 3
+        assert parsed["failures"][0]["index"] == 0
+        assert "Missing 'key'" in parsed["failures"][0]["error"]
+        assert parsed["failures"][1]["index"] == 1
+        assert "No fields" in parsed["failures"][1]["error"]
+        assert parsed["failures"][2]["index"] == 2
+        assert "403" in parsed["failures"][2]["error"]
+        assert len(parsed["successes"]) == 1
+        assert parsed["successes"][0]["key"] == "PROJ-3"

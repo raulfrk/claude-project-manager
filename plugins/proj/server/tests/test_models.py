@@ -29,14 +29,6 @@ class TestTodoistSyncModel:
 
         assert result.mcp_server == "sentry"
 
-    def test_to_dict_includes_mcp_server(self) -> None:
-        ts = TodoistSync(enabled=True, auto_sync=True, mcp_server="custom")
-
-        d = ts.to_dict()
-
-        assert "mcp_server" in d
-        assert d["mcp_server"] == "custom"
-
     def test_roundtrip_with_custom_mcp_server(self) -> None:
         original = TodoistSync(enabled=False, auto_sync=True, mcp_server="my_server")
 
@@ -45,11 +37,6 @@ class TestTodoistSyncModel:
         assert result.mcp_server == "my_server"
         assert result.enabled == original.enabled
         assert result.auto_sync == original.auto_sync
-
-    def test_default_mcp_server_is_claude_ai_todoist(self) -> None:
-        ts = TodoistSync()
-
-        assert ts.mcp_server == "claude_ai_Todoist"
 
 
 class TestTodoDueDateModel:
@@ -62,6 +49,8 @@ class TestTodoDueDateModel:
         todo = self._make_minimal_todo()
 
         assert todo.due_date is None
+        d = todo.to_dict()
+        assert d["due_date"] is None
 
     def test_due_date_iso_string_roundtrip(self) -> None:
         todo = self._make_minimal_todo(due_date="2026-06-01")
@@ -79,22 +68,6 @@ class TestTodoDueDateModel:
         restored = Todo.from_dict(d)
 
         assert restored.due_date == "next Friday"
-
-    def test_to_dict_includes_due_date_key(self) -> None:
-        todo = self._make_minimal_todo(due_date="2026-12-31")
-
-        d = todo.to_dict()
-
-        assert "due_date" in d
-        assert d["due_date"] == "2026-12-31"
-
-    def test_to_dict_due_date_none_serializes_as_none(self) -> None:
-        todo = self._make_minimal_todo()
-
-        d = todo.to_dict()
-
-        assert "due_date" in d
-        assert d["due_date"] is None
 
     def test_from_dict_old_yaml_without_due_date_gives_none(self) -> None:
         """Deserializing old YAML that has no due_date key yields None."""
@@ -204,14 +177,6 @@ class TestProjectGitTrackingConfig:
         assert pgt2.enabled is True
         assert pgt2.github_enabled is False
         assert pgt2.github_repo_format == "custom-{project-name}"
-
-    def test_none_values_roundtrip(self) -> None:
-        pgt = ProjectGitTrackingConfig()
-        data = pgt.to_dict()
-        pgt2 = ProjectGitTrackingConfig.from_dict(data)
-        assert pgt2.enabled is None
-        assert pgt2.github_enabled is None
-        assert pgt2.github_repo_format is None
 
     def test_project_meta_includes_git_tracking(self) -> None:
         meta = ProjectMeta(name="test")

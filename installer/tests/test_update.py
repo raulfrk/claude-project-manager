@@ -1,22 +1,18 @@
-"""Tests for installer.update — version comparison and update/reinstall."""
+"""Tests for installer.update — version comparison and display."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from installer.detect import InstallState
-from installer.errors import InstallerError
 from installer.update import (
     _read_installed_version,
     _read_marketplace_versions,
     compare_versions,
     display_version_diff,
-    run_reinstall,
-    run_update,
 )
 
 
@@ -95,68 +91,3 @@ class TestDisplayVersionDiff:
     def test_with_diffs(self, mock_console):
         display_version_diff({"proj": ("0.9.0", "1.0.0")}, mock_console)
         # Should not raise
-
-
-class TestRunUpdate:
-    def test_no_cache_dir_raises(self, mock_console):
-        state = InstallState(cache_dir=None)
-        with pytest.raises(InstallerError, match="No cache directory"):
-            run_update(["proj"], state, mock_console)
-
-    def test_successful_update(self, tmp_path: Path, mock_home: Path, mock_console):
-        cache = tmp_path / "cache"
-        (cache / "proj").mkdir(parents=True)
-        (cache / "proj" / "old.txt").write_text("old")
-
-        state = InstallState(cache_dir=cache, installed_plugins=["proj"])
-
-        # Create a fake source dir
-        source = tmp_path / "plugins" / "proj"
-        source.mkdir(parents=True)
-        (source / "new.txt").write_text("new")
-
-        with patch("installer.update._resolve_plugin_source", return_value=source):
-            results = run_update(["proj"], state, mock_console)
-
-        assert results["proj"] is True
-        assert (cache / "proj" / "new.txt").exists()
-
-    def test_missing_source_fails(self, tmp_path: Path, mock_home: Path, mock_console):
-        cache = tmp_path / "cache"
-        (cache / "proj").mkdir(parents=True)
-        state = InstallState(cache_dir=cache, installed_plugins=["proj"])
-
-        with patch(
-            "installer.update._resolve_plugin_source",
-            return_value=tmp_path / "nonexistent",
-        ):
-            results = run_update(["proj"], state, mock_console)
-
-        assert results["proj"] is False
-
-
-class TestRunReinstall:
-    def test_no_cache_dir_raises(self, mock_console):
-        state = InstallState(cache_dir=None)
-        with pytest.raises(InstallerError, match="No cache directory"):
-            run_reinstall(["proj"], state, mock_console)
-
-    def test_reinstall_keep_configs(
-        self, tmp_path: Path, mock_home: Path, mock_console
-    ):
-        cache = tmp_path / "cache"
-        (cache / "proj").mkdir(parents=True)
-
-        state = InstallState(cache_dir=cache, installed_plugins=["proj"])
-
-        source = tmp_path / "plugins" / "proj"
-        source.mkdir(parents=True)
-        (source / "plugin.json").write_text("{}")
-
-        with (
-            patch("installer.update.Prompt.ask", return_value="1"),  # keep configs
-            patch("installer.update._resolve_plugin_source", return_value=source),
-        ):
-            results = run_reinstall(["proj"], state, mock_console)
-
-        assert results["proj"] is True
