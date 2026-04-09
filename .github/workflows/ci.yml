@@ -71,6 +71,8 @@ jobs:
   test-installer-e2e:
     needs: pre-commit
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
