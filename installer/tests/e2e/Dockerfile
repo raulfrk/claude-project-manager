@@ -2,7 +2,7 @@
 # Provides Python 3.12, Node.js (for Claude CLI), git, and uv.
 
 # --- Stage 1: fetch uv binary ---
-FROM docker.io/astral-sh/uv:latest AS uv
+FROM ghcr.io/astral-sh/uv:latest AS uv
 
 # --- Stage 2: test runner ---
 FROM docker.io/python:3.12-slim
