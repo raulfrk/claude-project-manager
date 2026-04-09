@@ -608,108 +608,157 @@ class TestRichCLIAutoSync:
 
 
 # ============================================================================
-# Integration: _patch_proj_yaml_auto_sync
+# Unit tests: _write_all_configs and _compute_diff
 # ============================================================================
 
 
-class TestPatchProjYamlAutoSync:
-    """Test that _patch_proj_yaml_auto_sync writes correct values to proj.yaml."""
+class TestConfigWriteOnContinue:
+    """Unit tests for _write_all_configs() and _compute_diff() on integration screens."""
 
-    def test_writes_auto_sync_to_proj_yaml(self, mock_home: Path):
-        """Integration results patch proj.yaml with correct auto_sync values."""
-        from installer.app import InstallerApp
-        from installer.wizard import _atomic_write
-
-        # Write initial proj.yaml
-        proj_yaml = mock_home / ".claude" / "proj.yaml"
-        _atomic_write(
-            proj_yaml,
-            yaml.dump(
-                {
-                    "version": "1",
-                    "tracking_dir": "~/projects/tracking",
-                    "sync": {
-                        "todoist": {"enabled": True},
-                        "trello": {"enabled": True},
-                    },
-                    "jira": {"enabled": True},
-                }
-            ),
+    def test_write_all_configs_writes_service_yaml(self, mock_home: Path):
+        """_write_all_configs writes credentials to service yaml and sync flags to proj.yaml."""
+        screen = TodoistConfigScreen()
+        screen._write_all_configs(
+            {"api_token": "test-tok", "enabled": True, "auto_sync": True}
         )
 
-        # Create app and simulate integration results
-        app = InstallerApp()
-        app.selected_plugins = ["proj", "todoist", "trello", "jira"]
-        app._integration_results = {
-            "todoist": {"auto_sync": False, "api_token": "tok"},
-            "trello": {"auto_sync": True, "api_key": "k", "token": "t"},
-            "jira": {"auto_sync": False, "base_url": "https://x.atlassian.net"},
-        }
-        app._patch_proj_yaml_auto_sync()
+        todoist_yaml = mock_home / ".claude" / "todoist.yaml"
+        assert todoist_yaml.exists()
+        data = yaml.safe_load(todoist_yaml.read_text())
+        assert data["api_token"] == "test-tok"
+
+        proj_yaml = mock_home / ".claude" / "proj.yaml"
+        assert proj_yaml.exists()
+        proj_data = yaml.safe_load(proj_yaml.read_text())
+        assert proj_data["sync"]["todoist"]["enabled"] is True
+        assert proj_data["sync"]["todoist"]["auto_sync"] is True
+
+    def test_write_all_configs_merges_existing(self, mock_home: Path):
+        """_write_all_configs merges with existing service yaml, preserving extra keys."""
+        todoist_yaml = mock_home / ".claude" / "todoist.yaml"
+        todoist_yaml.write_text(
+            yaml.dump({"api_token": "old", "extra_key": "keep"}),
+            encoding="utf-8",
+        )
+
+        screen = TodoistConfigScreen()
+        screen._write_all_configs(
+            {"api_token": "new", "enabled": True, "auto_sync": False}
+        )
+
+        data = yaml.safe_load(todoist_yaml.read_text())
+        assert data["api_token"] == "new"
+        assert data["extra_key"] == "keep"
+
+    def test_write_all_configs_writes_enabled_to_proj_yaml(self, mock_home: Path):
+        """_write_all_configs writes enabled and auto_sync to existing proj.yaml."""
+        proj_yaml = mock_home / ".claude" / "proj.yaml"
+        proj_yaml.write_text(
+            yaml.dump({"version": "1", "tracking_dir": "~/t"}),
+            encoding="utf-8",
+        )
+
+        screen = TodoistConfigScreen()
+        screen._write_all_configs(
+            {"api_token": "t", "enabled": True, "auto_sync": False}
+        )
 
         data = yaml.safe_load(proj_yaml.read_text())
+        assert data["sync"]["todoist"]["enabled"] is True
         assert data["sync"]["todoist"]["auto_sync"] is False
-        assert data["sync"]["trello"]["auto_sync"] is True
+        # Existing keys preserved
+        assert data["version"] == "1"
+        assert data["tracking_dir"] == "~/t"
+
+    def test_write_all_configs_jira_section(self, mock_home: Path):
+        """JiraConfigScreen writes to jira section (not sync.jira) in proj.yaml."""
+        screen = JiraConfigScreen()
+        screen._write_all_configs(
+            {
+                "base_url": "https://x.atlassian.net",
+                "default_user": "u",
+                "personal_access_token": "pat",
+                "default_project": "PROJ",
+                "enabled": True,
+                "auto_sync": False,
+            }
+        )
+
+        proj_yaml = mock_home / ".claude" / "proj.yaml"
+        data = yaml.safe_load(proj_yaml.read_text())
+        assert data["jira"]["enabled"] is True
         assert data["jira"]["auto_sync"] is False
+        # Should NOT be nested under sync
+        assert "sync" not in data or "jira" not in data.get("sync", {})
 
-    def test_missing_proj_yaml_is_noop(self, mock_home: Path):
-        """If proj.yaml doesn't exist, _patch_proj_yaml_auto_sync is a no-op."""
-        from installer.app import InstallerApp
+    def test_compute_diff_first_time(self, mock_home: Path):
+        """_compute_diff returns is_first_time=True when no service config exists."""
+        screen = TodoistConfigScreen()
+        _diff_text, _has_changes, is_first_time = screen._compute_diff(
+            {"api_token": "t", "enabled": True, "auto_sync": True}
+        )
+        assert is_first_time is True
 
-        app = InstallerApp()
-        app.selected_plugins = ["proj", "todoist"]
-        app._integration_results = {"todoist": {"auto_sync": True, "api_token": "t"}}
-        app._patch_proj_yaml_auto_sync()
-
-        proj_yaml = mock_home / ".claude" / "proj.yaml"
-        assert not proj_yaml.exists()
-
-    def test_empty_integration_results_is_noop(self, mock_home: Path):
-        """No integration results means no patching."""
-        from installer.app import InstallerApp
-        from installer.wizard import _atomic_write
-
-        proj_yaml = mock_home / ".claude" / "proj.yaml"
-        _atomic_write(proj_yaml, yaml.dump({"version": "1"}))
-
-        app = InstallerApp()
-        app.selected_plugins = ["proj"]
-        app._integration_results = {}
-        app._patch_proj_yaml_auto_sync()
-
-        data = yaml.safe_load(proj_yaml.read_text())
-        assert data == {"version": "1"}
-
-    def test_skipped_integration_leaves_proj_yaml_unchanged(self, mock_home: Path):
-        """Skipped integrations (absent from results) do not modify proj.yaml."""
-        from installer.app import InstallerApp
-        from installer.wizard import _atomic_write
+    def test_compute_diff_no_changes(self, mock_home: Path):
+        """_compute_diff returns has_changes=False when nothing changed."""
+        todoist_yaml = mock_home / ".claude" / "todoist.yaml"
+        todoist_yaml.write_text(
+            yaml.dump({"api_token": "t"}),
+            encoding="utf-8",
+        )
 
         proj_yaml = mock_home / ".claude" / "proj.yaml"
-        original = {
-            "version": "1",
-            "tracking_dir": "~/projects/tracking",
-            "sync": {
-                "todoist": {"enabled": True, "auto_sync": True},
-                "trello": {"enabled": False},
-            },
-            "jira": {"enabled": False},
-        }
-        _atomic_write(proj_yaml, yaml.dump(original))
+        proj_yaml.write_text(
+            yaml.dump({"sync": {"todoist": {"enabled": True, "auto_sync": True}}}),
+            encoding="utf-8",
+        )
 
-        app = InstallerApp()
-        app.selected_plugins = ["proj", "todoist", "trello", "jira"]
-        # Only todoist submitted; trello and jira were skipped (not in results)
-        app._integration_results = {
-            "todoist": {"auto_sync": False, "api_token": "tok"},
-        }
-        app._patch_proj_yaml_auto_sync()
+        screen = TodoistConfigScreen()
+        _diff_text, has_changes, is_first_time = screen._compute_diff(
+            {"api_token": "t", "enabled": True, "auto_sync": True}
+        )
+        assert is_first_time is False
+        assert has_changes is False
 
-        data = yaml.safe_load(proj_yaml.read_text())
-        # Todoist updated, trello/jira unchanged
-        assert data["sync"]["todoist"]["auto_sync"] is False
-        assert "auto_sync" not in data["sync"]["trello"]
-        assert "auto_sync" not in data["jira"]
+    def test_compute_diff_detects_changes(self, mock_home: Path):
+        """_compute_diff returns has_changes=True and non-empty diff_text when values differ."""
+        todoist_yaml = mock_home / ".claude" / "todoist.yaml"
+        todoist_yaml.write_text(
+            yaml.dump({"api_token": "old"}),
+            encoding="utf-8",
+        )
+
+        screen = TodoistConfigScreen()
+        diff_text, has_changes, is_first_time = screen._compute_diff(
+            {"api_token": "new", "enabled": True, "auto_sync": True}
+        )
+        assert is_first_time is False
+        assert has_changes is True
+        assert diff_text  # non-empty
+
+    def test_write_all_configs_trello(self, mock_home: Path):
+        """TrelloConfigScreen writes all 3 credential keys and sync.trello section."""
+        screen = TrelloConfigScreen()
+        screen._write_all_configs(
+            {
+                "api_key": "k",
+                "token": "t",
+                "default_board_id": "b123",
+                "enabled": True,
+                "auto_sync": True,
+            }
+        )
+
+        trello_yaml = mock_home / ".claude" / "trello.yaml"
+        data = yaml.safe_load(trello_yaml.read_text())
+        assert data["api_key"] == "k"
+        assert data["token"] == "t"
+        assert data["default_board_id"] == "b123"
+
+        proj_yaml = mock_home / ".claude" / "proj.yaml"
+        proj_data = yaml.safe_load(proj_yaml.read_text())
+        assert proj_data["sync"]["trello"]["enabled"] is True
+        assert proj_data["sync"]["trello"]["auto_sync"] is True
 
 
 # ============================================================================

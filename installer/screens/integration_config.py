@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import difflib
 import os
 import tempfile
 from abc import abstractmethod
@@ -22,6 +23,8 @@ from textual.widgets import (
     Static,
     Switch,
 )
+
+from installer.screens.config_diff import ConfigDiffScreen
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -184,6 +187,19 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
     def _collect_values(self) -> dict[str, str | bool]:
         """Gather values from the form fields."""
 
+    @property
+    @abstractmethod
+    def _credential_keys(self) -> tuple[str, ...]:
+        """Keys from _collect_values() that are credentials (not enabled/auto_sync)."""
+
+    @property
+    @abstractmethod
+    def _proj_yaml_section(self) -> tuple[str, ...]:
+        """Path segments in proj.yaml where sync flags live.
+
+        E.g. ("sync", "todoist") means proj.yaml["sync"]["todoist"].
+        """
+
     # -- Common methods --
 
     def _read_existing_config(self) -> dict[str, Any]:
@@ -199,6 +215,127 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
         """Write values to config_path as YAML using atomic write."""
         content = yaml.dump(values, default_flow_style=False, sort_keys=False)
         _atomic_write(self.config_path, content)
+
+    def _read_proj_yaml(self) -> dict[str, Any]:
+        """Read ~/.claude/proj.yaml, return {} if not found or invalid."""
+        proj_yaml = Path.home() / ".claude" / "proj.yaml"
+        try:
+            text = proj_yaml.read_text(encoding="utf-8")
+            data = yaml.safe_load(text)
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, OSError, yaml.YAMLError):
+            return {}
+
+    def _get_proj_yaml_section(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Navigate to the proj.yaml section for this service."""
+        current = data
+        for key in self._proj_yaml_section:
+            current = current.get(key, {})
+            if not isinstance(current, dict):
+                return {}
+        return current
+
+    def _compute_diff(self, values: dict[str, str | bool]) -> tuple[str, bool, bool]:
+        """Compute a unified YAML diff between current and proposed config.
+
+        Returns (diff_text, has_changes, is_first_time).
+        """
+        # Build proposed service config (credentials only)
+        proposed_svc = {k: values[k] for k in self._credential_keys if k in values}
+        # Build proposed proj.yaml section
+        proposed_proj = {
+            "enabled": bool(values.get("enabled", False)),
+            "auto_sync": bool(values.get("auto_sync", True)),
+        }
+
+        # Read existing configs
+        existing_svc = self._read_existing_config()
+        proj_data = self._read_proj_yaml()
+        existing_proj = self._get_proj_yaml_section(proj_data)
+
+        # First-time: no service config file exists
+        is_first_time = not self.config_path.exists()
+
+        # Merge existing service config with proposed for comparison
+        merged_svc = dict(existing_svc)
+        merged_svc.update(proposed_svc)
+
+        # Build YAML representations for diff
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+
+        # Service config section
+        if existing_svc:
+            old_lines.append(f"# {self.config_path.name}\n")
+            old_lines.extend(
+                yaml.dump(
+                    existing_svc, default_flow_style=False, sort_keys=False
+                ).splitlines(keepends=True)
+            )
+        new_lines.append(f"# {self.config_path.name}\n")
+        new_lines.extend(
+            yaml.dump(merged_svc, default_flow_style=False, sort_keys=False).splitlines(
+                keepends=True
+            )
+        )
+
+        # Proj.yaml section
+        section_label = ".".join(self._proj_yaml_section)
+        if existing_proj:
+            old_lines.append(f"\n# proj.yaml [{section_label}]\n")
+            old_lines.extend(
+                yaml.dump(
+                    {
+                        k: existing_proj[k]
+                        for k in ("enabled", "auto_sync")
+                        if k in existing_proj
+                    },
+                    default_flow_style=False,
+                    sort_keys=False,
+                ).splitlines(keepends=True)
+            )
+        new_lines.append(f"\n# proj.yaml [{section_label}]\n")
+        new_lines.extend(
+            yaml.dump(
+                proposed_proj, default_flow_style=False, sort_keys=False
+            ).splitlines(keepends=True)
+        )
+
+        diff = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile="current",
+            tofile="proposed",
+            lineterm="",
+        )
+        diff_text = "\n".join(diff)
+        has_changes = bool(diff_text.strip())
+
+        return diff_text, has_changes, is_first_time
+
+    def _write_all_configs(self, values: dict[str, str | bool]) -> None:
+        """Write credentials to service config and sync flags to proj.yaml."""
+        # 1. Write service config (merge with existing)
+        existing_svc = self._read_existing_config()
+        for key in self._credential_keys:
+            if key in values:
+                existing_svc[key] = values[key]
+        self._write_config(existing_svc)
+
+        # 2. Patch proj.yaml with enabled/auto_sync
+        proj_yaml = Path.home() / ".claude" / "proj.yaml"
+        proj_data = self._read_proj_yaml()
+
+        # Navigate/create the section path
+        current = proj_data
+        for key in self._proj_yaml_section:
+            current = current.setdefault(key, {})
+
+        current["enabled"] = bool(values.get("enabled", False))
+        current["auto_sync"] = bool(values.get("auto_sync", True))
+
+        content = yaml.dump(proj_data, default_flow_style=False, sort_keys=False)
+        _atomic_write(proj_yaml, content)
 
     # -- Compose --
 
@@ -272,14 +409,24 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
         """Hide the loading indicator."""
         self.query_one("#validation-loading").remove_class("visible")
 
+    def _on_diff_result(self, apply: bool) -> None:
+        """Handle ConfigDiffScreen result."""
+        if not apply:
+            return  # Cancel — stay on integration form
+        values = self._collect_values()
+        self._write_all_configs(values)
+        self.dismiss(values)
+
     async def _on_continue(self) -> None:
-        """Handle Continue: validate, then dismiss with values."""
+        """Handle Continue: validate, compute diff, then write and dismiss."""
         self._hide_error()
 
         # Skip validation if sync is disabled — no credentials needed
         sync_enabled = self.query_one("#sync_enabled", Switch).value
         if not sync_enabled:
-            self.dismiss(self._collect_values())
+            values = self._collect_values()
+            self._write_all_configs(values)
+            self.dismiss(values)
             return
 
         self._show_loading()
@@ -294,7 +441,22 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
             return
 
         values = self._collect_values()
-        self.dismiss(values)
+        diff_text, has_changes, is_first_time = self._compute_diff(values)
+
+        if is_first_time or not has_changes:
+            # First-time setup or no changes — write directly
+            self._write_all_configs(values)
+            self.dismiss(values)
+            return
+
+        # Show diff confirmation
+        self.app.push_screen(
+            ConfigDiffScreen(
+                service_name=self.service_name,
+                diff_text=diff_text,
+            ),
+            callback=self._on_diff_result,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle Continue and Skip button presses."""
@@ -314,6 +476,14 @@ class TodoistConfigScreen(BaseIntegrationScreen):
     @property
     def config_path(self) -> Path:
         return Path.home() / ".claude" / "todoist.yaml"
+
+    @property
+    def _credential_keys(self) -> tuple[str, ...]:
+        return ("api_token",)
+
+    @property
+    def _proj_yaml_section(self) -> tuple[str, ...]:
+        return ("sync", "todoist")
 
     def compose_fields(self) -> ComposeResult:
         existing = self._read_existing_config()
@@ -370,6 +540,14 @@ class TrelloConfigScreen(BaseIntegrationScreen):
     @property
     def config_path(self) -> Path:
         return Path.home() / ".claude" / "trello.yaml"
+
+    @property
+    def _credential_keys(self) -> tuple[str, ...]:
+        return ("api_key", "token", "default_board_id")
+
+    @property
+    def _proj_yaml_section(self) -> tuple[str, ...]:
+        return ("sync", "trello")
 
     def compose_fields(self) -> ComposeResult:
         existing = self._read_existing_config()
@@ -449,6 +627,14 @@ class JiraConfigScreen(BaseIntegrationScreen):
     @property
     def config_path(self) -> Path:
         return Path.home() / ".claude" / "jira.yaml"
+
+    @property
+    def _credential_keys(self) -> tuple[str, ...]:
+        return ("base_url", "default_user", "personal_access_token", "default_project")
+
+    @property
+    def _proj_yaml_section(self) -> tuple[str, ...]:
+        return ("jira",)
 
     def compose_fields(self) -> ComposeResult:
         existing = self._read_existing_config()

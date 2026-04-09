@@ -255,8 +255,6 @@ class InstallerApp(App):
     def _push_next_integration(self) -> None:
         """Push the next integration config screen, or proceed to install."""
         if not self._pending_integrations:
-            # Patch proj.yaml with auto_sync from integration results
-            self._patch_proj_yaml_auto_sync()
             # Check hooks diff before proceeding to install
             self._check_hooks_diff()
             return
@@ -275,49 +273,6 @@ class InstallerApp(App):
         if result is not None:
             self._integration_results[self._current_integration] = result
         self._push_next_integration()
-
-    def _patch_proj_yaml_auto_sync(self) -> None:
-        """Patch proj.yaml to add auto_sync values from integration results."""
-        if not self._integration_results:
-            return
-        needs_proj = bool(self._PROJ_PLUGINS & set(self.selected_plugins))
-        if not needs_proj:
-            return
-
-        proj_yaml = Path.home() / ".claude" / "proj.yaml"
-        if not proj_yaml.exists():
-            return
-
-        import yaml
-
-        try:
-            text = proj_yaml.read_text(encoding="utf-8")
-            data = yaml.safe_load(text)
-            if not isinstance(data, dict):
-                return
-        except (OSError, yaml.YAMLError):
-            return
-
-        # Todoist and Trello auto_sync go under sync.<service>.auto_sync
-        for service in ("todoist", "trello"):
-            if service in self._integration_results:
-                result = self._integration_results[service]
-                auto_sync = bool(result.get("auto_sync", True))
-                sync = data.setdefault("sync", {})
-                svc = sync.setdefault(service, {})
-                svc["auto_sync"] = auto_sync
-
-        # Jira auto_sync goes under jira.auto_sync
-        if "jira" in self._integration_results:
-            result = self._integration_results["jira"]
-            auto_sync = bool(result.get("auto_sync", True))
-            jira = data.setdefault("jira", {})
-            jira["auto_sync"] = auto_sync
-
-        _atomic_write(
-            proj_yaml,
-            yaml.dump(data, default_flow_style=False, sort_keys=False),
-        )
 
     def _check_hooks_diff(self) -> None:
         """Compute hooks diff and show review screen if changes exist."""

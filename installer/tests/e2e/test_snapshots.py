@@ -316,3 +316,51 @@ async def test_progress_snapshot() -> None:
 
         svg = app.export_screenshot()
         _assert_snapshot(svg, "progress")
+
+
+# ---------------------------------------------------------------------------
+# 7. TodoistConfigScreen -- integration config form
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_todoist_config_snapshot() -> None:
+    """Snapshot of the Todoist integration config screen."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        from installer.screens.integration_config import TodoistConfigScreen
+
+        screen = TodoistConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "todoist_config")
+
+
+# ---------------------------------------------------------------------------
+# 8. ConfigDiffScreen -- config change review
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_config_diff_snapshot() -> None:
+    """Snapshot of the config diff confirmation screen."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        from installer.screens.config_diff import ConfigDiffScreen
+
+        diff_text = (
+            "--- current\n"
+            "+++ proposed\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-api_token: old-token-value\n"
+            "+api_token: new-token-value\n"
+            " \n"
+            "-enabled: false\n"
+            "+enabled: true\n"
+        )
+        screen = ConfigDiffScreen(service_name="Todoist", diff_text=diff_text)
+        app.push_screen(screen)
+        await pilot.pause()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "config_diff")
