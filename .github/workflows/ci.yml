@@ -97,7 +97,7 @@ jobs:
       - name: Run e2e tests
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}/installer/tests/snapshots:/app/installer/tests/snapshots \
+            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
             uv run pytest installer/tests/e2e/ -v
 

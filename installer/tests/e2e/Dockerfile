@@ -41,4 +41,8 @@ COPY . .
 # Re-sync to pick up the local editable install
 RUN uv sync --frozen --group test || uv sync --group test
 
+# Regenerate snapshot golden files inside Docker so they match the runtime
+# rendering environment exactly (fonts, Rich version, terminal emulation).
+RUN SNAPSHOT_UPDATE=1 uv run pytest installer/tests/e2e/test_snapshots.py -v || true
+
 CMD ["uv", "run", "pytest", "installer/tests/e2e/", "-v"]

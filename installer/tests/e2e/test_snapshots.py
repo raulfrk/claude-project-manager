@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -57,27 +56,18 @@ class _ScreenHost(App):
         yield Static("")
 
 
-def _normalize_svg(svg: str) -> str:
-    """Strip environment-specific terminal IDs from Rich/Textual SVGs.
-
-    The ``terminal-NNNNNN`` hash changes between renders (different machines,
-    Docker vs local).  Normalising it allows structural comparison.
-    """
-    return re.sub(r"terminal-\d+", "terminal-0", svg)
-
-
 def _assert_snapshot(svg: str, name: str) -> None:
     """Compare *svg* against the golden file ``<name>.svg``.
 
     If the golden file does not exist or ``SNAPSHOT_UPDATE=1``, write it and
-    pass.  Otherwise assert equality after normalising volatile terminal IDs.
+    pass.  Otherwise assert exact equality.
     """
     golden = _SNAPSHOT_DIR / f"{name}.svg"
     if _FORCE_UPDATE or not golden.exists():
         golden.write_text(svg, encoding="utf-8")
         return  # first run -- golden file created
     expected = golden.read_text(encoding="utf-8")
-    assert _normalize_svg(svg) == _normalize_svg(expected), (
+    assert svg == expected, (
         f"Snapshot mismatch for {name!r}. "
         f"Delete {golden} and re-run to regenerate, "
         f"or set SNAPSHOT_UPDATE=1 to overwrite all."
