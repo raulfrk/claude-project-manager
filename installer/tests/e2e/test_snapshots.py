@@ -59,18 +59,22 @@ class _ScreenHost(App):
 def _assert_snapshot(svg: str, name: str) -> None:
     """Compare *svg* against the golden file ``<name>.svg``.
 
-    If the golden file does not exist or ``SNAPSHOT_UPDATE=1``, write it and
-    pass.  Otherwise assert exact equality.
+    ``SNAPSHOT_UPDATE=1`` writes/overwrites the golden and passes.
+    Missing golden without SNAPSHOT_UPDATE is a hard failure — forces
+    goldens to be generated explicitly and committed.
     """
     golden = _SNAPSHOT_DIR / f"{name}.svg"
-    if _FORCE_UPDATE or not golden.exists():
+    if _FORCE_UPDATE:
         golden.write_text(svg, encoding="utf-8")
-        return  # first run -- golden file created
+        return  # golden written/updated
+    assert golden.exists(), (
+        f"Golden file missing for {name!r}: {golden}. "
+        f"Run with SNAPSHOT_UPDATE=1 to generate."
+    )
     expected = golden.read_text(encoding="utf-8")
     assert svg == expected, (
         f"Snapshot mismatch for {name!r}. "
-        f"Delete {golden} and re-run to regenerate, "
-        f"or set SNAPSHOT_UPDATE=1 to overwrite all."
+        f"Delete {golden} and re-run with SNAPSHOT_UPDATE=1 to regenerate."
     )
 
 
