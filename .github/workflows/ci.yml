@@ -101,7 +101,7 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
-            sh -c "SNAPSHOT_UPDATE=1 uv run pytest installer/tests/e2e/test_snapshots.py -v"
+            sh -c "SNAPSHOT_CREATE_MISSING=1 uv run pytest installer/tests/e2e/test_snapshots.py -v"
 
       - name: Commit generated snapshots
         run: |

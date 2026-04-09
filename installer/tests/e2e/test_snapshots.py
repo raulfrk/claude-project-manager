@@ -37,6 +37,7 @@ _SNAPSHOT_DIR = Path(__file__).resolve().parent / "snapshots"
 _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 _FORCE_UPDATE = os.environ.get("SNAPSHOT_UPDATE", "") == "1"
+_CREATE_MISSING = os.environ.get("SNAPSHOT_CREATE_MISSING", "") == "1"
 
 # Consistent terminal size for reproducible screenshots
 _TERM_SIZE = (120, 40)
@@ -59,18 +60,23 @@ class _ScreenHost(App):
 def _assert_snapshot(svg: str, name: str) -> None:
     """Compare *svg* against the golden file ``<name>.svg``.
 
-    ``SNAPSHOT_UPDATE=1`` writes/overwrites the golden and passes.
-    Missing golden without SNAPSHOT_UPDATE is a hard failure — forces
-    goldens to be generated explicitly and committed.
+    Modes:
+    - ``SNAPSHOT_UPDATE=1``: overwrite all goldens (regenerate baseline).
+    - ``SNAPSHOT_CREATE_MISSING=1``: create only missing goldens, compare existing.
+    - Default: hard-fail on missing, exact-match on existing.
     """
     golden = _SNAPSHOT_DIR / f"{name}.svg"
     if _FORCE_UPDATE:
         golden.write_text(svg, encoding="utf-8")
-        return  # golden written/updated
-    assert golden.exists(), (
-        f"Golden file missing for {name!r}: {golden}. "
-        f"Run with SNAPSHOT_UPDATE=1 to generate."
-    )
+        return
+    if not golden.exists():
+        if _CREATE_MISSING:
+            golden.write_text(svg, encoding="utf-8")
+            return
+        pytest.fail(
+            f"Golden file missing for {name!r}: {golden}. "
+            f"Run with SNAPSHOT_UPDATE=1 to generate."
+        )
     expected = golden.read_text(encoding="utf-8")
     assert svg == expected, (
         f"Snapshot mismatch for {name!r}. "
