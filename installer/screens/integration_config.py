@@ -275,6 +275,13 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
     async def _on_continue(self) -> None:
         """Handle Continue: validate, then dismiss with values."""
         self._hide_error()
+
+        # Skip validation if sync is disabled — no credentials needed
+        sync_enabled = self.query_one("#sync_enabled", Switch).value
+        if not sync_enabled:
+            self.dismiss(self._collect_values())
+            return
+
         self._show_loading()
 
         try:

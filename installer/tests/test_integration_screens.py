@@ -103,6 +103,11 @@ class TestTodoistConfigScreen:
             app.push_screen(screen)
             await pilot.pause()
 
+            # Enable sync so validation is triggered
+            sync_switch = screen.query_one("#sync_enabled", Switch)
+            sync_switch.value = True
+            await pilot.pause()
+
             # Ensure token is empty (mock_home gives a clean config dir)
             token_input = screen.query_one("#api_token", Input)
             assert token_input.value == ""
@@ -214,6 +219,11 @@ class TestTrelloConfigScreen:
         async with app.run_test(size=(120, 40)) as pilot:
             screen = TrelloConfigScreen()
             app.push_screen(screen)
+            await pilot.pause()
+
+            # Enable sync so validation is triggered
+            sync_switch = screen.query_one("#sync_enabled", Switch)
+            sync_switch.value = True
             await pilot.pause()
 
             btn = screen.query_one("#btn-continue", Button)
