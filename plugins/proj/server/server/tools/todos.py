@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import storage
@@ -16,10 +18,123 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _UTC = UTC
+logger = logging.getLogger(__name__)
+
+# ── Trello list ID resolution (cached per board) ──────────────────────────────
+
+_trello_board_lists_cache: dict[str, list[dict[str, JsonValue]]] = {}
+
+
+def _resolve_trello_socket() -> str:
+    """Read Trello plugin socket path from registry, fall back to legacy."""
+    registry_file = Path.home() / ".claude" / "sockets" / "trello"
+    try:
+        path = registry_file.read_text().strip()
+        if path and Path(path).exists():
+            return path
+    except (FileNotFoundError, OSError):
+        pass
+    candidates = sorted(
+        Path("/tmp").glob("claude-hooks-trello-*.sock"),  # noqa: S108
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return str(candidates[0])
+    return "/tmp/claude-hooks-trello.sock"  # noqa: S108
+
+
+def _get_board_lists(board_id: str) -> list[dict[str, JsonValue]]:
+    """Fetch board lists from Trello, with in-process cache."""
+    if board_id in _trello_board_lists_cache:
+        return _trello_board_lists_cache[board_id]
+    try:
+        import httpx
+
+        sock_path = _resolve_trello_socket()
+        transport = httpx.HTTPTransport(uds=sock_path)
+        with httpx.Client(transport=transport, timeout=10.0) as client:
+            resp = client.post(
+                "http://localhost/hook",
+                json={"tool": "get_lists", "params": {"board_id": board_id}},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and "result" in data:
+                result = data["result"]
+                if isinstance(result, str):
+                    result = json.loads(result)
+                if isinstance(result, list):
+                    _trello_board_lists_cache[board_id] = result
+                    return result
+            if isinstance(data, list):
+                _trello_board_lists_cache[board_id] = data
+                return data
+    except Exception:
+        logger.debug("Failed to fetch Trello board lists for %s", board_id, exc_info=True)
+    return []
+
+
+def _resolve_list_id(board_id: str, list_name: str) -> str:
+    """Resolve a Trello list name to its ID on the given board."""
+    if not board_id or not list_name:
+        return ""
+    board_lists = _get_board_lists(board_id)
+    for lst in board_lists:
+        if not isinstance(lst, dict):
+            continue
+        if lst.get("name") == list_name or lst.get("id") == list_name:
+            return str(lst.get("id", ""))
+    return ""
+
+
+def _resolve_trello_list_ids(cfg: ProjConfig) -> dict[str, str]:
+    """Resolve all configured Trello list names to IDs.
+
+    Returns a dict of {role: list_id} e.g. {"tasks": "abc123", "done": "def456"}.
+    Only resolves when Trello sync is enabled and a board is configured.
+    """
+    if not cfg.trello.enabled or not cfg.trello.default_board_id:
+        return {}
+    board_id = cfg.trello.default_board_id
+    mappings = cfg.trello.list_mappings
+    result: dict[str, str] = {}
+    for role, name in [
+        ("tasks", mappings.tasks),
+        ("done", mappings.done),
+        ("projects", mappings.projects),
+        ("default", cfg.trello.default_list),
+        ("archived", mappings.archived),
+    ]:
+        if name:
+            lid = _resolve_list_id(board_id, name)
+            if lid:
+                result[role] = lid
+    return result
+
+
+def _enrich_trello_dict(
+    trello_dict: dict[str, JsonValue],
+    trello_list_ids: dict[str, str],
+) -> dict[str, JsonValue]:
+    """Overwrite list_mappings names with resolved IDs and add default_list_id."""
+    lm = trello_dict.get("list_mappings")
+    if isinstance(lm, dict):
+        for role, lid in trello_list_ids.items():
+            if role in lm:
+                lm[role] = lid
+    if "default" in trello_list_ids:
+        trello_dict["default_list_id"] = trello_list_ids["default"]
+    return trello_dict
 
 
 def _todo_hook_fields(
-    todo: Todo, meta: ProjectMeta, name: str, *, todos: list[Todo] | None = None
+    todo: Todo,
+    meta: ProjectMeta,
+    name: str,
+    *,
+    todos: list[Todo] | None = None,
+    cfg: ProjConfig | None = None,
 ) -> dict[str, JsonValue]:
     """Return enriched fields for hook dispatch from a todo and its project metadata."""
     fields: dict[str, JsonValue] = {
@@ -45,6 +160,20 @@ def _todo_hook_fields(
             fields["parent_trello_card_id"] = parent_todo.trello_card_id
         if parent_todo and parent_todo.trello_checklist_id:
             fields["parent_trello_checklist_id"] = parent_todo.trello_checklist_id
+    # Inject sync config and resolved list IDs so hooks can use direct Trello tools.
+    # The list_mappings values are overwritten with resolved IDs (instead of names)
+    # so ${sync.trello.list_mappings.done} etc. resolve to actual Trello list IDs.
+    if cfg is not None:
+        trello_list_ids = _resolve_trello_list_ids(cfg)
+        trello_dict = _enrich_trello_dict(cfg.trello.to_dict(), trello_list_ids)
+        fields["sync"] = {
+            "trello": trello_dict,
+            "todoist": cfg.todoist.to_dict(),
+        }
+        # Top-level convenience fields for hook param_mapping
+        fields["trello_list_id"] = trello_list_ids.get("tasks", "")
+        fields["trello_done_list_id"] = trello_list_ids.get("done", "")
+        fields["trello_projects_list_id"] = trello_list_ids.get("projects", "")
     return fields
 
 
@@ -252,7 +381,7 @@ def register(app: FastMCP) -> None:
             {
                 "result": f"Added todo {todo.id}: {title}",
                 "todo_id": todo.id,
-                **_todo_hook_fields(todo, meta, name, todos=todos),
+                **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
             }
         )
 
@@ -403,7 +532,7 @@ def register(app: FastMCP) -> None:
             {
                 "result": f"Updated todo {todo_id}.",
                 "todo_id": todo_id,
-                **_todo_hook_fields(todo, meta, name, todos=todos),
+                **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
             }
         )
 
@@ -428,7 +557,7 @@ def register(app: FastMCP) -> None:
             result_str = _complete_leaf(cfg, name, todo, todos, today)
 
         result_data = json.loads(result_str)
-        result_data.update(_todo_hook_fields(todo, meta, name))
+        result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
         return json.dumps(result_data)
 
     @app.tool(description="Revert a completed todo back to pending.")
@@ -453,7 +582,7 @@ def register(app: FastMCP) -> None:
         meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
         return json.dumps(
-            {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name)}
+            {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name, cfg=cfg)}
         )
 
     @app.tool(
@@ -554,7 +683,7 @@ def register(app: FastMCP) -> None:
         if not todo:
             return json.dumps({"error": f"Todo '{todo_id}' not found."})
         meta = storage.load_meta(cfg, name)
-        snapshot = _todo_hook_fields(todo, meta, name)
+        snapshot = _todo_hook_fields(todo, meta, name, cfg=cfg)
         today = _now()
         # Clean up references
         for t in todos:
@@ -638,7 +767,7 @@ def register(app: FastMCP) -> None:
             {
                 "result": f"Added child todo {child.id} under {parent_id}: {title}",
                 "todo_id": child.id,
-                **_todo_hook_fields(child, meta, name, todos=todos),
+                **_todo_hook_fields(child, meta, name, todos=todos, cfg=cfg),
             }
         )
 
@@ -783,14 +912,43 @@ def register(app: FastMCP) -> None:
 
         # Pre-build todoist_tasks for hook-053 param mapping (template resolver
         # doesn't support JMESPath iteration, so we build the array here).
-        todoist_tasks: list[dict[str, JsonValue]] = [
-            {
-                "content": c["title"],
-                "projectId": meta.todoist_project_id,
-                "parentId": parent.todoist_task_id,
-            }
-            for c in created
-        ]
+        # Build an index so grandchildren can reference their parent's Todoist
+        # task ID (resolved at creation time by todoist_add_tasks).
+        created_index: dict[str, int] = {c["id"]: i for i, c in enumerate(created)}
+        todoist_tasks: list[dict[str, JsonValue]] = []
+        for c in created:
+            if c["parent"] == parent.id:
+                # Direct child of root parent — use root's Todoist task ID
+                todoist_tasks.append(
+                    {
+                        "content": c["title"],
+                        "projectId": meta.todoist_project_id,
+                        "parentId": parent.todoist_task_id,
+                        "_parent_index": -1,
+                        "_local_id": c["id"],
+                    }
+                )
+            else:
+                # Grandchild+ — parent ID resolved at creation time
+                todoist_tasks.append(
+                    {
+                        "content": c["title"],
+                        "projectId": meta.todoist_project_id,
+                        "_parent_index": created_index[c["parent"]],
+                        "_local_id": c["id"],
+                    }
+                )
+        # Resolve Trello list IDs for hook dispatch
+        trello_list_ids = _resolve_trello_list_ids(cfg)
+        trello_dict = _enrich_trello_dict(cfg.trello.to_dict(), trello_list_ids)
+        tasks_list_id = trello_list_ids.get("tasks", "")
+
+        # Build batch cards array for trello batch_create_cards hook
+        trello_batch_cards: list[dict[str, str]] = []
+        if tasks_list_id:
+            for c in created:
+                trello_batch_cards.append({"list_id": tasks_list_id, "name": c["title"]})
+
         result_data: dict[str, JsonValue] = {
             "created": created,
             "count": len(created),
@@ -800,6 +958,11 @@ def register(app: FastMCP) -> None:
             "trello_card_id": parent.trello_card_id,
             "parent_todoist_task_id": parent.todoist_task_id,
             "todoist_tasks": todoist_tasks,
+            "trello_batch_cards": trello_batch_cards,
+            "sync": {
+                "trello": trello_dict,
+                "todoist": cfg.todoist.to_dict(),
+            },
         }
         if pair_errors:
             result_data["blocking_errors"] = pair_errors

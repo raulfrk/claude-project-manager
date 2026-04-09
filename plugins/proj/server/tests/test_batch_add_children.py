@@ -291,6 +291,68 @@ async def test_empty_children_list_returns_error(project_with_parent):
 
 
 @pytest.mark.asyncio
+async def test_nested_todoist_tasks_parent_index(project_with_parent):
+    """Todoist tasks get correct _parent_index for grandchildren."""
+    from mcp.server.fastmcp import FastMCP
+
+    from server.tools import config, projects
+    from server.tools import todos as todos_mod
+
+    cfg, name, parent_id = project_with_parent
+
+    # Set todoist IDs on the meta and parent todo so todoist_tasks are built
+    meta = storage.load_meta(cfg, name)
+    meta.todoist_project_id = "proj-123"
+    storage.save_meta(cfg, meta)
+
+    todos_list = storage.load_todos(cfg, name)
+    parent_todo = next(t for t in todos_list if t.id == parent_id)
+    parent_todo.todoist_task_id = "todoist-parent-99"
+    storage.save_todos(cfg, name, todos_list)
+
+    app = FastMCP("test-proj")
+    config.register(app)
+    projects.register(app)
+    todos_mod.register(app)
+
+    # 3-level nesting: parent → child A → grandchild A1
+    children_json = json.dumps(
+        [
+            {
+                "title": "Child A",
+                "children": [
+                    {"title": "Grandchild A1"},
+                ],
+            },
+            {"title": "Child B"},
+        ]
+    )
+
+    result = await call_tool(
+        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
+    )
+    data = json.loads(result)
+
+    todoist_tasks = data["todoist_tasks"]
+    assert len(todoist_tasks) == 3
+
+    # Child A: direct child → parentId = root's todoist ID, _parent_index = -1
+    assert todoist_tasks[0]["content"] == "Child A"
+    assert todoist_tasks[0]["parentId"] == "todoist-parent-99"
+    assert todoist_tasks[0]["_parent_index"] == -1
+
+    # Grandchild A1: child of Child A → no parentId, _parent_index = 0 (index of Child A)
+    assert todoist_tasks[1]["content"] == "Grandchild A1"
+    assert "parentId" not in todoist_tasks[1]
+    assert todoist_tasks[1]["_parent_index"] == 0
+
+    # Child B: direct child → parentId = root's todoist ID, _parent_index = -1
+    assert todoist_tasks[2]["content"] == "Child B"
+    assert todoist_tasks[2]["parentId"] == "todoist-parent-99"
+    assert todoist_tasks[2]["_parent_index"] == -1
+
+
+@pytest.mark.asyncio
 async def test_invalid_json_returns_error(project_with_parent):
     """Invalid JSON for children parameter returns an error."""
     from mcp.server.fastmcp import FastMCP

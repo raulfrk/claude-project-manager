@@ -27,12 +27,12 @@ Extract from $ARGUMENTS:
   - **Trust 3 (full-auto)**: no plan phase — skip planning entirely. Agents execute with context only (requirements + research + parent context).
 - **`--resume`**: resume execution from the most recent checkpoint. See **Resume checkpoint** sections below.
 - **`--no-pipeline`**: disable plan-while-executing pipeline (default: pipeline enabled)
-- **`--refine`**: enable requirement refinement with 3 review agents after last prep iteration (default: off)
+- **`--refine`**: enable requirement refinement with review agents (default: off for `--balanced`, auto-enabled for `--careful`/`--paranoid`)
 - **`--fast`**: minimize review gates, auto-execute low-complexity todos, skip verification. Tag immunity: `security`/`breaking-change`/`migration` still get FULL REVIEW.
-- **`--balanced`**: default. Smart-gate scoring determines review level.
-- **`--careful`**: full review on all plans, auto-enable refine, enhanced verification.
+- **`--balanced`**: Smart-gate scoring determines review level.
+- **`--careful`**: default. Full review on all plans, auto-enable refine, enhanced verification.
 - **`--paranoid`**: sequential execution (max_parallel=1), cross-review agents, full verification with independent review agent.
-- Quality levels are mutually exclusive (last wins, default: `--balanced`).
+- Quality levels are mutually exclusive (last wins, default: `--careful`).
 - **`--force-plan`**: force FULL REVIEW on all todos regardless of complexity score.
 - **`--batch-approve`**: auto-approve all speculative plans without review (subject to trust level).
 - **`--worktree`**: enable worktree isolation for parallel execution (opt-in).
@@ -40,7 +40,7 @@ Extract from $ARGUMENTS:
 
 Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
 
-Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quality flag is passed, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--balanced` if not set or unrecognized.
+Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quality flag is passed, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--careful` if not set or unrecognized.
 
 **Quality Level Parameter Mapping:**
 
@@ -54,7 +54,7 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quali
 | max_parallel | 20 | 6 | 3 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | preflight | skip | enabled | enabled | enabled |
-| refine | skip | if --refine set | auto-enabled | auto-enabled |
+| refine | skip | if --refine set | auto-enabled (per iteration) | auto-enabled (per iteration) |
 | worktree | from config (`worktree_isolation`) | from config (`worktree_isolation`) | from config (`worktree_isolation`) | off (max_parallel=1) |
 | overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
 
@@ -181,6 +181,14 @@ For each todo in descendant list:
   - Wait for batch completion. Report failures.
 - After completion: refresh descendant list via `mcp__proj__todo_tree`.
 
+**If `refine`** — after decompose, within iteration (if (`quality_level in [careful, paranoid]`) AND `refine` in steps AND NOT `--no-interactive`):
+
+IF quality_level == fast: skip refine entirely, proceed to next step.
+IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
+
+For each todo in the descendant list, call the Skill tool: `skill: "proj:refine", args: "<id>"`.
+  If Apply: requirements/research are updated and preflight re-runs automatically.
+
 **3a.** Capture iteration snapshots (only when N > 1)
 
 **Before iteration 1 starts** (after building the initial descendant list but before running any prep steps), capture the pre-existing state as `snapshot_0`:
@@ -229,14 +237,6 @@ Recommend "Ready to execute" when ALL dimensions are Stable or Minor changes wit
 
 When the user picks option 2, skip all remaining iterations and jump directly to step 5 (Execute).
 When the user picks option 3: prompt for todo IDs, run interactive define on each, then resume from decompose step.
-
-**4.5** Refine (if (`--refine` flag set OR quality_level in [careful, paranoid]) AND `refine` in steps AND NOT `--no-interactive`)
-
-IF quality_level == fast: skip refine entirely, proceed to next step.
-IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
-
-For each todo in the descendant list, call the Skill tool: `skill: "proj:refine", args: "<id>"`.
-  If Apply: requirements/research are updated and preflight re-runs automatically.
 
 **5.** Execute (only if `has_execute`)
 
@@ -814,6 +814,15 @@ For each batch in dependency order:
 
 After Phase B completes (either mode): refresh descendant lists via `mcp__proj__todo_tree`.
 
+**Phase B.75 — Refine (if (`quality_level in [careful, paranoid]`) AND `refine` in steps AND NOT `--no-interactive`):**
+
+IF quality_level == fast: skip refine entirely, proceed to convergence check.
+IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
+
+For each todo in dependency order, call the Skill tool: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttling from quality_level.
+  Present per-todo refinement reports sequentially.
+  If Apply on any todo: requirements/research updated, preflight re-runs on that todo.
+
 **Phase B.5 — Convergence check** (skip if `--no-interactive`, only when N > 1)
 
 **Before iteration 1 starts** (after dependency order but before Phase A), capture pre-existing state as `snapshot_0` for each todo in the input list (requirements, research, tree structure).
@@ -832,15 +841,6 @@ Compare `snapshot_<i>` with `snapshot_<i-1>` and display:
 ```
 
 Then show the between-iteration prompt (same 4 options as single-ID mode).
-
-**Phase B.75 — Refine (if (`--refine` flag set OR quality_level in [careful, paranoid]) AND `refine` in steps AND NOT `--no-interactive`):**
-
-IF quality_level == fast: skip refine entirely, proceed to Phase C.
-IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
-
-For each todo in dependency order, call the Skill tool: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttling from quality_level.
-  Present per-todo refinement reports sequentially.
-  If Apply on any todo: requirements/research updated, preflight re-runs on that todo.
 
 **Phase C — Execute (after iteration loop):**
 

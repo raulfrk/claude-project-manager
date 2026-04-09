@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -336,10 +337,12 @@ class TestArchiveTrelloMoveHint:
         )
 
         result = await call_tool(mcp_app, "proj_archive", name="myapp")
+        result_data = json.loads(result)
 
-        assert "trello_move" in result
-        assert "ProjectArchive" in result
-        assert "GlobalArchive" not in result
+        # The trello_move hint in the result string should use per-project override
+        assert "trello_move" in result_data["result"]
+        assert "ProjectArchive" in result_data["result"]
+        assert "GlobalArchive" not in result_data["result"]
 
 
 # ── proj_update_meta trello_move hint tests ──────────────────────────────────

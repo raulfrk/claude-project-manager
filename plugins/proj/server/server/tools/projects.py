@@ -74,6 +74,15 @@ def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
         todos_yaml.write_text("todos: []\n")
 
 
+def _enrich_trello_sync(cfg: ProjConfig) -> dict[str, JsonValue]:
+    """Return Trello sync config dict with list_mappings resolved to IDs."""
+    from server.tools.todos import _enrich_trello_dict, _resolve_trello_list_ids
+
+    trello_dict = cfg.trello.to_dict()
+    trello_list_ids = _resolve_trello_list_ids(cfg)
+    return _enrich_trello_dict(trello_dict, trello_list_ids)
+
+
 def register(app: FastMCP) -> None:
     """Register project management tools with the MCP app.
 
@@ -223,6 +232,9 @@ def register(app: FastMCP) -> None:
                 "mcp_servers": [],
                 "todoist_project_id": meta.todoist_project_id,
                 "trello_card_id": meta.trello_card_id,
+                "sync": {
+                    "trello": _enrich_trello_sync(cfg),
+                },
             }
         )
 
@@ -567,6 +579,9 @@ def register(app: FastMCP) -> None:
             "mcp_servers": [],
             "todoist_project_id": meta.todoist_project_id,
             "trello_card_id": meta.trello_card_id,
+            "sync": {
+                "trello": _enrich_trello_sync(cfg),
+            },
         }
         return json.dumps(result_dict)
 

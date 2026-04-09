@@ -1,10 +1,8 @@
-"""Tests for default-hooks.yaml structure and hook tool behaviour."""
+"""Tests for default-hooks.yaml structure after migration to direct tool mapping."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import yaml
 
@@ -77,504 +75,104 @@ class TestDefaultHooksYaml:
         assert ids == expected
 
 
-# -- trello_add_card_hook ----------------------------------------------------
+# -- Direct tool mapping validation -------------------------------------------
 
 
-class TestAddCardHook:
-    def _get_tool(self) -> callable:
-        from mcp.server.fastmcp import FastMCP
+class TestDirectToolMapping:
+    """Verify all hooks now target real Trello tools (not wrapper hooks)."""
 
-        from server.tools.hooks import register
-
-        app = FastMCP("test")
-        register(app)
-        return app._tool_manager._tools["trello_add_card_hook"].fn
-
-    def test_no_board_id_returns_error(self, mocker: MagicMock) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={},
-        )
-        tool = self._get_tool()
-        result = json.loads(tool(name="project"))
-        assert "error" in result
-        assert "default_board_id" in result["error"]
-
-    def test_creates_card_on_default_list(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "default_list": "Active",
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "Active"},
-        ]
-        mock_trello_client.post.return_value = {"id": "card-new"}
-        tool = self._get_tool()
-        result = json.loads(tool(name="my project"))
-        assert result["card_id"] == "card-new"
-        mock_trello_client.post.assert_called_once_with(
-            "/cards",
-            params={"idList": "list-1", "name": "my project"},
-        )
-
-    def test_default_list_not_found(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "default_list": "Active",
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "Other"},
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(name="project"))
-        assert "error" in result
-        assert "Active" in result["error"]
-
-    def test_api_error_returns_error(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "default_list": "Active",
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "Active"},
-        ]
-        mock_trello_client.post.side_effect = RuntimeError("API error 500")
-        tool = self._get_tool()
-        result = json.loads(tool(name="project"))
-        assert "error" in result
-        assert "500" in result["error"]
-
-    def test_uses_active_as_default_list_name(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={"default_board_id": "board-1"},
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "Active"},
-        ]
-        mock_trello_client.post.return_value = {"id": "card-1"}
-        tool = self._get_tool()
-        result = json.loads(tool(name="project"))
-        assert result["card_id"] == "card-1"
-
-
-# -- trello_add_todo_card_hook ------------------------------------------------
-
-
-class TestAddTodoCardHook:
-    def _get_tool(self) -> callable:
-        from mcp.server.fastmcp import FastMCP
-
-        from server.tools.hooks import register
-
-        app = FastMCP("test")
-        register(app)
-        return app._tool_manager._tools["trello_add_todo_card_hook"].fn
-
-    def test_no_board_id_returns_error(self, mocker: MagicMock) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={},
-        )
-        tool = self._get_tool()
-        result = json.loads(tool(name="task 1"))
-        assert "error" in result
-        assert "default_board_id" in result["error"]
-
-    def test_creates_card_on_tasks_list(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.return_value = {"id": "card-new"}
-        tool = self._get_tool()
-        result = json.loads(tool(name="task 1"))
-        assert result["card_id"] == "card-new"
-        mock_trello_client.post.assert_called_once_with(
-            "/cards",
-            params={"idList": "list-1", "name": "task 1"},
-        )
-
-    def test_creates_card_with_desc_and_due(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.return_value = {"id": "card-new"}
-        tool = self._get_tool()
-        result = json.loads(tool(name="task 1", desc="details", due="2026-04-01"))
-        assert result["card_id"] == "card-new"
-        mock_trello_client.post.assert_called_once_with(
-            "/cards",
-            params={"idList": "list-1", "name": "task 1", "desc": "details", "due": "2026-04-01"},
-        )
-
-    def test_tasks_list_not_found(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "Other"},
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(name="task 1"))
-        assert "error" in result
-        assert "proj-tasks" in result["error"]
-
-
-# -- trello_add_child_card_hook -----------------------------------------------
-
-
-class TestAddChildCardHook:
-    def _get_tool(self) -> callable:
-        from mcp.server.fastmcp import FastMCP
-
-        from server.tools.hooks import register
-
-        app = FastMCP("test")
-        register(app)
-        return app._tool_manager._tools["trello_add_child_card_hook"].fn
-
-    def test_no_board_id_returns_error(self, mocker: MagicMock) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={},
-        )
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id="parent-1", name="child"))
-        assert "error" in result
-        assert "default_board_id" in result["error"]
-
-    def test_creates_card_and_attaches_to_parent(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.side_effect = [
-            {"id": "child-card", "shortUrl": "https://trello.com/c/abc"},
-            {"id": "attach-1"},  # attachment
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id="parent-1", name="child task"))
-        assert result["card_id"] == "child-card"
-        assert mock_trello_client.post.call_count == 2
-        # Verify attachment call
-        mock_trello_client.post.assert_any_call(
-            "/cards/parent-1/attachments",
-            params={"url": "https://trello.com/c/abc", "name": "child task"},
-        )
-
-    def test_creates_card_with_desc_and_due(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.return_value = {
-            "id": "child-card",
-            "shortUrl": "https://trello.com/c/abc",
-        }
-        tool = self._get_tool()
-        result = json.loads(
-            tool(parent_card_id=None, name="child", desc="some desc", due="2026-06-01")
-        )
-        assert result["card_id"] == "child-card"
-        mock_trello_client.post.assert_called_once_with(
-            "/cards",
-            params={
-                "idList": "list-1",
-                "name": "child",
-                "desc": "some desc",
-                "due": "2026-06-01",
-            },
-        )
-
-    def test_creates_card_without_parent(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.return_value = {
-            "id": "child-card",
-            "shortUrl": "https://trello.com/c/abc",
-        }
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id=None, name="orphan task"))
-        assert result["card_id"] == "child-card"
-        # Only one post call (card creation, no attachment)
-        assert mock_trello_client.post.call_count == 1
-
-
-# -- trello_batch_add_child_cards_hook ----------------------------------------
-
-
-class TestBatchAddChildCardsHook:
-    def _get_tool(self) -> callable:
-        from mcp.server.fastmcp import FastMCP
-
-        from server.tools.hooks import register
-
-        app = FastMCP("test")
-        register(app)
-        return app._tool_manager._tools["trello_batch_add_child_cards_hook"].fn
-
-    def test_no_board_id_returns_error(self, mocker: MagicMock) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={},
-        )
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id="p1", items=["a", "b"]))
-        assert "error" in result
-        assert "default_board_id" in result["error"]
-
-    def test_creates_cards_and_attaches(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.side_effect = [
-            {"id": "card-a", "shortUrl": "https://trello.com/c/a"},
-            {"id": "attach-a"},  # attachment for a
-            {"id": "card-b", "shortUrl": "https://trello.com/c/b"},
-            {"id": "attach-b"},  # attachment for b
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id="parent-1", items=["a", "b"]))
-        assert len(result["children"]) == 2
-        assert result["children"][0]["card_id"] == "card-a"
-        assert result["children"][1]["card_id"] == "card-b"
-        assert not result["failures"]
-
-    def test_handles_partial_failures(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"tasks": "proj-tasks"},
-            },
-        )
-        mock_trello_client.get.return_value = [
-            {"id": "list-1", "name": "proj-tasks"},
-        ]
-        mock_trello_client.post.side_effect = [
-            {"id": "card-a", "shortUrl": "https://trello.com/c/a"},
-            {"id": "attach-a"},
-            Exception("API error"),
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(parent_card_id="parent-1", items=["a", "b"]))
-        assert len(result["children"]) == 1
-        assert len(result["failures"]) == 1
-        assert result["failures"][0]["name"] == "b"
-
-
-# -- trello_verify_card_hook --------------------------------------------------
-
-
-class TestVerifyCardHook:
-    def _get_tool(self) -> callable:
-        from mcp.server.fastmcp import FastMCP
-
-        from server.tools.hooks import register
-
-        app = FastMCP("test")
-        register(app)
-        return app._tool_manager._tools["trello_verify_card_hook"].fn
-
-    def test_no_card_id_returns_unverified(self) -> None:
-        tool = self._get_tool()
-        result = json.loads(tool(card_id=""))
-        assert result["verified"] is False
-        assert "No card_id" in result["error"]
-
-    def test_card_found_returns_verified(
-        self,
-        mock_trello_client: MagicMock,
-        mocker: MagicMock,
-    ) -> None:
-        mocker.patch(
-            "server.tools.hooks._get_trello_sync_config",
-            return_value={
-                "default_board_id": "board-1",
-                "list_mappings": {"done": "Done"},
-            },
-        )
-        mock_trello_client.get.side_effect = [
-            {"id": "card-1", "name": "Task", "idList": "done-list", "closed": False},
-            [{"id": "done-list", "name": "Done"}],  # board lists
-        ]
-        tool = self._get_tool()
-        result = json.loads(tool(card_id="card-1"))
-        assert result["verified"] is True
-        assert result["card_id"] == "card-1"
-        assert result["in_done_list"] is True
-
-
-# -- Hook structure tests for card-based hooks ---------------------------------
-
-
-class TestCardBasedHookStructure:
     def _load_hooks(self) -> list[dict]:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
         return data["hooks"]
 
-    def test_todo_add_hook_targets_card_creation(self) -> None:
+    def test_no_wrapper_tools_referenced(self) -> None:
+        """Ensure no hooks reference the deleted wrapper tools."""
+        wrapper_tools = {
+            "trello_add_card_hook",
+            "trello_add_todo_card_hook",
+            "trello_add_child_card_hook",
+            "trello_batch_add_child_cards_hook",
+            "trello_verify_card_hook",
+        }
+        hooks = self._load_hooks()
+        for hook in hooks:
+            assert hook["target_tool"] not in wrapper_tools, (
+                f"Hook {hook['id']} still targets wrapper tool {hook['target_tool']}"
+            )
+
+    def test_proj_init_uses_add_card_to_list(self) -> None:
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["trello-on-proj-init"]
+        assert hook["target_tool"] == "add_card_to_list"
+        assert hook["param_mapping"]["list_id"] == "${sync.trello.default_list_id}"
+        assert hook["param_mapping"]["name"] == "${project_name}"
+        assert hook["blocking"] is True
+        assert hook["feedback_mapping"]["id"] == "trello_card_id"
+
+    def test_todo_add_uses_add_card_to_list(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
         hook = hooks["trello-on-todo-add"]
-        assert hook["trigger_tool"] == "todo_add"
-        assert hook["target_tool"] == "trello_add_todo_card_hook"
-        assert hook["server"] == "trello"
-        assert hook["blocking"] is True
-        assert "sync.trello.enabled" in hook["condition"]
-        assert hook["feedback_mapping"]["card_id"] == "trello_card_id"
+        assert hook["target_tool"] == "add_card_to_list"
+        assert hook["param_mapping"]["list_id"] == "${trello_list_id}"
+        assert hook["param_mapping"]["name"] == "${title}"
+        assert hook["param_mapping"]["desc"] == "${notes}"
+        assert hook["param_mapping"]["due"] == "${due_date}"
+        assert hook["feedback_mapping"]["id"] == "trello_card_id"
 
-    def test_todo_complete_hook_moves_card_to_done(self) -> None:
+    def test_todo_complete_uses_move_card(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
         hook = hooks["trello-on-todo-complete"]
         assert hook["target_tool"] == "move_card"
-        assert hook["param_mapping"]["list_id"] == "${sync.trello.list_mappings.done}"
-
-    def test_todo_uncomplete_hook_moves_card_to_tasks(self) -> None:
-        hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-uncomplete"]
-        assert hook["trigger_tool"] == "todo_uncomplete"
-        assert hook["target_tool"] == "move_card"
-        assert hook["param_mapping"]["list_id"] == "${sync.trello.list_mappings.tasks}"
-
-    def test_todo_delete_hook_archives_card(self) -> None:
-        hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-delete"]
-        assert hook["target_tool"] == "archive_card"
+        assert hook["param_mapping"]["list_id"] == "${trello_done_list_id}"
         assert hook["param_mapping"]["card_id"] == "${trello_card_id}"
 
-    def test_todo_update_hook_updates_card_details(self) -> None:
+    def test_todo_uncomplete_uses_move_card(self) -> None:
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["trello-on-todo-uncomplete"]
+        assert hook["target_tool"] == "move_card"
+        assert hook["param_mapping"]["list_id"] == "${trello_list_id}"
+
+    def test_verify_uses_get_card(self) -> None:
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["verify-trello-todo-card"]
+        assert hook["target_tool"] == "get_card"
+        assert hook["param_mapping"]["card_id"] == "${trello_card_id}"
+        assert hook["verification"] is True
+
+    def test_todo_add_child_uses_add_card_to_list(self) -> None:
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["trello-on-todo-add-child"]
+        assert hook["target_tool"] == "add_card_to_list"
+        assert hook["param_mapping"]["list_id"] == "${trello_list_id}"
+        assert hook["param_mapping"]["name"] == "${title}"
+        assert hook["feedback_mapping"]["id"] == "trello_card_id"
+
+    def test_batch_add_children_uses_batch_create_cards(self) -> None:
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["trello-on-todo-batch-add-children"]
+        assert hook["target_tool"] == "batch_create_cards"
+        assert hook["param_mapping"]["cards"] == "${trello_batch_cards}"
+        assert hook["feedback_mapping"]["successes[*].id"] == "trello_card_id"
+
+    def test_todo_update_uses_update_card_details(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
         hook = hooks["trello-on-todo-update"]
         assert hook["target_tool"] == "update_card_details"
         assert "name" in hook["param_mapping"]
         assert "desc" in hook["param_mapping"]
 
-    def test_batch_add_children_hook_targets_batch_cards(self) -> None:
+    def test_todo_delete_uses_archive_card(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-batch-add-children"]
-        assert hook["trigger_tool"] == "todo_batch_add_children"
-        assert hook["target_tool"] == "trello_batch_add_child_cards_hook"
-        assert hook["server"] == "trello"
-        assert hook["blocking"] is True
+        hook = hooks["trello-on-todo-delete"]
+        assert hook["target_tool"] == "archive_card"
+        assert hook["param_mapping"]["card_id"] == "${trello_card_id}"
 
-    def test_add_child_hook_targets_child_card(self) -> None:
-        hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-add-child"]
-        assert hook["trigger_tool"] == "todo_add_child"
-        assert hook["target_tool"] == "trello_add_child_card_hook"
-        assert hook["param_mapping"]["parent_card_id"] == "${parent_trello_card_id}"
-
-    def test_proj_archive_hook_structure(self) -> None:
+    def test_proj_archive_uses_move_card(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
         hook = hooks["trello-on-proj-archive"]
-        assert hook["trigger_tool"] == "proj_archive"
         assert hook["target_tool"] == "move_card"
-        assert hook["server"] == "trello"
         assert hook["blocking"] is False
-        assert "sync.trello.list_mappings.archived" in hook["condition"]
 
     def test_no_checklist_hooks_remain(self) -> None:
         """Verify no hooks reference checklist-based tools."""

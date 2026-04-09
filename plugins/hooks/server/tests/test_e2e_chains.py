@@ -40,13 +40,12 @@ def mock_post_hook():
     - ``todoist_add_projects`` → success with ``{"id": "proj-td-1"}``
     - ``todoist_find_projects`` → success with project list
     - ``todoist_verify_complete`` → verification pass
-    - ``trello_add_card_hook`` → success with ``{"card_id": "card-tr-1"}``
-    - ``trello_add_todo_card_hook`` → success with ``{"card_id": "card-tr-todo-1"}``
+    - ``add_card_to_list`` → success with ``{"id": "card-tr-1"}``
     - ``move_card`` → simple success
     - ``get_card`` → success with card data
     - ``update_card_details`` → simple success
     - ``archive_card`` → simple success
-    - ``trello_verify_card_hook`` → verification pass
+    - ``batch_create_cards`` → success with batch card results
     - ``todo_update`` → simple success (feedback writeback)
     - ``proj_update_meta`` → simple success (feedback writeback)
     - ``proj_todoist_full_sync`` → simple success
@@ -60,13 +59,14 @@ def mock_post_hook():
         "todoist_add_projects": json.dumps({"id": "proj-td-1"}),
         "todoist_find_projects": json.dumps({"projects": [{"id": "proj-td-1", "name": "test"}]}),
         "todoist_verify_complete": json.dumps({"status": "pass", "details": "task completed"}),
-        "trello_add_card_hook": json.dumps({"card_id": "card-tr-1"}),
-        "trello_add_todo_card_hook": json.dumps({"card_id": "card-tr-todo-1"}),
+        "add_card_to_list": json.dumps({"id": "card-tr-1", "name": "test card"}),
         "move_card": json.dumps({"ok": True}),
         "get_card": json.dumps({"id": "card-tr-1", "name": "test project"}),
         "update_card_details": json.dumps({"ok": True}),
         "archive_card": json.dumps({"ok": True}),
-        "trello_verify_card_hook": json.dumps({"status": "pass", "details": "card verified"}),
+        "batch_create_cards": json.dumps(
+            {"successes": [{"id": "card-child-1"}, {"id": "card-child-2"}], "failures": []}
+        ),
         "todo_update": json.dumps({"ok": True}),
         "proj_update_meta": json.dumps({"ok": True}),
         "proj_todoist_full_sync": json.dumps({"ok": True}),
@@ -141,6 +141,28 @@ def make_todo_source(**overrides: Any) -> dict[str, Any]:
         "parent_todoist_task_id": None,
         "parent_trello_card_id": None,
         "parent_trello_checklist_id": None,
+        # Resolved Trello list IDs for direct tool mapping hooks
+        "trello_list_id": "list-tasks-id",
+        "trello_done_list_id": "list-done-id",
+        "trello_projects_list_id": "list-projects-id",
+        "sync": {
+            "trello": {
+                "enabled": True,
+                "auto_sync": True,
+                "default_board_id": "board-1",
+                "default_list_id": "list-default-id",
+                "list_mappings": {
+                    "tasks": "list-tasks-id",
+                    "done": "list-done-id",
+                    "projects": "list-projects-id",
+                    "archived": "list-archived-id",
+                },
+            },
+            "todoist": {
+                "enabled": True,
+                "auto_sync": True,
+            },
+        },
     }
     defaults.update(overrides)
     return defaults
@@ -154,6 +176,20 @@ def make_proj_source(**overrides: Any) -> dict[str, Any]:
         "mcp_servers": [],
         "todoist_project_id": "proj-td-1",
         "trello_card_id": "card-tr-1",
+        "sync": {
+            "trello": {
+                "enabled": True,
+                "auto_sync": True,
+                "default_board_id": "board-1",
+                "default_list_id": "list-default-id",
+                "list_mappings": {
+                    "tasks": "list-tasks-id",
+                    "done": "list-done-id",
+                    "projects": "list-projects-id",
+                    "archived": "list-archived-id",
+                },
+            },
+        },
     }
     defaults.update(overrides)
     return defaults
@@ -317,10 +353,11 @@ class TestCrudChains:
         assert td_params["tasks"][0]["priority"] == "high"
         assert td_params["tasks"][0]["projectId"] == "proj-td-1"
 
-        # Trello hook fires
-        assert "trello_add_todo_card_hook" in by_tool
-        tr_params = by_tool["trello_add_todo_card_hook"][0]["params"]
+        # Trello hook fires (add_card_to_list)
+        assert "add_card_to_list" in by_tool
+        tr_params = by_tool["add_card_to_list"][0]["params"]
         assert tr_params["name"] == "Buy milk"
+        assert tr_params["list_id"] == "list-tasks-id"
 
         # Feedback writeback calls todo_update with mapped IDs
         assert "todo_update" in by_tool
@@ -354,10 +391,11 @@ class TestCrudChains:
         assert td_params["tasks"][0]["parentId"] == "td-parent-1"
         assert td_params["tasks"][0]["content"] == "Child task"
 
-        # Trello child card with parent_card_id
-        assert "trello_add_child_card_hook" in by_tool
-        tr_params = by_tool["trello_add_child_card_hook"][0]["params"]
-        assert tr_params["parent_card_id"] == "card-tr-parent-1"
+        # Trello child card (add_card_to_list with resolved list ID)
+        assert "add_card_to_list" in by_tool
+        tr_params = by_tool["add_card_to_list"][0]["params"]
+        assert tr_params["list_id"] == "list-tasks-id"
+        assert tr_params["name"] == "Child task"
 
     @pytest.mark.asyncio
     async def test_todo_complete_fires_four_hooks(
@@ -385,6 +423,7 @@ class TestCrudChains:
         assert "move_card" in by_tool
         mc_params = by_tool["move_card"][0]["params"]
         assert mc_params["card_id"] == "card-tr-todo-1"
+        assert mc_params["list_id"] == "list-done-id"
 
         # Phase 2: verification hooks
         assert "verification" in result
@@ -483,10 +522,11 @@ class TestProjectChains:
         td_params = by_tool["todoist_add_projects"][0]["params"]
         assert td_params["name"] == "my-new-project"
 
-        # Trello: trello_add_card_hook fires with project name
-        assert "trello_add_card_hook" in by_tool
-        tr_params = by_tool["trello_add_card_hook"][0]["params"]
+        # Trello: add_card_to_list fires with project name and resolved list ID
+        assert "add_card_to_list" in by_tool
+        tr_params = by_tool["add_card_to_list"][0]["params"]
         assert tr_params["name"] == "my-new-project"
+        assert tr_params["list_id"] == "list-default-id"
 
         # Feedback writeback: proj_update_meta called with mapped IDs
         assert "proj_update_meta" in by_tool
@@ -495,7 +535,7 @@ class TestProjectChains:
         # todoist feedback maps id → todoist_project_id
         assert "todoist_project_id" in fb_params_all
         assert fb_params_all["todoist_project_id"] == "proj-td-1"
-        # trello feedback maps card_id → trello_card_id
+        # trello feedback maps id → trello_card_id (from add_card_to_list response)
         assert "trello_card_id" in fb_params_all
         assert fb_params_all["trello_card_id"] == "card-tr-1"
 
@@ -644,31 +684,7 @@ class TestAdvancedChains:
         registry = load_real_hooks()
         hooks_yaml = tmp_path / "hooks.yaml"
 
-        # Mock trello_batch_add_child_cards_hook to return per-child card IDs
-        original_side_effect = mock_post_hook.side_effect
-
-        async def _batch_route(**kwargs: Any) -> FireResult:
-            tool = kwargs.get("target_tool", "")
-            hook_id = kwargs.get("hook_id", "unknown")
-            if tool == "trello_batch_add_child_cards_hook":
-                result_body = json.dumps(
-                    {
-                        "children": [
-                            {"card_id": "card-child-1"},
-                            {"card_id": "card-child-2"},
-                        ]
-                    }
-                )
-                return FireResult(
-                    hook_id=hook_id,
-                    status_code=200,
-                    body=json.dumps({"ok": True, "result": result_body}),
-                    result=result_body,
-                )
-            return await original_side_effect(**kwargs)
-
-        mock_post_hook.side_effect = _batch_route
-
+        # batch_create_cards returns per-card results with IDs
         source = make_todo_source(
             trello_card_id="card-tr-parent-1",
             trello_project_card_id="card-tr-proj-1",
@@ -676,6 +692,10 @@ class TestAdvancedChains:
         source["created"] = [
             {"id": "child-1", "title": "Sub-task 1"},
             {"id": "child-2", "title": "Sub-task 2"},
+        ]
+        source["trello_batch_cards"] = [
+            {"list_id": "list-tasks-id", "name": "Sub-task 1"},
+            {"list_id": "list-tasks-id", "name": "Sub-task 2"},
         ]
 
         result = await fire_with_config(
@@ -685,10 +705,11 @@ class TestAdvancedChains:
         assert result["errors"] == []
         by_tool = _calls_by_tool(mock_post_hook)
 
-        # Trello batch hook fires
-        assert "trello_batch_add_child_cards_hook" in by_tool
-        tr_params = by_tool["trello_batch_add_child_cards_hook"][0]["params"]
-        assert tr_params["parent_card_id"] == "card-tr-parent-1"
+        # Trello batch_create_cards hook fires
+        assert "batch_create_cards" in by_tool
+        tr_params = by_tool["batch_create_cards"][0]["params"]
+        assert isinstance(tr_params["cards"], list)
+        assert len(tr_params["cards"]) == 2
 
         # Feedback writeback calls todo_update for each child
         assert "todo_update" in by_tool
@@ -721,9 +742,9 @@ class TestAdvancedChains:
         skipped_ids = {s["hook_id"] for s in skipped}
         assert "todoist-on-todo-add" in skipped_ids
 
-        # Trello hook fires
+        # Trello hook fires (add_card_to_list)
         by_tool = _calls_by_tool(mock_post_hook)
-        assert "trello_add_todo_card_hook" in by_tool
+        assert "add_card_to_list" in by_tool
 
     @pytest.mark.asyncio
     async def test_condition_gating_trello_disabled(
@@ -788,7 +809,7 @@ class TestAdvancedChains:
         """Mock todo_update (feedback target) to return an error — primary hooks still succeed."""
         _TOOL_RESPONSES: dict[str, str | None] = {
             "todoist_add_tasks": json.dumps({"successes": [{"id": "td-123"}]}),
-            "trello_add_todo_card_hook": json.dumps({"card_id": "card-tr-todo-1"}),
+            "add_card_to_list": json.dumps({"id": "card-tr-todo-1", "name": "test"}),
         }
 
         async def _route_with_fb_fail(**kwargs: Any) -> FireResult:
@@ -824,7 +845,7 @@ class TestAdvancedChains:
 
         # Primary hooks succeed
         assert "todoist_add_tasks" in by_tool
-        assert "trello_add_todo_card_hook" in by_tool
+        assert "add_card_to_list" in by_tool
 
         # Feedback was attempted but failed
         feedback = result.get("feedback", [])

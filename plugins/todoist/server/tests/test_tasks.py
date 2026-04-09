@@ -239,6 +239,91 @@ class TestAddTasks:
         assert result["successes"] == []
         assert len(result["failures"]) == 2
 
+    def test_parent_index_resolution(self, mock_client: MagicMock) -> None:
+        """_parent_index resolves grandchild parentId from previously created task."""
+        call_count = 0
+
+        def _mock_post(path: str, json: Any = None) -> dict[str, Any]:
+            nonlocal call_count
+            call_count += 1
+            # Return sequential IDs: todoist-1, todoist-2, todoist-3
+            return _api_task(id=f"todoist-{call_count}", content=json.get("content", ""))
+
+        mock_client.post.side_effect = _mock_post
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_tasks"]
+
+        # Simulate what todo_batch_add_children now produces:
+        # idx 0: Child A (direct child, parentId known)
+        # idx 1: Grandchild A1 (_parent_index=0, parentId resolved at creation)
+        # idx 2: Child B (direct child, parentId known)
+        tasks = [
+            {
+                "content": "Child A",
+                "projectId": "proj-1",
+                "parentId": "root-todoist-id",
+                "_parent_index": -1,
+                "_local_id": "1.1",
+            },
+            {
+                "content": "Grandchild A1",
+                "projectId": "proj-1",
+                "_parent_index": 0,
+                "_local_id": "1.1.1",
+            },
+            {
+                "content": "Child B",
+                "projectId": "proj-1",
+                "parentId": "root-todoist-id",
+                "_parent_index": -1,
+                "_local_id": "1.2",
+            },
+        ]
+        result = json.loads(tool.fn(tasks=tasks))
+
+        assert len(result["successes"]) == 3
+        assert result["failures"] == []
+
+        # Verify the API calls: Child A gets root parent, Grandchild gets Child A's ID
+        calls = mock_client.post.call_args_list
+        assert calls[0].kwargs["json"]["parent_id"] == "root-todoist-id"
+        assert calls[1].kwargs["json"]["parent_id"] == "todoist-1"  # resolved from idx 0
+        assert calls[2].kwargs["json"]["parent_id"] == "root-todoist-id"
+
+        # _parent_index and _local_id should NOT appear in payloads
+        for call in calls:
+            assert "_parent_index" not in call.kwargs["json"]
+            assert "_local_id" not in call.kwargs["json"]
+
+    def test_parent_index_failed_parent_skips_child(self, mock_client: MagicMock) -> None:
+        """If a parent task fails, its grandchild (referencing it) also fails."""
+        mock_client.post.side_effect = RuntimeError("API error")
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.tasks import register
+
+        app = FastMCP("test")
+        register(app)
+        tool = app._tool_manager._tools["todoist_add_tasks"]
+
+        tasks = [
+            {"content": "Child A", "projectId": "p1", "parentId": "root", "_parent_index": -1},
+            {"content": "Grandchild A1", "projectId": "p1", "_parent_index": 0},
+        ]
+        result = json.loads(tool.fn(tasks=tasks))
+
+        assert result["successes"] == []
+        assert len(result["failures"]) == 2
+        # First fails from API error, second fails because parent wasn't created
+        assert "Parent at index 0 was not created" in result["failures"][1]["error"]
+
 
 # -- todoist_complete_tasks --------------------------------------------------
 

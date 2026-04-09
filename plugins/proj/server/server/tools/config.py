@@ -165,7 +165,7 @@ def register(app: FastMCP) -> None:
         team_mode_trust_level: int = 1,
         resilience_failure_threshold: int = 3,
         resilience_recovery_timeout: int = 300,
-        quality_level: str = "balanced",
+        quality_level: str = "careful",
         smart_gate_enabled: bool = True,
         worktree_isolation: bool = False,
         context_injection_enabled: bool = True,

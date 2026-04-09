@@ -407,7 +407,7 @@ class ProjConfig:
     team_mode: TeamModeConfig = field(default_factory=TeamModeConfig)
     resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
     smart_gate: SmartGateConfig = field(default_factory=SmartGateConfig)
-    quality_level: str = "balanced"
+    quality_level: str = "careful"
     worktree_isolation: bool = True  # default-on: isolate parallel agents in git worktrees
     context_injection: ContextInjectionConfig = field(default_factory=ContextInjectionConfig)
 
@@ -501,7 +501,7 @@ class ProjConfig:
             team_mode=TeamModeConfig.from_dict(team_mode_raw),
             resilience=ResilienceConfig.from_dict(resilience_raw),
             smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
-            quality_level=str(data.get("quality_level", "balanced")),
+            quality_level=str(data.get("quality_level", "careful")),
             worktree_isolation=bool(data.get("worktree_isolation", True)),
             context_injection=ContextInjectionConfig.from_dict(ctx_injection_raw),
         )

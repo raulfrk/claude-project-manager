@@ -84,17 +84,40 @@ def register(app: FastMCP) -> None:
         client = get_client()
         successes: list[JsonObject] = []
         failures: list[JsonObject] = []
+        # Track created Todoist IDs by index so grandchildren can resolve
+        # their parent's Todoist task ID via _parent_index.
+        created_ids: dict[int, str] = {}
         for idx, task in enumerate(tasks):
             try:
                 if not task.get("content"):
                     failures.append({"index": idx, "error": "Missing 'content'"})
                     continue
-                payload = _build_task_payload(task)
+                # Resolve _parent_index → actual Todoist parent ID
+                parent_index = task.get("_parent_index")
+                if isinstance(parent_index, int) and parent_index >= 0:
+                    resolved_parent = created_ids.get(parent_index)
+                    if resolved_parent is None:
+                        failures.append(
+                            {
+                                "index": idx,
+                                "content": str(task.get("content", "")),
+                                "error": f"Parent at index {parent_index} was not created",
+                            }
+                        )
+                        continue
+                    task = {**task, "parentId": resolved_parent}
+                # Strip internal keys before building payload
+                clean_task: TaskInput = {
+                    k: v for k, v in task.items() if k not in ("_parent_index", "_local_id")
+                }
+                payload = _build_task_payload(clean_task)
                 result = client.post("/tasks", json=payload)
                 if not isinstance(result, dict):
                     failures.append({"index": idx, "error": "Unexpected response type"})
                     continue
-                successes.append(TodoistTask.from_api(result).to_dict())
+                todoist_task = TodoistTask.from_api(result)
+                created_ids[idx] = todoist_task.id
+                successes.append(todoist_task.to_dict())
             except Exception as exc:
                 failures.append(
                     {

@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Stress-test requirements with 3 specialized review agents (Skeptic, Edge-Case Finder, Architecture Reviewer). Sub-skill invoked by run, not user-invocable.
+description: Stress-test requirements with review agents (3 core + up to 4 tag/quality-based). Sub-skill invoked by run, not user-invocable.
 allowed-tools: mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__proj_get_todo_context, mcp__proj__notes_append, Read, Glob, Grep, Task
 context: fork
 agent: general-purpose
@@ -22,7 +22,9 @@ Refine todo: $ARGUMENTS
 - If no requirements found: note as a critical gap but continue (agents will flag it).
 - If no research found: note for Architecture Reviewer (will flag missing research as a gap).
 
-**3.** Spawn 3 review agents in parallel (general-purpose, read-only: `Read, Glob, Grep`):
+**3.** Determine agent set and spawn in parallel (general-purpose, read-only: `Read, Glob, Grep`):
+
+Load the todo's `tags` field from todo context. Select agents per the agent selection logic below. Spawn all selected agents in parallel:
 
 **Agent 1 — Skeptic:**
 > You are a Skeptic reviewer. Your job is to challenge the requirements and research for this todo. Look for:
@@ -55,6 +57,63 @@ Refine todo: $ARGUMENTS
 >
 > Report ONLY new information. Do NOT restate existing architecture decisions.
 
+**Agent 4 — Security Reviewer** (triggered by `security` or `breaking-change` tags on the todo):
+> You are a Security Reviewer. Your job is to audit the requirements and proposed approach for security risks. Look for:
+> - Authentication and authorization gaps
+> - Data privacy concerns and sensitive data exposure
+> - Injection attack vectors (SQL, command, template, etc.)
+> - Secrets management and credential handling
+> - Input validation and sanitization weaknesses
+> - Access control bypasses
+> - Compliance implications
+>
+> Report ONLY new information. Do NOT restate existing security considerations.
+
+**Agent 5 — Performance & Scalability Reviewer** (triggered by `performance` tag on the todo):
+> You are a Performance & Scalability Reviewer. Your job is to identify performance risks in the proposed approach. Look for:
+> - Algorithmic complexity issues (O(n^2) or worse where O(n) is possible)
+> - Excessive memory consumption or memory leaks
+> - Concurrency bottlenecks and lock contention
+> - Missing pagination or batching for large datasets
+> - Database query patterns (N+1 queries, missing indexes, full table scans)
+> - Caching opportunities and cache invalidation risks
+> - Resource cleanup and connection pool exhaustion
+>
+> Report ONLY new information. Do NOT restate existing performance considerations.
+
+**Agent 6 — API & Contract Reviewer** (triggered by `api` tag on the todo):
+> You are an API & Contract Reviewer. Your job is to evaluate interface design and backwards compatibility. Look for:
+> - Public API surface changes that break existing consumers
+> - Parameter naming inconsistencies with existing conventions
+> - Response format changes or missing fields
+> - Missing versioning or deprecation strategy
+> - Error response semantics (status codes, error shapes)
+> - Missing or incorrect type annotations on public interfaces
+> - Documentation gaps for consumer-facing changes
+>
+> Report ONLY new information. Do NOT restate existing API decisions.
+
+**Agent 7 — Complexity & Maintainability Reviewer** (triggered by `--paranoid` quality level only):
+> You are a Complexity & Maintainability Reviewer. Your job is to assess long-term code health impact. Look for:
+> - DRY violations and code duplication across the codebase
+> - High cyclomatic complexity in proposed implementations
+> - Abstraction level mismatches (too abstract or too concrete)
+> - Single-responsibility principle violations
+> - Tight coupling between modules that should be independent
+> - Test coverage gaps in critical paths
+> - Technical debt being introduced without acknowledgment
+>
+> Report ONLY new information. Do NOT restate existing maintainability concerns.
+
+**Agent selection logic:**
+- **Core agents (1-3)**: ALWAYS run regardless of tags or quality level.
+- **Tag-based agents (4-6)**: Check the todo's `tags` field. Add matching reviewers:
+  - Tags `security` or `breaking-change` → add Agent 4 (Security Reviewer)
+  - Tag `performance` → add Agent 5 (Performance & Scalability Reviewer)
+  - Tag `api` → add Agent 6 (API & Contract Reviewer)
+- **Quality-level agents**: `--paranoid` adds ALL 7 agents regardless of tags.
+- **Max parallel**: Respect the quality_level's `max_parallel` setting when spawning agents.
+
 Each agent receives: todo context, requirements.md content, research.md content, and codebase read access.
 
 Each agent produces this exact structure:
@@ -74,9 +133,11 @@ Each agent produces this exact structure:
 
 If an agent finds nothing: all three sections are present, with Critical Issues and Suggestions empty, and Confirmed Sound listing what was validated.
 
-**4.** Wait for all 3 agents. If any agent fails/times out: report partial results from succeeded agents, note the failure.
+**4.** Wait for all agents. If any agent fails/times out: report partial results from succeeded agents, note the failure.
 
 **5.** Synthesize into Refinement Report:
+
+For each agent that ran, include a summary block:
 
 ```
 ### Refinement Report
@@ -93,6 +154,24 @@ If an agent finds nothing: all three sections are present, with Critical Issues 
   - CRITICAL: <issue summary>
   - Suggest: <suggestion summary>
 
+[If tag-based or quality-level agents ran, include their blocks:]
+
+**Security** — <N> critical, <M> suggestions
+  - CRITICAL: <issue summary>
+  - Suggest: <suggestion summary>
+
+**Performance** — <N> critical, <M> suggestions
+  - CRITICAL: <issue summary>
+  - Suggest: <suggestion summary>
+
+**API & Contract** — <N> critical, <M> suggestions
+  - CRITICAL: <issue summary>
+  - Suggest: <suggestion summary>
+
+**Complexity** — <N> critical, <M> suggestions
+  - CRITICAL: <issue summary>
+  - Suggest: <suggestion summary>
+
 ### Suggested Amendments
 
 **Requirements changes**:
@@ -105,11 +184,11 @@ If an agent finds nothing: all three sections are present, with Critical Issues 
 1. <new edge case>
 ```
 
-**6.** All-clear scenario: if zero criticals AND zero suggestions across all 3 agents:
+**6.** All-clear scenario: if zero criticals AND zero suggestions across all agents:
 ```
 ### Refinement Report
 
-No concerns found. All 3 reviewers confirmed the requirements and research are sound.
+No concerns found. All <N> reviewers confirmed the requirements and research are sound.
 
 Proceeding to plan mode.
 ```

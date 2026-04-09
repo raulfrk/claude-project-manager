@@ -21,7 +21,7 @@ Execute todo(s): $ARGUMENTS
   - **Trust 3 (full-auto)**: no plan phase — Phase 1 is skipped entirely. Agents execute with context only (requirements + research + parent context). No plans are created.
 - Parse `--resume` flag: resume execution from the most recent checkpoint. See **Resume checkpoint** below.
 - Parse `--no-pipeline` flag: disable plan-while-executing pipeline (default: pipeline enabled).
-- Parse `--fast`/`--balanced`/`--careful`/`--paranoid` flags. Mutually exclusive, last wins, default `--balanced`.
+- Parse `--fast`/`--balanced`/`--careful`/`--paranoid` flags. Mutually exclusive, last wins, default `--careful`.
 - Parse `--force-plan` flag: force FULL REVIEW regardless of complexity score.
 - Parse `--batch-approve` flag: auto-approve all speculative plans without review.
 - Parse `--worktree` flag: enable worktree isolation for parallel execution.

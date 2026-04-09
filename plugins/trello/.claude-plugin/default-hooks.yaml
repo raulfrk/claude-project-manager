@@ -1,15 +1,16 @@
 hooks:
   - id: trello-on-proj-init
     trigger_tool: proj_init
-    target_tool: trello_add_card_hook
+    target_tool: add_card_to_list
     server: trello
     param_mapping:
+      list_id: "${sync.trello.default_list_id}"
       name: "${project_name}"
     blocking: true
     condition: "sync.trello.enabled"
     feedback_tool: proj_update_meta
     feedback_mapping:
-      card_id: trello_card_id
+      id: trello_card_id
 
   - id: trello-on-proj-load
     trigger_tool: proj_load_session
@@ -32,9 +33,10 @@ hooks:
 
   - id: trello-on-todo-add
     trigger_tool: todo_add
-    target_tool: trello_add_todo_card_hook
+    target_tool: add_card_to_list
     server: trello
     param_mapping:
+      list_id: "${trello_list_id}"
       name: "${title}"
       desc: "${notes}"
       due: "${due_date}"
@@ -42,7 +44,7 @@ hooks:
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
     feedback_tool: todo_update
     feedback_mapping:
-      card_id: trello_card_id
+      id: trello_card_id
 
   - id: trello-on-todo-complete
     trigger_tool: todo_complete
@@ -50,7 +52,7 @@ hooks:
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      list_id: "${sync.trello.list_mappings.done}"
+      list_id: "${trello_done_list_id}"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
@@ -60,16 +62,16 @@ hooks:
     server: trello
     param_mapping:
       card_id: "${trello_card_id}"
-      list_id: "${sync.trello.list_mappings.tasks}"
+      list_id: "${trello_list_id}"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
   - id: verify-trello-todo-card
     trigger_tool: todo_complete
-    target_tool: trello_verify_card_hook
+    target_tool: get_card
     server: trello
     param_mapping:
-      card_id: "${result.trello_card_id}"
+      card_id: "${trello_card_id}"
     verification: true
     condition: "sync.trello.enabled"
 
@@ -96,26 +98,25 @@ hooks:
 
   - id: trello-on-todo-add-child
     trigger_tool: todo_add_child
-    target_tool: trello_add_child_card_hook
+    target_tool: add_card_to_list
     server: trello
     param_mapping:
-      parent_card_id: "${parent_trello_card_id}"
-      name: "${todo.title}"
+      list_id: "${trello_list_id}"
+      name: "${title}"
     feedback_tool: todo_update
     feedback_mapping:
-      card_id: trello_card_id
+      id: trello_card_id
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync"
 
   - id: trello-on-todo-batch-add-children
     trigger_tool: todo_batch_add_children
-    target_tool: trello_batch_add_child_cards_hook
+    target_tool: batch_create_cards
     server: trello
     param_mapping:
-      parent_card_id: "${trello_card_id}"
-      items: "${children[*].title}"
+      cards: "${trello_batch_cards}"
     feedback_tool: todo_update
     feedback_mapping:
-      "children[*].card_id": "trello_card_id"
+      "successes[*].id": "trello_card_id"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
