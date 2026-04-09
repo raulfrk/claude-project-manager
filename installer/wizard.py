@@ -311,7 +311,7 @@ def _setup_todoist_config(console: Console) -> None:
 
     try:
         resp = httpx.get(
-            "https://api.todoist.com/rest/v2/projects",
+            "https://api.todoist.com/api/v1/projects",
             headers={"Authorization": f"Bearer {api_token}"},
             timeout=10,
         )

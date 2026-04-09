@@ -28,7 +28,7 @@ _TASK_RESPONSE_SCHEMA: dict[str, object] = {
 
 LIST_TASKS = EndpointContract(
     method="GET",
-    url_pattern="/rest/v2/tasks",
+    url_pattern="/api/v1/tasks",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,
@@ -38,7 +38,7 @@ LIST_TASKS = EndpointContract(
 
 CREATE_TASK = EndpointContract(
     method="POST",
-    url_pattern="/rest/v2/tasks",
+    url_pattern="/api/v1/tasks",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema={
@@ -52,7 +52,7 @@ CREATE_TASK = EndpointContract(
 
 UPDATE_TASK = EndpointContract(
     method="POST",
-    url_pattern="/rest/v2/tasks/{task_id}",
+    url_pattern="/api/v1/tasks/{task_id}",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema={
@@ -66,7 +66,7 @@ UPDATE_TASK = EndpointContract(
 
 CLOSE_TASK = EndpointContract(
     method="POST",
-    url_pattern="/rest/v2/tasks/{task_id}/close",
+    url_pattern="/api/v1/tasks/{task_id}/close",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,
@@ -76,7 +76,7 @@ CLOSE_TASK = EndpointContract(
 
 REOPEN_TASK = EndpointContract(
     method="POST",
-    url_pattern="/rest/v2/tasks/{task_id}/reopen",
+    url_pattern="/api/v1/tasks/{task_id}/reopen",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,
@@ -86,7 +86,7 @@ REOPEN_TASK = EndpointContract(
 
 DELETE_TASK = EndpointContract(
     method="DELETE",
-    url_pattern="/rest/v2/tasks/{task_id}",
+    url_pattern="/api/v1/tasks/{task_id}",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,
@@ -96,7 +96,7 @@ DELETE_TASK = EndpointContract(
 
 GET_TASK = EndpointContract(
     method="GET",
-    url_pattern="/rest/v2/tasks/{task_id}",
+    url_pattern="/api/v1/tasks/{task_id}",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,

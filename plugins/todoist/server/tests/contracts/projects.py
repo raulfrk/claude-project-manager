@@ -22,7 +22,7 @@ _PROJECT_RESPONSE_SCHEMA: dict[str, object] = {
 
 LIST_PROJECTS = EndpointContract(
     method="GET",
-    url_pattern="/rest/v2/projects",
+    url_pattern="/api/v1/projects",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema=None,
@@ -32,7 +32,7 @@ LIST_PROJECTS = EndpointContract(
 
 CREATE_PROJECT = EndpointContract(
     method="POST",
-    url_pattern="/rest/v2/projects",
+    url_pattern="/api/v1/projects",
     required_headers=_AUTH_HEADERS,
     auth_style=_AUTH_STYLE,
     request_schema={

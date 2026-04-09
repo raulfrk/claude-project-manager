@@ -102,7 +102,7 @@ def _get_tool(app, name: str):
     return app._tool_manager._tools[name]
 
 
-# -- todoist_find_projects (GET /rest/v2/projects) ---------------------------
+# -- todoist_find_projects (GET /api/v1/projects) ---------------------------
 
 
 class TestFindProjectsContract:
@@ -166,7 +166,7 @@ class TestFindProjectsContract:
         assert result == []
 
 
-# -- todoist_add_projects (POST /rest/v2/projects) ---------------------------
+# -- todoist_add_projects (POST /api/v1/projects) ---------------------------
 
 
 class TestAddProjectsContract:
@@ -233,7 +233,7 @@ class TestAddProjectsContract:
         assert body["is_favorite"] is True
 
 
-# -- todoist_add_project_hook (POST /rest/v2/projects) -----------------------
+# -- todoist_add_project_hook (POST /api/v1/projects) -----------------------
 
 
 class TestAddProjectHookContract:

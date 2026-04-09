@@ -331,7 +331,7 @@ class TodoistConfigScreen(BaseIntegrationScreen):
 
         try:
             resp = httpx.get(
-                "https://api.todoist.com/rest/v2/projects",
+                "https://api.todoist.com/api/v1/projects",
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
             )

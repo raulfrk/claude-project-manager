@@ -1,7 +1,7 @@
 """Dedicated error response contract tests for Todoist REST v2.
 
 Tests each error code (401, 403, 404, 429, 500) against multiple endpoints
-(GET /rest/v2/tasks and POST /rest/v2/tasks) for broader coverage than the
+(GET /api/v1/tasks and POST /api/v1/tasks) for broader coverage than the
 inline error tests in test_contracts_tasks.py.
 """
 
@@ -83,7 +83,7 @@ def _get_tool(app, name: str):
 class TestUnauthorized401:
     @respx.mock
     def test_get_tasks_401(self, mock_client: TodoistClient) -> None:
-        """GET /rest/v2/tasks returns 401."""
+        """GET /api/v1/tasks returns 401."""
         respx.get(f"{BASE_URL}/tasks").mock(return_value=build_error_response(UNAUTHORIZED_401))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_find_tasks")
@@ -92,7 +92,7 @@ class TestUnauthorized401:
 
     @respx.mock
     def test_post_tasks_401(self, mock_client: TodoistClient) -> None:
-        """POST /rest/v2/tasks returns 401."""
+        """POST /api/v1/tasks returns 401."""
         respx.post(f"{BASE_URL}/tasks").mock(return_value=build_error_response(UNAUTHORIZED_401))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_add_tasks")
@@ -112,7 +112,7 @@ class TestUnauthorized401:
 class TestForbidden403:
     @respx.mock
     def test_get_tasks_403(self, mock_client: TodoistClient) -> None:
-        """GET /rest/v2/tasks returns 403."""
+        """GET /api/v1/tasks returns 403."""
         respx.get(f"{BASE_URL}/tasks").mock(return_value=build_error_response(FORBIDDEN_403))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_find_tasks")
@@ -121,7 +121,7 @@ class TestForbidden403:
 
     @respx.mock
     def test_post_tasks_403(self, mock_client: TodoistClient) -> None:
-        """POST /rest/v2/tasks returns 403."""
+        """POST /api/v1/tasks returns 403."""
         respx.post(f"{BASE_URL}/tasks").mock(return_value=build_error_response(FORBIDDEN_403))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_add_tasks")
@@ -139,7 +139,7 @@ class TestForbidden403:
 class TestNotFound404:
     @respx.mock
     def test_get_task_404(self, mock_client: TodoistClient) -> None:
-        """GET /rest/v2/tasks/{id} returns 404 (via verify_complete)."""
+        """GET /api/v1/tasks/{id} returns 404 (via verify_complete)."""
         respx.get(f"{BASE_URL}/tasks/nonexistent").mock(
             return_value=build_error_response(NOT_FOUND_404)
         )
@@ -151,7 +151,7 @@ class TestNotFound404:
 
     @respx.mock
     def test_post_tasks_404(self, mock_client: TodoistClient) -> None:
-        """POST /rest/v2/tasks returns 404."""
+        """POST /api/v1/tasks returns 404."""
         respx.post(f"{BASE_URL}/tasks").mock(return_value=build_error_response(NOT_FOUND_404))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_add_tasks")
@@ -169,7 +169,7 @@ class TestNotFound404:
 class TestRateLimited429:
     @respx.mock
     def test_get_tasks_429(self, mock_client: TodoistClient) -> None:
-        """GET /rest/v2/tasks returns 429 with Retry-After header."""
+        """GET /api/v1/tasks returns 429 with Retry-After header."""
         respx.get(f"{BASE_URL}/tasks").mock(return_value=build_error_response(RATE_LIMITED_429))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_find_tasks")
@@ -178,7 +178,7 @@ class TestRateLimited429:
 
     @respx.mock
     def test_post_tasks_429(self, mock_client: TodoistClient) -> None:
-        """POST /rest/v2/tasks returns 429 with Retry-After header."""
+        """POST /api/v1/tasks returns 429 with Retry-After header."""
         respx.post(f"{BASE_URL}/tasks").mock(return_value=build_error_response(RATE_LIMITED_429))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_add_tasks")
@@ -197,7 +197,7 @@ class TestRateLimited429:
 class TestServerError500:
     @respx.mock
     def test_get_tasks_500(self, mock_client: TodoistClient) -> None:
-        """GET /rest/v2/tasks returns 500."""
+        """GET /api/v1/tasks returns 500."""
         respx.get(f"{BASE_URL}/tasks").mock(return_value=build_error_response(SERVER_ERROR_500))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_find_tasks")
@@ -206,7 +206,7 @@ class TestServerError500:
 
     @respx.mock
     def test_post_tasks_500(self, mock_client: TodoistClient) -> None:
-        """POST /rest/v2/tasks returns 500."""
+        """POST /api/v1/tasks returns 500."""
         respx.post(f"{BASE_URL}/tasks").mock(return_value=build_error_response(SERVER_ERROR_500))
         app = _register_task_tools()
         tool = _get_tool(app, "todoist_add_tasks")

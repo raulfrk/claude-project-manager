@@ -24,9 +24,9 @@ def register(app: FastMCP) -> None:
         auto_sync: bool = True,
         root_only: bool = False,
     ) -> str:
-        # Validate credentials against the Todoist REST API
+        # Validate credentials against the Todoist API
         resp = httpx.get(
-            "https://api.todoist.com/rest/v2/projects",
+            "https://api.todoist.com/api/v1/projects",
             headers={"Authorization": f"Bearer {api_token}"},
             timeout=30,
         )

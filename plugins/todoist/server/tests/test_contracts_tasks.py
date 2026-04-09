@@ -133,7 +133,7 @@ def _get_tool(app, name: str):
     return app._tool_manager._tools[name]
 
 
-# -- todoist_find_tasks (GET /rest/v2/tasks) ---------------------------------
+# -- todoist_find_tasks (GET /api/v1/tasks) ---------------------------------
 
 
 class TestFindTasksContract:
@@ -196,7 +196,7 @@ class TestFindTasksContract:
         assert result == []
 
 
-# -- todoist_add_tasks (POST /rest/v2/tasks) ---------------------------------
+# -- todoist_add_tasks (POST /api/v1/tasks) ---------------------------------
 
 
 class TestAddTasksContract:
@@ -278,7 +278,7 @@ class TestAddTasksContract:
         assert result["failures"] == []
 
 
-# -- todoist_update_tasks (POST /rest/v2/tasks/{id}) -------------------------
+# -- todoist_update_tasks (POST /api/v1/tasks/{id}) -------------------------
 
 
 class TestUpdateTasksContract:
@@ -310,7 +310,7 @@ class TestUpdateTasksContract:
         assert_response_parses(result["successes"][0], UPDATE_TASK)
 
 
-# -- todoist_update_task_hook (POST /rest/v2/tasks/{id}) ---------------------
+# -- todoist_update_task_hook (POST /api/v1/tasks/{id}) ---------------------
 
 
 class TestUpdateTaskHookContract:
@@ -342,7 +342,7 @@ class TestUpdateTaskHookContract:
         assert_response_parses(result["successes"][0], UPDATE_TASK)
 
 
-# -- todoist_complete_tasks (POST /rest/v2/tasks/{id}/close) -----------------
+# -- todoist_complete_tasks (POST /api/v1/tasks/{id}/close) -----------------
 
 
 class TestCompleteTasksContract:
@@ -371,7 +371,7 @@ class TestCompleteTasksContract:
         assert result["failures"] == []
 
 
-# -- todoist_complete_task_hook (POST /rest/v2/tasks/{id}/close) -------------
+# -- todoist_complete_task_hook (POST /api/v1/tasks/{id}/close) -------------
 
 
 class TestCompleteTaskHookContract:
@@ -399,7 +399,7 @@ class TestCompleteTaskHookContract:
         assert result["failures"] == []
 
 
-# -- todoist_uncomplete_tasks (POST /rest/v2/tasks/{id}/reopen) --------------
+# -- todoist_uncomplete_tasks (POST /api/v1/tasks/{id}/reopen) --------------
 
 
 class TestUncompleteTasksContract:
@@ -428,7 +428,7 @@ class TestUncompleteTasksContract:
         assert result["failures"] == []
 
 
-# -- todoist_delete (DELETE /rest/v2/tasks/{id}) -----------------------------
+# -- todoist_delete (DELETE /api/v1/tasks/{id}) -----------------------------
 
 
 class TestDeleteTaskContract:
@@ -455,7 +455,7 @@ class TestDeleteTaskContract:
         assert result == {"deleted": True, "id": "t1"}
 
 
-# -- todoist_verify_complete (GET /rest/v2/tasks/{id}) -----------------------
+# -- todoist_verify_complete (GET /api/v1/tasks/{id}) -----------------------
 
 
 class TestVerifyCompleteContract:
@@ -500,7 +500,7 @@ class TestVerifyCompleteContract:
         assert result["status"] == "open"
 
 
-# -- todoist_add_child_task_hook (POST /rest/v2/tasks) -----------------------
+# -- todoist_add_child_task_hook (POST /api/v1/tasks) -----------------------
 
 
 class TestAddChildTaskHookContract:
