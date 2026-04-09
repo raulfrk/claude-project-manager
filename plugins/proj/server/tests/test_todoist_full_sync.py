@@ -24,9 +24,11 @@ from server.lib.models import (
     TodoistSync,
 )
 from server.tools.todoist_full_sync import (
+    _PUSH_COMPLETE_BATCH_SIZE,
     ApplyInput,
     _collect_descendant_todoist_ids,
     _compute_todoist_depth,
+    _execute_push_completes,
     _infer_parent_link_from_children,
     _migrate_parent_links,
     apply_changes,
@@ -1221,12 +1223,12 @@ class TestFullSyncParentChild:
 
 
 class TestCompletionSync:
-    """Tests for second-pass completion scan, push_reopen, timestamp resolution,
-    parent cascade, and deduplication in compute_diff."""
+    """Tests for stale ID skipping, push_reopen, timestamp resolution,
+    parent cascade filtering, and deduplication in compute_diff."""
 
-    # 1. test_child_push_complete — second-pass catches done todo not in Todoist fetch
+    # 1. test_child_push_complete — stale child not in fetch is skipped
     def test_child_push_complete(self, cfg_with_project: tuple) -> None:
-        """Done child not in Todoist fetch → second-pass adds to push_complete."""
+        """Done child not in Todoist fetch → skipped (stale), not added to push_complete."""
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp")
@@ -1241,9 +1243,10 @@ class TestCompletionSync:
 
         plan = compute_diff(todoist_tasks, cfg, name)
 
-        assert "tc" in plan.push_complete
+        assert "tc" not in plan.push_complete
+        assert plan.stale_ids_skipped >= 1
 
-    # 2. test_grandchild_push_complete — all three levels found via second-pass
+    # 2. test_grandchild_push_complete — all stale, none pushed
     def test_grandchild_push_complete(self, cfg_with_project: tuple) -> None:
         """Parent → child → grandchild, all done with todoist_task_ids, none in Todoist fetch."""
         cfg, name = cfg_with_project
@@ -1262,11 +1265,11 @@ class TestCompletionSync:
 
         plan = compute_diff(todoist_tasks, cfg, name)
 
-        # All three should be in push_complete (second-pass for missing from fetch,
-        # plus cascade for descendants of done parents)
-        assert "tp" in plan.push_complete
-        assert "tc" in plan.push_complete
-        assert "tgc" in plan.push_complete
+        # None should be in push_complete (all stale — not in active fetch)
+        assert "tp" not in plan.push_complete
+        assert "tc" not in plan.push_complete
+        assert "tgc" not in plan.push_complete
+        assert plan.stale_ids_skipped == 3
 
     # 3. test_push_reopen — local open, Todoist completed, local newer
     def test_push_reopen(self, cfg_with_project: tuple) -> None:
@@ -1518,3 +1521,195 @@ class TestCompletionSync:
         assert "tc" in plan.push_complete
         # No duplicates
         assert plan.push_complete.count("tc") == 1
+
+    # 11. test_stale_id_skipped — locally-done todo with stale todoist_task_id
+    def test_stale_id_skipped_not_in_push_complete(self, cfg_with_project: tuple) -> None:
+        """Locally-done todo whose todoist_task_id is not in active fetch → stale, not pushed."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(cfg, name, "Done task", todoist_task_id="t_stale", status="done")
+        storage.save_todos(cfg, name, [todo])
+
+        # Todoist returns no tasks — t_stale is not in the active fetch
+        todoist_tasks: list[dict] = []
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t_stale" not in plan.push_complete
+        assert plan.stale_ids_skipped == 1
+
+    # 12. test_cascade_filters_stale_descendants
+    def test_cascade_filters_stale_descendants(self, cfg_with_project: tuple) -> None:
+        """Parent done with children — descendant IDs not in active fetch are filtered out."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "P", todoist_task_id="tp", status="done")
+        child = _make_todo(
+            cfg, name, "C", parent=parent.id, todoist_task_id="tc_stale", status="done"
+        )
+        parent.children = [child.id]
+        storage.save_todos(cfg, name, [parent, child])
+
+        # Todoist returns parent (as completed=False, old ts) but NOT child
+        todoist_tasks = [_make_todoist_task("tp", "P", updated_at="2000-01-01T00:00:00Z")]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Child's stale ID should not be in push_complete via cascade
+        assert "tc_stale" not in plan.push_complete
+
+    # 13. test_cascade_includes_active_descendants
+    def test_cascade_includes_active_descendants(self, cfg_with_project: tuple) -> None:
+        """Parent done with children — descendant IDs in active fetch are included in cascade."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "P", todoist_task_id="tp", status="done")
+        child = _make_todo(
+            cfg,
+            name,
+            "C",
+            parent=parent.id,
+            todoist_task_id="tc_active",
+            status="done",
+            updated="2099-06-01T00:00:00",
+        )
+        parent.children = [child.id]
+        storage.save_todos(cfg, name, [parent, child])
+
+        # Todoist returns both parent and child
+        todoist_tasks = [
+            _make_todoist_task("tp", "P", updated_at="2000-01-01T00:00:00Z"),
+            _make_todoist_task("tc_active", "C", updated_at="2000-01-01T00:00:00Z", parent_id="tp"),
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Child is in active fetch → cascade should include it
+        assert "tc_active" in plan.push_complete
+
+    # 14. test_ghost_parent_not_pushed
+    def test_ghost_parent_not_pushed(self, cfg_with_project: tuple) -> None:
+        """Done parent with stale todoist_task_id, no children → not pushed."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Ghost parent", todoist_task_id="tp_ghost", status="done")
+        storage.save_todos(cfg, name, [parent])
+
+        todoist_tasks: list[dict] = []
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "tp_ghost" not in plan.push_complete
+        assert plan.stale_ids_skipped >= 1
+
+    # 15. test_mixed_legitimate_and_stale
+    def test_mixed_legitimate_and_stale(self, cfg_with_project: tuple) -> None:
+        """Mix of legitimate (in active fetch) and stale (not in fetch) → only legitimate pushed."""
+        cfg, name = cfg_with_project
+
+        legit = _make_todo(
+            cfg,
+            name,
+            "Legit",
+            todoist_task_id="t_legit",
+            status="done",
+            updated="2099-06-01T00:00:00",
+        )
+        stale = _make_todo(cfg, name, "Stale", todoist_task_id="t_stale", status="done")
+        storage.save_todos(cfg, name, [legit, stale])
+
+        # Only legit is in the active fetch (still open, old timestamp)
+        todoist_tasks = [_make_todoist_task("t_legit", "Legit", updated_at="2000-01-01T00:00:00Z")]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t_legit" in plan.push_complete
+        assert "t_stale" not in plan.push_complete
+        assert plan.stale_ids_skipped >= 1
+
+
+class TestExecutePushCompletes:
+    """Tests for _execute_push_completes batching and per-ID response parsing."""
+
+    # 16. test_batching
+    def test_execute_push_completes_batching(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """45 IDs → 3 chunks (20+20+5)."""
+        from server.tools import todoist_full_sync
+
+        calls: list[list[str]] = []
+
+        def mock_call_todoist(tool_name: str, params: dict) -> dict:
+            ids = params["ids"]
+            calls.append(ids)
+            return {"successes": [{"id": i} for i in ids], "failures": []}
+
+        monkeypatch.setattr(todoist_full_sync, "_call_todoist_tool", mock_call_todoist)
+
+        task_ids = [f"t{i}" for i in range(45)]
+        succeeded, errors = _execute_push_completes(task_ids)
+
+        assert len(calls) == 3
+        assert len(calls[0]) == 20
+        assert len(calls[1]) == 20
+        assert len(calls[2]) == 5
+        assert len(succeeded) == 45
+        assert errors == []
+
+    # 17. test_parses_failures
+    def test_execute_push_completes_parses_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """1 failure in a batch → only successes returned, failure in errors."""
+        from server.tools import todoist_full_sync
+
+        def mock_call_todoist(tool_name: str, params: dict) -> dict:
+            ids = params["ids"]
+            return {
+                "successes": [{"id": i} for i in ids[:-1]],
+                "failures": [{"id": ids[-1], "error": "not found"}],
+            }
+
+        monkeypatch.setattr(todoist_full_sync, "_call_todoist_tool", mock_call_todoist)
+
+        task_ids = ["t1", "t2", "t3"]
+        succeeded, errors = _execute_push_completes(task_ids)
+
+        assert succeeded == ["t1", "t2"]
+        assert len(errors) == 1
+        assert errors[0]["retry_payload"] == {"ids": ["t3"]}
+
+    # 18. test_partial_chunk_failure
+    def test_execute_push_completes_partial_chunk_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """First chunk succeeds, second chunk raises → first chunk preserved."""
+        from server.tools import todoist_full_sync
+
+        call_count = 0
+
+        def mock_call_todoist(tool_name: str, params: dict) -> dict:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"successes": [{"id": i} for i in params["ids"]], "failures": []}
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(todoist_full_sync, "_call_todoist_tool", mock_call_todoist)
+
+        # 25 IDs → 2 chunks (20+5), second chunk fails
+        task_ids = [f"t{i}" for i in range(25)]
+        succeeded, errors = _execute_push_completes(task_ids)
+
+        assert len(succeeded) == 20  # First chunk preserved
+        assert len(errors) == 1
+        assert errors[0]["retry_payload"] == {"ids": [f"t{i}" for i in range(20, 25)]}
+
+    # 19. test_empty_ids
+    def test_execute_push_completes_empty(self) -> None:
+        """Empty list → no calls, no errors."""
+        succeeded, errors = _execute_push_completes([])
+        assert succeeded == []
+        assert errors == []
+
+    # 20. test_batch_size_constant
+    def test_batch_size_is_20(self) -> None:
+        """Batch size should be 20 to stay under 30s socket timeout."""
+        assert _PUSH_COMPLETE_BATCH_SIZE == 20

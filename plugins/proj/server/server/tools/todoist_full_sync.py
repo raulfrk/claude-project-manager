@@ -204,6 +204,7 @@ class SyncPlan:
     ghost_close: list[str] = field(default_factory=list)
     potential_links: list[dict[str, JsonValue]] = field(default_factory=list)
     root_only_cleanup: list[dict[str, str]] = field(default_factory=list)
+    stale_ids_skipped: int = 0
 
     def is_empty(self) -> bool:
         return not any(
@@ -394,8 +395,16 @@ def _infer_parent_link_from_children(
     return local_by_id.get(parent_id)
 
 
-def _collect_descendant_todoist_ids(todo: Todo, local_by_id: dict[str, Todo]) -> list[str]:
-    """Walk todo.children recursively, collecting todoist_task_ids of terminal descendants."""
+def _collect_descendant_todoist_ids(
+    todo: Todo,
+    local_by_id: dict[str, Todo],
+    allowed_ids: set[str] | None = None,
+) -> list[str]:
+    """Walk todo.children recursively, collecting todoist_task_ids of terminal descendants.
+
+    When *allowed_ids* is provided, only IDs present in the set are included.
+    This filters out stale IDs whose Todoist tasks are no longer in the active fetch.
+    """
     result: list[str] = []
     seen: set[str] = set()
     stack = list(todo.children) if todo.children else []
@@ -407,7 +416,11 @@ def _collect_descendant_todoist_ids(todo: Todo, local_by_id: dict[str, Todo]) ->
         child = local_by_id.get(child_id)
         if child is None:
             continue
-        if child.todoist_task_id and child.status in TERMINAL_STATUSES:
+        if (
+            child.todoist_task_id
+            and child.status in TERMINAL_STATUSES
+            and (allowed_ids is None or child.todoist_task_id in allowed_ids)
+        ):
             result.append(child.todoist_task_id)
         if child.children:
             stack.extend(child.children)
@@ -671,7 +684,7 @@ def compute_diff(
                 if _ts_newer(local_todo.updated, todoist_updated):
                     plan.push_reopen.append(todoist_id)
 
-    # ── Second pass: catch locally-done todos whose Todoist task wasn't in fetch ──
+    # ── Count stale IDs: locally-done todos whose Todoist task is not in active fetch ──
     push_complete_set = set(plan.push_complete)
     for todoist_id, local_todo in local_by_todoist_id.items():
         if (
@@ -679,12 +692,15 @@ def compute_diff(
             and todoist_id not in push_complete_set
             and todoist_id not in todoist_by_id
         ):
-            plan.push_complete.append(todoist_id)
+            plan.stale_ids_skipped += 1
 
     # ── Parent cascade: collect descendant todoist IDs for completed parents ──
+    active_todoist_ids = set(todoist_by_id.keys())
     for todo in todos:
         if todo.children and todo.status in TERMINAL_STATUSES and todo.todoist_task_id:
-            descendant_ids = _collect_descendant_todoist_ids(todo, local_by_id)
+            descendant_ids = _collect_descendant_todoist_ids(
+                todo, local_by_id, allowed_ids=active_todoist_ids
+            )
             plan.push_complete.extend(descendant_ids)
 
     # Filter push_complete to exclude IDs in root_only_cleanup
@@ -1218,26 +1234,66 @@ def _execute_push_updates(
         return [], errors
 
 
+_PUSH_COMPLETE_BATCH_SIZE = 20
+
+
 def _execute_push_completes(
     task_ids: list[str],
 ) -> tuple[list[str], list[dict[str, JsonValue]]]:
-    """Execute push_complete operations via todoist_complete_tasks."""
+    """Execute push_complete operations via todoist_complete_tasks in batches.
+
+    Batches IDs into chunks of ``_PUSH_COMPLETE_BATCH_SIZE`` to stay under the
+    30s inter-plugin socket timeout.  Parses per-ID successes/failures from the
+    ``todoist_complete_tasks`` response instead of treating the call as
+    all-or-nothing.
+    """
     if not task_ids:
         return [], []
 
-    try:
-        _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
-        return task_ids, []
-    except Exception as e:
-        errors: list[dict[str, JsonValue]] = [
-            {
-                "operation_type": "push_complete",
-                "error": str(e),
-                "retryable": True,
-                "retry_payload": {"ids": task_ids},
-            }
-        ]
-        return [], errors
+    all_succeeded: list[str] = []
+    all_errors: list[dict[str, JsonValue]] = []
+
+    for i in range(0, len(task_ids), _PUSH_COMPLETE_BATCH_SIZE):
+        chunk = task_ids[i : i + _PUSH_COMPLETE_BATCH_SIZE]
+        try:
+            result = _call_todoist_tool("todoist_complete_tasks", {"ids": chunk})
+            # Parse per-ID successes/failures from the response
+            successes: list[str]
+            failure_list: list[JsonValue]
+            if isinstance(result, dict):
+                raw_successes = result.get("successes")
+                raw_failures = result.get("failures")
+                success_list = raw_successes if isinstance(raw_successes, list) else []
+                failure_list = raw_failures if isinstance(raw_failures, list) else []
+                successes = [
+                    str(s["id"]) for s in success_list if isinstance(s, dict) and "id" in s
+                ]
+            else:
+                # Fallback: treat entire chunk as succeeded if response shape is unexpected
+                successes = list(chunk)
+                failure_list = []
+            all_succeeded.extend(successes)
+            if failure_list:
+                failed_ids = [str(f.get("id", "")) for f in failure_list if isinstance(f, dict)]
+                all_errors.append(
+                    {
+                        "operation_type": "push_complete",
+                        "error": f"{len(failure_list)} task(s) failed in chunk",
+                        "retryable": True,
+                        "retry_payload": {"ids": failed_ids},
+                    }
+                )
+        except Exception as e:
+            all_errors.append(
+                {
+                    "operation_type": "push_complete",
+                    "error": str(e),
+                    "retryable": True,
+                    "retry_payload": {"ids": chunk},
+                }
+            )
+
+    return all_succeeded, all_errors
 
 
 def _execute_push_reopens(
@@ -1499,6 +1555,7 @@ def _build_summary(
             "tasks_reopened": push_reopened,
             "ghost_closed": ghost_closed,
             "root_only_cleaned": root_cleaned,
+            "stale_ids_skipped": plan.stale_ids_skipped,
         },
     }
 
