@@ -254,7 +254,7 @@ class TestAddChildTaskHookUnexpectedResponse:
 class TestFindTasksEdgeCases:
     def test_non_dict_items_filtered(self, mock_client: MagicMock) -> None:
         """Response list may contain non-dict items (e.g. nulls). They should be filtered."""
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_task(id="1", content="Real"),
             "not a dict",
             42,
@@ -272,14 +272,14 @@ class TestFindTasksEdgeCases:
 
     def test_both_project_id_and_filter(self, mock_client: MagicMock) -> None:
         """Both params should be passed together."""
-        mock_client.get.return_value = []
+        mock_client.get_paginated.return_value = []
 
         app = _make_task_app()
         tool = app._tool_manager._tools["todoist_find_tasks"]
         tool.fn(project_id="proj1", filter="today")
 
-        mock_client.get.assert_called_once_with(
-            "/tasks", params={"project_id": "proj1", "filter": "today"}
+        mock_client.get_paginated.assert_called_once_with(
+            "/tasks", params={"project_id": "proj1", "filter": "today"}, limit=None
         )
 
 
@@ -320,8 +320,8 @@ class TestCompleteTasksAllFail:
 
 
 class TestVerifyCompleteMissingField:
-    def test_dict_without_is_completed_field(self, mock_client: MagicMock) -> None:
-        """API returns a dict without is_completed — should default to False."""
+    def test_dict_without_checked_field(self, mock_client: MagicMock) -> None:
+        """API returns a dict without checked — should default to False."""
         mock_client.get.return_value = {"id": "v4", "content": "task"}
 
         app = _make_task_app()
@@ -389,7 +389,7 @@ class TestRateLimitPropagation:
 class TestFindProjectsEdgeCases:
     def test_non_dict_items_filtered_during_name_search(self, mock_client: MagicMock) -> None:
         """Non-dict items in the response list should be filtered by name search."""
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             {"id": "1", "name": "Work"},
             "not a dict",
             None,
@@ -429,7 +429,9 @@ class TestTodoistInit:
         """Successful init validates token and writes config."""
 
         def mock_get(*args: Any, **kwargs: Any) -> httpx.Response:
-            return httpx.Response(200, json=[{"id": "p1"}, {"id": "p2"}])
+            return httpx.Response(
+                200, json={"results": [{"id": "p1"}, {"id": "p2"}], "next_cursor": None}
+            )
 
         monkeypatch.setattr(httpx, "get", mock_get)
         config_path = tmp_path / "todoist.yaml"
@@ -520,22 +522,19 @@ class TestTaskModelEdgeCases:
         task = TodoistTask.from_api({"id": "1", "content": "Task", "priority": 99})
         assert task.priority == "low"
 
-    def test_camel_case_project_id_preferred(self) -> None:
-        """When both projectId and project_id are present, projectId wins (fallback order)."""
+    def test_project_id_from_snake_case(self) -> None:
+        """API v1 uses snake_case project_id."""
         from server.lib.models import TodoistTask
 
-        task = TodoistTask.from_api(
-            {"id": "1", "content": "Task", "projectId": "camel", "project_id": "snake"}
-        )
-        assert task.project_id == "camel"
+        task = TodoistTask.from_api({"id": "1", "content": "Task", "project_id": "snake"})
+        assert task.project_id == "snake"
 
-    def test_camel_case_parent_id_preferred(self) -> None:
+    def test_parent_id_from_snake_case(self) -> None:
+        """API v1 uses snake_case parent_id."""
         from server.lib.models import TodoistTask
 
-        task = TodoistTask.from_api(
-            {"id": "1", "content": "Task", "parentId": "camel", "parent_id": "snake"}
-        )
-        assert task.parent_id == "camel"
+        task = TodoistTask.from_api({"id": "1", "content": "Task", "parent_id": "snake"})
+        assert task.parent_id == "snake"
 
 
 # -- TodoistProject.from_api edge cases --------------------------------------

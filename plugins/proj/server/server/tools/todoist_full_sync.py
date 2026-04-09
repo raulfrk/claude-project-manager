@@ -181,8 +181,8 @@ def _parse_todoist_due(task: dict[str, JsonValue]) -> str | None:
 
 
 def _parse_todoist_updated(task: dict[str, JsonValue]) -> str:
-    """Extract date from updatedAt or updated_at field."""
-    raw: str = str(task.get("updatedAt") or task.get("updated_at") or "")
+    """Extract updated_at date from task dict."""
+    raw: str = str(task.get("updated_at") or "")
     return _todoist_date(raw)
 
 
@@ -262,7 +262,7 @@ class ApplyInput:
 
 
 def _compute_todoist_depth(task_id: str, todoist_by_id: dict[str, dict[str, JsonValue]]) -> int:
-    """Walk the parentId chain counting hops. Returns 0 for root tasks.
+    """Walk the parent_id chain counting hops. Returns 0 for root tasks.
 
     Uses a ``seen`` set for cycle detection and caps at depth 10.
     """
@@ -273,7 +273,7 @@ def _compute_todoist_depth(task_id: str, todoist_by_id: dict[str, dict[str, Json
         task = todoist_by_id.get(current)
         if task is None:
             break
-        parent = str(task.get("parentId") or task.get("parent_id") or "")
+        parent = str(task.get("parent_id") or "")
         if not parent:
             break
         if parent == current:
@@ -371,7 +371,7 @@ def _infer_parent_link_from_children(
     todoist_children = [
         t
         for t in todoist_by_id.values()
-        if isinstance(t, dict) and str(t.get("parentId") or "") == todoist_id
+        if isinstance(t, dict) and str(t.get("parent_id") or "") == todoist_id
     ]
     if not todoist_children:
         return None
@@ -503,8 +503,7 @@ def compute_diff(
                     "due_date": todoist_due,
                     "todoist_task_id": todoist_id,
                     "todoist_description_synced": new_synced,
-                    "todoist_parent_id": str(task.get("parentId") or task.get("parent_id") or "")
-                    or None,
+                    "todoist_parent_id": str(task.get("parent_id") or "") or None,
                 }
             )
         else:
@@ -528,7 +527,7 @@ def compute_diff(
                     "todoist_updated_at": todoist_updated,
                 }
                 # Check if Todoist task is completed
-                if task.get("is_completed") or task.get("isCompleted") or task.get("checked"):
+                if task.get("is_completed"):
                     update_entry["complete"] = True
                 plan.pull_update.append(update_entry)
 
@@ -543,7 +542,7 @@ def compute_diff(
     # Root-only cleanup
     if effective_root_only:
         for todoist_id, task in todoist_by_id.items():
-            if task.get("parentId"):
+            if task.get("parent_id"):
                 cleanup_todo = local_by_todoist_id.get(todoist_id)
                 if cleanup_todo and cleanup_todo.parent:
                     plan.root_only_cleanup.append(
@@ -592,7 +591,7 @@ def compute_diff(
         if todo.due_date:
             entry["dueString"] = todo.due_date
         if parent_todoist_id:
-            entry["parentId"] = parent_todoist_id
+            entry["parent_id"] = parent_todoist_id
         if meta.todoist_project_id:
             entry["project_id"] = meta.todoist_project_id
         if todo.status == TodoStatus.DONE:
@@ -641,10 +640,10 @@ def compute_diff(
                 plan.push_update.append(update_entry_push)
             elif local_todo.status in TERMINAL_STATUSES:
                 # Local is done, Todoist still open
-                if not (task.get("is_completed") or task.get("isCompleted") or task.get("checked")):
+                if not task.get("is_completed"):
                     plan.push_complete.append(todoist_id)
 
-    # ── Fix parent linkage for linked todos missing Todoist parentId ──
+    # ── Fix parent linkage for linked todos missing Todoist parent_id ──
     for todoist_id, task in todoist_by_id.items():
         if todoist_id not in local_by_todoist_id:
             continue
@@ -656,13 +655,13 @@ def compute_diff(
         if not parent_todo or not parent_todo.todoist_task_id:
             continue
         # Check if Todoist task already has the correct parent_id set
-        if task.get("parentId"):
+        if task.get("parent_id"):
             continue
-        # Todoist task is missing parentId — push an update to set it
+        # Todoist task is missing parent_id — push an update to set it
         plan.push_update.append(
             {
                 "id": todoist_id,
-                "parentId": parent_todo.todoist_task_id,
+                "parent_id": parent_todo.todoist_task_id,
             }
         )
 
@@ -718,7 +717,7 @@ def apply_changes(
         tid = str(item.get("todoist_task_id", ""))
         if tid:
             synthetic_todoist_by_id[tid] = {
-                "parentId": item.get("todoist_parent_id") or "",
+                "parent_id": item.get("todoist_parent_id") or "",
             }
 
     # Sort by Todoist depth ascending so parents are created before children
@@ -808,7 +807,7 @@ def apply_changes(
                 staged_description_synced[todo_id] = desc_synced_value
         # Only update the timestamp when content actually changed.
         # Use the Todoist timestamp if provided (pull updates) so local updated
-        # matches Todoist's updatedAt and doesn't immediately trigger a push back.
+        # matches Todoist's updated_at and doesn't immediately trigger a push back.
         # Metadata-only writes (todoist_description_synced, todoist_task_id) must
         # NOT bump updated — they would make the todo look locally newer next sync.
         if content_changed:
@@ -1007,8 +1006,8 @@ def _execute_push_creates(
             payload["labels"] = task["labels"]
         if task.get("dueString"):
             payload["dueString"] = task["dueString"]
-        if task.get("parentId"):
-            payload["parentId"] = task["parentId"]
+        if task.get("parent_id"):
+            payload["parent_id"] = task["parent_id"]
         if task.get("project_id"):
             payload["project_id"] = task["project_id"]
         add_payloads.append(payload)
@@ -1042,7 +1041,7 @@ def _execute_push_creates(
                     recovered_id = _find_existing_todoist_task(
                         str(task.get("project_id", "") or "") or (project_todoist_id or ""),
                         str(task.get("content", "")),
-                        parent_id=str(task.get("parentId", "") or "") or None,
+                        parent_id=str(task.get("parent_id", "") or "") or None,
                     )
                     if recovered_id:
                         id_map[todo_id] = recovered_id
@@ -1064,7 +1063,7 @@ def _execute_push_creates(
                 recovered_id = _find_existing_todoist_task(
                     str(task.get("project_id", "") or "") or (project_todoist_id or ""),
                     str(task.get("content", "")),
-                    parent_id=str(task.get("parentId", "") or "") or None,
+                    parent_id=str(task.get("parent_id", "") or "") or None,
                 )
                 if recovered_id:
                     id_map[todo_id] = recovered_id
@@ -1124,7 +1123,7 @@ def _execute_push_creates_phase2(
         parent_local_id = str(task.get("_parent_local_id", ""))
         if parent_local_id in phase1_id_map:
             task_copy = dict(task)
-            task_copy["parentId"] = phase1_id_map[parent_local_id]
+            task_copy["parent_id"] = phase1_id_map[parent_local_id]
             # Remove internal field
             task_copy.pop("_parent_local_id", None)
             resolved.append(task_copy)
@@ -1255,7 +1254,7 @@ def _find_existing_todoist_task(
     created the task but the response was truncated, retrying without this check
     would create a duplicate.
 
-    When *parent_id* is provided, only tasks with that parentId are considered.
+    When *parent_id* is provided, only tasks with that parent_id are considered.
     This prevents false positives when multiple tasks share the same title.
     """
     if not project_id or not content:
@@ -1274,9 +1273,9 @@ def _find_existing_todoist_task(
                 continue
             if str(t.get("content", "")).strip() != needle:
                 continue
-            # Narrow by parentId when available
+            # Narrow by parent_id when available
             if parent_id:
-                task_parent = str(t.get("parentId", "") or "")
+                task_parent = str(t.get("parent_id", "") or "")
                 if task_parent != parent_id:
                     continue
             task_id = str(t.get("id", ""))
@@ -1317,7 +1316,7 @@ def _retry_failed_ops(
                 # to avoid creating a duplicate on retry.
                 project_id = str(payload.get("project_id", ""))
                 content = str(payload.get("content", ""))
-                parent_id = str(payload.get("parentId", "") or "")
+                parent_id = str(payload.get("parent_id", "") or "")
                 existing_id = _find_existing_todoist_task(
                     project_id,
                     content,
@@ -1337,7 +1336,7 @@ def _retry_failed_ops(
                             "description",
                             "labels",
                             "dueString",
-                            "parentId",
+                            "parent_id",
                             "project_id",
                         )
                     }
@@ -1458,10 +1457,10 @@ def _migrate_parent_links(
                 todo.id,
             )
             continue
-        if task.get("parentId") == parent.todoist_task_id:
+        if task.get("parent_id") == parent.todoist_task_id:
             counts["already_correct"] += 1
             continue
-        updates.append({"id": todo.todoist_task_id, "parentId": parent.todoist_task_id})
+        updates.append({"id": todo.todoist_task_id, "parent_id": parent.todoist_task_id})
         counts["migrated"] += 1
 
     if updates:
@@ -1584,13 +1583,6 @@ def register(app: FastMCP) -> None:
                 )
                 if isinstance(fetch_result, list):
                     todoist_tasks = [x for x in fetch_result if isinstance(x, dict)]
-                elif isinstance(fetch_result, dict):
-                    tasks_raw = fetch_result.get("tasks", [])
-                    todoist_tasks = (
-                        [x for x in tasks_raw if isinstance(x, dict)]
-                        if isinstance(tasks_raw, list)
-                        else []
-                    )
             except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
                 return json.dumps(
                     {
@@ -1731,7 +1723,7 @@ def register(app: FastMCP) -> None:
                 if t.todoist_task_id:
                     _post_local_by_tid[t.todoist_task_id] = t
             for tid, task in _post_todoist_by_id.items():
-                if task.get("parentId"):
+                if task.get("parent_id"):
                     continue
                 local_todo = _post_local_by_tid.get(tid)
                 if not local_todo or not local_todo.parent:
@@ -1741,7 +1733,7 @@ def register(app: FastMCP) -> None:
                     continue
                 parent_tid = combined_id_map.get(local_todo.parent) or parent_todo.todoist_task_id
                 if parent_tid:
-                    post_link_updates.append({"id": tid, "parentId": parent_tid})
+                    post_link_updates.append({"id": tid, "parent_id": parent_tid})
             if post_link_updates:
                 _execute_push_updates(post_link_updates)
 

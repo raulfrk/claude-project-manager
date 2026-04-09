@@ -1,4 +1,4 @@
-"""Dedicated error response contract tests for Todoist REST v2.
+"""Dedicated error response contract tests for Todoist API v1.
 
 Tests each error code (401, 403, 404, 429, 500) against multiple endpoints
 (GET /api/v1/tasks and POST /api/v1/tasks) for broader coverage than the

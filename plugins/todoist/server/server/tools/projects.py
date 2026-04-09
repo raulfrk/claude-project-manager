@@ -42,12 +42,10 @@ def register(app: FastMCP) -> None:
             return json.dumps({"successes": [], "failures": [{"name": name, "error": str(exc)}]})
 
     @app.tool(description="Find Todoist projects, optionally filtering by name.")
-    def todoist_find_projects(name: str | None = None) -> str:
+    def todoist_find_projects(name: str | None = None, limit: int | None = None) -> str:
         client = get_client()
-        response = client.get("/projects")
-        # REST API v2 returns a bare JSON array
-        projects: list[JsonValue]
-        projects = response if isinstance(response, list) else []
+        raw_projects = client.get_paginated("/projects", limit=limit)
+        projects: list[JsonValue] = [p for p in raw_projects if isinstance(p, dict)]
         if name is not None:
             lower = name.lower()
             projects = [

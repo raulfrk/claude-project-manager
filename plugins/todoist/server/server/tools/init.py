@@ -55,7 +55,7 @@ def register(app: FastMCP) -> None:
         return json.dumps(
             {
                 "ok": True,
-                "project_count": len(resp.json()),
+                "project_count": len(resp.json().get("results", [])),
                 "config_path": str(config_path),
             }
         )

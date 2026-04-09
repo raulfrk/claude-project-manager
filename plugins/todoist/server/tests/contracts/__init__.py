@@ -1,1 +1,1 @@
-"""Todoist API contract definitions for REST v2 endpoints."""
+"""Todoist API contract definitions for API v1 endpoints."""

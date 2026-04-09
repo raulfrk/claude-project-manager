@@ -56,6 +56,33 @@ class TodoistClient:
         """Send a GET request to the Todoist API."""
         return self._request("GET", path, params=params)
 
+    def get_paginated(
+        self, path: str, params: dict[str, str] | None = None, *, limit: int | None = None
+    ) -> list[JsonValue]:
+        """Fetch all pages from a paginated endpoint. Returns flat list."""
+        all_results: list[JsonValue] = []
+        req_params = dict(params or {})
+        while True:
+            resp = self._request("GET", path, params=req_params or None)
+            if isinstance(resp, dict):
+                results = resp.get("results", [])
+                if isinstance(results, list):
+                    all_results.extend(results)
+                cursor = resp.get("next_cursor")
+                if (
+                    not cursor
+                    or not isinstance(cursor, str)
+                    or (limit and len(all_results) >= limit)
+                ):
+                    break
+                req_params["cursor"] = cursor
+            elif isinstance(resp, list):
+                all_results.extend(resp)
+                break
+            else:
+                break
+        return all_results[:limit] if limit else all_results
+
     def post(self, path: str, json: JsonObject | None = None) -> JsonValue:
         """Send a POST request to the Todoist API."""
         return self._request("POST", path, json=json)

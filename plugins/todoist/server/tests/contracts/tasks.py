@@ -1,4 +1,4 @@
-"""EndpointContract definitions for Todoist REST v2 task endpoints."""
+"""EndpointContract definitions for Todoist API v1 task endpoints."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _TASK_RESPONSE_SCHEMA: dict[str, object] = {
         "project_id": {"type": "string"},
         "parent_id": {"type": ["string", "null"]},
         "is_completed": {"type": "boolean"},
-        "updatedAt": {"type": "string"},
+        "updated_at": {"type": "string"},
     },
 }
 

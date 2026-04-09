@@ -1,4 +1,4 @@
-"""EndpointContract definitions for Todoist REST v2 project endpoints."""
+"""EndpointContract definitions for Todoist API v1 project endpoints."""
 
 from __future__ import annotations
 

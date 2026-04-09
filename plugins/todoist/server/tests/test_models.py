@@ -81,9 +81,9 @@ class TestTodoistTaskFromApi:
             "priority": 2,
             "labels": ["shopping", "errands"],
             "due": {"date": "2024-01-15", "string": "Jan 15"},
-            "projectId": "proj123",
-            "parentId": "parent789",
-            "isCompleted": False,
+            "project_id": "proj123",
+            "parent_id": "parent789",
+            "checked": False,
         }
         task = TodoistTask.from_api(data)
 
@@ -95,7 +95,7 @@ class TestTodoistTaskFromApi:
         assert task.due == {"date": "2024-01-15", "string": "Jan 15"}
         assert task.project_id == "proj123"
         assert task.parent_id == "parent789"
-        assert task.is_completed is False
+        assert task.is_completed is False  # mapped from "checked"
 
     def test_minimal_response(self) -> None:
         data = {"id": "1", "content": "Simple task"}
@@ -117,13 +117,13 @@ class TestTodoistTaskFromApi:
         assert task.priority == "medium"
 
     def test_snake_case_keys(self) -> None:
-        """API may return snake_case keys instead of camelCase."""
+        """API v1 returns snake_case keys."""
         data = {
             "id": "1",
             "content": "Task",
             "project_id": "proj1",
             "parent_id": "parent1",
-            "is_completed": True,
+            "checked": True,
         }
         task = TodoistTask.from_api(data)
         assert task.project_id == "proj1"
@@ -145,15 +145,11 @@ class TestTodoistTaskFromApi:
         task = TodoistTask.from_api(data)
         assert task.due is None
 
-    def test_updated_at_camel_case(self) -> None:
-        data = {"id": "1", "content": "Task", "updatedAt": "2026-01-01T00:00:00Z"}
+    def test_updated_at(self) -> None:
+        """API v1 returns updated_at in snake_case."""
+        data = {"id": "1", "content": "Task", "updated_at": "2026-01-01T00:00:00Z"}
         task = TodoistTask.from_api(data)
         assert task.updated_at == "2026-01-01T00:00:00Z"
-
-    def test_updated_at_snake_case(self) -> None:
-        data = {"id": "1", "content": "Task", "updated_at": "2026-04-01T12:00:00Z"}
-        task = TodoistTask.from_api(data)
-        assert task.updated_at == "2026-04-01T12:00:00Z"
 
     def test_missing_updated_at_defaults_to_empty(self) -> None:
         data = {"id": "1", "content": "Task"}
@@ -188,7 +184,7 @@ class TestTodoistTaskToDict:
             "project_id": "p1",
             "parent_id": "pp1",
             "is_completed": True,
-            "updatedAt": "",
+            "updated_at": "",
         }
 
 
@@ -201,7 +197,7 @@ class TestTodoistProjectFromApi:
             "id": "proj123",
             "name": "Work",
             "color": "blue",
-            "isFavorite": True,
+            "is_favorite": True,
         }
         project = TodoistProject.from_api(data)
 

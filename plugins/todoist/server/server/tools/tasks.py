@@ -211,7 +211,7 @@ def register(app: FastMCP) -> None:
         client = get_client()
         try:
             task = client.get(f"/tasks/{todoist_task_id}")
-            is_completed = task.get("is_completed", False) if isinstance(task, dict) else False
+            is_completed = task.get("checked", False) if isinstance(task, dict) else False
             return json.dumps(
                 {
                     "verified": is_completed,
@@ -256,6 +256,7 @@ def register(app: FastMCP) -> None:
     def todoist_find_tasks(
         project_id: str | None = None,
         filter: str | None = None,
+        limit: int | None = None,
     ) -> str:
         client = get_client()
         params: dict[str, str] = {}
@@ -263,10 +264,7 @@ def register(app: FastMCP) -> None:
             params["project_id"] = project_id
         if filter:
             params["filter"] = filter
-        response = client.get("/tasks", params=params or None)
-        # REST API v2 returns a bare JSON array
-        raw_tasks: list[JsonValue]
-        raw_tasks = response if isinstance(response, list) else []
+        raw_tasks = client.get_paginated("/tasks", params=params, limit=limit)
         tasks = [TodoistTask.from_api(t).to_dict() for t in raw_tasks if isinstance(t, dict)]
         return json.dumps(tasks)
 

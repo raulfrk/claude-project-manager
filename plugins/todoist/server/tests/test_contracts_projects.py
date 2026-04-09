@@ -1,4 +1,4 @@
-"""Contract tests for Todoist REST v2 project endpoints.
+"""Contract tests for Todoist API v1 project endpoints.
 
 Each test mocks the HTTP transport via respx, calls the tool function,
 then validates request shape and response parsing against EndpointContracts.

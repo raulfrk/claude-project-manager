@@ -75,7 +75,7 @@ class TodoistTask:
 
     @classmethod
     def from_api(cls, data: JsonObject) -> Self:
-        """Parse a Todoist REST API v2 task response into a TodoistTask."""
+        """Parse a Todoist API v1 task response into a TodoistTask."""
         raw_priority = data.get("priority")
         if isinstance(raw_priority, (str, int)):
             priority = todoist_to_local_priority(raw_priority)
@@ -89,7 +89,7 @@ class TodoistTask:
         if not isinstance(due, dict):
             due = None
 
-        parent_raw = data.get("parentId", data.get("parent_id"))
+        parent_raw = data.get("parent_id")
         parent_id = str(parent_raw) if parent_raw is not None else None
 
         return cls(
@@ -99,10 +99,10 @@ class TodoistTask:
             priority=priority,
             labels=labels,
             due=due,
-            project_id=str(data.get("projectId", data.get("project_id", ""))),
+            project_id=str(data.get("project_id", "")),
             parent_id=parent_id,
-            is_completed=bool(data.get("isCompleted", data.get("is_completed", False))),
-            updated_at=str(data.get("updatedAt", data.get("updated_at", ""))),
+            is_completed=bool(data.get("checked", False)),
+            updated_at=str(data.get("updated_at", "")),
         )
 
     def to_dict(self) -> JsonObject:
@@ -118,7 +118,7 @@ class TodoistTask:
             "project_id": self.project_id,
             "parent_id": self.parent_id,
             "is_completed": self.is_completed,
-            "updatedAt": self.updated_at,
+            "updated_at": self.updated_at,
         }
 
 
@@ -133,14 +133,14 @@ class TodoistProject:
 
     @classmethod
     def from_api(cls, data: JsonObject) -> Self:
-        """Parse a Todoist REST API v2 project response into a TodoistProject."""
+        """Parse a Todoist API v1 project response into a TodoistProject."""
         color_raw = data.get("color")
         color = str(color_raw) if color_raw is not None else None
         return cls(
             id=str(data.get("id", "")),
             name=str(data.get("name", "")),
             color=color,
-            is_favorite=bool(data.get("isFavorite", data.get("is_favorite", False))),
+            is_favorite=bool(data.get("is_favorite", False)),
         )
 
     def to_dict(self) -> JsonObject:

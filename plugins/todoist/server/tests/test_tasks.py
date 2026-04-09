@@ -312,7 +312,7 @@ class TestCompleteTasks:
 
 class TestFindTasks:
     def test_success_no_filter(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_task(id="1", content="A"),
             _api_task(id="2", content="B"),
         ]
@@ -330,7 +330,7 @@ class TestFindTasks:
         assert result[0]["id"] == "1"
 
     def test_with_project_id(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [_api_task(id="5")]
+        mock_client.get_paginated.return_value = [_api_task(id="5")]
 
         from mcp.server.fastmcp import FastMCP
 
@@ -341,11 +341,13 @@ class TestFindTasks:
         tool = app._tool_manager._tools["todoist_find_tasks"]
         result = json.loads(tool.fn(project_id="proj1"))
 
-        mock_client.get.assert_called_once_with("/tasks", params={"project_id": "proj1"})
+        mock_client.get_paginated.assert_called_once_with(
+            "/tasks", params={"project_id": "proj1"}, limit=None
+        )
         assert len(result) == 1
 
     def test_with_filter(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = []
+        mock_client.get_paginated.return_value = []
 
         from mcp.server.fastmcp import FastMCP
 
@@ -356,11 +358,13 @@ class TestFindTasks:
         tool = app._tool_manager._tools["todoist_find_tasks"]
         result = json.loads(tool.fn(filter="today"))
 
-        mock_client.get.assert_called_once_with("/tasks", params={"filter": "today"})
+        mock_client.get_paginated.assert_called_once_with(
+            "/tasks", params={"filter": "today"}, limit=None
+        )
         assert result == []
 
     def test_non_list_response_returns_empty(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = {"error": "unexpected"}
+        mock_client.get_paginated.return_value = [{"error": "unexpected"}]
 
         from mcp.server.fastmcp import FastMCP
 
@@ -371,10 +375,11 @@ class TestFindTasks:
         tool = app._tool_manager._tools["todoist_find_tasks"]
         result = json.loads(tool.fn())
 
-        assert result == []
+        # get_paginated returns a list; non-dict items are filtered by the tool
+        assert len(result) == 1
 
-    def test_no_params_passes_none(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = []
+    def test_no_params_passes_empty(self, mock_client: MagicMock) -> None:
+        mock_client.get_paginated.return_value = []
 
         from mcp.server.fastmcp import FastMCP
 
@@ -385,7 +390,7 @@ class TestFindTasks:
         tool = app._tool_manager._tools["todoist_find_tasks"]
         tool.fn()
 
-        mock_client.get.assert_called_once_with("/tasks", params=None)
+        mock_client.get_paginated.assert_called_once_with("/tasks", params={}, limit=None)
 
 
 # -- todoist_update_tasks ----------------------------------------------------
@@ -759,7 +764,7 @@ class TestVerifyComplete:
         return app._tool_manager._tools["todoist_verify_complete"]
 
     def test_completed_task(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = {"id": "v1", "is_completed": True}
+        mock_client.get.return_value = {"id": "v1", "checked": True}
         tool = self._get_tool(mock_client)
         result = json.loads(tool.fn(todoist_task_id="v1"))
 
@@ -768,7 +773,7 @@ class TestVerifyComplete:
         assert result["task_id"] == "v1"
 
     def test_open_task(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = {"id": "v2", "is_completed": False}
+        mock_client.get.return_value = {"id": "v2", "checked": False}
         tool = self._get_tool(mock_client)
         result = json.loads(tool.fn(todoist_task_id="v2"))
 

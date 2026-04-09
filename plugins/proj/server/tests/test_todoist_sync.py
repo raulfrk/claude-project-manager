@@ -92,8 +92,8 @@ def _make_todoist_task(
         "priority": priority,
         "description": "",
         "labels": [],
-        "updatedAt": updated_at,
-        "isCompleted": False,
+        "updated_at": updated_at,
+        "is_completed": False,
     }
     task.update(kwargs)
     return task
@@ -311,16 +311,16 @@ class TestTwoPhasePush:
 
         plan = compute_diff([], cfg, name)
 
-        # Parent should be in phase 1 (push_create) with no parentId
+        # Parent should be in phase 1 (push_create) with no parent_id
         assert len(plan.push_create) == 1
         assert plan.push_create[0]["content"] == "Parent task"
-        assert "parentId" not in plan.push_create[0]
+        assert "parent_id" not in plan.push_create[0]
 
         # Child should be in phase 2 with _parent_local_id set
         assert len(plan.push_create_phase2) == 1
         assert plan.push_create_phase2[0]["content"] == "Child task"
         assert plan.push_create_phase2[0]["_parent_local_id"] == parent.id
-        assert "parentId" not in plan.push_create_phase2[0]
+        assert "parent_id" not in plan.push_create_phase2[0]
 
 
 class TestApplyChanges:

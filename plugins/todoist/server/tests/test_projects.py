@@ -72,7 +72,7 @@ class TestAddProjects:
 
     def test_success_with_color_and_favorite(self, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _api_project(
-            id="p2", name="Personal", color="red", isFavorite=True
+            id="p2", name="Personal", color="red", is_favorite=True
         )
 
         app = _make_app()
@@ -100,7 +100,7 @@ class TestAddProjects:
 
 class TestFindProjects:
     def test_no_filter_returns_all(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_project(id="1", name="Inbox"),
             _api_project(id="2", name="Work"),
         ]
@@ -112,7 +112,7 @@ class TestFindProjects:
         assert len(result) == 2
 
     def test_name_filter_case_insensitive(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_project(id="1", name="Inbox"),
             _api_project(id="2", name="Work Project"),
             _api_project(id="3", name="Personal"),
@@ -126,7 +126,7 @@ class TestFindProjects:
         assert result[0]["name"] == "Work Project"
 
     def test_name_filter_no_matches(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_project(id="1", name="Inbox"),
         ]
 
@@ -137,7 +137,7 @@ class TestFindProjects:
         assert result == []
 
     def test_api_error(self, mock_client: MagicMock) -> None:
-        mock_client.get.side_effect = RuntimeError("timeout")
+        mock_client.get_paginated.side_effect = RuntimeError("timeout")
 
         app = _make_app()
         tool = app._tool_manager._tools["todoist_find_projects"]
@@ -146,7 +146,7 @@ class TestFindProjects:
             tool.fn()
 
     def test_name_filter_substring_match(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = [
+        mock_client.get_paginated.return_value = [
             _api_project(id="1", name="My Work Tasks"),
             _api_project(id="2", name="Homework"),
         ]
@@ -158,13 +158,14 @@ class TestFindProjects:
         assert len(result) == 2
 
     def test_non_list_response_returns_empty(self, mock_client: MagicMock) -> None:
-        mock_client.get.return_value = {"error": "unexpected"}
+        mock_client.get_paginated.return_value = [{"error": "unexpected"}]
 
         app = _make_app()
         tool = app._tool_manager._tools["todoist_find_projects"]
         result = json.loads(tool.fn())
 
-        assert result == []
+        # get_paginated returns list; non-dict items filtered by tool
+        assert len(result) == 1
 
 
 # -- todoist_add_project_hook ------------------------------------------------

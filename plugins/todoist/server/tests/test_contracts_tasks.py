@@ -1,4 +1,4 @@
-"""Contract tests for Todoist REST v2 task endpoints.
+"""Contract tests for Todoist API v1 task endpoints.
 
 Each test mocks the HTTP transport via respx, calls the tool function,
 then validates request shape and response parsing against EndpointContracts.
@@ -71,7 +71,7 @@ def _api_task(
         "due": None,
         "project_id": "proj1",
         "parent_id": None,
-        "is_completed": False,
+        "checked": False,
         "updated_at": "2026-01-01T00:00:00Z",
         **extra,
     }
@@ -462,7 +462,7 @@ class TestVerifyCompleteContract:
     @respx.mock
     def test_verify_complete_request_shape(self, mock_client: TodoistClient) -> None:
         route = respx.get(f"{BASE_URL}/tasks/t1").mock(
-            return_value=build_success_response(GET_TASK, _api_task(id="t1", is_completed=True))
+            return_value=build_success_response(GET_TASK, _api_task(id="t1", checked=True))
         )
 
         app = _register_task_tools()
@@ -476,7 +476,7 @@ class TestVerifyCompleteContract:
     @respx.mock
     def test_verify_complete_completed_task(self, mock_client: TodoistClient) -> None:
         respx.get(f"{BASE_URL}/tasks/t1").mock(
-            return_value=build_success_response(GET_TASK, _api_task(id="t1", is_completed=True))
+            return_value=build_success_response(GET_TASK, _api_task(id="t1", checked=True))
         )
 
         app = _register_task_tools()
@@ -489,7 +489,7 @@ class TestVerifyCompleteContract:
     @respx.mock
     def test_verify_complete_open_task(self, mock_client: TodoistClient) -> None:
         respx.get(f"{BASE_URL}/tasks/t1").mock(
-            return_value=build_success_response(GET_TASK, _api_task(id="t1", is_completed=False))
+            return_value=build_success_response(GET_TASK, _api_task(id="t1", checked=False))
         )
 
         app = _register_task_tools()

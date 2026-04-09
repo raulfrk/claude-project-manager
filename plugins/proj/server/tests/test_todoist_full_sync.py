@@ -92,8 +92,8 @@ def _make_todoist_task(
         "priority": priority,
         "description": "",
         "labels": [],
-        "updatedAt": updated_at,
-        "isCompleted": False,
+        "updated_at": updated_at,
+        "is_completed": False,
     }
     task.update(kwargs)
     return task
@@ -347,7 +347,7 @@ class TestProjTodoistFullSync:
         add_calls = [(t, p) for t, p in call_log if t == "todoist_add_tasks"]
         assert len(add_calls) == 2  # phase-1 and phase-2
         phase2_tasks = add_calls[1][1]["tasks"]
-        assert phase2_tasks[0]["parentId"] == "todoist_0"
+        assert phase2_tasks[0]["parent_id"] == "todoist_0"
 
     # 8. test_root_only_suppression ────────────────────────────────────────────
 
@@ -370,7 +370,7 @@ class TestProjTodoistFullSync:
 
         todoist_tasks = [
             _make_todoist_task("tp", "Parent"),
-            _make_todoist_task("tc", "Child", parentId="tp"),
+            _make_todoist_task("tc", "Child", parent_id="tp"),
         ]
 
         call_log = []
@@ -556,8 +556,8 @@ class TestMigrateParentLinks:
         child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
 
         todoist_tasks = [
-            {"id": "tid_parent", "parentId": None},
-            {"id": "tid_child", "parentId": None},  # Missing parent link
+            {"id": "tid_parent", "parent_id": None},
+            {"id": "tid_child", "parent_id": None},  # Missing parent link
         ]
 
         call_log = []
@@ -580,7 +580,7 @@ class TestMigrateParentLinks:
         import json as _json
 
         updates = _json.loads(tasks_arg)
-        assert updates == [{"id": "tid_child", "parentId": "tid_parent"}]
+        assert updates == [{"id": "tid_child", "parent_id": "tid_parent"}]
 
     def test_already_correct_no_update(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Child already has correct parentId in Todoist → no update call."""
@@ -588,8 +588,8 @@ class TestMigrateParentLinks:
         child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
 
         todoist_tasks = [
-            {"id": "tid_parent", "parentId": None},
-            {"id": "tid_child", "parentId": "tid_parent"},  # Already correct
+            {"id": "tid_parent", "parent_id": None},
+            {"id": "tid_child", "parent_id": "tid_parent"},  # Already correct
         ]
 
         call_log = []
@@ -612,7 +612,7 @@ class TestMigrateParentLinks:
         child = self._make_local_todo("100.1", parent="100", todoist_task_id="tid_child")
 
         todoist_tasks = [
-            {"id": "tid_child", "parentId": None},
+            {"id": "tid_child", "parent_id": None},
         ]
 
         call_log = []
@@ -633,7 +633,7 @@ class TestMigrateParentLinks:
         """Todos without a parent are silently skipped."""
         root = self._make_local_todo("100", todoist_task_id="tid_root")
 
-        todoist_tasks = [{"id": "tid_root", "parentId": None}]
+        todoist_tasks = [{"id": "tid_root", "parent_id": None}]
 
         call_log = []
 
@@ -672,7 +672,7 @@ class TestPostExecutionLinkageFix:
 
         # Todoist state: only the child exists (parent not yet created)
         todoist_tasks = [
-            _make_todoist_task("existing_child_tid", "Child task", parentId=None),
+            _make_todoist_task("existing_child_tid", "Child task", parent_id=None),
         ]
 
         call_log = []
@@ -705,7 +705,7 @@ class TestPostExecutionLinkageFix:
             for task in tasks:
                 if (
                     task.get("id") == "existing_child_tid"
-                    and task.get("parentId") == "new_parent_tid"
+                    and task.get("parent_id") == "new_parent_tid"
                 ):
                     reparent_found = True
         assert reparent_found, (
@@ -730,7 +730,7 @@ def _make_local_todo(
 def _make_task(task_id: str, content: str, parent_id: str | None = None) -> dict:
     task: dict = {"id": task_id, "content": content, "priority": 4, "labels": [], "description": ""}
     if parent_id:
-        task["parentId"] = parent_id
+        task["parent_id"] = parent_id
     return task
 
 
@@ -895,7 +895,7 @@ class TestComputeTodoistDepth:
         """Task with one parent returns depth 1."""
         todoist_by_id = {
             "parent": {"id": "parent"},
-            "child": {"id": "child", "parentId": "parent"},
+            "child": {"id": "child", "parent_id": "parent"},
         }
         assert _compute_todoist_depth("child", todoist_by_id) == 1
 
@@ -903,27 +903,27 @@ class TestComputeTodoistDepth:
         """Task two levels deep returns depth 2."""
         todoist_by_id = {
             "root": {"id": "root"},
-            "mid": {"id": "mid", "parentId": "root"},
-            "leaf": {"id": "leaf", "parentId": "mid"},
+            "mid": {"id": "mid", "parent_id": "root"},
+            "leaf": {"id": "leaf", "parent_id": "mid"},
         }
         assert _compute_todoist_depth("leaf", todoist_by_id) == 2
 
     def test_circular_ref_breaks_without_infinite_loop(self) -> None:
-        """Circular parentId chain terminates via seen-set guard."""
+        """Circular parent_id chain terminates via seen-set guard."""
         todoist_by_id = {
-            "a": {"id": "a", "parentId": "b"},
-            "b": {"id": "b", "parentId": "c"},
-            "c": {"id": "c", "parentId": "a"},
+            "a": {"id": "a", "parent_id": "b"},
+            "b": {"id": "b", "parent_id": "c"},
+            "c": {"id": "c", "parent_id": "a"},
         }
         # Should not hang; result depends on where the cycle is detected
         depth = _compute_todoist_depth("a", todoist_by_id)
         assert depth <= 10  # capped by max-depth guard
 
     def test_missing_parent_depth_zero(self) -> None:
-        """Task whose parentId points to a non-existent task
+        """Task whose parent_id points to a non-existent task
         returns depth 1 (walks one hop then stops)."""
         todoist_by_id = {
-            "orphan": {"id": "orphan", "parentId": "ghost"},
+            "orphan": {"id": "orphan", "parent_id": "ghost"},
         }
         # Walks one hop (orphan → ghost), ghost not in map → stops
         assert _compute_todoist_depth("orphan", todoist_by_id) == 1
@@ -933,7 +933,7 @@ class TestComputeTodoistDepth:
         assert _compute_todoist_depth("nonexistent", {}) == 0
 
     def test_parent_id_underscore_variant(self) -> None:
-        """Handles parent_id (underscore) as well as parentId."""
+        """Handles parent_id (API v1 snake_case format)."""
         todoist_by_id = {
             "root": {"id": "root"},
             "child": {"id": "child", "parent_id": "root"},
@@ -948,12 +948,12 @@ class TestPullCreateParentId:
         self,
         cfg_with_project: tuple,
     ) -> None:
-        """New Todoist task with parentId populates todoist_parent_id in pull_create."""
+        """New Todoist task with parent_id populates todoist_parent_id in pull_create."""
         cfg, name = cfg_with_project
 
         todoist_tasks = [
             _make_todoist_task("tp", "Parent task"),
-            {**_make_todoist_task("tc", "Child task"), "parentId": "tp"},
+            {**_make_todoist_task("tc", "Child task"), "parent_id": "tp"},
         ]
 
         plan = compute_diff(todoist_tasks, cfg, name)
@@ -970,7 +970,7 @@ class TestPullCreateParentId:
         self,
         cfg_with_project: tuple,
     ) -> None:
-        """New Todoist task without parentId has todoist_parent_id=None."""
+        """New Todoist task without parent_id has todoist_parent_id=None."""
         cfg, name = cfg_with_project
 
         todoist_tasks = [_make_todoist_task("t1", "Solo task")]
@@ -1155,8 +1155,8 @@ class TestFullSyncParentChild:
 
         todoist_tasks = [
             _make_todoist_task("t1", "Root"),
-            {**_make_todoist_task("t2", "Mid"), "parentId": "t1"},
-            {**_make_todoist_task("t3", "Leaf"), "parentId": "t2"},
+            {**_make_todoist_task("t2", "Mid"), "parent_id": "t1"},
+            {**_make_todoist_task("t3", "Leaf"), "parent_id": "t2"},
         ]
 
         def mock_call(tool_name, params):
@@ -1188,12 +1188,12 @@ class TestFullSyncParentChild:
         cfg_with_project: tuple,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Child's parentId points to a task not in the fetched list — child stays root."""
+        """Child's parent_id points to a task not in the fetched list — child stays root."""
         cfg, name = cfg_with_project
 
         # Only the child is in the task list; "external_parent" is not
         todoist_tasks = [
-            {**_make_todoist_task("tc", "Orphan child"), "parentId": "external_parent"},
+            {**_make_todoist_task("tc", "Orphan child"), "parent_id": "external_parent"},
         ]
 
         def mock_call(tool_name, params):
