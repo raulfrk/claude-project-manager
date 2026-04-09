@@ -74,8 +74,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and run e2e tests
-        run: docker compose -f docker-compose.test.yml run --rm test-e2e
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-e2e-${{ hashFiles('installer/tests/e2e/Dockerfile', 'pyproject.toml', 'uv.lock') }}
+          restore-keys: buildx-e2e-
+
+      - name: Build e2e test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: installer/tests/e2e/Dockerfile
+          load: true
+          tags: cpm-e2e:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Run e2e tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/installer/tests/snapshots:/app/installer/tests/snapshots \
+            cpm-e2e:latest \
+            uv run pytest installer/tests/e2e/ -v
+
+      - name: Move cache
+        if: always()
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Upload snapshots on failure
         if: failure()
