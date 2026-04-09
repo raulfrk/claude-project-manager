@@ -131,6 +131,11 @@ class ConfirmScreen(Screen[ConfirmResult]):
     #confirm-button-bar Button {
         margin: 0 1;
     }
+
+    #confirm-button-bar Button:focus {
+        text-style: bold;
+        border: tall $accent;
+    }
     """
 
     BINDINGS = [
