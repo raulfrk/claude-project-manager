@@ -5,6 +5,12 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      regenerate_snapshots:
+        description: "Regenerate all snapshot goldens in Docker"
+        type: boolean
+        default: false
 
 jobs:
   pre-commit:
@@ -96,12 +102,17 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Generate missing snapshot goldens
+      - name: Generate snapshot goldens
         run: |
+          if [ "${{ github.event.inputs.regenerate_snapshots }}" = "true" ]; then
+            MODE="SNAPSHOT_UPDATE=1"
+          else
+            MODE="SNAPSHOT_CREATE_MISSING=1"
+          fi
           docker run --rm \
             -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
-            sh -c "SNAPSHOT_CREATE_MISSING=1 uv run pytest installer/tests/e2e/test_snapshots.py -v"
+            sh -c "$MODE uv run pytest installer/tests/e2e/test_snapshots.py -v"
 
       - name: Commit generated snapshots
         run: |
@@ -128,9 +139,9 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Upload snapshots on failure
-        if: failure()
+      - name: Upload snapshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: snapshot-diffs
+          name: snapshot-svgs
           path: installer/tests/e2e/snapshots/
