@@ -147,7 +147,7 @@ class ConfirmScreen(Screen[ConfirmResult]):
         title: str,
         message: str,
         options: list[ConfirmOption] | None = None,
-        confirm_label: str = "Confirm",
+        confirm_label: str = "OK",
         cancel_label: str = "Cancel",
         confirm_variant: str = "primary",
         name: str | None = None,
