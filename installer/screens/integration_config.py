@@ -372,7 +372,7 @@ class BaseIntegrationScreen(Screen[dict[str, str | bool] | None]):
             # Buttons (always visible outside scroll)
             with Horizontal(id="button-bar"):
                 yield Button(
-                    "Continue",
+                    "Confirm",
                     variant="primary",
                     id="btn-continue",
                 )
