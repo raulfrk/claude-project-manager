@@ -1,6 +1,6 @@
 ---
 name: trello-setup
-description: Ensure the proj label and project card exist on the Trello board. Sub-skill of trello-sync.
+description: Ensure the proj (blue) and proj-task (green) labels and project card exist on the Trello board. Sub-skill of trello-sync.
 allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__config_load
 ---
 
@@ -24,22 +24,27 @@ and say:
 
 Do not proceed with any further steps.
 
-**2.** Ensure `proj` label exists
+**2.** Ensure `proj` and `proj-task` labels exist
 
 - Call `mcp__trello__get_board` with `boardId` set to the effective board ID to retrieve board labels.
-- If no label named `proj` exists, create one (name `proj`, color `blue`).
-- Record the label ID.
+- For label name `proj` (color `blue`):
+  - If no label named `proj` exists, create one (name `proj`, color `blue`).
+  - Record its ID as `proj_label_id`.
+- For label name `proj-task` (color `green`):
+  - If no label named `proj-task` exists, create one (name `proj-task`, color `green`).
+  - Record its ID as `proj_task_label_id`.
+- Both IDs are used downstream: `proj_label_id` for the project tracking card and `proj_task_label_id` for per-todo cards.
 
 **3.** Ensure project card exists
 
 - If `trello_card_id` is set on the project meta, verify the card exists and is not archived.
-  - If valid, return the card ID and label ID.
+  - If valid, return the card ID and label IDs.
 - If no card exists or the card is invalid:
   - Resolve the target list from the board (matching `trello.default_list`, default "Active", case-insensitive; fallback to the first list).
-  - Create a new card with `name` = project name and `idLabels` = the `proj` label ID.
+  - Create a new card with `name` = project name and `label_ids` = `[proj_label_id]`.
   - Record the returned card ID for linking by downstream sub-skills.
 
-Return the board ID, card ID, and label ID for use by the trello-sync skill.
+Return the board ID, card ID, `proj_label_id`, and `proj_task_label_id` for use by the trello-sync skill.
 
 ## Prerequisites
 
@@ -57,7 +62,7 @@ Return the board ID, card ID, and label ID for use by the trello-sync skill.
 
 ## Output
 
-Returns board ID, card ID, and label ID for use by the trello-sync skill.
+Returns board ID, card ID, `proj_label_id`, and `proj_task_label_id` for use by the trello-sync skill.
 
 ## Notes
 
