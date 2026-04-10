@@ -86,6 +86,9 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 **2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
    This returns the todo, its requirements, its research, and (if present) the parent todo in one call.
 **3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
+
+> **Pre-execute preflight**: when this skill is invoked via `/proj:run`, Phase C0.5 (pre-execute structural preflight) and Phase C0.5b (pre-execute adversarial review) run between plan approval and agent spawn. Direct `/proj:execute` invocations do **not** run Phase C0.5 — the preflight is a `/proj:run` orchestration step, not an execute-skill step. See `plugins/proj/skills/run/SKILL.md` Phase C0.5 for the check list and severity rules.
+
 **3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
 
    **File-impact estimation** (for dimensions 1-2 when no speculative plan exists):
