@@ -78,6 +78,8 @@ Run the interactive setup wizard once before using any other `proj` commands:
 /proj:init-plugin
 ```
 
+Re-running `/proj:init-plugin` on an existing setup reuses the values from your current config files (`~/.claude/proj.yaml`, `~/.claude/todoist.yaml`, `~/.claude/trello.yaml`, `~/.claude/jira.yaml`) as the bracketed defaults for every prompt. Press Enter to keep each existing value, or type a new value to override. Sensitive credentials (tokens) are shown masked as `****<last4>`.
+
 This asks you for:
 
 | Setting | Default | Description |
