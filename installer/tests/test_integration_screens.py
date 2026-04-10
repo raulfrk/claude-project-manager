@@ -810,7 +810,8 @@ class TestWriteConfigFiles:
         wt_yaml = mock_home / ".claude" / "worktree.yaml"
         assert wt_yaml.exists()
         content = wt_yaml.read_text()
-        assert "default_worktree_dir: ~/worktrees" in content
+        # Key renamed from default_worktree_dir to worktree_dir in 514 PromptSpec refactor
+        assert "worktree_dir: ~/worktrees" in content
 
     def test_no_worktree_yaml_without_plugin(self, mock_home: Path):
         """worktree.yaml is NOT created when worktree is not selected."""

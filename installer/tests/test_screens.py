@@ -217,7 +217,7 @@ class TestWizardScreen:
     """Pilot tests for the configuration wizard screen."""
 
     @pytest.mark.asyncio
-    async def test_default_values_on_submit(self):
+    async def test_default_values_on_submit(self, mock_home: Path):
         """Submit with empty fields returns default values."""
         app = _TestApp()
         results: list[dict | None] = []
@@ -238,11 +238,14 @@ class TestWizardScreen:
         assert config["projects_base_dir"] == "~/projects"
         assert config["sandbox_integration"] is True
         assert config["zoxide_integration"] is False
-        assert "worktree_dir" not in config  # absent when worktree not selected
+        # worktree_dir lives in worktree.yaml (yaml_file="worktree"), not WizardScreen
+        assert "worktree_dir" not in config
 
     @pytest.mark.asyncio
-    async def test_custom_values_override(self):
+    async def test_custom_values_override(self, mock_home: Path):
         """Custom values typed into inputs override defaults."""
+        from textual.widgets import Input
+
         app = _TestApp()
         results: list[dict | None] = []
 
@@ -251,10 +254,8 @@ class TestWizardScreen:
             app.push_screen(screen, callback=lambda r: results.append(r))
             await pilot.pause()
 
-            tracking_input = screen.query_one("#tracking_dir")
-            await pilot.click(tracking_input)
-            await pilot.pause()
-            await pilot.press(*list("/custom/tracking"))
+            tracking_input = screen.query_one("#tracking_dir", Input)
+            tracking_input.value = "/custom/tracking"
             await pilot.pause()
 
             btn = screen.query_one("#btn-submit")
@@ -267,16 +268,18 @@ class TestWizardScreen:
         assert config["tracking_dir"] == "/custom/tracking"
 
     @pytest.mark.asyncio
-    async def test_worktree_dir_shown_when_worktree_selected(self):
-        """worktree_dir input is present when worktree plugin is selected."""
+    async def test_worktree_dir_not_in_proj_wizard_basic_tier(self, mock_home: Path):
+        """worktree_dir lives in worktree.yaml (514 dual-path), not WizardScreen basic tier."""
+        from textual.css.query import NoMatches
+
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = WizardScreen(selected_plugins=["proj", "worktree"])
             app.push_screen(screen)
             await pilot.pause()
 
-            wt_input = screen.query_one("#worktree_dir")
-            assert wt_input is not None
+            with pytest.raises(NoMatches):
+                screen.query_one("#worktree_dir")
 
     @pytest.mark.asyncio
     async def test_worktree_dir_hidden_without_worktree(self):

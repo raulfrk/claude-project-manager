@@ -819,7 +819,12 @@ class TestInstallerAppHelpers:
         assert "sandbox_integration: true" in content
 
     def test_write_config_files_with_integrations(self, mock_home):
-        """_write_config_files writes sync sections for integrations."""
+        """_write_config_files writes sync sections for integrations.
+
+        Post-514 refactor: wizard answers are dotted keys (sync.todoist.enabled,
+        sync.jira.default_user) merged via _merge_dotted_into_dict, not flat
+        top-level keys.
+        """
         from installer.app import InstallerApp
 
         app = InstallerApp(mode="install")
@@ -829,14 +834,13 @@ class TestInstallerAppHelpers:
             "projects_base_dir": str(mock_home / "projects"),
             "sandbox_integration": False,
             "zoxide_integration": False,
-            "todoist_enabled": True,
-            "jira_enabled": True,
-            "jira_default_user": "testuser",
+            "sync.todoist.enabled": True,
+            "sync.jira.enabled": True,
+            "sync.jira.default_user": "testuser",
         }
         app._write_config_files(config)
         proj_yaml = mock_home / ".claude" / "proj.yaml"
         content = proj_yaml.read_text()
         assert "todoist:" in content
-        assert "enabled: true" in content
         assert "jira:" in content
         assert "default_user: testuser" in content
