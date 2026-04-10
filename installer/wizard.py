@@ -12,13 +12,11 @@ import yaml
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
+from installer._config_loader import ConfigLoadError, get_nested, load_existing_yaml
 from installer.claudemd import ensure_managed_section
 from installer.hooks_diff import apply_diffs, compute_hooks_diff
-
-# Default config values
-_DEFAULT_TRACKING_DIR = "~/projects/tracking"
-_DEFAULT_PROJECTS_BASE = "~/projects"
-_DEFAULT_WORKTREE_DIR = "~/worktrees"
+from installer.prompts import int_in_range, prompt_choice
+from installer.wizard_specs import PROJ_YAML_PROMPTS, PromptSpec
 
 
 def _resolve_plugin_dir(cache_dir: Path, plugin_name: str) -> Path | None:
@@ -61,183 +59,179 @@ def _atomic_write(path: Path, content: str) -> None:
         raise
 
 
-def _yaml_line(key: str, value: str | bool) -> str:
-    """Format a single YAML key-value line."""
-    if isinstance(value, bool):
-        return f"{key}: {'true' if value else 'false'}\n"
-    return f"{key}: {value}\n"
+def _merge_dotted_into_dict(
+    existing: dict[str, Any], answers: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge flat dotted-key answers into a nested existing dict (in-place + return).
+
+    Preserves unknown keys in existing. Creates intermediate dicts as needed.
+    """
+    for dotted, value in answers.items():
+        parts = dotted.split(".")
+        cursor = existing
+        for segment in parts[:-1]:
+            nxt = cursor.get(segment)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cursor[segment] = nxt
+            cursor = nxt
+        cursor[parts[-1]] = value
+    return existing
 
 
-def _setup_proj_yaml(console: Console, selected_plugins: list[str]) -> None:
-    """Prompt for proj.yaml configuration and write it."""
-    proj_yaml = Path.home() / ".claude" / "proj.yaml"
+def _masked_default(value: str, min_len: int = 8) -> str:
+    """Return a masked preview of a credential value for display as a prompt default."""
+    if not value:
+        return ""
+    if len(value) < min_len:
+        return "****"
+    return f"****{value[-4:]}"
 
-    # Check for existing config
-    if proj_yaml.exists():
-        try:
-            content = proj_yaml.read_text(encoding="utf-8").strip()
-            if content and Confirm.ask(
-                f"[bold]{proj_yaml}[/bold] already exists. Keep existing config?",
-                default=True,
+
+def _dispatch_rich_prompt(spec: PromptSpec, default: Any, console: Console) -> Any:
+    """Dispatch a PromptSpec to the correct Rich prompt type."""
+    try:
+        if spec.type == "bool":
+            return Confirm.ask(spec.label, default=bool(default), console=console)
+        if spec.type == "str":
+            return Prompt.ask(
+                spec.label,
+                default="" if default is None else str(default),
                 console=console,
-            ):
-                console.print("[dim]Keeping existing proj.yaml[/dim]")
-                return
-        except OSError:
-            pass
+            )
+        if spec.type == "int":
+            if spec.int_range is None:
+                raise ValueError(
+                    f"PromptSpec {spec.dotted_key!r} has type=int but no int_range"
+                )
+            low, high = spec.int_range
+            try:
+                int_default = int(default)
+            except (TypeError, ValueError):
+                int_default = low
+            return int_in_range(spec.label, int_default, low, high, console)
+        if spec.type == "choice":
+            if not spec.choices:
+                raise ValueError(
+                    f"PromptSpec {spec.dotted_key!r} has type=choice but no choices"
+                )
+            return prompt_choice(spec.label, str(default), spec.choices, console)
+        raise ValueError(f"Unknown PromptSpec type: {spec.type!r}")
+    except EOFError:
+        return default
+
+
+def _render_prompts_rich(
+    specs: list[PromptSpec],
+    existing: dict[str, Any],
+    console: Console,
+    tier: str,
+    yaml_file: str,
+) -> dict[str, Any]:
+    """Iterate PromptSpec entries filtered by tier+yaml_file, honor conditions, emit group headers."""
+    answers: dict[str, Any] = {}
+    current_group: str | None = None
+    for spec in specs:
+        if spec.yaml_file != yaml_file:
+            continue
+        if spec.tier != tier:
+            continue
+        if spec.condition is not None:
+            merged_view = dict(existing)
+            _merge_dotted_into_dict(merged_view, answers)
+            if not spec.condition(merged_view):
+                continue
+        if spec.group != current_group:
+            console.print(f"\n[bold cyan]── {spec.group} ──[/bold cyan]")
+            current_group = spec.group
+        default = spec.default_factory(existing)
+        answers[spec.dotted_key] = _dispatch_rich_prompt(spec, default, console)
+    return answers
+
+
+def _setup_proj_yaml(console: Console, selected_plugins: list[str]) -> dict[str, Any]:
+    """Setup ~/.claude/proj.yaml using PromptSpec table. Returns final config dict."""
+    del selected_plugins  # plugin gating is now handled via PromptSpec conditions
+    path = Path.home() / ".claude" / "proj.yaml"
+    try:
+        existing = load_existing_yaml(path)
+    except ConfigLoadError as exc:
+        console.print(f"[red]Failed to load {path}: {exc.original}[/red]")
+        console.print("[yellow]Aborting proj.yaml setup.[/yellow]")
+        return {}
+    mtime_before = path.stat().st_mtime if path.exists() else None
 
     console.print("\n[bold]proj.yaml configuration[/bold]")
 
-    tracking_dir = Prompt.ask(
-        "Tracking directory",
-        default=_DEFAULT_TRACKING_DIR,
-        console=console,
+    basic_answers = _render_prompts_rich(
+        PROJ_YAML_PROMPTS, existing, console, tier="basic", yaml_file="proj"
     )
+    _merge_dotted_into_dict(existing, basic_answers)
 
-    projects_base = Prompt.ask(
-        "Projects base directory",
-        default=_DEFAULT_PROJECTS_BASE,
-        console=console,
-    )
-
-    sandbox_integration = Confirm.ask(
-        "Enable sandbox integration?",
-        default=True,
-        console=console,
-    )
-
-    zoxide_integration = Confirm.ask(
-        "Enable zoxide integration?",
-        default=False,
-        console=console,
-    )
-
-    # Integration-specific prompts (conditional on selected plugins)
-    todoist_enabled = False
-    todoist_auto_sync = True
-    if "todoist" in selected_plugins:
-        todoist_enabled = Confirm.ask(
-            "Enable Todoist sync?",
-            default=False,
-            console=console,
+    if Confirm.ask("\nShow advanced options?", default=False, console=console):
+        advanced_answers = _render_prompts_rich(
+            PROJ_YAML_PROMPTS, existing, console, tier="advanced", yaml_file="proj"
         )
-        if todoist_enabled:
-            todoist_auto_sync = Confirm.ask(
-                "Enable Todoist auto sync?",
-                default=True,
-                console=console,
-            )
+        _merge_dotted_into_dict(existing, advanced_answers)
 
-    trello_enabled = False
-    trello_auto_sync = True
-    trello_board_id = ""
-    if "trello" in selected_plugins:
-        trello_enabled = Confirm.ask(
-            "Enable Trello sync?",
-            default=False,
-            console=console,
+    if (
+        mtime_before is not None
+        and path.exists()
+        and path.stat().st_mtime != mtime_before
+    ):
+        console.print(
+            "[red]proj.yaml changed on disk during wizard — aborting write.[/red]"
         )
-        if trello_enabled:
-            trello_auto_sync = Confirm.ask(
-                "Enable Trello auto sync?",
-                default=True,
-                console=console,
-            )
-            trello_board_id = Prompt.ask(
-                "Trello board ID",
-                default="",
-                console=console,
-            )
+        return existing
 
-    jira_enabled = False
-    jira_auto_sync = True
-    jira_default_user = ""
-    if "jira" in selected_plugins:
-        jira_enabled = Confirm.ask(
-            "Enable Jira sync?",
-            default=False,
-            console=console,
-        )
-        if jira_enabled:
-            jira_auto_sync = Confirm.ask(
-                "Enable Jira auto sync?",
-                default=True,
-                console=console,
-            )
-            jira_default_user = Prompt.ask(
-                "Jira default user",
-                default="",
-                console=console,
-            )
-
-    # Build YAML content
-    lines = [
-        _yaml_line("version", "1"),
-        _yaml_line("tracking_dir", tracking_dir),
-        _yaml_line("projects_base_dir", projects_base),
-        _yaml_line("sandbox_integration", sandbox_integration),
-        _yaml_line("zoxide_integration", zoxide_integration),
-    ]
-
-    # Build nested sync config for enabled integrations
-    if todoist_enabled or trello_enabled:
-        lines.append("sync:\n")
-        if todoist_enabled:
-            lines.append("  todoist:\n")
-            lines.append("    enabled: true\n")
-            lines.append(f"    auto_sync: {'true' if todoist_auto_sync else 'false'}\n")
-        if trello_enabled:
-            lines.append("  trello:\n")
-            lines.append("    enabled: true\n")
-            lines.append(f"    auto_sync: {'true' if trello_auto_sync else 'false'}\n")
-            if trello_board_id:
-                lines.append(f"    default_board_id: {trello_board_id}\n")
-
-    # Jira is top-level (not under sync:)
-    if jira_enabled:
-        lines.append("jira:\n")
-        lines.append("  enabled: true\n")
-        lines.append(f"  auto_sync: {'true' if jira_auto_sync else 'false'}\n")
-        if jira_default_user:
-            lines.append(f"  default_user: {jira_default_user}\n")
-
-    _atomic_write(proj_yaml, "".join(lines))
-    console.print(f"[green]Wrote {proj_yaml}[/green]")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(
+        path, yaml.safe_dump(existing, sort_keys=False, default_flow_style=False)
+    )
+    console.print(f"[green]Wrote {path}[/green]")
+    return existing
 
 
-def _setup_worktree_yaml(console: Console) -> None:
-    """Prompt for worktree.yaml configuration and write it."""
-    worktree_yaml = Path.home() / ".claude" / "worktree.yaml"
-
-    # Check for existing config
-    if worktree_yaml.exists():
-        try:
-            content = worktree_yaml.read_text(encoding="utf-8").strip()
-            if content and Confirm.ask(
-                f"[bold]{worktree_yaml}[/bold] already exists. Keep existing config?",
-                default=True,
-                console=console,
-            ):
-                console.print("[dim]Keeping existing worktree.yaml[/dim]")
-                return
-        except OSError:
-            pass
+def _setup_worktree_yaml(console: Console) -> dict[str, Any]:
+    """Setup ~/.claude/worktree.yaml using PromptSpec table. Returns final config dict."""
+    path = Path.home() / ".claude" / "worktree.yaml"
+    try:
+        existing = load_existing_yaml(path)
+    except ConfigLoadError as exc:
+        console.print(f"[red]Failed to load {path}: {exc.original}[/red]")
+        console.print("[yellow]Aborting worktree.yaml setup.[/yellow]")
+        return {}
+    mtime_before = path.stat().st_mtime if path.exists() else None
 
     console.print("\n[bold]worktree.yaml configuration[/bold]")
 
-    default_dir = Prompt.ask(
-        "Default worktree directory",
-        default=_DEFAULT_WORKTREE_DIR,
-        console=console,
+    basic_answers = _render_prompts_rich(
+        PROJ_YAML_PROMPTS, existing, console, tier="basic", yaml_file="worktree"
     )
+    _merge_dotted_into_dict(existing, basic_answers)
 
-    lines = [
-        _yaml_line("version", "1"),
-        _yaml_line("default_worktree_dir", default_dir),
-    ]
+    if Confirm.ask("\nShow advanced options?", default=False, console=console):
+        advanced_answers = _render_prompts_rich(
+            PROJ_YAML_PROMPTS, existing, console, tier="advanced", yaml_file="worktree"
+        )
+        _merge_dotted_into_dict(existing, advanced_answers)
 
-    _atomic_write(worktree_yaml, "".join(lines))
-    console.print(f"[green]Wrote {worktree_yaml}[/green]")
+    if (
+        mtime_before is not None
+        and path.exists()
+        and path.stat().st_mtime != mtime_before
+    ):
+        console.print(
+            "[red]worktree.yaml changed on disk during wizard — aborting write.[/red]"
+        )
+        return existing
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(
+        path, yaml.safe_dump(existing, sort_keys=False, default_flow_style=False)
+    )
+    console.print(f"[green]Wrote {path}[/green]")
+    return existing
 
 
 def _hooks_diff_prompt(plugin_dirs: list[Path], console: Console | None = None) -> None:
@@ -266,13 +260,10 @@ def _hooks_diff_prompt(plugin_dirs: list[Path], console: Console | None = None) 
     }
 
     for diff in diffs:
-        # Show status badge
         badge = badge_map.get(diff.status, diff.status)
         console.print(f"  {badge}  [bold]{diff.hook_id}[/bold]")
-        # Show unified diff
         if diff.unified_diff:
             console.print(diff.unified_diff)
-        # Prompt — default apply for new/changed, skip for removed
         default = diff.status != "removed"
         action = Confirm.ask("  Apply this change?", default=default, console=console)
         if action and diff.status == "removed":
@@ -290,26 +281,20 @@ def _hooks_diff_prompt(plugin_dirs: list[Path], console: Console | None = None) 
         console.print("\n[dim]No hook changes applied.[/dim]")
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
-    """Read a YAML file and return its contents as a dict, or {} if missing/invalid."""
-    try:
-        text = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(text)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, OSError, yaml.YAMLError):
-        return {}
-
-
 def _setup_todoist_config(console: Console) -> None:
     """Prompt for Todoist config in Rich (--no-tui path)."""
     config_path = Path.home() / ".claude" / "todoist.yaml"
-    existing = _read_yaml(config_path)
+    try:
+        existing = load_existing_yaml(config_path)
+    except ConfigLoadError as exc:
+        console.print(f"[red]Failed to load {config_path}: {exc.original}[/red]")
+        return
 
     console.print("\n[bold]Todoist Configuration[/bold]")
 
     enabled = Confirm.ask(
         "Enable Todoist sync?",
-        default=bool(existing.get("enabled", False)),
+        default=bool(get_nested(existing, "enabled", False)),
         console=console,
     )
     if not enabled:
@@ -318,21 +303,26 @@ def _setup_todoist_config(console: Console) -> None:
 
     auto_sync = Confirm.ask(
         "Enable auto-sync?",
-        default=bool(existing.get("auto_sync", True)),
+        default=bool(get_nested(existing, "auto_sync", True)),
         console=console,
     )
 
-    api_token = Prompt.ask(
+    existing_token = str(get_nested(existing, "api_token", "") or "")
+    token_input = Prompt.ask(
         "Todoist API token",
         password=True,
-        default=existing.get("api_token", ""),
+        default=_masked_default(existing_token),
         console=console,
     )
+    if token_input == _masked_default(existing_token) and existing_token:
+        api_token = existing_token
+    else:
+        api_token = token_input
+
     if not api_token.strip():
         console.print("[red]API token is required.[/red]")
         return
 
-    # Validate token against Todoist REST API
     import httpx
 
     try:
@@ -368,13 +358,17 @@ def _setup_todoist_config(console: Console) -> None:
 def _setup_trello_config(console: Console) -> None:
     """Prompt for Trello config in Rich (--no-tui path)."""
     config_path = Path.home() / ".claude" / "trello.yaml"
-    existing = _read_yaml(config_path)
+    try:
+        existing = load_existing_yaml(config_path)
+    except ConfigLoadError as exc:
+        console.print(f"[red]Failed to load {config_path}: {exc.original}[/red]")
+        return
 
     console.print("\n[bold]Trello Configuration[/bold]")
 
     enabled = Confirm.ask(
         "Enable Trello sync?",
-        default=bool(existing.get("enabled", False)),
+        default=bool(get_nested(existing, "enabled", False)),
         console=console,
     )
     if not enabled:
@@ -383,33 +377,46 @@ def _setup_trello_config(console: Console) -> None:
 
     auto_sync = Confirm.ask(
         "Enable auto-sync?",
-        default=bool(existing.get("auto_sync", True)),
+        default=bool(get_nested(existing, "auto_sync", True)),
         console=console,
     )
 
-    api_key = Prompt.ask(
+    existing_key = str(get_nested(existing, "api_key", "") or "")
+    key_input = Prompt.ask(
         "Trello API key",
         password=True,
-        default=existing.get("api_key", ""),
+        default=_masked_default(existing_key),
         console=console,
     )
-    token = Prompt.ask(
+    api_key = (
+        existing_key
+        if key_input == _masked_default(existing_key) and existing_key
+        else key_input
+    )
+
+    existing_token = str(get_nested(existing, "token", "") or "")
+    token_input = Prompt.ask(
         "Trello token",
         password=True,
-        default=existing.get("token", ""),
+        default=_masked_default(existing_token),
         console=console,
     )
+    token = (
+        existing_token
+        if token_input == _masked_default(existing_token) and existing_token
+        else token_input
+    )
+
     if not api_key.strip() or not token.strip():
         console.print("[red]API key and token are both required.[/red]")
         return
 
     default_board_id = Prompt.ask(
         "Default board ID (optional)",
-        default=existing.get("default_board_id", ""),
+        default=str(get_nested(existing, "default_board_id", "") or ""),
         console=console,
     )
 
-    # Validate credentials against Trello API
     import httpx
 
     try:
@@ -449,13 +456,17 @@ def _setup_trello_config(console: Console) -> None:
 def _setup_jira_config(console: Console) -> None:
     """Prompt for Jira config in Rich (--no-tui path)."""
     config_path = Path.home() / ".claude" / "jira.yaml"
-    existing = _read_yaml(config_path)
+    try:
+        existing = load_existing_yaml(config_path)
+    except ConfigLoadError as exc:
+        console.print(f"[red]Failed to load {config_path}: {exc.original}[/red]")
+        return
 
     console.print("\n[bold]Jira Configuration[/bold]")
 
     enabled = Confirm.ask(
         "Enable Jira sync?",
-        default=bool(existing.get("enabled", False)),
+        default=bool(get_nested(existing, "enabled", False)),
         console=console,
     )
     if not enabled:
@@ -464,29 +475,37 @@ def _setup_jira_config(console: Console) -> None:
 
     auto_sync = Confirm.ask(
         "Enable auto-sync?",
-        default=bool(existing.get("auto_sync", True)),
+        default=bool(get_nested(existing, "auto_sync", True)),
         console=console,
     )
 
     base_url = Prompt.ask(
         "Jira base URL (e.g. https://yourcompany.atlassian.net)",
-        default=str(existing.get("base_url", "")),
+        default=str(get_nested(existing, "base_url", "") or ""),
         console=console,
     )
     default_user = Prompt.ask(
         "Username / email",
-        default=str(existing.get("default_user", "")),
+        default=str(get_nested(existing, "default_user", "") or ""),
         console=console,
     )
-    personal_access_token = Prompt.ask(
+
+    existing_pat = str(get_nested(existing, "personal_access_token", "") or "")
+    pat_input = Prompt.ask(
         "Personal access token",
         password=True,
-        default=str(existing.get("personal_access_token", "")),
+        default=_masked_default(existing_pat),
         console=console,
     )
+    personal_access_token = (
+        existing_pat
+        if pat_input == _masked_default(existing_pat) and existing_pat
+        else pat_input
+    )
+
     default_project = Prompt.ask(
         "Default project key (e.g. PROJ)",
-        default=str(existing.get("default_project", "")),
+        default=str(get_nested(existing, "default_project", "") or ""),
         console=console,
     )
 
@@ -498,7 +517,6 @@ def _setup_jira_config(console: Console) -> None:
         console.print("[red]Personal access token is required.[/red]")
         return
 
-    # Validate credentials against Jira API
     import httpx
 
     try:
@@ -554,16 +572,13 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
     console.print("\n[bold]Post-install Setup Wizard[/bold]")
     console.print("Configure your plugins. Press Enter to accept defaults.\n")
 
-    # proj.yaml is needed by proj, hooks, sandbox, and most other plugins
     proj_plugins = {"proj", "hooks", "sandbox", "todoist", "trello", "jira"}
     if proj_plugins & set(selected_plugins):
         _setup_proj_yaml(console, selected_plugins)
 
-    # worktree.yaml only if worktree was selected
     if "worktree" in selected_plugins:
         _setup_worktree_yaml(console)
 
-    # Integration config (API tokens with validation)
     if "todoist" in selected_plugins:
         _setup_todoist_config(console)
     if "trello" in selected_plugins:
@@ -571,7 +586,6 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
     if "jira" in selected_plugins:
         _setup_jira_config(console)
 
-    # Hooks diff prompt — resolve installed plugin dirs from cache
     cache_dir = Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
     plugin_dirs: list[Path] = []
     for name in selected_plugins:
@@ -581,7 +595,6 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
     if plugin_dirs:
         _hooks_diff_prompt(plugin_dirs, console=console)
 
-    # Ensure managed section in global CLAUDE.md
     ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
 
     console.print("\n[green]Setup wizard complete.[/green]")
