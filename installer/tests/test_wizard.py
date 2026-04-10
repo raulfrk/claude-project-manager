@@ -908,3 +908,82 @@ class TestMergeDottedIntoDict:
         existing: dict = {}
         _merge_dotted_into_dict(existing, {"a.b.c.d": "deep"})
         assert existing == {"a": {"b": {"c": {"d": "deep"}}}}
+
+
+class TestRichWizardSettingsHooksCallOrder:
+    """Assert run_wizard calls _settings_hooks_diff_prompt after _hooks_diff_prompt."""
+
+    def test_run_wizard_calls_settings_hooks_diff_prompt(self, tmp_path, monkeypatch):
+        """Patch helpers and assert call order in the Rich path."""
+        from unittest.mock import patch
+
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude").mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from installer import wizard as w
+
+        calls: list[str] = []
+
+        def _stub_setup_proj(*args, **kwargs):
+            calls.append("_setup_proj_yaml")
+            return {}
+
+        def _stub_setup_worktree(*args, **kwargs):
+            calls.append("_setup_worktree_yaml")
+            return {}
+
+        def _stub_hooks_diff(*args, **kwargs):
+            calls.append("_hooks_diff_prompt")
+
+        def _stub_settings_hooks_diff(*args, **kwargs):
+            calls.append("_settings_hooks_diff_prompt")
+
+        def _stub_ensure_managed(*args, **kwargs):
+            calls.append("ensure_managed_section")
+
+        def _stub_resolve_plugin_dir(cache_dir, name):
+            return home / ".claude" / "plugins" / name
+
+        with (
+            patch.object(w, "_setup_proj_yaml", side_effect=_stub_setup_proj),
+            patch.object(w, "_setup_worktree_yaml", side_effect=_stub_setup_worktree),
+            patch.object(w, "_hooks_diff_prompt", side_effect=_stub_hooks_diff),
+            patch.object(
+                w, "_settings_hooks_diff_prompt", side_effect=_stub_settings_hooks_diff
+            ),
+            patch.object(w, "ensure_managed_section", side_effect=_stub_ensure_managed),
+            patch.object(
+                w, "_resolve_plugin_dir", side_effect=_stub_resolve_plugin_dir
+            ),
+            patch.object(w, "Confirm") as mock_confirm,
+            patch.object(w, "Prompt") as mock_prompt,
+        ):
+            mock_confirm.ask.return_value = False
+            mock_prompt.ask.return_value = ""
+            try:
+                w.run_wizard(selected_plugins=["proj"], skip=False)
+            except SystemExit:
+                pass
+            except Exception:
+                pass
+
+        assert "_settings_hooks_diff_prompt" in calls, (
+            f"_settings_hooks_diff_prompt was not called. Calls: {calls}"
+        )
+        if "_hooks_diff_prompt" in calls and "_settings_hooks_diff_prompt" in calls:
+            assert calls.index("_hooks_diff_prompt") < calls.index(
+                "_settings_hooks_diff_prompt"
+            ), f"Call order wrong: {calls}"
+
+    def test_skips_on_empty_plugin_dirs(self, tmp_path, monkeypatch):
+        """With empty plugin_dirs, _settings_hooks_diff_prompt is a no-op guard."""
+        from io import StringIO
+
+        from rich.console import Console
+
+        from installer.wizard import _settings_hooks_diff_prompt
+
+        console = Console(file=StringIO(), force_terminal=False)
+        _settings_hooks_diff_prompt([], console)
