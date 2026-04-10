@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import difflib
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -9,13 +14,65 @@ from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Footer, Static
 
 from installer.hooks_diff import HookDiff
+from installer.settings_hooks import SettingsHookDiff
 
 # Status badge labels
 _STATUS_BADGES: dict[str, str] = {
     "new": "[bold green]NEW[/]",
     "changed": "[bold yellow]CHANGED[/]",
     "removed": "[bold red]REMOVED[/]",
+    "unchanged": "[dim]UNCHANGED[/]",
 }
+
+HooksDiffMode = Literal["yaml_hooks", "settings_hooks"]
+
+
+def _settings_diff_text(diff: SettingsHookDiff) -> str:
+    """Synthesize a unified diff for a SettingsHookDiff."""
+
+    def _dump(block: dict[str, Any] | None) -> list[str]:
+        if not block:
+            return []
+        return yaml.safe_dump(
+            block, sort_keys=False, default_flow_style=False
+        ).splitlines(keepends=True)
+
+    a = _dump(diff.actual)
+    b = _dump(diff.desired)
+    lines = list(
+        difflib.unified_diff(
+            a,
+            b,
+            fromfile=f"a/{diff.cpm_id}",
+            tofile=f"b/{diff.cpm_id}",
+            lineterm="",
+        )
+    )
+    return "".join(lines)
+
+
+def _normalize_diff(
+    diff: HookDiff | SettingsHookDiff, mode: HooksDiffMode
+) -> dict[str, str]:
+    """Map either diff shape to a uniform dict used for rendering.
+
+    Returned keys: id, status, unified_diff, label.
+    """
+    if mode == "settings_hooks":
+        assert isinstance(diff, SettingsHookDiff)
+        return {
+            "id": diff.cpm_id,
+            "status": diff.kind,
+            "unified_diff": _settings_diff_text(diff),
+            "label": f"{diff.cpm_id} ({diff.event})",
+        }
+    assert isinstance(diff, HookDiff)
+    return {
+        "id": diff.hook_id,
+        "status": diff.status,
+        "unified_diff": diff.unified_diff,
+        "label": diff.hook_id,
+    }
 
 
 class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
@@ -138,44 +195,87 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
 
     def __init__(
         self,
-        diffs: list[HookDiff],
+        plugin_dirs: list[Path] | None = None,
+        *,
+        mode: HooksDiffMode = "yaml_hooks",
+        diffs: list[HookDiff] | list[SettingsHookDiff] | None = None,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
-        self._diffs = diffs
+        self._mode: HooksDiffMode = mode
+        self._plugin_dirs: list[Path] = list(plugin_dirs or [])
+        if diffs is None:
+            diffs = self._compute_diffs()
+        self._diffs: list[HookDiff] | list[SettingsHookDiff] = diffs
+        self._normalized: list[dict[str, str]] = [
+            _normalize_diff(d, mode) for d in diffs
+        ]
+
+    def _compute_diffs(self) -> list:
+        """Load diffs from disk based on ``self._mode`` and ``self._plugin_dirs``."""
+        if self._mode == "settings_hooks":
+            from installer.settings_hooks import compute_settings_hooks_diff
+
+            settings_path = Path.home() / ".claude" / "settings.json"
+            return compute_settings_hooks_diff(settings_path, self._plugin_dirs)
+        from installer.hooks_diff import compute_hooks_diff
+
+        hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
+        return compute_hooks_diff(hooks_yaml, self._plugin_dirs)
+
+    def _apply_selected(
+        self, apply_ids: set[str], remove_ids: set[str] | None = None
+    ) -> None:
+        """Dispatch Apply to the mode-appropriate apply function."""
+        remove_ids = remove_ids or set()
+        if self._mode == "settings_hooks":
+            from installer.settings_hooks import apply_settings_hooks_diffs
+
+            settings_path = Path.home() / ".claude" / "settings.json"
+            apply_settings_hooks_diffs(
+                settings_path, self._diffs, apply_ids, remove_ids
+            )
+            return
+        from installer.hooks_diff import apply_diffs
+
+        hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
+        apply_diffs(hooks_yaml, self._diffs, apply_ids, remove_ids)
 
     def compose(self) -> ComposeResult:
+        empty_message = (
+            "settings.json hooks are up to date — no changes needed."
+            if self._mode == "settings_hooks"
+            else "hooks.yaml is up to date — no changes needed."
+        )
         with Vertical(id="hooks-diff-dialog"):
             yield Static("Hook Configuration Updates", id="hooks-diff-title")
 
-            if not self._diffs:
-                yield Static(
-                    "hooks.yaml is up to date — no changes needed.",
-                    id="hooks-diff-empty",
-                )
+            if not self._normalized:
+                yield Static(empty_message, id="hooks-diff-empty")
                 with Horizontal(id="hooks-diff-button-bar"):
                     yield Button("Continue", variant="primary", id="btn-hooks-continue")
             else:
                 with VerticalScroll(id="hooks-diff-scroll"):
-                    for diff in self._diffs:
-                        badge = _STATUS_BADGES.get(diff.status, diff.status.upper())
-                        # Default: checked for new/changed, unchecked for removed
-                        default_checked = diff.status != "removed"
+                    for row in self._normalized:
+                        status = row["status"]
+                        badge = _STATUS_BADGES.get(status, status.upper())
+                        # Default: checked for new/changed, unchecked for removed/unchanged
+                        default_checked = status not in ("removed", "unchanged")
 
                         with Vertical(classes="hook-card"):
                             with Horizontal(classes="hook-header"):
-                                yield Static(diff.hook_id, classes="hook-id")
+                                yield Static(row["label"], classes="hook-id")
                                 yield Static(badge, classes="hook-badge", markup=True)
                             yield Static(
-                                diff.unified_diff or "(no diff)",
+                                row["unified_diff"] or "(no diff)",
                                 classes="hook-diff-text",
                             )
                             yield Checkbox(
                                 "Include this hook",
                                 value=default_checked,
-                                id=f"hook-cb-{diff.hook_id}",
+                                id=f"hook-cb-{row['id']}",
                                 classes="hook-checkbox",
                             )
 
@@ -192,9 +292,9 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
 
     def _set_all_checkboxes(self, value: bool) -> None:
         """Set all hook checkboxes to the given value."""
-        for diff in self._diffs:
+        for row in self._normalized:
             try:
-                cb = self.query_one(f"#hook-cb-{diff.hook_id}", Checkbox)
+                cb = self.query_one(f"#hook-cb-{row['id']}", Checkbox)
                 cb.value = value
             except Exception:
                 pass
@@ -204,9 +304,9 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
         apply_ids: set[str] = set()
         remove_ids: set[str] = set()
 
-        for diff in self._diffs:
+        for row in self._normalized:
             try:
-                cb = self.query_one(f"#hook-cb-{diff.hook_id}", Checkbox)
+                cb = self.query_one(f"#hook-cb-{row['id']}", Checkbox)
                 checked = cb.value
             except Exception:
                 checked = False
@@ -214,10 +314,10 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
             if not checked:
                 continue
 
-            if diff.status == "removed":
-                remove_ids.add(diff.hook_id)
+            if row["status"] == "removed":
+                remove_ids.add(row["id"])
             else:
-                apply_ids.add(diff.hook_id)
+                apply_ids.add(row["id"])
 
         return {"apply": apply_ids, "remove": remove_ids}
 
@@ -230,7 +330,7 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
         self._set_all_checkboxes(False)
 
     def action_continue_action(self) -> None:
-        if not self._diffs:
+        if not self._normalized:
             self.dismiss(None)
         else:
             self.dismiss(self._collect_selections())
