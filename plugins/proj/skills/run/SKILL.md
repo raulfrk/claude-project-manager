@@ -615,29 +615,53 @@ For each completed todo in batch order:
     If committed: display "Auto-committed {N} files in worktree for todo {id}"
     If error: log warning, proceed to merge attempt
 
-  Run `git merge --no-ff todo-{id}`:
+  Run `git merge --no-ff todo-{id}` and apply the **3-tier resolution cascade** below.
 
-  **IF clean merge** (exit 0): commit. Add all modified files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`. Continue.
+  ---
 
-  **IF conflict**:
-    Check auto-resolve eligibility:
-    - Conflicting file count <= 2
-    - No conflicting files match critical-path patterns
-    - All conflict hunks < 20 lines
+  ### Tier 1 — Clean merge
 
-    **IF eligible for auto-resolve**:
-      For each conflicting file:
-      - If file NOT in `files_merged_this_batch`: accept "theirs" (worktree version).
-      - If file IN `files_merged_this_batch`: accept "ours" (main, already merged from earlier todo).
-      Stage resolved files. Commit. Add files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`.
+  `git merge --no-ff todo-{id}` exits 0.
 
-    **IF NOT eligible** (AND NOT `--no-interactive`):
-      Display conflict details. Prompt:
-      1. **Manual resolve** — user resolves in editor, then continue
-      2. **Abort this merge** — revert to `pre-merge-{todo_id}` tag, add to `reexecution_queue`
+  - Add all modified files (from `git diff-tree --no-commit-id --name-only -r HEAD`) to `files_merged_this_batch`.
+  - Call `mcp__proj__notes_append` with `note="Merge tier 1 (clean): todo-{id} — {N} files"`.
+  - After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`.
+  - Continue to the next todo.
 
-    **IF NOT eligible AND `--no-interactive`**:
-      Abort merge. Revert to `pre-merge-{todo_id}`. Add to `reexecution_queue`.
+  ### Tier 2 — Expanded auto-resolve
+
+  Merge had conflicts. Evaluate eligibility (ALL conditions must hold):
+  - Conflicting file count ≤ **5** (raised from previous cap of 2).
+  - All conflict hunks < **50 lines** (raised from 20).
+  - No conflicting file matches any critical-path pattern (e.g. `**/models.py`, `**/schema.*`, `**/migrations/**`, `**/security/**` — configurable list).
+
+  If eligible, resolve each conflicting file using the `files_merged_this_batch` decision rule:
+  - If file **NOT** in `files_merged_this_batch` → accept **theirs** (worktree version is the authoritative latest write).
+  - If file **IN** `files_merged_this_batch` → accept **ours** (main already holds a merged version from an earlier todo in this batch; the worktree branched before that merge and its view is stale).
+
+  Stage resolved files, commit, add files to `files_merged_this_batch`. After successful merge and `wt_remove`, delete branch with `git branch -d todo-{id}`.
+
+  Call `mcp__proj__notes_append` with `note="Merge tier 2 (auto-resolve): todo-{id} — {N} files, strategy=[theirs×K, ours×M]"`.
+
+  ### Tier 3 — Ask user
+
+  Tier 2 ineligible (too many files, hunks too large, or critical-path file touched) OR Tier 2 auto-resolve raised a fresh error.
+
+  **IF `--no-interactive`**:
+    - Abort merge: `git merge --abort`, then `git reset --hard pre-merge-{todo_id}`.
+    - Append todo to `reexecution_queue`.
+    - Call `mcp__proj__notes_append` with `note="Merge tier 3 (aborted, non-interactive): todo-{id} — queued for re-execution"`.
+
+  **ELSE** (interactive):
+    Display conflict summary: conflicting files, hunk counts, critical-path matches (if any). Prompt:
+    1. **Manual resolve** — user resolves in editor, then `git add` + `git commit` + continue
+    2. **Abort this merge** — revert to `pre-merge-{todo_id}` tag, add to `reexecution_queue`
+
+    Call `mcp__proj__notes_append` with `note="Merge tier 3 (user): todo-{id} — choice={manual|abort}"`.
+
+  > **Note**: the previous Tier 3 `-X theirs` and `git rerere` strategies have been removed. `rerere` is a user-side local config (not a runtime-invocable command), and a blind `-X theirs` across an arbitrary conflict set is unsafe without a files-merged decision rule — which is exactly what Tier 2 already provides within its eligibility envelope.
+
+  ---
 
   **Post-merge test** (after each merge):
     Run test suite (`uv run pytest --tb=short -q` or `npm test`).
@@ -649,6 +673,18 @@ For each completed todo in batch order:
   If `reexecution_queue` is non-empty:
     Display: "N todos need re-execution on main (merge conflicts aborted)."
     For each queued todo: re-execute sequentially on main (no worktree, `--no-pipeline --balanced`).
+
+**Phase 2.6 — Post-merge verification** (after all tier-1/2/3 merges and any re-execution queue drain, before `Verification` step):
+
+1. **Final full-suite test run** — run the project test suite **without** `-q` so that per-test output is visible. Detect runner via the same logic as execute step 4a (`uv run pytest --tb=short`, `npm test`, etc.). If the suite fails, surface the full failing output, append `notes_append("Post-merge verification FAILED: {N} tests")`, and offer: (1) Spawn fix agents (2) Proceed anyway (3) Abort batch.
+
+2. **Diff-vs-plan review agent** — spawn a read-only `general-purpose` Task agent with a **60s timeout** to compare the combined batch diff (`git diff {merge_base}..HEAD`) against each todo's approved implementation plan (from the plans persisted earlier in Phase 1/2). The agent reports per-todo mismatches as `WARNING` entries — it does NOT modify files and does NOT block the batch. Its report is appended to the combined verification summary below as a new **Drift** column.
+
+3. **Resource safeguards** (pre-batch, run these checks *before* Phase 1.5 worktree setup as a gate):
+   - **Disk**: `df --output=avail .` — require at least `300 MB × max_parallel` free on the worktree root. On shortfall, warn and cap `max_parallel` to `floor(avail_mb / 300)`.
+   - **File descriptors**: `ulimit -n` — require at least `256 × max_parallel` descriptors. On shortfall, warn and cap `max_parallel` accordingly.
+   - **Context budget**: estimated aggregate context per agent × `max_parallel` must stay below the trust-level budget (see `context_injection_budget`). On shortfall, cap `max_parallel`.
+   Each cap emits a `notes_append("Pre-batch cap: max_parallel {old}→{new} due to {reason}")` line.
 
 **Verification** (skip entirely if `--no-verify` was passed):
 
@@ -1125,29 +1161,19 @@ For each completed todo in batch order:
     If committed: display "Auto-committed {N} files in worktree for todo {id}"
     If error: log warning, proceed to merge attempt
 
-  Run `git merge --no-ff todo-{id}`:
+  Run `git merge --no-ff todo-{id}` and apply the **3-tier resolution cascade** (see Phase 2.5 for the full definition — the batch cascade is identical):
 
-  **IF clean merge** (exit 0): commit. Add all modified files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`. Continue.
+  ### Tier 1 — Clean merge
+  Exit 0. Add modified files to `files_merged_this_batch`, `notes_append("Merge tier 1 (clean): todo-{id} — {N} files")`, `wt_remove`, `git branch -d todo-{id}`.
 
-  **IF conflict**:
-    Check auto-resolve eligibility:
-    - Conflicting file count <= 2
-    - No conflicting files match critical-path patterns
-    - All conflict hunks < 20 lines
+  ### Tier 2 — Expanded auto-resolve
+  Eligibility: ≤5 conflicting files, all hunks <50 lines, no critical-path files. Decision rule: file NOT in `files_merged_this_batch` → theirs; file IN → ours. Stage, commit, `notes_append("Merge tier 2 (auto-resolve): todo-{id} — {N} files, strategy=[theirs×K, ours×M]")`.
 
-    **IF eligible for auto-resolve**:
-      For each conflicting file:
-      - If file NOT in `files_merged_this_batch`: accept "theirs" (worktree version).
-      - If file IN `files_merged_this_batch`: accept "ours" (main, already merged from earlier todo).
-      Stage resolved files. Commit. Add files to `files_merged_this_batch`. After successful merge and `wt_remove`: delete the branch with `git branch -d todo-{id}`.
+  ### Tier 3 — Ask user
+  **IF `--no-interactive`**: abort, revert to `pre-merge-{todo_id}`, enqueue, `notes_append("Merge tier 3 (aborted, non-interactive): todo-{id} — queued for re-execution")`.
+  **ELSE**: display conflict summary, prompt (1) Manual resolve (2) Abort, `notes_append("Merge tier 3 (user): todo-{id} — choice={manual|abort}")`.
 
-    **IF NOT eligible** (AND NOT `--no-interactive`):
-      Display conflict details. Prompt:
-      1. **Manual resolve** — user resolves in editor, then continue
-      2. **Abort this merge** — revert to `pre-merge-{todo_id}` tag, add to `reexecution_queue`
-
-    **IF NOT eligible AND `--no-interactive`**:
-      Abort merge. Revert to `pre-merge-{todo_id}`. Add to `reexecution_queue`.
+  > `-X theirs` and `git rerere` Tier-3 strategies are intentionally NOT used. See Phase 2.5 note for rationale.
 
   **Post-merge test** (after each merge):
     Run test suite (`uv run pytest --tb=short -q` or `npm test`).
@@ -1159,6 +1185,12 @@ For each completed todo in batch order:
   If `reexecution_queue` is non-empty:
     Display: "N todos need re-execution on main (merge conflicts aborted)."
     For each queued todo: re-execute sequentially on main (no worktree, `--no-pipeline --balanced`).
+
+**Phase C2.6 — Post-merge verification** (after all cascades and re-execution drain, before Phase C2a):
+
+1. **Final full-suite test run** — run project test suite **without** `-q`. On failure: surface full output, `notes_append("Post-merge verification FAILED: {N} tests")`, offer (1) Spawn fix agents (2) Proceed anyway (3) Abort batch.
+2. **Diff-vs-plan review agent** — spawn a read-only `general-purpose` Task agent (60s timeout) to compare `git diff {merge_base}..HEAD` against each todo's approved plan. Reports per-todo mismatches as `WARNING` only; does NOT block or modify files. Feeds a **Drift** column into the combined verification summary.
+3. **Resource safeguards** (pre-batch, gate before Phase C1.5): disk (≥300 MB × max_parallel), FDs (≥256 × max_parallel), context budget. Any shortfall caps `max_parallel` downward with a `notes_append("Pre-batch cap: max_parallel {old}→{new} due to {reason}")` line.
 
 **Phase C2a — Verification** (skip entirely if `--no-verify` was passed):
 
