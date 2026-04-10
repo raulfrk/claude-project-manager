@@ -1,0 +1,241 @@
+"""Transition snapshot tests for integration config screens.
+
+Covers TodoistConfigScreen, TrelloConfigScreen, JiraConfigScreen. All
+tests rely on the ``stub_httpx`` fixture from ``conftest.py`` to prevent
+any real network call. Error states are triggered via direct
+``_show_error()`` calls (not by pressing Continue with bad credentials).
+
+See ``test_snapshots.py`` module docstring for full inventory and
+per-screen widget ID map.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from textual.app import App, ComposeResult
+from textual.widgets import Button, Static, Switch
+
+from installer.screens.integration_config import (
+    JiraConfigScreen,
+    TodoistConfigScreen,
+    TrelloConfigScreen,
+)
+from installer.tests.e2e.test_snapshots import _assert_snapshot
+
+_TERM_SIZE = (120, 40)
+
+
+class _ScreenHost(App):
+    CSS = "Screen { align: center middle; }"
+
+    def compose(self) -> ComposeResult:
+        yield Static("")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force Path.home() to a tmp dir so integration screens can't read
+    real user config files during snapshot capture."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("HOME", str(home))
+
+
+# ---------------------------------------------------------------------------
+# TodoistConfigScreen
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_integration_todoist_focus_skip_snapshot(stub_httpx) -> None:
+    """Focus on #btn-skip (default focus is #btn-continue)."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TodoistConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen.query_one("#btn-skip", Button).focus()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-skip"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_todoist_focus_skip")
+
+
+@pytest.mark.asyncio
+async def test_integration_todoist_error_invalid_token_snapshot(stub_httpx) -> None:
+    """Error label visible via direct _show_error() (no real API call)."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TodoistConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen._show_error("Invalid API token")
+        screen._hide_loading()
+        await pilot.pause()
+
+        # Default focus is #btn-continue (set in on_mount).
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-continue"
+
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_todoist_error_invalid_token")
+
+
+@pytest.mark.asyncio
+async def test_integration_todoist_disabled_confirm_snapshot(stub_httpx) -> None:
+    """Disable the Continue button via reactive property and snapshot."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TodoistConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        # Flip sync_enabled OFF — this is the reactive state that normally
+        # causes _on_continue to skip validation; combined with a disabled
+        # button, it represents the "not actionable" variant.
+        screen.query_one("#sync_enabled", Switch).value = False
+        btn = screen.query_one("#btn-continue", Button)
+        btn.disabled = True
+        await pilot.pause()
+
+        # Focus on the still-enabled Skip button for a deterministic focus.
+        screen.query_one("#btn-skip", Button).focus()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-skip"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_todoist_disabled_confirm")
+
+
+# ---------------------------------------------------------------------------
+# TrelloConfigScreen
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_integration_trello_initial_snapshot(stub_httpx) -> None:
+    """Baseline Trello config form (no existing golden yet)."""
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TrelloConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        # on_mount() sets focus to #btn-continue.
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-continue"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_trello_initial")
+
+
+@pytest.mark.asyncio
+async def test_integration_trello_focus_skip_snapshot(stub_httpx) -> None:
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TrelloConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen.query_one("#btn-skip", Button).focus()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-skip"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_trello_focus_skip")
+
+
+@pytest.mark.asyncio
+async def test_integration_trello_error_invalid_credentials_snapshot(
+    stub_httpx,
+) -> None:
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = TrelloConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen._show_error("Invalid API key or token")
+        screen._hide_loading()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-continue"
+
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_trello_error_invalid_credentials")
+
+
+# ---------------------------------------------------------------------------
+# JiraConfigScreen
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_integration_jira_initial_snapshot(stub_httpx) -> None:
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = JiraConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-continue"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_jira_initial")
+
+
+@pytest.mark.asyncio
+async def test_integration_jira_focus_skip_snapshot(stub_httpx) -> None:
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = JiraConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen.query_one("#btn-skip", Button).focus()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-skip"
+
+        screen._hide_loading()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_jira_focus_skip")
+
+
+@pytest.mark.asyncio
+async def test_integration_jira_error_invalid_url_snapshot(stub_httpx) -> None:
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = JiraConfigScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen._show_error("Cannot reach https://bogus.example — check URL and network")
+        screen._hide_loading()
+        await pilot.pause()
+
+        assert pilot.app.focused is not None
+        assert pilot.app.focused.id == "btn-continue"
+
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "integration_jira_error_invalid_url")
