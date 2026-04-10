@@ -245,6 +245,14 @@ Omit `todoist_mcp_server` when `todoist_enabled: false`.
 
 ## Step 7: Permission setup (if sandbox plugin detected)
 
+This step uses `sandbox_state` loaded in Step 0 to detect which MCP rules, write paths, and batch-setup paths already exist, so the wizard can report idempotent no-ops instead of silently re-applying. If `sandbox_state` is `None` (load failed or stale), re-fetch via `sandbox_list` before proceeding.
+
+Compute the existing-rules view once:
+```
+existing_allow = set(sandbox_state.get("permissions_allow", [])) if sandbox_state else set()
+existing_write = set(sandbox_state.get("write_paths", [])) if sandbox_state else set()
+```
+
 ### 7a. MCP auto-allow
 Build the server list and call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` once:
 - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
@@ -255,20 +263,20 @@ Build the server list and call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_all
 - If `auto_allow_mcps: true` and trello enabled: `"plugin_trello_trello"`
 - If `auto_allow_mcps: true` and jira enabled: `"plugin_jira_jira"`
 - If `auto_allow_mcps: true` and zoxide detected: `"plugin_zoxide_zoxide"`
-- Call: `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow(servers=[<list>])`
-- If `zoxide_integration: true`, also call `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` with `entry="Bash(zoxide *)"`.
+- Before calling, filter out servers whose wildcard rule `f"mcp__{server}__*"` is already in `existing_allow` — report each skipped rule as `"<rule> already present, skipping"`. Call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow(servers=[<filtered list>])` only if the filtered list is non-empty.
+- If `zoxide_integration: true` and `"Bash(zoxide *)"` is not in `existing_allow`, call `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` with `entry="Bash(zoxide *)"`.
 
 ### 7b. Verify MCP rules
-Call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"`.
+Re-read sandbox state via `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"` (fresh read, since 7a may have mutated it).
 Parse `permissions_allow` from the result.
 - If `sandbox_integration: true`: check for `mcp__plugin_sandbox_sandbox__*` — warn if missing
 - If `worktree_integration: true`: check for `mcp__plugin_worktree_worktree__*` — warn if missing
 
 ### 7c. Sandbox setup
-- Compute `projects_root` from `projects_base_dir`
+- Compute `projects_root` from `projects_base_dir` (default from `sandbox_state` if present, else from newly-entered value)
 - Compute `tracking_root` from `tracking_dir`
 - Compute `archive_destination` from archive config
-- Call `sandbox_batch_setup` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`
+- Call `sandbox_batch_setup` with `paths=[projects_root, tracking_root, archive_destination]` and `preserve_extra=true`. The tool is idempotent — paths already configured are no-ops.
 
 ### 7d. Default deny rules
 - Call `sandbox_set_deny` with the default deny rules list (from `DEFAULT_DENY_RULES` constant)
