@@ -135,7 +135,7 @@ jobs:
             -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
             -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
-            sh -c "$MODE uv run pytest installer/tests/e2e/test_snapshots.py -v"
+            sh -c "$MODE pytest installer/tests/e2e/test_snapshots.py -v"
 
       - name: Commit generated snapshots
         run: |
@@ -159,7 +159,7 @@ jobs:
             -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
             -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
-            uv run pytest installer/tests/e2e/ -v
+            pytest installer/tests/e2e/ -v
 
       - name: Move cache
         if: always()
@@ -178,7 +178,7 @@ jobs:
             -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
             -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
             cpm-e2e:latest \
-            uv run python installer/tests/e2e/snapshot_diff.py \
+            python installer/tests/e2e/snapshot_diff.py \
               installer/tests/e2e/snapshots \
               installer/tests/e2e/snapshots/diff-report.html
 
