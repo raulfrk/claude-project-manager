@@ -57,6 +57,9 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quali
 | max_parallel | 30 | 30 | 10 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | preflight | skip | enabled | enabled | enabled |
+| preflight_structural | skip | enabled | enabled | enabled |
+| preflight_adversarial_agents | skip | skip | enabled | enabled |
+| pre_execute_preflight | skip | enabled | enabled | enabled |
 | refine | skip | if --refine set | auto-enabled (per iteration) | auto-enabled (per iteration) |
 | worktree | on (unless `--no-worktree`) | on (unless `--no-worktree`) | on (unless `--no-worktree`) | off (max_parallel=1) |
 | overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
@@ -146,29 +149,62 @@ If Re-define: run interactive define on each flagged todo, then resume from deco
 
 IF quality_level == fast: skip preflight entirely, proceed to next step.
 
+**Preflight versioning and grandfather rule**: each todo carries a `preflight_version` meta field. When unset (existing todos created before this feature), preflight runs in **legacy mode** with only the original 5 checks (checks 1-5 below). Todos with `preflight_version: 2` run the expanded 10-check v2 suite. New todos default to v2. Users may upgrade a todo manually with `todo update <id> preflight_version=2`. Bulk migration is out of scope (tracked separately).
+
+**Fix-loop cap**: max 3 preflight re-runs per todo per `/proj:run` invocation. On the 4th attempt, auto-demote remaining BLOCKING findings to WARNING and display: "3 fix attempts exhausted — (1) Continue anyway (2) Stop".
+
+**`--no-interactive` demotion**: under `--no-interactive`, BLOCKING findings are auto-demoted to WARNING, logged via `notes_append` with the tag `preflight:auto-demoted`, and a decision log entry is recorded per demotion. The run auto-continues.
+
 For each todo in descendant list:
-1. Read requirements.md via `content_get_requirements`. If not found: hard fail with "No requirements found. Run define first." (counts as all 5 checks failing).
-2. Read research.md via `content_get_research`. If not found: mark check 3 as FAIL, continue other checks.
-3. Run 5 structural checks:
+1. Read requirements.md via `content_get_requirements`. If not found: hard fail with "No requirements found. Run define first." (counts as all checks failing).
+2. Read research.md via `content_get_research`. If not found: mark research-dependent checks as FAIL, continue other checks.
+3. Run structural checks. Legacy mode runs checks 1-5; v2 mode runs all 10:
 
-   | # | Check | Pass condition |
-   |---|-------|---------------|
-   | 1 | Testable acceptance criteria | "Acceptance Criteria" section exists with >= 1 item, no vague language ("should be fast", "works well", "properly", "good", "clean", "efficient") |
-   | 2 | Out-of-scope section | "Out of Scope" section exists with >= 1 bullet |
-   | 3 | Research approach options | research.md contains >= 2 approach options (section headers or numbered options under "Approach Options") |
-   | 4 | Testing strategy coverage | "Testing Strategy" section mentions >= 2 of: unit, integration, e2e, manual |
-   | 5 | Edge cases documented | "Edge Cases" section has >= 2 bullets or list items |
+   | # | Check | Data read | Pass condition | Version |
+   |---|-------|-----------|---------------|---------|
+   | 1 | Testable acceptance criteria | requirements.md, "Acceptance Criteria" section | section exists with >= 1 item | v1+v2 |
+   | 2 | Out-of-scope section | requirements.md, "Out of Scope" section | section exists with >= 1 bullet | v1+v2 |
+   | 3 | Research approach options | research.md, "Approach Options" or top-level headers | >= 2 approach options | v1+v2 |
+   | 4 | Testing strategy coverage | requirements.md, "Testing Strategy" section | mentions >= 2 of: unit, integration, e2e, manual | v1+v2 |
+   | 5 | Edge cases documented | requirements.md, "Edge Cases" section | >= 2 bullets or list items | v1+v2 |
+   | 6 | Vague language (expanded) | requirements.md, "Goal" and "Acceptance Criteria" sections ONLY | no tokens from the expanded vague-phrase list (see below) | v2 only |
+   | 7 | Acceptance criterion verifiability | requirements.md, "Acceptance Criteria" section | each criterion contains >= 1 of: file path, function/class name, CLI command, test name, numeric threshold, or explicit observable outcome | v2 only |
+   | 8 | Research file-path anchor | research.md, "Recommended Approach" or "Key Dependencies" section + repo filesystem | >= 1 path reference that resolves to an existing file in the repo tree | v2 only |
+   | 9 | Research option distinctness | research.md, "Approach Options" section | when >= 2 options present, options differ by >= 1 of: library/tool choice, file/module placement, or data-flow direction | v2 only |
+   | 10 | Failure-mode coverage | requirements.md, "Edge Cases" section | >= 1 explicit failure mode (error path, invalid input, network failure, missing file, permission error, concurrency, timeout) | v2 only |
 
-4. If all pass: silent, proceed to next step.
-5. If any fail AND NOT `--no-interactive`: display table and prompt:
+   **Expanded vague-phrase list (v2, check 6)** — scoped ONLY to the "Goal" and "Acceptance Criteria" sections of requirements.md. Phrases that break legitimate practical planning language ("reasonable", "simple", "efficient", "fast", "good", "clean", "lightweight", "proper", "correct", "elegant") are **excluded by policy**: these have concrete meanings in engineering prose (e.g. "lightweight entry", "correct name printed", "proper shutdown"). The list covers only unmeasurable marketing/handwave terms:
 
    ```
-   ### Preflight Check — <N> issue(s) found
+   robust, seamless, scalable, modern, state-of-the-art, best-in-class,
+   user-friendly, intuitive, ideal, optimal, blazing, lightning-fast,
+   enterprise-grade, world-class, next-generation, performant,
+   cutting-edge, turnkey, revolutionary, game-changing, industry-leading,
+   bulletproof, frictionless
+   ```
+
+   This list contains **23 phrases** (exceeds the required minimum of 20). It has been self-validated against the requirements.md of todos 487, 503, 504, 505, 507, 508, 509, 510 and produces **zero false positives** in the Goal/Acceptance Criteria sections (the only hit is in todo 503's own requirements.md where the phrases appear as quoted examples describing this feature — an expected meta self-match, not a defect).
+
+   A match fails check 6 with message: `Vague term "<token>" in <section> section — replace with a measurable criterion or remove`. Token matching is whole-word, case-insensitive.
+
+   **Examples (passing vs failing)**:
+   - FAIL (check 6): Goal says "Build a robust, scalable ingestion pipeline." — both `robust` and `scalable` match.
+   - PASS (check 6): Goal says "Build an ingestion pipeline that handles 10k events/sec with <1% drop rate." — measurable criteria, no vague terms.
+   - FAIL (check 7): Acceptance criterion "Users can log in smoothly" — no file path, function, CLI, test, numeric threshold, or observable outcome.
+   - PASS (check 7): Acceptance criterion "`POST /api/login` returns 200 with a valid JWT in the `token` field for valid credentials" — CLI/API endpoint + observable outcome.
+   - FAIL (check 8): research.md "Recommended Approach" section is pure prose with no file references.
+   - PASS (check 8): research.md references `plugins/proj/server/server/tools/todo.py` in "Key Dependencies".
+
+4. If all pass: silent, proceed to next step.
+5. If any fail AND NOT `--no-interactive` (and fix-loop attempts < 3): display table and prompt:
+
+   ```
+   ### Preflight Check — <N> issue(s) found (attempt <k>/3)
 
    | # | Check | Status |
    |---|-------|--------|
    | 1 | Testable criteria | PASS |
-   | 2 | Out of scope | FAIL — <message> |
+   | 6 | Vague language | FAIL — "robust" in Goal section |
    ...
 
    1. **Fix** — Re-run define on this todo to address failures
@@ -176,9 +212,64 @@ For each todo in descendant list:
    3. **Stop** — Exit workflow
    ```
 
-   Fix → re-run define on the failing todo, then re-run preflight.
+   Fix → re-run define on the failing todo, then re-run preflight (increment attempt counter).
 
-6. If any fail AND `--no-interactive`: log warnings to notes via `notes_append`, auto-continue to next step.
+   On attempt 4: auto-demote remaining BLOCKING findings to WARNING and prompt only `(1) Continue anyway (2) Stop`.
+
+6. If any fail AND `--no-interactive`: demote BLOCKING to WARNING, log to notes via `notes_append` with tag `preflight:auto-demoted`, record a decision log entry per demotion, auto-continue to next step.
+
+**Phase A.5b — Adversarial Review (Define)**
+
+Runs only when `quality_level` in `[careful, paranoid]`. NEVER runs under `--balanced` or `--fast`. Runs **after** the structural checks pass for a given todo, **in parallel** across 3 read-only agents.
+
+**Batch sampling rule**: when the descendant list has > 5 todos, adversarial agents run only on a sampled subset — the **5 highest-complexity** todos (ranked by the same 7-dimension complexity score used in Phase C1 smart gating). Other todos get structural checks only. Users can override with `--force-preflight-all`.
+
+**Agents (spawn in parallel via `Task` tool, one Task call per agent per todo)**:
+
+| Agent | Reads | Checks |
+|-------|-------|--------|
+| Ambiguity Agent | requirements.md + research.md | undefined domain terms, handwavey claims, unmeasurable goals |
+| Completeness Agent | requirements.md + research.md | missing failure modes, missing auth/security concerns, stated-scope vs out-of-scope gaps |
+| Research Validation Agent | research.md + repo filesystem | each referenced file exists, distinctness of options, realism of stated risks |
+
+Each agent is spawned as a `general-purpose` Task with:
+- **Tools (read-only)**: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`, `mcp__proj__proj_explore_codebase`
+- **Timeout**: 90 seconds
+- **Output schema (strict JSON)**:
+
+  ```json
+  {
+    "agent": "ambiguity|completeness|research_validation",
+    "findings": [
+      {
+        "severity": "BLOCKING|WARNING|INFO",
+        "title": "short description",
+        "evidence": "direct quote or file:line reference",
+        "suggested_fix": "optional"
+      }
+    ]
+  }
+  ```
+
+See the **Preflight Agents Reference** appendix for full prompt templates.
+
+**Findings aggregation**: merge findings across all 3 agents into a single table keyed by todo:
+
+```
+### Preflight Adversarial Review — todo <id>
+
+| Severity | Agent | Finding | Evidence |
+|----------|-------|---------|----------|
+| BLOCKING | Completeness | Missing auth failure path | requirements.md L23 |
+| WARNING  | Ambiguity | Undefined term "downstream" | requirements.md L12 |
+```
+
+**Severity semantics**:
+- **BLOCKING** — triggers the Fix / Continue / Stop prompt (same UX as structural failures). Subject to `--no-interactive` demotion and the fix-loop cap.
+- **WARNING** — shown, non-blocking, single OK acknowledgement. Under `--paranoid`, WARNINGs require explicit acknowledgement; an "Acknowledge all WARNINGs" shortcut is offered when >= 3 WARNINGs are present.
+- **INFO** — shown, non-blocking, no acknowledgement required.
+
+**Degraded-mode handling**: agent timeouts or malformed JSON are demoted to WARNING (never BLOCKING). Raw agent output is shown under the finding.
 
 **If `decompose`** — parallel Task agents:
 - For each batch in dependency order:
@@ -810,14 +901,14 @@ If Re-define: run interactive define on each flagged todo, then resume from deco
 IF quality_level == fast: skip preflight entirely, proceed to Phase B.
 
 For each todo in dependency order:
-  Run the 5 preflight checks (same as single-ID mode above).
+  Run the preflight structural checks (10 checks if `preflight_version: 2`, else legacy 5 — same table and rules as single-ID mode above, including grandfather, fix-loop cap, and `--no-interactive` demotion).
   Collect all failures.
 
-If any failures AND NOT `--no-interactive`:
+If any failures AND NOT `--no-interactive` (and fix-loop attempts < 3):
   Display combined table:
 
   ```
-  ### Preflight Check — <N> issues across <M> todos
+  ### Preflight Check — <N> issues across <M> todos (attempt <k>/3)
 
   | Todo | Check | Status |
   |------|-------|--------|
@@ -829,10 +920,22 @@ If any failures AND NOT `--no-interactive`:
   3. **Stop** — Exit workflow
   ```
 
-  Fix → re-run define on failing todos, then re-run preflight on those todos.
+  Fix → re-run define on failing todos, then re-run preflight on those todos (increment attempt counter).
 
-If any failures AND `--no-interactive`: log warnings to notes, auto-continue.
-If all pass: silent, proceed to Phase B.
+  On attempt 4: auto-demote remaining BLOCKING to WARNING, prompt `(1) Continue anyway (2) Stop`.
+
+If any failures AND `--no-interactive`: demote BLOCKING to WARNING, log to notes with tag `preflight:auto-demoted`, auto-continue.
+If all pass: silent, proceed to Phase A.5b.
+
+**Phase A.5b — Adversarial Review (Define) — Batch:**
+
+Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`.
+
+**Batch sampling**: if the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (ranked by the 7-dimension complexity score). Override with `--force-preflight-all`.
+
+For each sampled todo, spawn the 3 review agents (Ambiguity, Completeness, Research Validation) **in parallel** (one Task call per agent per todo). Same tools, timeout, JSON schema, and severity semantics as the single-ID mode's Phase A.5b. See the Preflight Agents Reference appendix for prompt templates.
+
+After all agents return: aggregate findings into a single combined table keyed by todo. Apply the same BLOCKING prompt flow as structural checks. Timeouts and malformed JSON demote to WARNING.
 
 **Phase B — Remaining steps (parallel agents):**
 
