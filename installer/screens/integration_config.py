@@ -20,10 +20,12 @@ from textual.widgets import (
     Input,
     Label,
     LoadingIndicator,
+    Select,
     Static,
     Switch,
 )
 
+from installer._config_loader import get_nested
 from installer.screens.config_diff import ConfigDiffScreen
 
 
@@ -498,6 +500,13 @@ class TodoistConfigScreen(BaseIntegrationScreen):
                 password=True,
                 value=str(existing.get("api_token", "")),
             )
+        existing_proj = self._read_proj_yaml()
+        root_only_default = bool(
+            get_nested(existing_proj, "sync.todoist.root_only", False)
+        )
+        with Horizontal(classes="switch-row"):
+            yield Label("Sync root-level todos only")
+            yield Switch(value=root_only_default, id="todoist-root-only")
 
     async def _validate_credentials(self) -> str | None:
         token = self.query_one("#api_token", Input).value.strip()
@@ -523,11 +532,18 @@ class TodoistConfigScreen(BaseIntegrationScreen):
         return None
 
     def _collect_values(self) -> dict[str, str | bool]:
-        return {
+        values: dict[str, str | bool] = {
             "api_token": self.query_one("#api_token", Input).value.strip(),
             "enabled": self.query_one("#sync_enabled", Switch).value,
             "auto_sync": self.query_one("#auto_sync", Switch).value,
         }
+        try:
+            values["sync.todoist.root_only"] = bool(
+                self.query_one("#todoist-root-only", Switch).value
+            )
+        except Exception:
+            pass
+        return values
 
 
 class TrelloConfigScreen(BaseIntegrationScreen):
@@ -582,6 +598,26 @@ class TrelloConfigScreen(BaseIntegrationScreen):
                 id="default_board_id",
                 value=existing.get("default_board_id", ""),
             )
+        existing_proj = self._read_proj_yaml()
+        default_list_value = str(
+            get_nested(existing_proj, "sync.trello.default_list", "Todo") or "Todo"
+        )
+        with Vertical(classes="field-group"):
+            yield Label("Default Trello list name", classes="field-label")
+            yield Input(value=default_list_value, id="trello-default-list")
+        on_delete_value = str(
+            get_nested(existing_proj, "sync.trello.on_delete", "archive") or "archive"
+        )
+        if on_delete_value not in ("archive", "delete"):
+            on_delete_value = "archive"
+        with Vertical(classes="field-group"):
+            yield Label("On delete", classes="field-label")
+            yield Select(
+                options=[("archive", "archive"), ("delete", "delete")],
+                value=on_delete_value,
+                id="trello-on-delete",
+                allow_blank=False,
+            )
 
     async def _validate_credentials(self) -> str | None:
         key = self.query_one("#api_key", Input).value.strip()
@@ -606,7 +642,7 @@ class TrelloConfigScreen(BaseIntegrationScreen):
         return None
 
     def _collect_values(self) -> dict[str, str | bool]:
-        return {
+        values: dict[str, str | bool] = {
             "api_key": self.query_one("#api_key", Input).value.strip(),
             "token": self.query_one("#token", Input).value.strip(),
             "default_board_id": self.query_one(
@@ -615,6 +651,19 @@ class TrelloConfigScreen(BaseIntegrationScreen):
             "enabled": self.query_one("#sync_enabled", Switch).value,
             "auto_sync": self.query_one("#auto_sync", Switch).value,
         }
+        try:
+            values["sync.trello.default_list"] = str(
+                self.query_one("#trello-default-list", Input).value or "Todo"
+            )
+        except Exception:
+            pass
+        try:
+            values["sync.trello.on_delete"] = str(
+                self.query_one("#trello-on-delete", Select).value or "archive"
+            )
+        except Exception:
+            pass
+        return values
 
 
 class JiraConfigScreen(BaseIntegrationScreen):
