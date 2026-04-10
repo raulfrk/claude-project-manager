@@ -1,4 +1,12 @@
 hooks:
+  # NOTE: The `proj` label (blue) is intentionally NOT applied here.
+  # The hook param-mapping DSL only supports `${path}` substitution from
+  # `source_result` / `proj.yaml`; it cannot call `get_labels` and filter
+  # by name to resolve a label ID at fire time. Accepted fallback:
+  # the card is created without its label, then the next `/proj:trello-sync`
+  # run detects the missing label via `push_update_labels` and calls
+  # `toggle_card_label(..., action="add")` to add it. Brief gap only —
+  # do not revisit without extending the hook DSL first.
   - id: trello-on-proj-init
     trigger_tool: proj_init
     target_tool: add_card_to_list
@@ -31,6 +39,12 @@ hooks:
     blocking: false  # reason: archive is fire-and-forget state update
     condition: "sync.trello.enabled and project.trello_card_id and sync.trello.list_mappings.archived"
 
+  # NOTE: The `proj-task` label (green) is intentionally NOT applied here.
+  # Same limitation as `trello-on-proj-init` above: the hook DSL can't
+  # resolve a label ID by name at fire time. Accepted fallback: the next
+  # `/proj:trello-sync` run adds the missing label via `push_update_labels`
+  # + `toggle_card_label(..., action="add")`. Brief gap only —
+  # do not revisit without extending the hook DSL first.
   - id: trello-on-todo-add
     trigger_tool: todo_add
     target_tool: add_card_to_list
