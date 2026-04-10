@@ -248,6 +248,13 @@ class TrelloSyncPlan:
     # Lists to auto-create
     lists_to_create: list[str] = field(default_factory=list)
 
+    # Add-only label enforcement (local -> Trello).
+    # Each entry: {"card_id": str, "add_label_ids": list[str]}.
+    # Emitted when an existing non-archived card is missing its expected
+    # `proj` / `proj-task` label. Extras on the card are preserved
+    # (this check is one-way add-only).
+    push_update_labels: list[dict[str, JsonValue]] = field(default_factory=list)
+
     # Legacy checklist-based fields (used by trello_full_sync)
     push_create_checklist: list[dict[str, JsonValue]] = field(default_factory=list)
     push_create_item: list[dict[str, JsonValue]] = field(default_factory=list)
@@ -270,6 +277,7 @@ class TrelloSyncPlan:
                 self.push_move_card,
                 self.push_archive_card,
                 self.push_attach_link,
+                self.push_update_labels,
                 self.pull_update,
                 self.pull_move,
                 self.pull_complete,
@@ -288,6 +296,7 @@ class TrelloSyncPlan:
             "push_move_card": self.push_move_card,
             "push_archive_card": self.push_archive_card,
             "push_attach_link": self.push_attach_link,
+            "push_update_labels": self.push_update_labels,
             "pull_update": self.pull_update,
             "pull_move": self.pull_move,
             "pull_complete": self.pull_complete,
@@ -303,6 +312,7 @@ class TrelloSyncPlan:
                 "push_move_card_count": len(self.push_move_card),
                 "push_archive_card_count": len(self.push_archive_card),
                 "push_attach_link_count": len(self.push_attach_link),
+                "push_update_labels_count": len(self.push_update_labels),
                 "pull_update_count": len(self.pull_update),
                 "pull_move_count": len(self.pull_move),
                 "pull_complete_count": len(self.pull_complete),
@@ -395,6 +405,16 @@ def compute_diff(
     cards_raw = trello_data.get("cards", [])
     trello_cards: list[dict[str, JsonValue]] = (
         [c for c in cards_raw if isinstance(c, dict)] if isinstance(cards_raw, list) else []
+    )
+
+    # Label IDs the skill resolved in Step 2. Optional — if absent (or empty),
+    # label diff enforcement is skipped entirely and no push_update_labels
+    # entries are emitted.
+    proj_label_id_raw = trello_data.get("proj_label_id", "")
+    proj_label_id = str(proj_label_id_raw) if isinstance(proj_label_id_raw, str) else ""
+    proj_task_label_id_raw = trello_data.get("proj_task_label_id", "")
+    proj_task_label_id = (
+        str(proj_task_label_id_raw) if isinstance(proj_task_label_id_raw, str) else ""
     )
 
     lists_raw = trello_data.get("lists", [])
@@ -703,6 +723,50 @@ def compute_diff(
                         "parent_card_id": parent.trello_card_id,
                     }
                 )
+
+    # ── Enforce expected labels on existing cards (add-only) ────────
+    # For each existing (non-archived) linked todo card, ensure its
+    # `proj-task` label is present. For the project tracking card,
+    # ensure its `proj` label is present. Extras are preserved.
+    # Archived cards (`closed=True`) are skipped — we never touch them.
+    if proj_task_label_id:
+        for todo in todos:
+            if not todo.trello_card_id:
+                continue
+            trello_card = trello_card_by_id.get(todo.trello_card_id)
+            if not trello_card:
+                continue
+            if trello_card.get("closed"):
+                continue
+            id_labels_raw = trello_card.get("idLabels", [])
+            id_labels: list[str] = (
+                [str(lid) for lid in id_labels_raw] if isinstance(id_labels_raw, list) else []
+            )
+            if proj_task_label_id not in id_labels:
+                plan.push_update_labels.append(
+                    {
+                        "card_id": todo.trello_card_id,
+                        "add_label_ids": [proj_task_label_id],
+                    }
+                )
+
+    if (
+        proj_label_id
+        and meta.trello_card_id
+        and isinstance(project_card, dict)
+        and not project_card.get("closed")
+    ):
+        pc_labels_raw = project_card.get("idLabels", [])
+        pc_labels: list[str] = (
+            [str(lid) for lid in pc_labels_raw] if isinstance(pc_labels_raw, list) else []
+        )
+        if proj_label_id not in pc_labels:
+            plan.push_update_labels.append(
+                {
+                    "card_id": meta.trello_card_id,
+                    "add_label_ids": [proj_label_id],
+                }
+            )
 
     # Sort card creation in topological order (parents before children)
     if plan.push_create_card:
