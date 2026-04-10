@@ -78,36 +78,58 @@ Not found: trello, jira
 
 ## Step 3: Plugin Credential Setup
 
-For each detected plugin that requires credentials, check whether credentials are already configured. If not, prompt the user and call the init tool. This phase is non-blocking — if a plugin is not detected or the user skips it, continue to the next.
+For each detected plugin that requires credentials, prompt using the values loaded in Step 0 as defaults. Each credential field is shown per its **per-field masking policy**: sensitive fields (any `*_token`, `api_token`, `personal_access_token`) are displayed as `****<last4>` if ≥ 8 chars, `****` if shorter, and `[not set]` when absent. Non-sensitive fields (trello.api_key, jira.base_url, jira.default_user, jira.default_project) are shown raw.
+
+Masking is applied inline using the `mask_secret()` helper defined in Step 0. Pressing Enter at a prompt keeps the existing value unchanged (no re-init call needed); typing a new value overrides it and triggers the init call.
+
+This phase is non-blocking — if a plugin is not detected or the user skips it, continue to the next.
 
 ### Trello (only if trello detected in Step 2)
-1. Read `~/.claude/trello.yaml` (via Bash: `cat ~/.claude/trello.yaml 2>/dev/null`)
-2. If the file exists and contains both `api_key` and `token` fields with non-empty values → show "Trello: ✓ credentials configured" and skip
-3. If not configured → prompt the user:
-   - "Trello API key?" (required)
-   - "Trello API token?" (required)
-4. Call `mcp__plugin_trello_trello__trello_init` with the provided `api_key` and `token`
+
+Use `trello_config` loaded in Step 0.
+
+1. Compute displays:
+   - `key_display = trello_config.get("api_key", "") if trello_config else ""` → shown **raw** (non-sensitive; Trello API keys are board-level identifiers)
+   - `token_display = mask_secret(trello_config.get("token", "")) if trello_config else "[not set]"`
+2. If both fields are present and non-empty, optionally short-circuit: show `"Trello: ✓ credentials configured (key: <key_display>, token: <token_display>)"` and ask `"Reconfigure Trello credentials? [no]"`. If no → skip.
+3. Otherwise prompt:
+   - `"Trello API key? [<key_display or 'required'>]"` — Enter keeps current, typing overrides
+   - `"Trello API token? [<token_display>]"` — Enter keeps current masked value, typing overrides (validate the new value is ≥ 8 chars before calling init)
+4. If either value changed, call `mcp__plugin_trello_trello__trello_init` with the final `api_key` and `token`
 5. If the init call returns an error → show the error and continue (do not block setup)
-6. If successful → show "Trello: ✓ credentials saved to ~/.claude/trello.yaml"
+6. If successful → show `"Trello: ✓ credentials saved to ~/.claude/trello.yaml"`
 
 ### Jira (only if jira detected in Step 2)
-1. Read `~/.claude/jira.yaml` (via Bash: `cat ~/.claude/jira.yaml 2>/dev/null`)
-2. If the file exists and contains both `base_url` and `personal_access_token` fields with non-empty values → show "Jira: ✓ credentials configured" and skip
-3. If not configured → prompt the user:
-   - "Jira base URL? (e.g. https://yourcompany.atlassian.net)" (required)
-   - "Jira personal access token?" (required)
-4. Call `mcp__plugin_jira_jira__jira_init` with the provided `base_url` and `personal_access_token`
+
+Use `jira_config` loaded in Step 0.
+
+1. Compute displays:
+   - `base_url_display = jira_config.get("base_url", "") if jira_config else ""` → shown **raw**
+   - `token_display = mask_secret(jira_config.get("personal_access_token", "")) if jira_config else "[not set]"`
+   - `user_display = jira_config.get("default_user", "") if jira_config else ""` → shown **raw**
+   - `project_display = jira_config.get("default_project", "") if jira_config else ""` → shown **raw**
+2. If `base_url` and `personal_access_token` are both present and non-empty, optionally short-circuit: show `"Jira: ✓ credentials configured (base_url: <base_url_display>, token: <token_display>)"` and ask `"Reconfigure Jira credentials? [no]"`. If no → skip.
+3. Otherwise prompt:
+   - `"Jira base URL? (e.g. https://yourcompany.atlassian.net) [<base_url_display or 'required'>]"`
+   - `"Jira personal access token? [<token_display>]"` — Enter keeps current, typing overrides
+   - `"Jira default user (email or account ID)? [<user_display or 'optional'>]"`
+   - `"Jira default project? [<project_display or 'optional'>]"`
+4. If `base_url` or `personal_access_token` changed, call `mcp__plugin_jira_jira__jira_init` with the final `base_url` and `personal_access_token`
 5. If the init call returns an error → show the error and continue (do not block setup)
-6. If successful → show "Jira: ✓ credentials saved to ~/.claude/jira.yaml"
+6. If successful → show `"Jira: ✓ credentials saved to ~/.claude/jira.yaml"`
 
 ### Todoist (only if todoist detected in Step 2)
-1. Read `~/.claude/todoist.yaml` (via Bash: `cat ~/.claude/todoist.yaml 2>/dev/null`)
-2. If the file exists and contains an `api_token` field with a non-empty value → show "Todoist: ✓ credentials configured" and skip
-3. If not configured → prompt the user:
-   - "Todoist API token?" (required)
-4. Call `mcp__plugin_todoist_todoist__todoist_init` with the provided `api_token`
+
+Use `todoist_config` loaded in Step 0.
+
+1. Compute display:
+   - `token_display = mask_secret(todoist_config.get("api_token", "")) if todoist_config else "[not set]"`
+2. If `api_token` is present and non-empty, optionally short-circuit: show `"Todoist: ✓ credentials configured (token: <token_display>)"` and ask `"Reconfigure Todoist credentials? [no]"`. If no → skip.
+3. Otherwise prompt:
+   - `"Todoist API token? [<token_display>]"` — Enter keeps current masked value, typing overrides
+4. If the value changed, call `mcp__plugin_todoist_todoist__todoist_init` with the final `api_token`
 5. If the init call returns an error → show the error and continue (do not block setup)
-6. If successful → show "Todoist: ✓ credentials saved to ~/.claude/todoist.yaml"
+6. If successful → show `"Todoist: ✓ credentials saved to ~/.claude/todoist.yaml"`
 
 If no sync plugins were detected, skip this step entirely.
 
