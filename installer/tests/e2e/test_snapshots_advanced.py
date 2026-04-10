@@ -157,11 +157,10 @@ class TestAdvancedConfigScreenSnapshots:
             result = screen._collect_values()
             assert result is None  # validation failed
             error_static = screen.query_one("#error-message", Static)
-            # Error label must be populated.
-            assert (
-                "trust" in str(error_static.renderable).lower()
-                or str(error_static.renderable) != ""
-            )
+            # Error label must be populated. Static stores text in its
+            # private _renderable attribute (no public .renderable accessor).
+            error_text = str(getattr(error_static, "_renderable", "") or "")
+            assert "trust" in error_text.lower() or error_text != ""
 
             svg = app.export_screenshot()
             _assert_snapshot(svg, "advanced_invalid_trust_level")
