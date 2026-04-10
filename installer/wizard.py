@@ -281,6 +281,64 @@ def _hooks_diff_prompt(plugin_dirs: list[Path], console: Console | None = None) 
         console.print("\n[dim]No hook changes applied.[/dim]")
 
 
+def _settings_hooks_diff_prompt(
+    plugin_dirs: list[Path], console: Console | None = None
+) -> None:
+    """Compute settings.json hooks diff, print, ask apply/skip, apply selected."""
+    if not plugin_dirs:
+        return
+
+    if console is None:
+        console = Console()
+
+    from installer.settings_hooks import (
+        SettingsHooksError,
+        apply_settings_hooks_diffs,
+        compute_settings_hooks_diff,
+    )
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        diffs = compute_settings_hooks_diff(settings_path, plugin_dirs)
+    except SettingsHooksError as exc:
+        console.print(f"[red]Failed to compute settings.json hooks diff: {exc}[/red]")
+        console.print("[yellow]Skipping settings.json hooks step.[/yellow]")
+        return
+
+    actionable = [d for d in diffs if d.kind in ("new", "changed", "removed")]
+    if not actionable:
+        console.print("[dim]Settings.json hooks: already up to date.[/dim]")
+        return
+
+    console.print("\n[bold cyan]── settings.json SessionStart hooks ──[/bold cyan]")
+    badge_map = {
+        "new": "[green]NEW[/green]",
+        "changed": "[yellow]CHANGED[/yellow]",
+        "removed": "[red]REMOVED[/red]",
+    }
+    for d in actionable:
+        tag = badge_map.get(d.kind, d.kind)
+        console.print(f"  {tag} {d.cpm_id} ({d.event}): matchers={d.matchers}")
+
+    if not Confirm.ask(
+        "Apply these settings.json hook changes?", default=True, console=console
+    ):
+        console.print("[dim]Skipped settings.json hooks.[/dim]")
+        return
+
+    apply_ids = {d.cpm_id for d in actionable if d.kind in ("new", "changed")}
+    remove_ids = {d.cpm_id for d in actionable if d.kind == "removed"}
+
+    try:
+        apply_settings_hooks_diffs(settings_path, diffs, apply_ids, remove_ids)
+        console.print(
+            f"[green]Applied {len(apply_ids)} new/changed and removed "
+            f"{len(remove_ids)} settings.json hook(s).[/green]"
+        )
+    except SettingsHooksError as exc:
+        console.print(f"[red]Failed to apply settings.json hook changes: {exc}[/red]")
+
+
 def _setup_todoist_config(console: Console) -> None:
     """Prompt for Todoist config in Rich (--no-tui path)."""
     config_path = Path.home() / ".claude" / "todoist.yaml"
@@ -594,6 +652,7 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
             plugin_dirs.append(resolved)
     if plugin_dirs:
         _hooks_diff_prompt(plugin_dirs, console=console)
+        _settings_hooks_diff_prompt(plugin_dirs, console=console)
 
     ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
 
