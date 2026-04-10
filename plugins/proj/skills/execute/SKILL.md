@@ -78,6 +78,8 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **For a single todo:**
 
+> **Note**: For worktree-isolated parallel execution, use `/proj:run <range> --from execute`. Direct execute runs on main without worktree isolation.
+
 **1.** Call `mcp__proj__todo_check_executable` with the todo ID.
    - If the result starts with "⚠️", display it as-is and **stop** — do not implement.
    - If the result is JSON, continue normally.
