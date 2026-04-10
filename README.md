@@ -31,6 +31,8 @@ Project management plugins for Claude Code -- track todos, manage permissions, a
 
 Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`, `zoxide`, `analyse`.
 
+The installer wizard now prompts for an advanced tier after the basic questions — press Enter (Rich path) or toggle the Advanced button (Textual path) to drill into team_mode, smart_gate, context_injection, archive, and other fine-grained settings. Leave the toggle off to accept all defaults on fresh installs.
+
 ---
 
 ## Plugins
