@@ -191,7 +191,7 @@ Skip sync sections entirely for plugins that are not detected.
 - **Zoxide** (only if zoxide plugin detected) — `"Enable zoxide integration (boost project dirs in frecency)? [<yes/no from proj_config.zoxide_integration, default no>]"`
 - **Worktree** (only if worktree plugin detected) — shown as detected, no question needed (auto-enabled)
 - **Team mode** — `"Enable parallel agent execution for batch todos? [<yes/no from proj_config.team_mode.enabled, default no>]"`
-  - If yes: `"Max agents? [<proj_config.team_mode.max_agents or 4>]"` (store as `team_mode_max_agents`)
+  - If yes: `"Max agents? [<proj_config.team_mode.max_agents or 30>]"` (store as `team_mode_max_agents`). Recommended cap: 10 for CPU-bound or API-rate-limited workloads; the hard default is 30.
   - If yes: `"Trust level? (0=supervised, 1=guided, 2=autonomous, 3=full-auto) [<proj_config.team_mode.trust_level or 1>]"` (store as `team_mode_trust_level`)
 - **Default priority** — `"Default priority for new todos? (low/medium/high) [<proj_config.default_priority or 'medium'>]"`
   - If the loaded value is not one of low/medium/high, warn and use 'medium' as the default.

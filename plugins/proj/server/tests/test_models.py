@@ -205,7 +205,7 @@ class TestTeamModeConfig:
     def test_defaults(self) -> None:
         tmc = TeamModeConfig()
         assert tmc.enabled is True
-        assert tmc.max_agents == 4
+        assert tmc.max_agents == 30
         assert tmc.trust_level == 1
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
@@ -219,8 +219,18 @@ class TestTeamModeConfig:
     def test_from_dict_empty_uses_defaults(self) -> None:
         tmc = TeamModeConfig.from_dict({})
         assert tmc.enabled is True
-        assert tmc.max_agents == 4
+        assert tmc.max_agents == 30
         assert tmc.trust_level == 1
+
+    def test_from_dict_fallback_max_agents_is_30(self) -> None:
+        """Empty dict falls back to max_agents=30 (ultra-parallel default)."""
+        tmc = TeamModeConfig.from_dict({})
+        assert tmc.max_agents == 30
+
+    def test_from_dict_explicit_override_preserved(self) -> None:
+        """Explicit max_agents in data takes precedence over the 30 default."""
+        tmc = TeamModeConfig.from_dict({"max_agents": 4})
+        assert tmc.max_agents == 4
 
 
 class TestProjConfigTeamModeBackwardCompat:
@@ -228,7 +238,7 @@ class TestProjConfigTeamModeBackwardCompat:
         """ProjConfig.from_dict({}) without 'team_mode' key uses TeamModeConfig defaults."""
         cfg = ProjConfig.from_dict({})
         assert cfg.team_mode.enabled is True
-        assert cfg.team_mode.max_agents == 4
+        assert cfg.team_mode.max_agents == 30
         assert cfg.team_mode.trust_level == 1
 
     def test_from_dict_with_team_mode_key_preserves_value(self) -> None:
@@ -243,4 +253,4 @@ class TestProjConfigTeamModeBackwardCompat:
         cfg = ProjConfig()
         d = cfg.to_dict()
         assert "team_mode" in d
-        assert d["team_mode"] == {"enabled": True, "max_agents": 4, "trust_level": 1}
+        assert d["team_mode"] == {"enabled": True, "max_agents": 30, "trust_level": 1}

@@ -333,7 +333,7 @@ class TestTeamModeConfig:
 
         assert "Invalid team_mode_max_agents" in result
         loaded = storage.load_config()
-        assert loaded.team_mode.max_agents == 4  # unchanged default
+        assert loaded.team_mode.max_agents == 30  # unchanged default
 
     async def test_config_update_partial_team_mode_leaves_others_unchanged(
         self,

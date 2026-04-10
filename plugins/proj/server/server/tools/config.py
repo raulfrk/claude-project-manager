@@ -161,7 +161,7 @@ def register(app: FastMCP) -> None:
         archive_purge_after_days: int | None = None,
         archive_trash_grace_days: int = 7,
         team_mode_enabled: bool = False,
-        team_mode_max_agents: int = 4,
+        team_mode_max_agents: int = 30,
         team_mode_trust_level: int = 1,
         resilience_failure_threshold: int = 3,
         resilience_recovery_timeout: int = 300,
