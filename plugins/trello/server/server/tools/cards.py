@@ -24,14 +24,32 @@ def register(app: FastMCP) -> None:
         card = client.get(f"/cards/{card_id}")
         return json.dumps(card)
 
-    @app.tool(description="Add a new card to a list.")
-    def add_card_to_list(list_id: str, name: str, desc: str = "", due: str | None = None) -> str:
+    @app.tool(
+        description=(
+            "Add a new card to a list. "
+            "Optional `label_ids` is a list of Trello label IDs to attach to the "
+            "card; these are forwarded to the Trello REST API as the `idLabels` "
+            "query parameter in CSV form (e.g. `idLabels=lbl1,lbl2`). "
+            "The Trello REST client in this plugin sends `POST /cards` with a "
+            "query-string `params` dict, not a JSON body — `label_ids` is joined "
+            'with commas into `params["idLabels"]`.'
+        )
+    )
+    def add_card_to_list(
+        list_id: str,
+        name: str,
+        desc: str = "",
+        due: str | None = None,
+        label_ids: list[str] | None = None,
+    ) -> str:
         client = get_client()
         params: dict[str, str] = {"idList": list_id, "name": name}
         if desc:
             params["desc"] = desc
         if due is not None:
             params["due"] = due
+        if label_ids:
+            params["idLabels"] = ",".join(label_ids)
         card = client.post("/cards", params=params)
         return json.dumps(card)
 
@@ -79,13 +97,20 @@ def register(app: FastMCP) -> None:
             "Create multiple cards in one call. "
             "Each card dict has 'list_id' and 'name' (required), "
             "plus optional 'desc' and 'due'. "
+            "Optional `label_ids` is a list of Trello label IDs applied to "
+            "every card in the batch; forwarded as the `idLabels` query "
+            "parameter in CSV form (e.g. `idLabels=lbl1,lbl2`). "
             "Returns {successes: [...], failures: [...]}."
         ),
     )
-    def batch_create_cards(cards: list[dict[str, str]]) -> str:
+    def batch_create_cards(
+        cards: list[dict[str, str]],
+        label_ids: list[str] | None = None,
+    ) -> str:
         client = get_client()
         successes: list[JsonValue] = []
         failures: list[dict[str, JsonValue]] = []
+        labels_csv = ",".join(label_ids) if label_ids else ""
         for idx, card in enumerate(cards):
             try:
                 list_id = card.get("list_id", "")
@@ -105,6 +130,8 @@ def register(app: FastMCP) -> None:
                 due = card.get("due")
                 if due is not None:
                     params["due"] = due
+                if labels_csv:
+                    params["idLabels"] = labels_csv
                 created = client.post("/cards", params=params)
                 successes.append(created)
             except Exception as exc:
