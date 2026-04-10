@@ -188,7 +188,7 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 | `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos with dependency analysis. Detects shared-file conflicts for safe parallel execution. Supports `worktree_candidate` annotations for worktree-aware conflict resolution. |
 | `refine` | `/proj:refine <id>` | Stress-test requirements with 3 review agents (Skeptic, Edge-Case Finder, Architecture Reviewer). Sub-skill invoked by `run` with `--refine` flag. Produces a Refinement Report with Apply/Edit/Skip/Stop options. |
 | `execute` | `/proj:execute [id\|range]` | Implement todos with smart-gate scoring, quality levels, and pipeline execution. Supports team mode, trust levels, verification, worktree isolation, and batch plan approval. |
-| `run` | `/proj:run <id> [--steps ...] [--from ...] [--iter N]` | Full workflow: define → preflight → decompose → refine → execute. Supports `--fast/--balanced/--careful/--paranoid` quality levels, `--worktree` isolation, `--refine` stress-testing, `--batch-approve` speculative planning, and `--no-pipeline` sequential mode. |
+| `run` | `/proj:run <id> [--steps ...] [--from ...] [--iter N]` | Full workflow: define → preflight → decompose → refine → execute. Supports `--fast/--balanced/--careful/--paranoid` quality levels, `--no-worktree` to opt out of default worktree isolation, `--refine` stress-testing, `--batch-approve` speculative planning, and `--no-pipeline` sequential mode. |
 | `quick` | `/proj:quick [description]` | Quick-start: creates a new project (if none active) or a new todo (if active project exists), then launches `/proj:run`. |
 
 ### Sync
@@ -344,6 +344,22 @@ Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`).
 | `permissions.auto_allow_mcps` | `true` | Auto-add MCP wildcard rules |
 | `todoist.enabled` | `false` | Enable Todoist sync |
 | `todoist.auto_sync` | `true` | Auto-sync on status/load commands |
+| `team_mode.max_agents` | `30` | Hard ceiling on concurrent parallel agents. Recommended cap: **10** for CPU-bound or API-rate-limited workloads. |
+
+### Parallel execution defaults
+
+`/proj:run` is tuned for ultra-parallel execution with worktree isolation by default:
+
+| Quality level | `max_parallel` | Worktree |
+|---------------|---------------|----------|
+| `--fast`      | 30 | on (unless `--no-worktree`) |
+| `--balanced`  | 30 | on (unless `--no-worktree`) |
+| `--careful` (default) | 10 | on (unless `--no-worktree`) |
+| `--paranoid`  | 1  | off (sequential) |
+
+- **Team mode trigger**: 2+ non-manual descendants (down from 3+).
+- **Worktree isolation is on by default** for all quality levels except `--paranoid`. Pass `--no-worktree` to opt out — useful when the batch is fully sequential or worktree setup costs outweigh isolation benefits.
+- The `max_parallel` ceiling can be lowered per-project via `team_mode.max_agents` in `~/.claude/proj.yaml`.
 
 ---
 
