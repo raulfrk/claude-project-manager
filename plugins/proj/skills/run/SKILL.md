@@ -492,6 +492,10 @@ Options:
    - If Use anyway: proceed with the stale checkpoint data.
 4. If no checkpoint found: display `No checkpoint found — starting fresh` and proceed normally.
 
+**Phase 1.25 — Pre-execute Preflight**
+
+Runs after plan approval and file-overlap detection, before worktree setup and execute spawn. Follows the same semantics as **Phase C0.5 — Pre-execute Preflight** (and Phase C0.5b adversarial review) described later in this document: 6 structural checks (plan has file list, paths valid, critical-path touches named, working tree clean, test runner detectable [WARNING only], plan non-empty), per-todo, skipped under trust 3, skipped under `--fast`. Adversarial agents (File Path Verifier, Spec-Plan Alignment, Impact Scanner) run only under `careful`/`paranoid`. See Phase C0.5/C0.5b for full tables, severity rules, `--no-interactive` demotion, and fix-loop cap.
+
 **Phase 1.5 — Worktree setup** (if `worktree_enabled`):
 
 **Worktree prerequisite check**:
@@ -630,6 +634,10 @@ IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
 7. IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+
+**Phase 1.25 — Pre-execute Preflight**
+
+Runs after plan approval and file-overlap detection, before worktree setup and execute spawn. Follows the same semantics as **Phase C0.5 — Pre-execute Preflight** (and Phase C0.5b adversarial review) described later in this document: 6 structural checks (plan has file list, paths valid, critical-path touches named, working tree clean, test runner detectable [WARNING only], plan non-empty), per-todo, skipped under trust 3, skipped under `--fast`. Adversarial agents (File Path Verifier, Spec-Plan Alignment, Impact Scanner) run only under `careful`/`paranoid`. See Phase C0.5/C0.5b for full tables, severity rules, `--no-interactive` demotion, and fix-loop cap.
 
 **Phase 1.5 — Worktree setup** (if `worktree_enabled`):
 
@@ -1131,6 +1139,61 @@ Options:
 6. If user selects **Proceed**: continue as-is.
 7. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
 8. If no overlaps detected: skip silently.
+
+**Phase C0.5 — Pre-execute Preflight**
+
+Runs **after** Phase C1 plan approval (including after the single `ExitPlanMode` under `--batch-approve`) and **before** Phase C2 execute spawn (and before Phase C1.5 worktree setup). Runs **per-todo** in dependency order, not batch-aggregated.
+
+**Skipped entirely under trust 3**: trust 3 has no plan, so plan-based checks are not applicable. Log a single line: `Phase C0.5 skipped — trust 3 (no plan)`. Proceed to Phase C2.
+
+**Skipped under `quality_level == fast`**: consistent with `preflight: skip` in the quality-level table.
+
+For each todo in dependency order (excluding `manual_skipped_ids` and todos that fell back to AUTO-EXECUTE without a plan), run 6 structural checks:
+
+| # | Check | Data read | Pass condition | Severity if fail |
+|---|-------|-----------|---------------|------------------|
+| 1 | Plan has file list | `approved_plans[todo_id]` text | contains a "Files to modify" or "Files to create" section with >= 1 entry | BLOCKING |
+| 2 | File paths are valid | each path in plan vs filesystem (worktree tree if `worktree_enabled`, else main) | every path is an existing file OR creatable (parent dir exists, path is inside repo root) | BLOCKING |
+| 3 | No critical-path file touched silently | plan text | each touched critical-path file (`*.env*`, `*secret*`, `*credential*`, `*auth*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`, `proj.yaml`, `*.config.*`) is named explicitly in the plan | BLOCKING |
+| 4 | Git working tree clean | `git status --porcelain` on the relevant tree (main or worktree branch) | empty output OR user previously confirmed "proceed with dirty tree" | BLOCKING |
+| 5 | Test runner detectable | repo root | `pyproject.toml` has `[tool.pytest]`, OR `package.json` has `"test"` script, OR a documented test command in a known location | WARNING (not BLOCKING — docs-only todos may have no tests) |
+| 6 | Plan is non-empty | `approved_plans[todo_id]` text | >= 20 lines or >= 100 words | BLOCKING |
+
+**Removed from this phase** (by design, documented for clarity):
+- "Plan acknowledges each acceptance criterion" — LLM judgment, relocated to the Spec-Plan Alignment Agent in Phase C0.5b.
+- "No touched file is gitignored" — too many false positives for legitimate build-artifact regeneration.
+
+**On failure** (same UX pattern as Phase A.5):
+- NOT `--no-interactive` AND attempts < 3: display per-todo table with Fix / Continue / Stop. Fix re-runs Phase C1 plan for that todo (incrementing the attempt counter).
+- `--no-interactive`: demote BLOCKING to WARNING, log via `notes_append` tag `preflight:auto-demoted`, record decision log, continue.
+- 4th attempt: auto-demote, prompt `(1) Continue anyway (2) Stop`.
+
+If all pass: silent, proceed to Phase C0.5b.
+
+**Phase C0.5b — Adversarial Review (Pre-execute)**
+
+Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`. Also skipped under trust 3 (no plan to review).
+
+**Batch sampling**: when the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (same ranking as Phase A.5b). Override with `--force-preflight-all`.
+
+For each sampled todo, spawn 3 read-only agents **in parallel** via the Task tool:
+
+| Agent | Reads | Checks |
+|-------|-------|--------|
+| File Path Verifier | `approved_plans[todo_id]` + filesystem (worktree tree if `worktree_enabled`, else main) | double-checks each path against the filesystem; catches path-normalization bugs and case-sensitivity issues missed by the structural check |
+| Spec-Plan Alignment Agent | requirements.md "Acceptance Criteria" + `approved_plans[todo_id]` | for each acceptance criterion, judges whether the plan addresses it; flags any criterion not acknowledged by the plan (this is the relocated "plan acknowledges criteria" check) |
+| Impact Scanner | `approved_plans[todo_id]` file list + repo grep | for each touched file, greps for references elsewhere; flags top-10-most-referenced files as WARNING only (never BLOCKING — impact scanning is heuristic) |
+
+Each agent is spawned with:
+- **Tools (read-only)**: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__proj_explore_codebase`
+- **Timeout**: 90 seconds
+- **Output schema**: same strict JSON as Phase A.5b adversarial agents (see appendix)
+
+See the **Preflight Agents Reference** appendix for full prompt templates.
+
+**Findings aggregation**: merge across all 3 agents into a combined table keyed by todo (same format as Phase A.5b). Apply the same severity semantics: BLOCKING triggers Fix / Continue / Stop, WARNING is shown non-blocking (acknowledge-all shortcut under `--paranoid`), INFO is shown non-blocking. Timeouts and malformed JSON demote to WARNING.
+
+If `worktree_enabled`, the File Path Verifier checks the worktree tree (not main) for the current todo's branch.
 
 **Phase C1.5 — Worktree setup** (if `worktree_enabled`):
 
