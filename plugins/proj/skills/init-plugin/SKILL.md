@@ -113,64 +113,67 @@ If no sync plugins were detected, skip this step entirely.
 
 ## Step 4: Collect configuration (grouped)
 
-Present questions in logical groups. Within each group, show all questions together and collect answers as a batch. When reconfiguring, show the current value in brackets.
+Present questions in logical groups. Within each group, show all questions together and collect answers as a batch. Every prompt's bracketed default is computed from the `proj_config` variable loaded in Step 0 — if the field is present, show the loaded value; otherwise show the hardcoded default shown in parentheses below. Use safe nested access: `(proj_config or {}).get("field", <hardcoded_default>)`. Boolean fields render as `[yes]`/`[no]`. Missing files or missing fields fall through to the hardcoded default.
+
+If a field's current value is a path that does not exist on disk, append ` (not found)` to the bracketed default as a subtle warning (e.g., `[~/custom/tracking (not found)]`).
 
 ### Group A: Core paths
-- **Tracking directory** — "Where should project tracking data be stored? [~/projects/tracking]"
+- **Tracking directory** — `"Where should project tracking data be stored? [<proj_config.tracking_dir or '~/projects/tracking'>]"`
   - Note: all projects share a single tracking repo at this path. Each project gets a subdirectory under it.
-- **Projects base directory** — "Default directory where project content lives (e.g. ~/projects)? Leave blank to skip."
+- **Projects base directory** — `"Default directory where project content lives (e.g. ~/projects)? [<proj_config.projects_base_dir or 'blank to skip'>]"`
   - If set, `/proj:init` uses `<base>/<project-name>` as the content path when no explicit path is given.
   - Store as `projects_base_dir` (null if left blank)
 
 ### Group B: Permissions & sandbox (only if sandbox plugin detected)
-- **Permissions** — "Auto-grant Claude read/edit permissions for project directories? [yes]"
+- **Permissions** — `"Auto-grant Claude read/edit permissions for project directories? [<yes/no from proj_config.auto_grant_permissions, default yes>]"`
   - If enabled, Claude auto-adds Read/Edit permissions for each project directory on `/proj:init`
-- **MCP auto-allow** — "Auto-allow plugin MCP tools so Claude never prompts for permission? [yes]"
+- **MCP auto-allow** — `"Auto-allow plugin MCP tools so Claude never prompts for permission? [<yes/no from proj_config.auto_allow_mcps, default yes>]"`
   - Adds wildcard MCP rules for all detected plugins to settings.json
-- **Sandbox setup** — "Initialize sandbox mode for project directories? [yes]"
+- **Sandbox setup** — `"Initialize sandbox mode for project directories? [<yes/no from proj_config.sandbox_integration, default yes>]"`
   - Sets up sandbox paths for projects root, tracking root, and archive destination
   - Adds default deny rules for security
 
 ### Group C: Sync integrations (only show for detected plugins)
 
-For each detected sync plugin, ask its configuration questions as a sub-group:
+For each detected sync plugin, ask its configuration questions as a sub-group. Sync enabled/auto-sync flags and nested fields are read from `proj_config.sync.<plugin>.*` via safe nested traversal (`(proj_config or {}).get("sync", {}).get("todoist", {}).get("enabled", False)`).
 
 **Todoist** (only if todoist plugin detected):
-- "Enable Todoist sync? [no]"
-- If yes: "Auto-sync on every project command? [yes]"
-- If yes: "Todoist MCP server name (must match your MCP config)? [claude_ai_Todoist]"
+- `"Enable Todoist sync? [<yes/no from proj_config.sync.todoist.enabled, default no>]"`
+- If yes: `"Auto-sync on every project command? [<yes/no from proj_config.sync.todoist.auto_sync, default yes>]"`
+- If yes: `"Todoist MCP server name (must match your MCP config)? [<proj_config.sync.todoist.mcp_server or 'claude_ai_Todoist'>]"`
   - Store as `todoist_mcp_server`
 
 **Trello** (only if trello plugin detected):
-- "Enable Trello sync? [no]"
-- If yes: "Auto-sync on every project command? [yes]"
-- If yes: "Default Trello board ID? (leave blank to set later)"
-- If yes: "On delete action — archive or delete Trello cards? [archive]"
-- If yes: "Trello projects list name? [Projects]" — the Trello list where project cards are created. Empty input uses default "Projects".
-- If yes: "Trello tasks list name? [proj-tasks]" — the Trello list where standalone task cards are created. Empty input uses default "proj-tasks".
+- `"Enable Trello sync? [<yes/no from proj_config.sync.trello.enabled, default no>]"`
+- If yes: `"Auto-sync on every project command? [<yes/no from proj_config.sync.trello.auto_sync, default yes>]"`
+- If yes: `"Default Trello board ID? [<proj_config.sync.trello.default_board_id or 'blank to set later'>]"`
+- If yes: `"On delete action — archive or delete Trello cards? [<proj_config.sync.trello.on_delete or 'archive'>]"`
+- If yes: `"Trello projects list name? [<proj_config.sync.trello.list_projects or 'Projects'>]"` — the Trello list where project cards are created. Empty input uses the shown default.
+- If yes: `"Trello tasks list name? [<proj_config.sync.trello.list_tasks or 'proj-tasks'>]"` — the Trello list where standalone task cards are created. Empty input uses the shown default.
 
 **Jira** (only if jira plugin detected):
-- "Enable Jira sync? [no]"
-- If yes: "Default Jira user (email or account ID)? (leave blank to set later)"
+- `"Enable Jira sync? [<yes/no from proj_config.sync.jira.enabled, default no>]"`
+- If yes: `"Default Jira user (email or account ID)? [<proj_config.sync.jira.default_user or 'blank to set later'>]"`
 
 Skip sync sections entirely for plugins that are not detected.
 
 ### Group D: Git
-- **Git integration** — "Enable git integration (detect commits, suggest todo updates)? [yes]"
-- **Git tracking** — "Auto-commit tracking data (todos, notes, sessions) to the shared tracking repo? [no]"
+- **Git integration** — `"Enable git integration (detect commits, suggest todo updates)? [<yes/no from proj_config.git_integration, default yes>]"`
+- **Git tracking** — `"Auto-commit tracking data (todos, notes, sessions) to the shared tracking repo? [<yes/no from proj_config.git_tracking.enabled, default no>]"`
   - All projects share a single git-tracked repo at the tracking directory path.
-  - If yes: "Also push the tracking repo to GitHub as a private repo? [no]"
-    - If yes: "GitHub repo name? [tracking]"
+  - If yes: `"Also push the tracking repo to GitHub as a private repo? [<yes/no from proj_config.git_tracking.github_enabled, default no>]"`
+    - If yes: `"GitHub repo name? [<proj_config.git_tracking.github_repo_format or 'tracking'>]"`
       - Store as `git_tracking_github_repo_format`
 
 ### Group E: Extras
-- **Zoxide** (only if zoxide plugin detected) — "Enable zoxide integration (boost project dirs in frecency)? [no]"
+- **Zoxide** (only if zoxide plugin detected) — `"Enable zoxide integration (boost project dirs in frecency)? [<yes/no from proj_config.zoxide_integration, default no>]"`
 - **Worktree** (only if worktree plugin detected) — shown as detected, no question needed (auto-enabled)
-- **Team mode** — "Enable parallel agent execution for batch todos? [no]"
-  - If yes: "Max agents? [4]" (store as `team_mode_max_agents`)
-  - If yes: "Trust level? (0=supervised, 1=guided, 2=autonomous, 3=full-auto) [1]" (store as `team_mode_trust_level`)
-- **Default priority** — "Default priority for new todos? (low/medium/high) [medium]"
-- **Archive purge** — "Days after archiving before purgeable projects are eligible for purge? Leave empty for never. [none]"
+- **Team mode** — `"Enable parallel agent execution for batch todos? [<yes/no from proj_config.team_mode.enabled, default no>]"`
+  - If yes: `"Max agents? [<proj_config.team_mode.max_agents or 4>]"` (store as `team_mode_max_agents`)
+  - If yes: `"Trust level? (0=supervised, 1=guided, 2=autonomous, 3=full-auto) [<proj_config.team_mode.trust_level or 1>]"` (store as `team_mode_trust_level`)
+- **Default priority** — `"Default priority for new todos? (low/medium/high) [<proj_config.default_priority or 'medium'>]"`
+  - If the loaded value is not one of low/medium/high, warn and use 'medium' as the default.
+- **Archive purge** — `"Days after archiving before purgeable projects are eligible for purge? Leave empty for never. [<proj_config.archive.purge_after_days or 'none'>]"`
   - Store as `archive_purge_after_days` (None if blank, integer if provided)
 
 ## Step 5: Show summary before applying
