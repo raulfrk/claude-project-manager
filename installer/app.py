@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Static
 
+from installer._config_loader import ConfigLoadError, load_existing_yaml
 from installer.detect import InstallState, detect_existing
 from installer.errors import InstallerError
 from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
@@ -38,7 +40,8 @@ from installer.update import (
     compare_versions,
 )
 from installer.claudemd import ensure_managed_section, remove_managed_section
-from installer.wizard import _atomic_write, _yaml_line
+from installer.wizard import _atomic_write, _merge_dotted_into_dict
+from installer.wizard_specs import PROJ_YAML_PROMPTS
 
 
 class InstallerApp(App):
@@ -106,7 +109,7 @@ class InstallerApp(App):
         self.mode = mode  # install, update, reinstall, uninstall
         self.installer_args = args
         self.selected_plugins: list[str] = []
-        self.wizard_config: dict[str, str | bool] | None = None
+        self.wizard_config: dict[str, Any] | None = None
         self._state: InstallState | None = None
         self._branch: str | None = getattr(args, "branch", None) if args else None
 
@@ -228,8 +231,14 @@ class InstallerApp(App):
             callback=self._on_wizard_complete,
         )
 
-    def _on_wizard_complete(self, config: dict[str, str | bool] | None) -> None:
-        """Handle the result from the configuration wizard."""
+    def _on_wizard_complete(self, config: dict[str, Any] | None) -> None:
+        """Handle the result from the configuration wizard.
+
+        ``config`` is a flat dotted-key dict produced by ``WizardScreen``
+        (merged basic + advanced answers). It is split by ``yaml_file`` and
+        round-tripped through ``ProjConfig.from_dict``/``to_dict`` for schema
+        validation and raw-key preservation.
+        """
         if config is None:
             # User cancelled — go back to plugin selection
             self.push_screen(
@@ -467,57 +476,70 @@ class InstallerApp(App):
                 progress.log(f"  [red]✗ {plugin_name}: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
 
-    def _write_config_files(self, config: dict[str, str | bool]) -> None:
-        """Write proj.yaml and/or worktree.yaml from wizard config values."""
-        needs_proj = bool(self._PROJ_PLUGINS & set(self.selected_plugins))
-        needs_worktree = "worktree" in self.selected_plugins
+    def _show_error(self, message: str) -> None:
+        """Surface an error to the user via the placeholder Static + log."""
+        try:
+            placeholder = self.query_one("#placeholder", Static)
+            placeholder.update(f"[red]Error:[/red] {message}")
+        except Exception:
+            pass
+        self.log.error(message)
 
-        if needs_proj:
-            proj_yaml = Path.home() / ".claude" / "proj.yaml"
-            lines = [
-                _yaml_line("version", "1"),
-                _yaml_line("tracking_dir", str(config["tracking_dir"])),
-                _yaml_line("projects_base_dir", str(config["projects_base_dir"])),
-                _yaml_line("sandbox_integration", bool(config["sandbox_integration"])),
-                _yaml_line("zoxide_integration", bool(config["zoxide_integration"])),
-            ]
+    def _write_config_files(self, config: dict[str, Any]) -> None:
+        """Write ~/.claude/proj.yaml and ~/.claude/worktree.yaml.
 
-            # Integration fields (nested under sync:/jira:)
-            todoist_on = config.get("todoist_enabled", False)
-            trello_on = config.get("trello_enabled", False)
-            jira_on = config.get("jira_enabled", False)
+        Loads existing yaml to preserve unknown keys, merges dotted-key wizard
+        answers on top, and writes atomically. Integration screens write their
+        own yaml files later in the flow.
+        """
+        import yaml
 
-            if todoist_on or trello_on:
-                lines.append("sync:\n")
-                if todoist_on:
-                    lines.append("  todoist:\n")
-                    lines.append("    enabled: true\n")
-                    lines.append("    auto_sync: true\n")
-                if trello_on:
-                    lines.append("  trello:\n")
-                    lines.append("    enabled: true\n")
-                    lines.append("    auto_sync: true\n")
-                    board_id = str(config.get("trello_board_id", "")).strip()
-                    if board_id:
-                        lines.append(f"    default_board_id: {board_id}\n")
+        yaml_file_by_key = {s.dotted_key: s.yaml_file for s in PROJ_YAML_PROMPTS}
+        proj_answers: dict[str, Any] = {}
+        worktree_answers: dict[str, Any] = {}
+        for dotted_key, value in config.items():
+            target = yaml_file_by_key.get(dotted_key, "proj")
+            if target == "worktree":
+                worktree_answers[dotted_key] = value
+            elif target == "proj":
+                proj_answers[dotted_key] = value
 
-            if jira_on:
-                lines.append("jira:\n")
-                lines.append("  enabled: true\n")
-                lines.append("  auto_sync: true\n")
-                default_user = str(config.get("jira_default_user", "")).strip()
-                if default_user:
-                    lines.append(f"  default_user: {default_user}\n")
+        # ---- Write proj.yaml ----
+        proj_path = Path.home() / ".claude" / "proj.yaml"
+        try:
+            existing_proj = load_existing_yaml(proj_path)
+        except ConfigLoadError as exc:
+            self._show_error(f"Failed to load {proj_path}: {exc.original}")
+            return
+        _merge_dotted_into_dict(existing_proj, proj_answers)
 
-            _atomic_write(proj_yaml, "".join(lines))
+        try:
+            from plugins.proj.server.server.lib.models import ProjConfig  # type: ignore
 
-        if needs_worktree:
-            wt_yaml = Path.home() / ".claude" / "worktree.yaml"
-            lines = [
-                _yaml_line("version", "1"),
-                _yaml_line("default_worktree_dir", str(config["worktree_dir"])),
-            ]
-            _atomic_write(wt_yaml, "".join(lines))
+            existing_proj = ProjConfig.from_dict(existing_proj).to_dict()
+        except Exception:
+            pass
+
+        _atomic_write(
+            proj_path,
+            yaml.safe_dump(existing_proj, sort_keys=False, default_flow_style=False),
+        )
+
+        # ---- Write worktree.yaml ----
+        if worktree_answers:
+            worktree_path = Path.home() / ".claude" / "worktree.yaml"
+            try:
+                existing_worktree = load_existing_yaml(worktree_path)
+            except ConfigLoadError as exc:
+                self._show_error(f"Failed to load {worktree_path}: {exc.original}")
+                return
+            _merge_dotted_into_dict(existing_worktree, worktree_answers)
+            _atomic_write(
+                worktree_path,
+                yaml.safe_dump(
+                    existing_worktree, sort_keys=False, default_flow_style=False
+                ),
+            )
 
         # Ensure managed section in global CLAUDE.md
         ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
