@@ -1,5 +1,9 @@
 # E2E test environment for the cpm-install TUI installer.
 # Provides Python 3.12, Node.js (for Claude CLI), git, and uv.
+#
+# Source code is NOT copied into the image — it is bind-mounted at runtime
+# into /app. This keeps the image cache stable across source changes; only
+# pyproject.toml / uv.lock changes invalidate the dep-install layer.
 
 # --- Stage 1: fetch uv binary ---
 FROM ghcr.io/astral-sh/uv:latest AS uv
@@ -27,18 +31,35 @@ RUN npm install -g @anthropic-ai/claude-code
 # Copy uv from the first stage
 COPY --from=uv /uv /usr/local/bin/uv
 
-WORKDIR /app
+# Install the venv to /opt/venv (outside /app) so the runtime bind-mount
+# on /app does not shadow it.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 
-# Copy dependency manifests first to leverage Docker layer caching
+# Build dependencies in an isolated directory so /app stays clean for the
+# runtime bind-mount.
+WORKDIR /build
+
+# Copy dependency manifests first to leverage Docker layer caching.
 COPY pyproject.toml uv.lock* ./
 
-# Install test dependencies (frozen lockfile when available)
-RUN uv sync --frozen --group test || uv sync --group test
+# Install test dependencies without installing the local project itself.
+# --no-install-project skips the hatchling build (which would need
+# installer/ source) and the uv.sources path dep (plugins/_shared), both of
+# which are absent at build time. Runtime bind-mount provides the source.
+RUN uv sync --frozen --no-install-project --group test \
+    || uv sync --no-install-project --group test
 
-# Copy the full project
-COPY . .
+# Runtime working directory — source is bind-mounted here at `docker run`.
+WORKDIR /app
 
-# Re-sync to pick up the local editable install
-RUN uv sync --frozen --group test || uv sync --group test
+# Point Python / pytest at the pre-built venv.
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
-CMD ["uv", "run", "pytest", "installer/tests/e2e/", "-v"]
+# Prevent host tree pollution from the bind-mount:
+#   - no __pycache__/*.pyc written next to source files
+#   - .pytest_cache/ redirected out of /app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTEST_CACHE_DIR=/tmp/pytest-cache
+
+CMD ["pytest", "installer/tests/e2e/", "-v"]

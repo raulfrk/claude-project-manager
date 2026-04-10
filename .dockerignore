@@ -1,0 +1,65 @@
+# .dockerignore — affects Docker build context ONLY
+#
+# This file controls which files are sent to the Docker daemon when building
+# an image (i.e. the build context for `docker build .`). It does NOT affect
+# runtime bind-mounts from `docker run -v <host>:<container>`. The narrow
+# bind-mount strategy in ci.yml is what prevents host venv pollution at
+# runtime, NOT this file. Do not rely on .dockerignore for runtime isolation.
+#
+# Categories below mirror parent todo 510 requirements.
+
+# --- Source control ---
+.git/
+.gitignore
+.gitattributes
+
+# --- Python ---
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+**/.venv/
+**/venv/
+
+# --- Test caches ---
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.basedpyright/
+.coverage
+htmlcov/
+
+# --- Build artifacts ---
+dist/
+build/
+*.egg-info/
+*.whl
+
+# --- Node ---
+node_modules/
+**/node_modules/
+
+# --- Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Project-specific ---
+*.log
+.envrc
+.direnv/
+
+# --- E2E outputs ---
+installer/tests/e2e/snapshots/
+installer/tests/e2e/actuals/
+installer/tests/e2e/diff_report/
