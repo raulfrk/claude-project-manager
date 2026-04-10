@@ -35,10 +35,13 @@ Extract from $ARGUMENTS:
 - Quality levels are mutually exclusive (last wins, default: `--careful`).
 - **`--force-plan`**: force FULL REVIEW on all todos regardless of complexity score.
 - **`--batch-approve`**: auto-approve all speculative plans without review (subject to trust level).
-- **`--worktree`**: enable worktree isolation for parallel execution (opt-in).
-- **`--no-worktree`**: disable worktree isolation (overrides config default).
+- **`--worktree`**: (default) enable worktree isolation for parallel execution. No-op since worktree is on by default; kept for explicitness.
+- **`--no-worktree`**: opt out of worktree isolation — run all agents on the current branch. Use this when the batch is small, fully sequential, or when worktree setup costs outweigh isolation benefits.
 
-Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
+Derive: `worktree_enabled` — **default: on**. Evaluated as:
+  1. If `--no-worktree` was explicitly passed → off.
+  2. Else if `quality_level == paranoid` → off (max_parallel=1 makes worktree isolation unnecessary).
+  3. Else → on (regardless of `config.worktree_isolation`; the config flag is retained only for legacy callers and can force-off via `--no-worktree`).
 
 Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quality flag is passed, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--careful` if not set or unrecognized.
 
@@ -51,12 +54,14 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid). If no quali
 | speculative_planning | enabled | enabled | disabled | disabled |
 | pattern_detection | auto-approve | enabled | disabled | disabled |
 | verification_mode | skip | standard | enhanced | full |
-| max_parallel | 20 | 6 | 3 | 1 |
+| max_parallel | 30 | 30 | 10 | 1 |
 | satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
 | preflight | skip | enabled | enabled | enabled |
 | refine | skip | if --refine set | auto-enabled (per iteration) | auto-enabled (per iteration) |
-| worktree | from config (`worktree_isolation`) | from config (`worktree_isolation`) | from config (`worktree_isolation`) | off (max_parallel=1) |
+| worktree | on (unless `--no-worktree`) | on (unless `--no-worktree`) | on (unless `--no-worktree`) | off (max_parallel=1) |
 | overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
+
+**Recommended cap**: 10 for CPU-bound or API-rate-limited workloads (e.g., heavy test suites, rate-limited LLM calls, DB migrations). The raw `--fast`/`--balanced` ceiling of 30 is tuned for I/O-bound work with isolated worktrees; override via `--max-parallel` or `config.team_mode.max_agents` when an individual agent will saturate a shared resource.
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
@@ -277,7 +282,7 @@ Build full list: `[todo_id] + all_descendants` (from todo_tree, flattened depth-
 Call `mcp__proj__proj_identify_batches` for dependency order.
 
 **Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine execution mode:
-- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 3+ total (non-manual) descendants: use **Team-based execution** below.
+- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 2+ total (non-manual) descendants: use **Team-based execution** below.
 - Otherwise: use **Task agent execution** below.
 
 **--- Team-based execution (5ii-T) ---**
@@ -796,7 +801,7 @@ If all pass: silent, proceed to Phase B.
 **Phase B — Remaining steps (parallel agents):**
 
 **Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine mode:
-- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 3+ non-manual todos in the batch: use **Team mode** below.
+- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 2+ non-manual todos in the batch: use **Team mode** below.
 - Otherwise: use **Task agent mode** below.
 
 **Team mode:**
@@ -1034,7 +1039,7 @@ Without pipeline: setup runs for all todos in batch before Phase C2 begins.
 **Phase C2 — Execute:**
 
 **Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine mode:
-- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 3+ non-manual todos: use **Team mode** below.
+- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 2+ non-manual todos: use **Team mode** below.
 - Otherwise: use **Task agent mode** below.
 
 **Resume checkpoint** (applies when `--resume` is passed):
