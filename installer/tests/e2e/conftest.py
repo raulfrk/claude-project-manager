@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from installer.app import InstallerApp
@@ -217,6 +218,25 @@ def mock_plugin_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
     _patch("uninstall_plugin", MagicMock(return_value=None))
 
     return mocks
+
+
+@pytest.fixture()
+def stub_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub httpx.get / httpx.Client.get / httpx.AsyncClient.get.
+
+    Used by snapshot tests for integration config screens so tests NEVER
+    reach a real Todoist/Trello/Jira API. Any call raises ConnectError,
+    which would be caught by the screen's validator — but snapshot tests
+    trigger error states directly via ``_show_error()``, so this fixture
+    just acts as a safety net.
+    """
+
+    def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise httpx.ConnectError("stubbed — no network in tests")
+
+    monkeypatch.setattr("httpx.get", _raise)
+    monkeypatch.setattr("httpx.Client.get", _raise)
+    monkeypatch.setattr("httpx.AsyncClient.get", _raise)
 
 
 @pytest.fixture()

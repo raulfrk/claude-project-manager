@@ -1,14 +1,110 @@
-"""SVG golden-file snapshot tests for all 6 TUI screens.
+"""SVG golden-file snapshot tests for all TUI screens (baseline + transitions).
 
 Each test renders a screen inside a minimal Textual App, exports an SVG
-screenshot, and compares it against a golden file in ``installer/tests/e2e/snapshots/``.
+screenshot, and compares it against a golden file in
+``installer/tests/e2e/snapshots/``.
 
 On the first run (or when golden files are missing) the SVG is written as
 the new golden file and the test passes.  To regenerate, delete the golden
-file and re-run.
+file and re-run, or set ``SNAPSHOT_CREATE_MISSING=1``.
 
-Passing ``SNAPSHOT_UPDATE=1`` as an environment variable forces overwrite of
-all golden files regardless of whether they already exist.
+Passing ``SNAPSHOT_UPDATE=1`` forces overwrite of all golden files
+regardless of whether they already exist.
+
+================================================================================
+SCREEN INVENTORY (todo 509.1)
+================================================================================
+
+The installer has these ``Screen`` subclasses under ``installer/screens/``:
+
+    1. ``plugin_select.py``   -> PluginSelectScreen
+    2. ``wizard.py``          -> WizardScreen
+    3. ``detection.py``       -> DetectionScreen
+    4. ``update.py``          -> UpdateScreen
+    5. ``confirm.py``         -> ConfirmScreen
+    6. ``progress.py``        -> ProgressScreen   (AUTO_FOCUS = "")
+    7. ``integration_config.py``
+        - BaseIntegrationScreen (abstract)
+        - TodoistConfigScreen
+        - TrelloConfigScreen
+        - JiraConfigScreen
+    8. ``config_diff.py``     -> ConfigDiffScreen
+    9. ``hooks_diff.py``      -> HooksDiffScreen
+
+The baseline snapshots below cover: plugin_select, wizard, detection,
+update, confirm, progress, todoist_config, config_diff.
+
+Per-screen transition snapshots live in sibling files:
+
+    * ``test_snapshots_confirm_progress.py`` — confirm variants + progress
+      state-based snapshots (no focus transitions — AUTO_FOCUS = "").
+    * ``test_snapshots_integration.py``     — Todoist / Trello / Jira
+      config focus + error states.
+    * ``test_snapshots_diff.py``            — ConfigDiff + HooksDiff focus
+      transitions.
+    * ``test_snapshots_main.py``            — plugin_select / wizard /
+      detection / update focus transitions.
+
+================================================================================
+PER-SCREEN WIDGET ID MAP (todo 509.1)
+================================================================================
+
+IDs are **not** uniform across screens.  Tests MUST use the IDs below and
+MUST assert ``pilot.app.focused.id == <expected>`` before exporting.
+
+    PluginSelectScreen:
+        #btn-confirm    primary (Confirm)
+        #btn-cancel     secondary (Cancel)
+        #plugin-table   DataTable (initial focus goes here on mount)
+
+    WizardScreen:
+        #btn-submit     primary (Submit)
+        #btn-cancel     secondary (Cancel)
+        #tracking_dir   first Input (focused on mount if needs_proj)
+
+    DetectionScreen:
+        #btn-continue   primary (Continue)
+        #btn-cancel     secondary (Cancel)
+
+    UpdateScreen:
+        #btn-update-selected   primary
+        #btn-update-all        success variant
+        #btn-update-cancel     secondary
+
+    ConfirmScreen:
+        #btn-confirm    primary (default focus = first focusable = confirm)
+        #btn-cancel     secondary
+        variants via ``confirm_variant=`` kwarg: "primary" | "warning" | "error"
+
+    ProgressScreen:
+        AUTO_FOCUS = ""   *** no focusable widgets — state-based only ***
+        State is driven by ``.advance()``, ``.log()``, and the internal
+        ``--complete`` CSS class.
+
+    BaseIntegrationScreen (Todoist/Trello/Jira):
+        #btn-continue        primary ("Confirm" label, auto-focused on_mount)
+        #btn-skip            secondary ("Skip")
+        #validation-error    Label (hidden unless .visible class set via _show_error)
+        #validation-loading  LoadingIndicator (hidden via _hide_loading before export)
+        #sync_enabled        Switch (drives validation skip path)
+        TodoistConfigScreen:
+            #api_token
+        TrelloConfigScreen:
+            #api_key, #token, #default_board_id
+        JiraConfigScreen:
+            #base_url, #default_user, #personal_access_token, #default_project
+
+    ConfigDiffScreen:
+        #btn-diff-apply     primary
+        #btn-diff-cancel    secondary
+
+    HooksDiffScreen:
+        #btn-hooks-continue     primary (rendered in both empty and populated modes)
+        #btn-hooks-cancel       secondary (only rendered when diffs is non-empty)
+        #btn-hooks-apply-all    success   (only when diffs is non-empty)
+        #btn-hooks-skip-all     warning   (only when diffs is non-empty)
+
+================================================================================
 """
 
 from __future__ import annotations
