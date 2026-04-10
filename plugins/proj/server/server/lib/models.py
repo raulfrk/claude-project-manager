@@ -295,7 +295,7 @@ class PermissionsConfig:
 @dataclass
 class TeamModeConfig:
     enabled: bool = True
-    max_agents: int = 4
+    max_agents: int = 30
     trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -309,7 +309,7 @@ class TeamModeConfig:
     def from_dict(cls, data: JsonDict) -> TeamModeConfig:
         return cls(
             enabled=bool(data.get("enabled", True)),
-            max_agents=_int(data.get("max_agents"), 4),
+            max_agents=_int(data.get("max_agents"), 30),
             trust_level=_int(data.get("trust_level"), 1),
         )
 
