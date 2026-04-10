@@ -131,3 +131,30 @@ class TestHasManagedSection:
     def test_missing_file(self, tmp_path: Path):
         p = tmp_path / "CLAUDE.md"
         assert has_managed_section(p) is False
+
+
+class TestManagedSectionContent:
+    """Assert that MANAGED_SECTION contains required rule substrings."""
+
+    def test_interactive_qa_mentions_ask_user_question(self):
+        assert "AskUserQuestion" in MANAGED_SECTION
+
+    def test_interactive_qa_mentions_multiple_choice(self):
+        assert "multiple-choice" in MANAGED_SECTION
+
+    def test_interactive_qa_mentions_one_question_at_a_time(self):
+        assert "one question at a time" in MANAGED_SECTION
+
+    def test_interactive_qa_forbids_batching(self):
+        assert "2 or more" in MANAGED_SECTION
+        assert "Do NOT batch" in MANAGED_SECTION
+
+    def test_interactive_qa_mentions_open_ended_fallback(self):
+        assert "open-ended" in MANAGED_SECTION
+        assert "describe your goals" in MANAGED_SECTION
+
+    def test_managed_section_still_has_preexisting_rules(self):
+        # Regression: new rule must not delete old ones
+        assert "TeamCreate" in MANAGED_SECTION
+        assert "plan mode" in MANAGED_SECTION
+        assert "Auto-capture" in MANAGED_SECTION
