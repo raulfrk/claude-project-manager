@@ -1,15 +1,21 @@
-"""Scaffold dataclasses for managing ~/.claude/settings.json SessionStart hooks.
+"""Dataclasses + diff/apply logic for managing ~/.claude/settings.json hooks.
 
-Diff and apply logic is in todo 488.3 (next batch). This module contains only
-the data model, following the Permissions/SettingsFile raw-field preservation
-pattern from plugins/sandbox/server/server/lib/models.py.
+Follows the Permissions/SettingsFile raw-field preservation pattern from
+plugins/sandbox/server/server/lib/models.py so round-trips never drop unknown
+keys. Reads and writes settings.json directly (JSON, not YAML) and only
+touches the top-level ``hooks`` key.
 """
 
 from __future__ import annotations
 
+import json
+import shutil
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
+
+import yaml
 
 
 class SettingsHooksError(Exception):
@@ -95,3 +101,297 @@ class SettingsDocument:
         result = dict(self.raw)
         result["hooks"] = self.hooks.to_dict()
         return result
+
+
+# ---- Plugin default file discovery ----
+
+DEFAULT_SETTINGS_HOOKS_FILENAME = "default-settings-hooks.yaml"
+
+
+def _load_plugin_default(plugin_dir: Path) -> dict[str, Any]:
+    """Load plugins/<name>/.claude-plugin/default-settings-hooks.yaml. Empty dict on missing."""
+    candidate = plugin_dir / ".claude-plugin" / DEFAULT_SETTINGS_HOOKS_FILENAME
+    if not candidate.exists():
+        return {}
+    try:
+        raw = candidate.read_text(encoding="utf-8")
+        data = yaml.safe_load(raw)
+    except Exception as exc:
+        raise SettingsHooksError(f"Failed to parse {candidate}: {exc}") from exc
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def merge_settings_defaults(plugin_dirs: Iterable[Path]) -> dict[str, dict[str, Any]]:
+    """Walk each plugin dir, load default-settings-hooks.yaml, merge by id.
+
+    Returns: {cpm_id: entry_dict}. Hard error on duplicate IDs across plugins (AC14).
+    Each entry has keys: id, event, matchers, command, [script, python, description].
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    seen_source: dict[str, Path] = {}
+    for plugin_dir in plugin_dirs:
+        data = _load_plugin_default(plugin_dir)
+        entries = data.get("hooks")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            cpm_id = entry.get("id")
+            if not isinstance(cpm_id, str) or not cpm_id:
+                continue
+            if cpm_id in merged:
+                prior = seen_source[cpm_id]
+                raise SettingsHooksError(
+                    f"Duplicate default-settings-hooks id '{cpm_id}' from "
+                    f"{plugin_dir} (already defined by {prior})"
+                )
+            merged[cpm_id] = dict(entry)
+            seen_source[cpm_id] = plugin_dir
+    return merged
+
+
+# ---- Command template resolution ----
+
+
+def resolve_command_template(entry: dict[str, Any], plugin_cache_dir: Path) -> str:
+    """Substitute {python}, {script}, {plugin_cache_dir} in the entry's command template.
+
+    Returns the resolved command with a `# cpm:<id>` sentinel prepended as the
+    first non-whitespace token of the command string (line-delimited for dual
+    detection per AC15). The sentinel is on its own line so shell parsers treat
+    it as a no-op comment.
+    """
+    cpm_id = str(entry.get("id") or "")
+    python = str(entry.get("python") or "python3")
+    script = str(entry.get("script") or "")
+    command_template = str(entry.get("command") or "")
+    resolved = (
+        command_template.replace("{python}", python)
+        .replace("{script}", script)
+        .replace("{plugin_cache_dir}", str(plugin_cache_dir))
+    )
+    return f"# cpm:{cpm_id}\n{resolved}"
+
+
+# ---- Dual detection ----
+
+
+def is_managed_entry(matcher_block: dict[str, Any], cpm_id: str) -> bool:
+    """True if matcher_block is managed by cpm for the given id.
+
+    Dual detection per AC15:
+    - ``__cpm_id`` field equals cpm_id (preferred)
+    - OR any ``hooks[].command`` string contains ``# cpm:<id>`` as a line
+
+    This lets us recover management even if the JSON field was stripped by a
+    user editor that re-serialized the file without unknown keys.
+    """
+    if not isinstance(matcher_block, dict):
+        return False
+    if matcher_block.get("__cpm_id") == cpm_id:
+        return True
+    hooks_list = matcher_block.get("hooks")
+    if isinstance(hooks_list, list):
+        sentinel = f"# cpm:{cpm_id}"
+        for h in hooks_list:
+            if isinstance(h, dict):
+                cmd = h.get("command")
+                if isinstance(cmd, str) and sentinel in cmd:
+                    return True
+    return False
+
+
+# ---- Diff computation ----
+
+
+def _read_settings_json(path: Path) -> dict[str, Any]:
+    """Read settings.json with loud errors (unlike sandbox storage which swallows)."""
+    if not path.exists():
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SettingsHooksError(f"Cannot read {path}: {exc}") from exc
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SettingsHooksError(f"Malformed JSON in {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SettingsHooksError(
+            f"{path}: top-level must be an object, got {type(data).__name__}"
+        )
+    return data
+
+
+def compute_settings_hooks_diff(
+    current_path: Path,
+    plugin_dirs: Iterable[Path],
+) -> list[SettingsHookDiff]:
+    """Compute per-hook-id diffs between desired (plugin defaults) and actual (settings.json)."""
+    resolved_path = current_path.resolve() if current_path.exists() else current_path
+    current_raw = _read_settings_json(resolved_path)
+    doc = SettingsDocument.from_dict(resolved_path, current_raw)
+
+    desired = merge_settings_defaults(list(plugin_dirs))
+
+    actual_by_id: dict[str, tuple[str, dict[str, Any]]] = {}
+    for event, matchers in doc.hooks.events.items():
+        for matcher in matchers:
+            for cpm_id in desired.keys():
+                if is_managed_entry(matcher, cpm_id):
+                    actual_by_id[cpm_id] = (event, matcher)
+                    break
+
+    diffs: list[SettingsHookDiff] = []
+    seen_ids: set[str] = set()
+    for cpm_id, entry in desired.items():
+        seen_ids.add(cpm_id)
+        event = str(entry.get("event") or "SessionStart")
+        matchers_list = list(entry.get("matchers") or [])
+        if cpm_id in actual_by_id:
+            actual_event, actual_matcher = actual_by_id[cpm_id]
+            desired_resolved = resolve_command_template(entry, Path())
+            actual_cmds: list[str] = []
+            actual_hooks = actual_matcher.get("hooks")
+            if isinstance(actual_hooks, list):
+                for h in actual_hooks:
+                    if isinstance(h, dict):
+                        cmd = h.get("command")
+                        if isinstance(cmd, str):
+                            actual_cmds.append(cmd)
+            sentinel = f"# cpm:{cpm_id}\n"
+            desired_body = desired_resolved.replace(sentinel, "")
+            actual_bodies = [c.replace(sentinel, "") for c in actual_cmds]
+            kind: DiffKind = "unchanged" if desired_body in actual_bodies else "changed"
+            diffs.append(
+                SettingsHookDiff(
+                    cpm_id=cpm_id,
+                    kind=kind,
+                    event=event,
+                    matchers=matchers_list,
+                    desired=entry,
+                    actual={"event": actual_event, "matcher": actual_matcher},
+                )
+            )
+        else:
+            diffs.append(
+                SettingsHookDiff(
+                    cpm_id=cpm_id,
+                    kind="new",
+                    event=event,
+                    matchers=matchers_list,
+                    desired=entry,
+                    actual=None,
+                )
+            )
+
+    for cpm_id, (event, matcher) in actual_by_id.items():
+        if cpm_id not in seen_ids:
+            diffs.append(
+                SettingsHookDiff(
+                    cpm_id=cpm_id,
+                    kind="removed",
+                    event=event,
+                    matchers=[str(matcher.get("matcher") or "")],
+                    desired=None,
+                    actual={"event": event, "matcher": matcher},
+                )
+            )
+
+    return diffs
+
+
+# ---- Apply + backup ----
+
+
+def _backup_with_retention(path: Path, keep: int = 5) -> Path:
+    """Create a timestamped backup of path, keep only the most recent `keep` backups."""
+    if not path.exists():
+        return path
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = path.with_suffix(path.suffix + f".bak-{ts}")
+    shutil.copy2(path, backup_path)
+
+    parent = path.parent
+    prefix = path.name + ".bak-"
+    existing = sorted(
+        [p for p in parent.iterdir() if p.name.startswith(prefix)],
+        key=lambda p: p.stat().st_mtime,
+    )
+    while len(existing) > keep:
+        old = existing.pop(0)
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return backup_path
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """Symlink-aware atomic write on same filesystem (mirrors sandbox storage.py:47)."""
+    resolved = path.resolve() if path.exists() else path
+    tmp = resolved.with_suffix(resolved.suffix + ".tmp")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    tmp.replace(resolved)
+
+
+def apply_settings_hooks_diffs(
+    current_path: Path,
+    diffs: list[SettingsHookDiff],
+    apply_ids: set[str],
+    remove_ids: set[str] | None = None,
+) -> None:
+    """Apply selected diffs to settings.json. Short-circuits on empty diff (AC4).
+
+    - ``apply_ids``: diffs with these cpm_ids are applied (new/changed).
+    - ``remove_ids``: diffs with these cpm_ids have their managed blocks removed.
+    - Creates a timestamped backup with 5-keep retention before writing (AC8).
+    - Wrong top-level type aborts with SettingsHooksError.
+    - Read-only file aborts with SettingsHooksError.
+    """
+    remove_ids = remove_ids or set()
+    actionable = [d for d in diffs if d.cpm_id in apply_ids or d.cpm_id in remove_ids]
+    if not actionable:
+        return  # AC4 short-circuit
+
+    resolved_path = current_path.resolve() if current_path.exists() else current_path
+    current_raw = _read_settings_json(resolved_path)
+    doc = SettingsDocument.from_dict(resolved_path, current_raw)
+
+    _backup_with_retention(resolved_path)
+
+    for diff in actionable:
+        event = diff.event
+        if diff.cpm_id in remove_ids:
+            matchers_list = doc.hooks.events.get(event, [])
+            doc.hooks.events[event] = [
+                m for m in matchers_list if not is_managed_entry(m, diff.cpm_id)
+            ]
+            continue
+        if diff.cpm_id not in apply_ids:
+            continue
+        matchers_list = doc.hooks.events.setdefault(event, [])
+        doc.hooks.events[event] = [
+            m for m in matchers_list if not is_managed_entry(m, diff.cpm_id)
+        ]
+        if diff.desired is None:
+            continue
+        for matcher_name in diff.matchers:
+            resolved_cmd = resolve_command_template(diff.desired, Path())
+            new_block = {
+                "matcher": matcher_name,
+                "__cpm_id": diff.cpm_id,
+                "hooks": [{"command": resolved_cmd, "type": "command"}],
+            }
+            doc.hooks.events[event].append(new_block)
+
+    try:
+        _atomic_write_json(resolved_path, doc.to_dict())
+    except OSError as exc:
+        raise SettingsHooksError(f"Cannot write {resolved_path}: {exc}") from exc
