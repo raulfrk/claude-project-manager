@@ -59,6 +59,10 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
   - Tags do NOT propagate to child todos; each todo is independent
   - No effect on Todoist sync
 
+## E2E TUI Snapshot Flakes
+
+**First-run flake after new panes added**: when a PR adds new TUI snapshots or widgets that alter pane composition, the first CI run often reports mismatches against stale goldens. These resolve on the second CI run (goldens auto-commit via `SNAPSHOT_CREATE_MISSING=1` in the generate step). **Do NOT fix rendering logic on the first failure** — rerun the workflow first. Only investigate if the second run still fails.
+
 ## Verification
 
 `/proj:execute` and `/proj:run` include a verification step (execute step **4a.**) after implementation, before the satisfaction prompt. Three checks run in sequence:
