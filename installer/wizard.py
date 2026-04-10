@@ -21,6 +21,32 @@ _DEFAULT_PROJECTS_BASE = "~/projects"
 _DEFAULT_WORKTREE_DIR = "~/worktrees"
 
 
+def _resolve_plugin_dir(cache_dir: Path, plugin_name: str) -> Path | None:
+    """Return the highest-version subdir of cache_dir/plugin_name, or None.
+
+    Uses natural-version ordering via `packaging.version.Version` if available,
+    otherwise falls back to lexicographic sort on subdir names.
+    """
+    plugin_root = cache_dir / plugin_name
+    if not plugin_root.is_dir():
+        return None
+    versions = [p for p in plugin_root.iterdir() if p.is_dir()]
+    if not versions:
+        return None
+    try:
+        from packaging.version import Version  # type: ignore[import-not-found]
+
+        def key(p: Path) -> Version:
+            try:
+                return Version(p.name)
+            except Exception:
+                return Version("0")
+
+        return max(versions, key=key)
+    except Exception:
+        return max(versions, key=lambda p: p.name)
+
+
 def _atomic_write(path: Path, content: str) -> None:
     """Write content to a file atomically via tmp + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -547,9 +573,11 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
 
     # Hooks diff prompt — resolve installed plugin dirs from cache
     cache_dir = Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
-    plugin_dirs = [
-        cache_dir / name for name in selected_plugins if (cache_dir / name).is_dir()
-    ]
+    plugin_dirs: list[Path] = []
+    for name in selected_plugins:
+        resolved = _resolve_plugin_dir(cache_dir, name)
+        if resolved is not None:
+            plugin_dirs.append(resolved)
     if plugin_dirs:
         _hooks_diff_prompt(plugin_dirs, console=console)
 
