@@ -1,10 +1,52 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
+
+This wizard uses a **load-once pattern**: at Step 0 it reads every relevant config file into named variables, and each subsequent prompt shows the current value from that variable as its bracketed default. Press Enter to keep the existing value; type to override. On first-run (no config files), prompts fall back to hardcoded defaults.
+
+## Step 0: Load existing config files
+
+Before any prompting, load every config file the wizard will reference. Each file is loaded once into a named variable; later steps reference these variables for their default values.
+
+Initialize a top-of-skill tracking set:
+
+```
+warnings_emitted = set()    # tracks which files have already warned — prevents duplicate warnings
+```
+
+Load each config file with the following pattern (use the `Read` tool on the absolute path, then parse with `yaml.safe_load`). On any error (file missing, read failure, YAML parse failure), set the variable to `None`. Only warn once per file — check `warnings_emitted` before printing, then add the filename to the set.
+
+1. **proj_config** — Read `~/.claude/proj.yaml`:
+   - If the file does not exist → `proj_config = None` (silent; first-run is expected)
+   - If the file exists but fails to parse → `proj_config = None` and warn once:
+     `"Warning: ~/.claude/proj.yaml exists but could not be parsed (<error>). Using hardcoded defaults for proj fields."`
+2. **todoist_config** — Read `~/.claude/todoist.yaml`:
+   - Missing → `todoist_config = None` (silent)
+   - Parse failure → `todoist_config = None` and warn once with the same pattern
+3. **trello_config** — Read `~/.claude/trello.yaml`: same pattern, store as `trello_config`
+4. **jira_config** — Read `~/.claude/jira.yaml`: same pattern, store as `jira_config`
+5. **sandbox_state** — Call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"`:
+   - On success → parse JSON, store as `sandbox_state`
+   - On failure (tool unavailable, sandbox plugin not installed) → `sandbox_state = None` (silent; plugin detection in Step 2 handles the "not installed" case)
+
+After this step, every prompt in Steps 3, 4, and 7 reads its default from the matching loaded variable via safe nested access (`(proj_config or {}).get("tracking_dir", "~/projects/tracking")` style). If the variable is `None` or the field is missing, fall back to the hardcoded default specified in the prompt.
+
+**Masking helper** (used in Step 3 for credential fields):
+
+```
+def mask_secret(value):
+    if not value:
+        return "[not set]"
+    if len(value) < 8:
+        return "****"
+    return f"****{value[-4:]}"
+```
+
+Non-sensitive fields (trello.api_key, jira.base_url, jira.default_user, jira.default_project) are shown raw, not masked.
 
 ## Step 1: Check existing configuration
 
