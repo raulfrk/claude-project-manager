@@ -158,6 +158,51 @@ class TestAddCardToList:
         assert "desc=D" in url_str
         assert "due=2026-04-01" in url_str
 
+    @respx.mock
+    def test_with_label_ids_sends_csv_query_param(self, tools: dict) -> None:
+        """`label_ids` is forwarded as the `idLabels` query param in CSV form."""
+        created = {"id": "c4", "name": "Card", "idList": "list1"}
+        route = respx.post(f"{BASE}/cards").mock(
+            return_value=build_success_response(ADD_CARD, created),
+        )
+
+        tools["add_card_to_list"]("list1", "Card", label_ids=["lbl1", "lbl2"])
+
+        assert route.called
+        request = route.calls[0].request
+        url_str = str(request.url)
+        # CSV in query params, NOT JSON body
+        assert "idLabels=lbl1%2Clbl2" in url_str or "idLabels=lbl1,lbl2" in url_str
+        # Verify nothing went in the body
+        assert request.content in (b"", b"{}")
+
+    @respx.mock
+    def test_without_label_ids_omits_id_labels_param(self, tools: dict) -> None:
+        """Omitting `label_ids` leaves `idLabels` out of the request entirely."""
+        created = {"id": "c5", "name": "Card", "idList": "list1"}
+        route = respx.post(f"{BASE}/cards").mock(
+            return_value=build_success_response(ADD_CARD, created),
+        )
+
+        tools["add_card_to_list"]("list1", "Card")
+
+        assert route.called
+        request = route.calls[0].request
+        assert "idLabels=" not in str(request.url)
+
+    @respx.mock
+    def test_empty_label_ids_omits_id_labels_param(self, tools: dict) -> None:
+        """An empty `label_ids` list is treated the same as None (no param)."""
+        created = {"id": "c6", "name": "Card", "idList": "list1"}
+        route = respx.post(f"{BASE}/cards").mock(
+            return_value=build_success_response(ADD_CARD, created),
+        )
+
+        tools["add_card_to_list"]("list1", "Card", label_ids=[])
+
+        assert route.called
+        assert "idLabels=" not in str(route.calls[0].request.url)
+
 
 class TestUpdateCardDetails:
     @respx.mock
@@ -249,6 +294,42 @@ class TestBatchCreateCards:
         parsed = json.loads(result)
         assert len(parsed["successes"]) == 2
         assert len(parsed["failures"]) == 0
+
+    @respx.mock
+    def test_label_ids_applied_to_each_card(self, tools: dict) -> None:
+        """`label_ids` applies to every card in the batch as `idLabels` CSV."""
+        route = respx.post(f"{BASE}/cards").mock(
+            side_effect=[
+                build_success_response(ADD_CARD, {"id": "c20", "name": "A", "idList": "l1"}),
+                build_success_response(ADD_CARD, {"id": "c21", "name": "B", "idList": "l2"}),
+            ],
+        )
+
+        tools["batch_create_cards"](
+            [
+                {"list_id": "l1", "name": "A"},
+                {"list_id": "l2", "name": "B"},
+            ],
+            label_ids=["lbl1"],
+        )
+
+        assert route.call_count == 2
+        for call in route.calls:
+            url_str = str(call.request.url)
+            assert "idLabels=lbl1" in url_str
+
+    @respx.mock
+    def test_no_label_ids_omits_id_labels(self, tools: dict) -> None:
+        route = respx.post(f"{BASE}/cards").mock(
+            return_value=build_success_response(
+                ADD_CARD, {"id": "c30", "name": "A", "idList": "l1"}
+            ),
+        )
+
+        tools["batch_create_cards"]([{"list_id": "l1", "name": "A"}])
+
+        assert route.called
+        assert "idLabels=" not in str(route.calls[0].request.url)
 
 
 # ---------------------------------------------------------------------------
