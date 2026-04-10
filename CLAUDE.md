@@ -44,6 +44,7 @@ After completing any implementation, always validate the result against the spec
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
+- **Worktree isolation is ON by default** for `/proj:run` at all quality levels except `--paranoid`. Pass `--no-worktree` to opt out. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants.
 
 ## Todo Tags
 
