@@ -129,10 +129,12 @@ jobs:
           fi
           # Run the FULL e2e dir — same set as "Run e2e tests" below — so
           # step 1 and step 2 see identical test order + fixture state.
-          # Previously this step ran a 5-file subset which led to divergent
-          # renders between generate and validate passes.
+          # TEXTUAL_ANIMATIONS=none disables Collapsible/Select cursor
+          # animations that caused nondeterministic renders between the
+          # generate and validate passes.
           docker run --rm \
             --user $(id -u):$(id -g) \
+            -e TEXTUAL_ANIMATIONS=none \
             -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
             sh -c "$MODE pytest installer/tests/e2e/ -v"
@@ -153,6 +155,7 @@ jobs:
         run: |
           docker run --rm \
             --user $(id -u):$(id -g) \
+            -e TEXTUAL_ANIMATIONS=none \
             -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
             pytest installer/tests/e2e/ -v
