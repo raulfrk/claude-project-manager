@@ -131,7 +131,7 @@ jobs:
             --user $(id -u):$(id -g) \
             -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
-            sh -c "$MODE pytest installer/tests/e2e/test_snapshots.py -v"
+            sh -c "$MODE pytest installer/tests/e2e/test_snapshots.py installer/tests/e2e/test_snapshots_main.py installer/tests/e2e/test_snapshots_confirm_progress.py installer/tests/e2e/test_snapshots_integration.py installer/tests/e2e/test_snapshots_diff.py -v"
 
       - name: Commit generated snapshots
         run: |
