@@ -1,7 +1,7 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Card-per-todo model -- each todo becomes its own Trello card in the tasks list; project gets a tracking card in the projects list. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__create_label, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__create_label, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards, mcp__trello__toggle_card_label
 context: fork
 agent: general-purpose
 ---
@@ -127,11 +127,16 @@ If the Trello MCP server is not reachable, stop immediately and say:
 
 > "Trello MCP server not available. Check your MCP server configuration and restart Claude Code."
 
-**2.** Ensure `proj` label exists
+**2.** Ensure `proj` and `proj-task` labels exist
 
-- Call `mcp__trello__get_labels` with `boardId` set to the effective board ID.
-- If no label named `proj` exists, call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`.
-- Record the label ID for use in card creation.
+- Call `mcp__trello__get_labels` with `boardId` set to the effective board ID. Store the result as `existing_labels` (list of `{id, name, color, ...}`).
+- For label name `proj` (color `blue`):
+  - If `existing_labels` contains a label with `name == "proj"` -> record its ID as `proj_label_id`.
+  - Otherwise call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`. Record the returned ID as `proj_label_id`.
+- For label name `proj-task` (color `green`):
+  - If `existing_labels` contains a label with `name == "proj-task"` -> record its ID as `proj_task_label_id`.
+  - Otherwise call `mcp__trello__create_label` with `boardId`, `name="proj-task"`, `color="green"`. Record the returned ID as `proj_task_label_id`.
+- If either creation fails, log a warning and continue; list placement is still applied. The next sync's diff will re-emit a `push_update_labels` entry to add the missing label via `toggle_card_label`.
 
 **3.** Ensure required lists exist
 
@@ -149,7 +154,7 @@ If the Trello MCP server is not reachable, stop immediately and say:
   - Call `mcp__trello__add_card_to_list` with:
     - `listId` = projects list ID
     - `name` = project name
-    - `idLabels` = the `proj` label ID
+    - `label_ids` = `[proj_label_id]`
   - Record the returned card ID.
   - Call `mcp__proj__proj_trello_apply` with `link_project_card_id` set to the new card ID.
 
@@ -158,7 +163,8 @@ If the Trello MCP server is not reachable, stop immediately and say:
 - Call `mcp__trello__get_cards_by_list_id` for the tasks list and done list.
 - Call `mcp__trello__get_lists` to get list metadata.
 - Optionally fetch the project tracking card state.
-- Format as JSON: `{"cards": [...], "lists": [...], "project_card": {...}}`
+- Format as JSON: `{"cards": [...], "lists": [...], "project_card": {...}, "proj_label_id": "<proj_label_id>", "proj_task_label_id": "<proj_task_label_id>"}`.
+- The two label ID keys let `proj_trello_diff` detect cards missing their expected label and emit `push_update_labels` entries. Omit them (or pass empty strings) only if Step 2 failed to resolve a label — in that case label enforcement is skipped for this run.
 
 **6.** Compute diff
 
@@ -177,7 +183,7 @@ Process each push operation from the plan by calling the appropriate Trello MCP 
 
 **Create cards** (`push_create_card`):
 For each entry:
-- Call `mcp__trello__add_card_to_list` with `listId` (resolve from `list_name`), `name` = title, `desc` = desc.
+- Call `mcp__trello__add_card_to_list` with `listId` (resolve from `list_name`), `name` = title, `desc` = desc, `label_ids` = `[proj_task_label_id]`.
 - Record the returned card ID.
 - For cards with `parent_todo_id`, attach a link to the parent card via `mcp__trello__add_attachment`.
 - Batch-link all new card IDs: call `mcp__proj__proj_trello_apply` with:
@@ -185,7 +191,7 @@ For each entry:
   {"link_card_ids": [{"todo_id": "<id>", "card_id": "<new_card_id>"}, ...]}
   ```
 
-When multiple cards need creating, prefer `mcp__trello__batch_create_cards` to reduce round-trips.
+When multiple cards need creating, prefer `mcp__trello__batch_create_cards` (pass `label_ids=[proj_task_label_id]` once at the batch level; it applies to every card in the batch) to reduce round-trips.
 
 **Update cards** (`push_update_card`):
 For each entry:
@@ -198,6 +204,12 @@ For each entry:
 **Archive cards** (`push_archive_card`):
 For each entry:
 - Call `mcp__trello__archive_card` with `cardId`.
+
+**Update labels** (`push_update_labels`):
+For each entry in `plan.push_update_labels`:
+- For each label ID in `add_label_ids`, call `mcp__trello__toggle_card_label` with `cardId` = entry `card_id`, `labelId` = that label ID, and `action="add"`. The `action` argument is required — do not omit it.
+- `toggle_card_label(..., action="add")` is idempotent: Trello's `POST /cards/{id}/idLabels` silently succeeds if the label is already present, so retrying on transient errors is safe.
+- Extras (labels beyond `proj` / `proj-task`) on the card are never removed — this sub-step is strictly add-only.
 
 **Update project card** (`project_card_update`):
 - If true, update the project tracking card description via `mcp__trello__update_card_details`.
