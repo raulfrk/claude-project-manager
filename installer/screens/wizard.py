@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, Label, Static, Switch
+from textual.widgets import Button, Footer, Header, Input, Select, Static, Switch
+
+from installer._config_loader import load_existing_yaml
+from installer.wizard_specs import PROJ_YAML_PROMPTS
 
 
 # Plugins that require proj.yaml configuration
 _PROJ_PLUGINS = {"proj", "hooks", "sandbox", "todoist", "trello", "jira"}
 
 
-class WizardScreen(Screen[dict[str, str | bool] | None]):
+class WizardScreen(Screen[dict[str, Any] | None]):
     """Post-install configuration wizard.
 
     Collects paths and integration toggles, then returns them as a dict
@@ -28,17 +35,11 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
     }
 
     #wizard-form {
-        width: 72;
+        width: 80;
         max-height: 85%;
         padding: 1 2;
         border: round $accent;
         background: $surface;
-    }
-
-    #wizard-scroll {
-        height: 1fr;
-        max-height: 100%;
-        min-height: 3;
     }
 
     #wizard-title {
@@ -50,23 +51,24 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         margin: 0 0 1 0;
     }
 
-    .field-group {
-        height: auto;
+    .group-header {
+        text-align: left;
+        text-style: bold;
+        color: $accent;
+        padding: 0 1;
         margin: 1 0 0 0;
     }
 
-    .field-label {
-        height: 1;
+    .field-row {
+        height: 3;
         padding: 0 1;
-        color: $accent;
-        text-style: bold;
+        margin: 0;
     }
 
-    .field-hint {
-        height: 1;
-        padding: 0 1;
-        color: $text-muted;
-        text-style: italic;
+    .field-label {
+        width: 32;
+        padding: 1 1;
+        color: $text;
     }
 
     Input {
@@ -78,23 +80,15 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         border: tall $accent;
     }
 
-    .switch-row {
-        height: 3;
-        padding: 0 1;
-        margin: 0 0 0 0;
-    }
-
-    .switch-row Label {
-        padding: 1 1;
-        width: 1fr;
-        color: $text;
-    }
-
-    .switch-row Switch {
+    Switch {
         width: auto;
     }
 
-    #button-bar {
+    Select {
+        width: 1fr;
+    }
+
+    #wizard-buttons {
         height: auto;
         min-height: 3;
         align: center middle;
@@ -103,7 +97,7 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         padding: 1 2;
     }
 
-    #button-bar Button {
+    #wizard-buttons Button {
         margin: 0 1;
     }
     """
@@ -123,79 +117,115 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         self._selected_plugins = selected_plugins
         self._needs_proj = bool(_PROJ_PLUGINS & set(selected_plugins))
         self._needs_worktree = "worktree" in selected_plugins
+        self._existing = self._read_existing_proj_yaml()
+
+    def _read_existing_proj_yaml(self) -> dict[str, Any]:
+        """Load ~/.claude/proj.yaml if present, returning {} on missing or parse error."""
+        try:
+            return load_existing_yaml(Path.home() / ".claude" / "proj.yaml")
+        except Exception:
+            return {}
 
     def compose(self) -> ComposeResult:
+        yield Header()
         with Vertical(id="wizard-form"):
             yield Static("Configuration Wizard", id="wizard-title")
-            yield Static(
-                "Configure plugin settings. Leave blank for defaults.",
-                classes="field-hint",
-            )
-
             with VerticalScroll(id="wizard-scroll"):
-                # -- Path fields --
-                if self._needs_proj:
-                    with Vertical(classes="field-group"):
-                        yield Label("Tracking directory", classes="field-label")
-                        yield Input(
-                            placeholder="~/projects/tracking",
-                            id="tracking_dir",
+                current_group: str | None = None
+                for spec in PROJ_YAML_PROMPTS:
+                    if spec.yaml_file != "proj" or spec.tier != "basic":
+                        continue
+                    if spec.condition is not None and not spec.condition(
+                        self._existing
+                    ):
+                        continue
+                    if spec.group != current_group:
+                        yield Static(f"── {spec.group} ──", classes="group-header")
+                        current_group = spec.group
+                    default = spec.default_factory(self._existing)
+                    widget_id = spec.dotted_key.replace(".", "-")
+                    row_id = f"row-{widget_id}"
+                    if spec.type == "bool":
+                        yield Horizontal(
+                            Static(spec.label, classes="field-label"),
+                            Switch(value=bool(default), id=widget_id),
+                            classes="field-row",
+                            id=row_id,
                         )
-
-                    with Vertical(classes="field-group"):
-                        yield Label("Projects base directory", classes="field-label")
-                        yield Input(
-                            placeholder="~/projects",
-                            id="projects_base_dir",
+                    elif spec.type == "str":
+                        yield Horizontal(
+                            Static(spec.label, classes="field-label"),
+                            Input(value=str(default), id=widget_id),
+                            classes="field-row",
+                            id=row_id,
                         )
-
-                if self._needs_worktree:
-                    with Vertical(classes="field-group"):
-                        yield Label("Default worktree directory", classes="field-label")
-                        yield Input(
-                            placeholder="~/worktrees",
-                            id="worktree_dir",
+                    elif spec.type == "choice":
+                        choices = spec.choices or []
+                        default_str = str(default)
+                        selected = (
+                            default_str
+                            if default_str in choices
+                            else (choices[0] if choices else "")
                         )
-
-                # -- Toggle switches --
-                if self._needs_proj:
-                    with Horizontal(classes="switch-row"):
-                        yield Label("Sandbox integration")
-                        yield Switch(value=True, id="sandbox_integration")
-
-                    with Horizontal(classes="switch-row"):
-                        yield Label("Zoxide integration")
-                        yield Switch(value=False, id="zoxide_integration")
-
-            # -- Buttons (always visible outside scroll) --
-            with Horizontal(id="button-bar"):
-                yield Button("Submit", variant="primary", id="btn-submit")
-                yield Button("Cancel", variant="default", id="btn-cancel")
+                        yield Horizontal(
+                            Static(spec.label, classes="field-label"),
+                            Select(
+                                options=[(c, c) for c in choices],
+                                value=selected,
+                                id=widget_id,
+                                allow_blank=False,
+                            ),
+                            classes="field-row",
+                            id=row_id,
+                        )
+                    elif spec.type == "int":
+                        yield Horizontal(
+                            Static(spec.label, classes="field-label"),
+                            Input(value=str(default), id=widget_id, type="integer"),
+                            classes="field-row",
+                            id=row_id,
+                        )
+            with Horizontal(id="wizard-buttons"):
+                yield Button("Submit", id="btn-submit", variant="primary")
+                yield Button("Advanced...", id="btn-advanced", variant="default")
+                yield Button("Cancel", id="btn-cancel", variant="default")
         yield Footer()
 
-    def _collect_values(self) -> dict[str, str | bool]:
-        """Read current widget values and apply defaults for blank fields."""
-        config: dict[str, str | bool] = {}
+    def _collect_values(self) -> dict[str, Any]:
+        """Read every basic-tier widget keyed by dotted key."""
+        answers: dict[str, Any] = {}
+        for spec in PROJ_YAML_PROMPTS:
+            if spec.yaml_file != "proj" or spec.tier != "basic":
+                continue
+            widget_id = spec.dotted_key.replace(".", "-")
+            try:
+                widget = self.query_one(f"#{widget_id}")
+            except Exception:
+                continue
+            value = getattr(widget, "value", None)
+            if spec.type == "bool":
+                answers[spec.dotted_key] = bool(value)
+            elif spec.type in ("str", "choice"):
+                answers[spec.dotted_key] = str(value) if value is not None else ""
+            elif spec.type == "int":
+                try:
+                    answers[spec.dotted_key] = int(value)
+                except (TypeError, ValueError):
+                    answers[spec.dotted_key] = spec.default_factory(self._existing)
+        return answers
 
-        if self._needs_proj:
-            tracking = self.query_one("#tracking_dir", Input).value.strip()
-            config["tracking_dir"] = tracking or "~/projects/tracking"
-
-            projects = self.query_one("#projects_base_dir", Input).value.strip()
-            config["projects_base_dir"] = projects or "~/projects"
-
-            config["sandbox_integration"] = self.query_one(
-                "#sandbox_integration", Switch
-            ).value
-            config["zoxide_integration"] = self.query_one(
-                "#zoxide_integration", Switch
-            ).value
-
-        if self._needs_worktree:
-            wt_dir = self.query_one("#worktree_dir", Input).value.strip()
-            config["worktree_dir"] = wt_dir or "~/worktrees"
-
-        return config
+    @on(Switch.Changed, "#git_tracking-enabled")
+    def _on_git_tracking_toggle(self, event: Switch.Changed) -> None:
+        """Show/hide git_tracking sub-widgets when parent toggle flips."""
+        for child_id in (
+            "row-git_tracking-github_enabled",
+            "row-git_tracking-github_repo_format",
+        ):
+            try:
+                row = self.query_one(f"#{child_id}")
+                row.display = bool(event.value)
+            except Exception:
+                pass
 
     # -- Actions & events --
 
@@ -204,8 +234,23 @@ class WizardScreen(Screen[dict[str, str | bool] | None]):
         self.dismiss(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle submit/cancel button presses."""
+        """Handle submit/cancel/advanced button presses."""
         if event.button.id == "btn-submit":
             self.dismiss(self._collect_values())
         elif event.button.id == "btn-cancel":
             self.dismiss(None)
+        elif event.button.id == "btn-advanced":
+            basic = self._collect_values()
+            try:
+                from installer.screens.advanced_config import AdvancedConfigScreen  # type: ignore
+
+                def _on_advanced(result: dict[str, Any] | None) -> None:
+                    if result:
+                        basic.update(result)
+                    self.dismiss(basic)
+
+                self.app.push_screen(
+                    AdvancedConfigScreen(self._existing, []), _on_advanced
+                )
+            except ImportError:
+                self.dismiss(basic)
