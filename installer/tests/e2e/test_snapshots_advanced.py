@@ -64,6 +64,25 @@ def _expand_collapsible(screen: AdvancedConfigScreen, group_id: str) -> None:
         pass
 
 
+async def _settle(pilot, screen: AdvancedConfigScreen) -> None:
+    """Force deterministic scroll position + wait for layout to settle.
+
+    After Collapsible expand/collapse the VerticalScroll container may
+    auto-scroll asynchronously, producing different SVGs across runs for
+    collapsibles near the bottom (trello_extras, trello_list_mappings).
+    Scroll to home + multiple pauses pin the viewport.
+    """
+    from textual.containers import VerticalScroll
+
+    try:
+        scroll = screen.query_one("#advanced-form", VerticalScroll)
+        scroll.scroll_home(animate=False)
+    except Exception:
+        pass
+    await pilot.pause()
+    await pilot.pause()
+
+
 class TestAdvancedConfigScreenSnapshots:
     """25 snapshots covering the AdvancedConfigScreen (todo 514.29)."""
 
@@ -413,7 +432,7 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             _expand_collapsible(screen, "trello-extras")
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             assert screen.query_one("#sync-trello-default_list", Input).region.width > 0
             assert screen.query_one("#sync-trello-on_delete", Select).region.width > 0
@@ -435,7 +454,7 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             _expand_collapsible(screen, "trello-list-mappings")
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             for wid in (
                 "sync-trello-list_mappings-backlog",
