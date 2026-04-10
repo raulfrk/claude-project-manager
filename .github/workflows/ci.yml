@@ -109,16 +109,16 @@ jobs:
       - name: Clean host plugin venvs
         run: find plugins -type d -name .venv -prune -exec rm -rf {} + || true
 
-      # Narrow bind-mount strategy (see installer/tests/e2e/Dockerfile):
+      # Bind-mount the full workspace at /app (see installer/tests/e2e/Dockerfile).
       # The image no longer `COPY .`s the source tree — /app is empty at build
-      # time and the source is bind-mounted at runtime. We mount each top-level
-      # source path explicitly (installer/, plugins/, pyproject.toml, uv.lock)
-      # instead of the whole workspace to keep the container's view narrow and
-      # avoid leaking .git/, node_modules/, etc.
+      # time and the source is bind-mounted at runtime. On CI a whole-workspace
+      # mount is safe because the runner has a fresh checkout (no host venv
+      # pollution from plugins/*/server/.venv/ that we worry about in the local
+      # run.sh flow).
       #
       # `--user $(id -u):$(id -g)` runs the container as the host UID/GID so any
-      # files written back to the bind-mounted snapshots/ directory are owned by
-      # the runner user, not root — otherwise the subsequent auto-commit step
+      # files written back to the bind-mounted workspace (snapshots, caches) are
+      # owned by the runner user, not root — otherwise the auto-commit step
       # would fail to `git add` root-owned files.
       - name: Generate snapshot goldens
         run: |
@@ -129,11 +129,7 @@ jobs:
           fi
           docker run --rm \
             --user $(id -u):$(id -g) \
-            -v ${{ github.workspace }}/installer:/app/installer \
-            -v ${{ github.workspace }}/plugins:/app/plugins \
-            -v ${{ github.workspace }}/pyproject.toml:/app/pyproject.toml:ro \
-            -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
-            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
+            -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
             sh -c "$MODE pytest installer/tests/e2e/test_snapshots.py -v"
 
@@ -153,11 +149,7 @@ jobs:
         run: |
           docker run --rm \
             --user $(id -u):$(id -g) \
-            -v ${{ github.workspace }}/installer:/app/installer \
-            -v ${{ github.workspace }}/plugins:/app/plugins \
-            -v ${{ github.workspace }}/pyproject.toml:/app/pyproject.toml:ro \
-            -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
-            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
+            -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
             pytest installer/tests/e2e/ -v
 
@@ -172,11 +164,7 @@ jobs:
         run: |
           docker run --rm \
             --user $(id -u):$(id -g) \
-            -v ${{ github.workspace }}/installer:/app/installer \
-            -v ${{ github.workspace }}/plugins:/app/plugins \
-            -v ${{ github.workspace }}/pyproject.toml:/app/pyproject.toml:ro \
-            -v ${{ github.workspace }}/uv.lock:/app/uv.lock:ro \
-            -v ${{ github.workspace }}/installer/tests/e2e/snapshots:/app/installer/tests/e2e/snapshots \
+            -v ${{ github.workspace }}:/app \
             cpm-e2e:latest \
             python installer/tests/e2e/snapshot_diff.py \
               installer/tests/e2e/snapshots \
