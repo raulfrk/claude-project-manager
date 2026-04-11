@@ -343,6 +343,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
        IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
    ELSE:
    - Display: `Executing batch: todos <id1>, <id2>, ...`
+   - When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
    - Spawn one Agent per todo with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
@@ -640,6 +641,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
        IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
    ELSE:
    - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
+   - When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
    - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.

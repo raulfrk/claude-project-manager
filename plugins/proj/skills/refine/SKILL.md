@@ -22,6 +22,8 @@ Refine todo: $ARGUMENTS
 
 **3.** Determine agent set and spawn in parallel (general-purpose, read-only: `Read, Glob, Grep`):
 
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+
 Load the todo's `tags` field from todo context. Select agents per the agent selection logic below. Spawn all selected agents in parallel:
 
 **Agent 1 — Skeptic:**
