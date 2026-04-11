@@ -743,13 +743,13 @@ class TestInstallerAppHelpers:
         assert "sandbox" in InstallerApp._PROJ_PLUGINS
         assert "worktree" not in InstallerApp._PROJ_PLUGINS
 
-    def test_on_plugins_selected_empty_exits(self):
-        """Selecting no plugins calls exit."""
+    def test_on_status_actions_empty_exits(self):
+        """Confirming with zero non-skip actions exits the app."""
         from installer.app import InstallerApp
 
         app = InstallerApp(mode="install")
         app.exit = MagicMock()
-        app._on_plugins_selected([])
+        app._on_status_actions([])
         app.exit.assert_called_once()
 
     def test_on_detection_done_false_exits(self):
@@ -771,14 +771,14 @@ class TestInstallerAppHelpers:
         app._on_update_selected([])
         app.exit.assert_called_once()
 
-    def test_on_wizard_complete_none_goes_back(self):
-        """Cancelling wizard pushes plugin select screen again."""
+    def test_on_wizard_complete_none_restarts_status_worker(self):
+        """Cancelling wizard re-runs the status-screen builder worker."""
         from installer.app import InstallerApp
 
         app = InstallerApp(mode="install")
-        app.push_screen = MagicMock()
+        app.run_worker = MagicMock()
         app._on_wizard_complete(None)
-        app.push_screen.assert_called_once()
+        app.run_worker.assert_called_once()
 
     def test_write_config_files_worktree(self, mock_home):
         """_write_config_files creates worktree.yaml when worktree is selected."""

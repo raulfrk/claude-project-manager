@@ -9,7 +9,7 @@ from textual.widgets import Checkbox, Static
 from installer.app import InstallerApp
 from installer.screens.confirm import ConfirmScreen
 from installer.screens.detection import DetectionScreen
-from installer.screens.plugin_select import PluginSelectScreen
+from installer.screens.plugin_select import PluginStatusScreen
 from installer.screens.wizard import WizardScreen
 
 from .conftest import assert_all_visible
@@ -216,15 +216,15 @@ class TestWizardCancel:
     async def test_wizard_escape_returns_to_plugin_select(
         self, e2e_app, mock_detect, mock_plugin_cli
     ):
-        """In install mode, pressing escape on WizardScreen pushes PluginSelectScreen again."""
+        """In install mode, pressing escape on WizardScreen pushes PluginStatusScreen again."""
         app: InstallerApp = e2e_app(mode="install")
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
 
-            # Step 1: PluginSelectScreen should be active
+            # Step 1: PluginStatusScreen should be active
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen), (
-                f"Expected PluginSelectScreen, got {type(screen).__name__}"
+            assert isinstance(screen, PluginStatusScreen), (
+                f"Expected PluginStatusScreen, got {type(screen).__name__}"
             )
             assert_all_visible(screen)
 
@@ -246,10 +246,10 @@ class TestWizardCancel:
             await pilot.press("escape")
             await pilot.pause()
 
-            # Step 5: PluginSelectScreen should be pushed again (not exit)
+            # Step 5: PluginStatusScreen should be pushed again (not exit)
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen), (
-                f"Expected PluginSelectScreen after wizard cancel, got {type(screen).__name__}"
+            assert isinstance(screen, PluginStatusScreen), (
+                f"Expected PluginStatusScreen after wizard cancel, got {type(screen).__name__}"
             )
             assert_all_visible(screen)
             assert not app._exit
@@ -258,14 +258,14 @@ class TestWizardCancel:
     async def test_wizard_cancel_button_returns_to_plugin_select(
         self, e2e_app, mock_detect, mock_plugin_cli
     ):
-        """In install mode, clicking Cancel on WizardScreen pushes PluginSelectScreen again."""
+        """In install mode, clicking Cancel on WizardScreen pushes PluginStatusScreen again."""
         app: InstallerApp = e2e_app(mode="install")
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
 
-            # PluginSelectScreen -> confirm
+            # PluginStatusScreen -> confirm
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
 
@@ -278,9 +278,9 @@ class TestWizardCancel:
             await pilot.click(btn_cancel)
             await pilot.pause()
 
-            # Should return to PluginSelectScreen
+            # Should return to PluginStatusScreen
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             assert not app._exit
 
 
@@ -346,13 +346,13 @@ class TestScreenGeometry:
 
     @pytest.mark.asyncio
     async def test_plugin_select_geometry(self, e2e_app, mock_detect, mock_plugin_cli):
-        """PluginSelectScreen widgets have positive dimensions."""
+        """PluginStatusScreen widgets have positive dimensions."""
         app: InstallerApp = e2e_app(mode="install")
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
 
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             assert_all_visible(screen)
 
             btn = screen.query_one("#btn-confirm")
@@ -367,7 +367,7 @@ class TestScreenGeometry:
 
             # Navigate to WizardScreen
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
 

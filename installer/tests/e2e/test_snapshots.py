@@ -511,3 +511,43 @@ async def test_config_diff_snapshot() -> None:
         await pilot.pause()
         svg = app.export_screenshot()
         _assert_snapshot(svg, "config_diff")
+
+
+# ---------------------------------------------------------------------------
+# 10. PluginStatusScreen — three-column available/installed/outdated view
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_plugin_status_screen_snapshot() -> None:
+    """Snapshot of the new PluginStatusScreen with a mixed-state fixture."""
+    from installer.plugin_status import PluginStatus
+    from installer.screens.plugin_select import PluginStatusScreen
+
+    statuses = [
+        PluginStatus(
+            name="router",
+            installed_version="2.0.0",
+            available_version="2.0.0",
+            state="installed",
+        ),
+        PluginStatus(
+            name="proj",
+            installed_version="3.5.0",
+            available_version="4.0.0",
+            state="outdated",
+        ),
+        PluginStatus(
+            name="trello",
+            installed_version=None,
+            available_version="3.0.0",
+            state="available",
+        ),
+    ]
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = PluginStatusScreen(statuses=statuses)
+        app.push_screen(screen)
+        await pilot.pause()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "plugin_status_screen")

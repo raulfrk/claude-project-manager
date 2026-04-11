@@ -12,9 +12,14 @@ from textual.widgets import Footer, Static
 from installer._config_loader import ConfigLoadError, load_existing_yaml
 from installer.detect import InstallState, detect_existing
 from installer.errors import InstallerError
+from installer.plugin_status import (
+    PLUGIN_NAME_RE,
+    PluginStatus,
+    build_plugin_status_list,
+)
 from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
 from installer.screens.detection import DetectionScreen, PluginDetectionRow
-from installer.screens.plugin_select import PluginSelectScreen
+from installer.screens.plugin_select import PluginStatusScreen
 from installer.screens.integration_config import (
     BaseIntegrationScreen,
     JiraConfigScreen,
@@ -22,6 +27,7 @@ from installer.screens.integration_config import (
     TrelloConfigScreen,
 )
 from installer.screens.progress import ProgressScreen
+from installer.screens.summary import PluginOutcome, SummaryScreen
 from installer.screens.update import UpdateScreen
 from installer.screens.wizard import WizardScreen
 from installer.plugin_cli import (
@@ -118,10 +124,7 @@ class InstallerApp(App):
     def on_mount(self) -> None:
         """Route to the appropriate screen based on mode."""
         if self.mode == "install":
-            self.push_screen(
-                PluginSelectScreen(branch=self._branch),
-                callback=self._on_plugins_selected,
-            )
+            self.run_worker(self._build_status_screen(), exclusive=True)
         elif self.mode in ("update", "reinstall", "uninstall"):
             self._state = detect_existing()
             detection_rows = self._build_detection_rows(self._state)
@@ -217,26 +220,70 @@ class InstallerApp(App):
 
     # -- Install flow callbacks --
 
-    def _on_plugins_selected(self, selected: list[str]) -> None:
-        """Handle the result from the plugin selection screen."""
-        self.selected_plugins = selected
-        if not selected:
+    async def _build_status_screen(self) -> None:
+        """Fetch plugin statuses (with timeout) and push ``PluginStatusScreen``.
+
+        Wraps ``build_plugin_status_list`` in ``asyncio.to_thread`` with a
+        30-second timeout so a hanging ``claude plugin list`` call can't
+        block the UI. On failure, surfaces a ``CorruptYamlScreen``-style
+        error modal pattern via ``_show_error``.
+        """
+        try:
+            statuses: list[PluginStatus] = await asyncio.wait_for(
+                asyncio.to_thread(build_plugin_status_list),
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            self._show_error(
+                "Timed out while listing plugins (>30s). "
+                "Is `claude plugin list` hanging?"
+            )
+            return
+        except InstallerError as exc:
+            self._show_error(f"Failed to build plugin status list: {exc}")
+            return
+        except ValueError as exc:
+            # Invalid plugin name in marketplace — refuse to continue.
+            self._show_error(str(exc))
+            return
+
+        self._plugin_statuses = statuses
+        self.push_screen(
+            PluginStatusScreen(statuses=statuses),
+            callback=self._on_status_actions,
+        )
+
+    def _on_status_actions(self, actions: list[tuple[str, str]] | None) -> None:
+        """Handle the result from ``PluginStatusScreen``.
+
+        ``actions`` is a list of ``(plugin_name, action)`` for rows whose
+        action is not ``"skip"``. Empty / None exits the app. Names are
+        validated against ``PLUGIN_NAME_RE`` as a defense-in-depth check
+        before they reach the subprocess layer.
+        """
+        if not actions:
             self.exit()
             return
-        # Create the wizard screen eagerly so we can inspect _load_errors
-        # (populated during __init__ by _read_existing_all_yamls) BEFORE
-        # showing the wizard. If any yaml file failed to parse, surface a
-        # modal that lets the user continue with defaults or cancel.
-        self._wizard_screen = WizardScreen(selected_plugins=selected)
+
+        for name, _action in actions:
+            if not PLUGIN_NAME_RE.match(name):
+                self._show_error(f"Rejected invalid plugin name: {name!r}")
+                self.exit()
+                return
+
+        self._pending_actions: list[tuple[str, str]] = list(actions)
+        # selected_plugins drives the wizard, integration config chain, and
+        # hooks-diff migration — it must be populated from the non-skip
+        # actions rather than left over from PluginSelectScreen.
+        self.selected_plugins = [name for name, _a in actions]
+
+        self._wizard_screen = WizardScreen(selected_plugins=self.selected_plugins)
         if self._wizard_screen._load_errors:
             from installer.screens.corrupt_yaml import CorruptYamlScreen
 
             def _after_corrupt_choice(proceed: bool | None) -> None:
                 if not proceed:
-                    self.push_screen(
-                        PluginSelectScreen(branch=self._branch),
-                        callback=self._on_plugins_selected,
-                    )
+                    self.run_worker(self._build_status_screen(), exclusive=True)
                     return
                 self.push_screen(
                     self._wizard_screen,
@@ -262,11 +309,8 @@ class InstallerApp(App):
         validation and raw-key preservation.
         """
         if config is None:
-            # User cancelled — go back to plugin selection
-            self.push_screen(
-                PluginSelectScreen(branch=self._branch),
-                callback=self._on_plugins_selected,
-            )
+            # User cancelled — go back to plugin status screen
+            self.run_worker(self._build_status_screen(), exclusive=True)
             return
 
         self.wizard_config = config
@@ -352,7 +396,7 @@ class InstallerApp(App):
         """Compute settings.json hooks diff and show review screen if changes exist."""
         plugin_dirs = getattr(self, "_plugin_dirs", [])
         if not plugin_dirs:
-            self.run_worker(self._detect_and_route_install(), exclusive=True)
+            self._start_status_install()
             return
 
         from installer.settings_hooks import (
@@ -365,12 +409,12 @@ class InstallerApp(App):
             diffs = compute_settings_hooks_diff(settings_path, plugin_dirs)
         except SettingsHooksError as exc:
             self._show_error(f"Failed to compute settings.json hooks diff: {exc}")
-            self.run_worker(self._detect_and_route_install(), exclusive=True)
+            self._start_status_install()
             return
 
         actionable = [d for d in diffs if d.kind in ("new", "changed", "removed")]
         if not actionable:
-            self.run_worker(self._detect_and_route_install(), exclusive=True)
+            self._start_status_install()
             return
 
         self._settings_hooks_diffs = diffs
@@ -403,163 +447,139 @@ class InstallerApp(App):
                 except SettingsHooksError as exc:
                     self._show_error(f"Failed to apply settings.json hooks: {exc}")
 
-        self.run_worker(self._detect_and_route_install(), exclusive=True)
+        self._start_status_install()
 
-    async def _detect_and_route_install(self) -> None:
-        """Check installed plugins and route to appropriate install flow."""
-        registered = await asyncio.to_thread(check_marketplace_registered)
-        installed_ids = (
-            await asyncio.to_thread(get_installed_plugins) if registered else []
-        )
-        installed_names = {pid.split("@")[0] for pid in installed_ids}
-
-        selected = set(self.selected_plugins)
-        already = selected & installed_names
-        missing = selected - installed_names
-
-        if already and not missing:
-            # All selected plugins already installed — ask reinstall or exit
-            self.app.call_later(self._show_all_installed_prompt, sorted(already))
-        elif already and missing:
-            # Some installed, some missing — install only missing
-            self.app.call_later(
-                self._start_install_missing, sorted(missing), sorted(already)
-            )
-        else:
-            # Nothing installed — fresh install all
-            self.app.call_later(self._start_install_all)
-
-    def _show_all_installed_prompt(self, already: list[str]) -> None:
-        """All selected plugins are already installed — ask user what to do."""
-        self.push_screen(
-            ConfirmScreen(
-                title="All Plugins Already Installed",
-                message=(
-                    f"All selected plugins are already installed:\n"
-                    f"{', '.join(already)}\n\n"
-                    f"Reinstall them? (remove marketplace + re-add + install)"
-                ),
-                confirm_label="Reinstall",
-                cancel_label="Exit",
-            ),
-            callback=self._on_all_installed_choice,
-        )
-
-    def _on_all_installed_choice(self, result: ConfirmResult) -> None:
-        """Handle reinstall-all or exit choice."""
-        if not result.confirmed:
+    def _start_status_install(self) -> None:
+        """Launch the status-driven install worker for ``self._pending_actions``."""
+        actions = getattr(self, "_pending_actions", [])
+        if not actions:
             self.exit()
             return
-        self._reinstall_marketplace = True
-        self._start_install_all()
-
-    def _start_install_missing(self, missing: list[str], already: list[str]) -> None:
-        """Install only missing plugins."""
-        total = len(missing) + 1  # +1 for marketplace check
+        total = len(actions) + 1  # +1 for marketplace check
         progress = ProgressScreen(
-            description=f"Installing {len(missing)} missing plugins...",
+            description=f"Processing {len(actions)} plugin actions...",
             total=total,
         )
         self.push_screen(progress, callback=self._on_progress_done)
         self.run_worker(
-            self._run_install_worker(missing, progress, skip_installed=True),
+            self._run_status_install_worker(actions, progress),
             exclusive=True,
         )
 
-    def _start_install_all(self) -> None:
-        """Install (or reinstall) all selected plugins."""
-        progress = ProgressScreen(
-            description="Installing plugins...",
-            total=len(self.selected_plugins) + 1,
-        )
-        self.push_screen(progress, callback=self._on_progress_done)
-        reinstall = getattr(self, "_reinstall_marketplace", False)
-        self.run_worker(
-            self._run_install_worker(
-                list(self.selected_plugins),
-                progress,
-                force_reinstall_marketplace=reinstall,
-            ),
-            exclusive=True,
-        )
-
-    async def _run_install_worker(
+    async def _run_status_install_worker(
         self,
-        plugins: list[str],
+        actions: list[tuple[str, str]],
         progress: ProgressScreen,
-        skip_installed: bool = False,
-        force_reinstall_marketplace: bool = False,
-    ) -> None:
-        """Register marketplace and install each selected plugin."""
+    ) -> list[PluginOutcome]:
+        """Execute each ``(plugin_name, action)`` tuple and return outcomes.
+
+        Dispatches ``install_plugin`` / ``uninstall_plugin`` via
+        ``asyncio.to_thread``, catching ``InstallerError`` per plugin so one
+        failure doesn't abort the batch. Writes a progress log line per
+        action and pushes a ``SummaryScreen`` with the aggregated outcomes.
+        """
         await progress.wait_ready()
         branch = self._branch
+        outcomes: list[PluginOutcome] = []
 
-        # Marketplace setup
+        # Marketplace setup — shared prelude
         try:
             progress.write_log("[bold]Checking marketplace...[/bold]")
-            if force_reinstall_marketplace:
-                progress.write_log("  Removing and re-adding marketplace...")
+            registered = await asyncio.to_thread(check_marketplace_registered)
+            if not registered:
+                branch_msg = f" (branch: {branch})" if branch else ""
+                progress.write_log(f"  Adding marketplace...{branch_msg}")
+                await asyncio.to_thread(add_marketplace, branch=branch)
+                progress.write_log("  [green]Marketplace registered.[/green]")
+            elif branch:
+                progress.write_log(f"  Re-adding for branch: {branch}")
                 await asyncio.to_thread(remove_marketplace)
                 await asyncio.to_thread(add_marketplace, branch=branch)
-                progress.write_log("  [green]Marketplace reinstalled.[/green]")
+                progress.write_log(f"  [green]Updated to branch {branch}.[/green]")
             else:
-                registered = await asyncio.to_thread(check_marketplace_registered)
-                if not registered:
-                    branch_msg = f" (branch: {branch})" if branch else ""
-                    progress.write_log(f"  Adding marketplace...{branch_msg}")
-                    await asyncio.to_thread(add_marketplace, branch=branch)
-                    progress.write_log("  [green]Marketplace registered.[/green]")
-                elif branch:
-                    progress.write_log(f"  Re-adding for branch: {branch}")
-                    await asyncio.to_thread(remove_marketplace)
-                    await asyncio.to_thread(add_marketplace, branch=branch)
-                    progress.write_log(f"  [green]Updated to branch {branch}.[/green]")
-                else:
-                    progress.write_log("  [dim]Already registered.[/dim]")
+                progress.write_log("  [dim]Already registered.[/dim]")
             progress.advance(1, detail="Marketplace ready")
         except InstallerError as exc:
             progress.write_log(f"  [red]Error: {exc}[/red]")
-            return
+            # Record a synthetic outcome so the summary surfaces the failure.
+            outcomes.append(
+                PluginOutcome(
+                    name="<marketplace>",
+                    action="register",
+                    status="failed",
+                    error=str(exc),
+                )
+            )
+            self._push_summary(outcomes)
+            return outcomes
 
         # Build name→ID map
-        progress.write_log("[bold]Discovering plugins...[/bold]")
-        available = await asyncio.to_thread(get_available_plugins)
-        installed_ids = await asyncio.to_thread(get_installed_plugins)
+        try:
+            available = await asyncio.to_thread(get_available_plugins)
+            installed_ids = await asyncio.to_thread(get_installed_plugins)
+        except InstallerError as exc:
+            progress.write_log(f"  [red]Error listing plugins: {exc}[/red]")
+            outcomes.append(
+                PluginOutcome(
+                    name="<plugin-list>",
+                    action="list",
+                    status="failed",
+                    error=str(exc),
+                )
+            )
+            self._push_summary(outcomes)
+            return outcomes
+
         name_to_id: dict[str, str] = {}
         for pid in available + installed_ids:
             name = pid.split("@")[0]
             name_to_id.setdefault(name, pid)
-        installed_names = {pid.split("@")[0] for pid in installed_ids}
-        progress.write_log(
-            f"  {len(available)} available, {len(installed_ids)} installed"
-        )
 
-        # Install plugins
-        done: set[str] = set()
-        for plugin_name in plugins:
-            plugin_id = name_to_id.get(plugin_name)
-            if plugin_id is None:
-                progress.write_log(f"  [red]✗ {plugin_name} not found[/red]")
-                progress.advance(1, detail=f"Skipped: {plugin_name}")
-                continue
-
-            if skip_installed and plugin_name in installed_names:
-                progress.write_log(f"  [dim]✓ {plugin_name} already installed[/dim]")
-                progress.advance(1, detail=f"Skipped: {plugin_name}")
-                continue
-
+        # Dispatch actions
+        for plugin_name, action in actions:
+            plugin_id = name_to_id.get(
+                plugin_name, f"{plugin_name}@claude-project-manager"
+            )
             try:
-                if plugin_name in installed_names:
-                    progress.write_log(f"  Uninstalling {plugin_name}...")
+                if action == "install":
+                    progress.write_log(f"  Installing {plugin_id}...")
+                    await asyncio.to_thread(install_plugin, plugin_id)
+                elif action == "reinstall":
+                    progress.write_log(f"  Reinstalling {plugin_id}...")
                     await asyncio.to_thread(uninstall_plugin, plugin_id)
-                progress.write_log(f"  Installing {plugin_id}...")
-                await asyncio.to_thread(install_plugin, plugin_id)
-                done.add(plugin_name)
-                progress.write_log(f"  [green]✓ {plugin_name} installed[/green]")
-                progress.advance(1, detail=f"Installed {plugin_name}")
+                    await asyncio.to_thread(install_plugin, plugin_id)
+                elif action == "uninstall":
+                    progress.write_log(f"  Uninstalling {plugin_id}...")
+                    await asyncio.to_thread(uninstall_plugin, plugin_id)
+                else:
+                    progress.write_log(
+                        f"  [dim]Skipping {plugin_name} ({action})[/dim]"
+                    )
+                    progress.advance(1, detail=f"Skipped: {plugin_name}")
+                    continue
+                progress.write_log(f"  [green]✓ {plugin_name} {action}[/green]")
+                progress.advance(1, detail=f"{action}: {plugin_name}")
+                outcomes.append(
+                    PluginOutcome(name=plugin_name, action=action, status="ok")
+                )
             except InstallerError as exc:
-                progress.write_log(f"  [red]✗ {plugin_name}: {exc}[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name} {action}: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
+                outcomes.append(
+                    PluginOutcome(
+                        name=plugin_name,
+                        action=action,
+                        status="failed",
+                        error=str(exc),
+                    )
+                )
+
+        self._push_summary(outcomes)
+        return outcomes
+
+    def _push_summary(self, outcomes: list[PluginOutcome]) -> None:
+        """Push the post-install ``SummaryScreen`` on the Textual event loop."""
+        self.call_later(self.push_screen, SummaryScreen(outcomes=outcomes))
 
     def _show_error(self, message: str) -> None:
         """Surface an error to the user via the placeholder Static + log."""
