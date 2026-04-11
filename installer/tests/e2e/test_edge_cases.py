@@ -8,7 +8,7 @@ import pytest
 
 from installer.app import InstallerApp
 from installer.errors import InstallerError
-from installer.screens.plugin_select import PluginSelectScreen
+from installer.screens.plugin_select import PluginStatusScreen
 from installer.screens.wizard import WizardScreen
 
 from .conftest import assert_all_visible
@@ -21,15 +21,24 @@ from .conftest import assert_all_visible
 
 @pytest.fixture(autouse=True)
 def _patch_marketplace_path(marketplace_json, monkeypatch):
-    """Point load_plugins at the test marketplace.json for all tests."""
+    """Point all marketplace readers at the test marketplace.json."""
     monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", marketplace_json)
+    monkeypatch.setattr("installer.update._MARKETPLACE_PATH", marketplace_json)
 
 
 @pytest.fixture()
-def _fresh_install(mock_plugin_cli):
+def _fresh_install(mock_plugin_cli, monkeypatch):
     """Override mock_plugin_cli so get_installed_plugins returns empty (fresh install)."""
     mock_plugin_cli["get_installed_plugins"].return_value = []
     mock_plugin_cli["check_marketplace_registered"].return_value = False
+    monkeypatch.setattr("installer.plugin_status.get_installed_plugins", lambda: [])
+
+
+def _install_only(screen, names: set[str]) -> None:
+    """Mark every plugin outside *names* as skip on a PluginStatusScreen."""
+    for plugin_name in list(screen._actions.keys()):
+        if plugin_name not in names:
+            screen._actions[plugin_name] = "skip"
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +50,7 @@ class TestTerminalResize:
     """Verify the app survives a mid-screen terminal resize."""
 
     @pytest.mark.asyncio
-    async def test_resize_plugin_select_screen(self, e2e_app, _fresh_install):
+    async def test_resize_plugin_status_screen(self, e2e_app, _fresh_install):
         """Start at 120x40, resize to 80x20, verify no crash and widgets visible."""
         app: InstallerApp = e2e_app(mode="install")
 
@@ -50,17 +59,15 @@ class TestTerminalResize:
             await pilot.pause()
 
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             assert_all_visible(screen)
 
-            # Resize to a smaller terminal
             await pilot.resize_terminal(80, 20)
             await pilot.pause()
             await pilot.pause()
 
-            # Screen should still be PluginSelectScreen (no crash)
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
             assert_all_visible(screen)
 
     @pytest.mark.asyncio
@@ -72,10 +79,9 @@ class TestTerminalResize:
             await pilot.pause()
             await pilot.pause()
 
-            # Advance to wizard by clicking the confirm button explicitly
-            # (pressing enter when DataTable has focus toggles a row instead)
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
+            _install_only(screen, {"sandbox", "router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -84,7 +90,6 @@ class TestTerminalResize:
             assert isinstance(screen, WizardScreen)
             assert_all_visible(screen)
 
-            # Resize
             await pilot.resize_terminal(80, 20)
             await pilot.pause()
             await pilot.pause()
@@ -99,12 +104,26 @@ class TestTerminalResize:
 # ---------------------------------------------------------------------------
 
 
-class TestPluginSelectKeyboardNav:
-    """Verify tab-through-focusable-elements on PluginSelectScreen."""
+class TestPluginStatusKeyboardNav:
+    """Verify tab-through-focusable-elements on PluginStatusScreen."""
 
     @pytest.mark.asyncio
-    async def test_tab_moves_focus(self, e2e_app):
-        """Tab through focusable elements; focused widget changes each time."""
+    async def test_tab_moves_focus(self, e2e_app, mock_plugin_cli, monkeypatch):
+        """Tab through focusable elements; focused widget changes each time.
+
+        Mixes installed and available plugins so at least two tables are
+        non-empty and Tab can meaningfully advance focus between them.
+        """
+        # Use the default mock_plugin_cli — it reports proj/router/sandbox installed,
+        # leaving 6 available plugins so both "installed" and "available" tables are non-empty.
+        monkeypatch.setattr(
+            "installer.plugin_status.get_installed_plugins",
+            lambda: [
+                "proj@claude-project-manager",
+                "router@claude-project-manager",
+                "sandbox@claude-project-manager",
+            ],
+        )
         app: InstallerApp = e2e_app(mode="install")
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -112,10 +131,9 @@ class TestPluginSelectKeyboardNav:
             await pilot.pause()
 
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
 
             seen_ids: list[str | None] = []
-            # Tab multiple times and record focused widget identity
             for _ in range(6):
                 focused = app.focused
                 fid = focused.id if focused else None
@@ -123,7 +141,6 @@ class TestPluginSelectKeyboardNav:
                 await pilot.press("tab")
                 await pilot.pause()
 
-            # At least 2 distinct focusable elements were visited
             unique = set(seen_ids)
             assert len(unique) >= 2, f"Expected multiple focus targets, got {unique}"
 
@@ -145,14 +162,11 @@ class TestWizardKeyboardNav:
             await pilot.pause()
             await pilot.pause()
 
-            # Advance to wizard with all plugins to get maximum fields
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
 
-            # Select all plugins and confirm by clicking the button
-            # (pressing enter when DataTable has focus toggles a row instead)
-            await pilot.press("a")
-            await pilot.pause()
+            # Restrict to core plugins that do not trigger integration config screens.
+            _install_only(screen, {"sandbox", "router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -198,10 +212,9 @@ class TestInstallError:
             await pilot.pause()
             await pilot.pause()
 
-            # Select defaults and confirm by clicking the button
-            # (pressing enter when DataTable has focus toggles a row instead)
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
+            _install_only(screen, {"sandbox", "router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -233,16 +246,17 @@ class TestInstallError:
 
 
 class TestEmptyMarketplace:
-    """Provide empty marketplace.json -> PluginSelectScreen handles gracefully."""
+    """Provide empty marketplace.json -> PluginStatusScreen handles gracefully."""
 
     @pytest.mark.asyncio
     async def test_empty_marketplace_no_crash(
         self, e2e_app, _fresh_install, tmp_path, monkeypatch
     ):
-        """Empty plugins list does not crash; table is populated with zero rows."""
+        """Empty plugins list does not crash; status screen shows zero rows."""
         empty_mp = tmp_path / "empty_marketplace.json"
         empty_mp.write_text(json.dumps({"plugins": []}), encoding="utf-8")
         monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", empty_mp)
+        monkeypatch.setattr("installer.update._MARKETPLACE_PATH", empty_mp)
 
         app: InstallerApp = e2e_app(mode="install")
 
@@ -251,18 +265,15 @@ class TestEmptyMarketplace:
             await pilot.pause()
 
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
+            assert screen._statuses == []
+            assert screen._actions == {}
 
-            # No plugins loaded
-            assert screen._plugins == []
-            assert screen._selected == set()
-
-            # Confirming empty selection should not crash
-            await pilot.press("enter")
+            # Confirm with zero actions — should dismiss without crash.
+            screen.action_confirm()
             await pilot.pause()
             await pilot.pause()
 
-        # App should exit with empty selection
         assert app.selected_plugins == []
 
 
@@ -275,22 +286,29 @@ class TestCorruptedMarketplaceJSON:
     """Provide invalid JSON file -> verify error handling."""
 
     @pytest.mark.asyncio
-    async def test_corrupted_json_raises_or_handles(
+    async def test_corrupted_json_does_not_crash_app(
         self, e2e_app, _fresh_install, tmp_path, monkeypatch
     ):
-        """Invalid JSON causes an error during load_plugins (json.JSONDecodeError)."""
+        """Invalid JSON surfaces via the worker error path without crashing the app.
+
+        Under the PluginStatusScreen flow, ``build_plugin_status_list`` runs in a
+        background worker; a JSONDecodeError is captured by the worker and should
+        not propagate out of ``run_test``.
+        """
         bad_mp = tmp_path / "bad_marketplace.json"
         bad_mp.write_text("{not valid json!!!}", encoding="utf-8")
         monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", bad_mp)
+        monkeypatch.setattr("installer.update._MARKETPLACE_PATH", bad_mp)
 
         app: InstallerApp = e2e_app(mode="install")
 
-        # The app should either raise during mount or handle it gracefully.
-        # load_plugins calls json.loads which will raise JSONDecodeError.
-        with pytest.raises(Exception):
-            async with app.run_test(size=(120, 40)) as pilot:
-                await pilot.pause()
-                await pilot.pause()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            # PluginStatusScreen should not have been pushed since the worker
+            # failed to build a status list. The app remains in the initial
+            # (loading/placeholder) state without crashing.
+            assert not isinstance(app.screen, PluginStatusScreen)
 
 
 # ---------------------------------------------------------------------------
@@ -365,54 +383,11 @@ class TestAllUpToDate:
 # ---------------------------------------------------------------------------
 
 
-class TestPluginSelectShortcuts:
-    """Test 'a' (select all), 'n' (select none), 'q' (quit) shortcuts."""
+class TestPluginStatusShortcuts:
+    """Test 'q' quit shortcut on PluginStatusScreen."""
 
     @pytest.mark.asyncio
-    async def test_select_all_shortcut(self, e2e_app):
-        """Pressing 'a' selects all plugins."""
-        app: InstallerApp = e2e_app(mode="install")
-
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            await pilot.pause()
-
-            screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
-
-            # First deselect all
-            await pilot.press("n")
-            await pilot.pause()
-            assert len(screen._selected) == 0
-
-            # Select all
-            await pilot.press("a")
-            await pilot.pause()
-            assert len(screen._selected) == len(screen._plugins)
-            assert len(screen._selected) == 9  # all 9 plugins
-
-    @pytest.mark.asyncio
-    async def test_select_none_shortcut(self, e2e_app):
-        """Pressing 'n' deselects all plugins."""
-        app: InstallerApp = e2e_app(mode="install")
-
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            await pilot.pause()
-
-            screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
-
-            # Default has some selected
-            assert len(screen._selected) > 0
-
-            # Deselect all
-            await pilot.press("n")
-            await pilot.pause()
-            assert len(screen._selected) == 0
-
-    @pytest.mark.asyncio
-    async def test_quit_shortcut(self, e2e_app):
+    async def test_quit_shortcut(self, e2e_app, _fresh_install):
         """Pressing 'q' dismisses the screen with empty list."""
         app: InstallerApp = e2e_app(mode="install")
 
@@ -421,42 +396,88 @@ class TestPluginSelectShortcuts:
             await pilot.pause()
 
             screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
+            assert isinstance(screen, PluginStatusScreen)
 
             await pilot.press("q")
             await pilot.pause()
             await pilot.pause()
 
-        # App should exit with empty selection
         assert app.selected_plugins == []
 
+
+# ---------------------------------------------------------------------------
+# 5. PluginStatusScreen keyboard navigation
+# ---------------------------------------------------------------------------
+
+
+class TestPluginStatusScreenKeyboardNavigation:
+    """Verify the three-column PluginStatusScreen handles keyboard nav without crashing."""
+
     @pytest.mark.asyncio
-    async def test_space_toggles_selection(self, e2e_app):
-        """Pressing space toggles the currently highlighted plugin."""
-        app: InstallerApp = e2e_app(mode="install")
+    async def test_plugin_status_screen_keyboard_navigation(self) -> None:
+        """Drive Tab + arrow keys + Space + Enter through the status screen."""
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
 
-        async with app.run_test(size=(120, 40)) as pilot:
+        from installer.plugin_status import PluginStatus
+        from installer.screens.plugin_select import PluginStatusScreen
+
+        class _Host(App):
+            CSS = "Screen { align: center middle; }"
+
+            def compose(self) -> ComposeResult:
+                yield Static("")
+
+        statuses = [
+            PluginStatus(
+                name="router",
+                installed_version="2.0.0",
+                available_version="2.0.0",
+                state="installed",
+            ),
+            PluginStatus(
+                name="proj",
+                installed_version="3.5.0",
+                available_version="4.0.0",
+                state="outdated",
+            ),
+            PluginStatus(
+                name="trello",
+                installed_version=None,
+                available_version="3.0.0",
+                state="available",
+            ),
+        ]
+
+        captured: list[list[tuple[str, str]]] = []
+
+        host = _Host()
+        async with host.run_test(size=(120, 40)) as pilot:
+            screen = PluginStatusScreen(statuses=statuses)
+            host.push_screen(screen, callback=lambda r: captured.append(r))
             await pilot.pause()
             await pilot.pause()
 
-            screen = app.screen
-            assert isinstance(screen, PluginSelectScreen)
-
-            # Start fresh: deselect all
-            await pilot.press("n")
+            # Tab to cycle through columns — each press should advance focus.
+            await pilot.press("tab")
             await pilot.pause()
-            assert len(screen._selected) == 0
+            await pilot.press("tab")
+            await pilot.pause()
 
-            # The cursor should be on the first row (possibly a category row).
-            # Move down to reach a plugin row.
+            # Arrow-down inside the currently focused table.
             await pilot.press("down")
             await pilot.pause()
 
-            # Toggle with space
-            before = len(screen._selected)
+            # Space cycles the action on the focused row.
             await pilot.press("space")
             await pilot.pause()
-            after = len(screen._selected)
 
-            # Selection count should have changed
-            assert after != before, "Space should toggle a plugin selection"
+            # Confirm — this should dismiss without raising.
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+        assert captured, "PluginStatusScreen did not dismiss"
+        for name, action in captured[0]:
+            assert action in {"install", "reinstall", "uninstall"}
+            assert name in {"router", "proj", "trello"}

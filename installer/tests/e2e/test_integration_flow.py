@@ -13,7 +13,7 @@ import yaml
 
 from installer.app import InstallerApp
 from installer.screens.integration_config import TodoistConfigScreen
-from installer.screens.plugin_select import PluginSelectScreen
+from installer.screens.plugin_select import PluginStatusScreen
 from installer.screens.wizard import WizardScreen
 
 from .conftest import assert_all_visible
@@ -26,15 +26,17 @@ from .conftest import assert_all_visible
 
 @pytest.fixture(autouse=True)
 def _patch_marketplace_path(marketplace_json, monkeypatch):
-    """Point load_plugins at the test marketplace.json for all tests."""
+    """Point all marketplace readers at the test marketplace.json."""
     monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", marketplace_json)
+    monkeypatch.setattr("installer.update._MARKETPLACE_PATH", marketplace_json)
 
 
 @pytest.fixture()
-def _fresh_install(mock_plugin_cli):
+def _fresh_install(mock_plugin_cli, monkeypatch):
     """Override mock_plugin_cli so get_installed_plugins returns empty (fresh install)."""
     mock_plugin_cli["get_installed_plugins"].return_value = []
     mock_plugin_cli["check_marketplace_registered"].return_value = False
+    monkeypatch.setattr("installer.plugin_status.get_installed_plugins", lambda: [])
 
 
 @pytest.fixture()
@@ -60,16 +62,20 @@ def _mock_httpx(monkeypatch):
 
 
 async def _select_todoist_and_advance(app: InstallerApp, pilot) -> None:
-    """Select todoist plugin on PluginSelectScreen and advance to WizardScreen."""
+    """Restrict install to todoist (+ core) on PluginStatusScreen and advance."""
     await pilot.pause()
     await pilot.pause()
 
     screen = app.screen
-    assert isinstance(screen, PluginSelectScreen)
+    assert isinstance(screen, PluginStatusScreen)
 
-    # Add todoist to selection (defaults have sandbox, hooks, proj)
-    screen._toggle_plugin("todoist")
-    assert "todoist" in screen._selected
+    # Restrict to todoist + core plugins that don't trigger other integration
+    # config screens. Every remaining plugin gets action=skip.
+    allowed = {"todoist", "sandbox", "router", "proj"}
+    for plugin_name in list(screen._actions.keys()):
+        if plugin_name not in allowed:
+            screen._actions[plugin_name] = "skip"
+    assert screen._actions["todoist"] == "install"
 
     btn = screen.query_one("#btn-confirm")
     await pilot.click(btn)
