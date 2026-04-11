@@ -24,7 +24,7 @@ Refine todo: $ARGUMENTS
 
 **3.** Determine agent set and spawn in parallel (general-purpose, read-only: `Read, Glob, Grep`):
 
-When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="refine-review-{todo_id}", description="Refine review agents for todo {todo_id}")` and spawn each Agent with `team_name="refine-review-{todo_id}"`. After all agents return (step 4), call `TeamDelete(team_name="refine-review-{todo_id}")`.
 
 Load the todo's `tags` field from todo context. Select agents per the agent selection logic below. Spawn all selected agents in parallel:
 
@@ -135,7 +135,7 @@ Each agent produces this exact structure:
 
 If an agent finds nothing: all three sections are present, with Critical Issues and Suggestions empty, and Confirmed Sound listing what was validated.
 
-**4.** Wait for all agents. If any agent fails/times out: report partial results from succeeded agents, note the failure.
+**4.** Wait for all agents. If any agent fails/times out: report partial results from succeeded agents, note the failure. After collecting results, call `TeamDelete(team_name="refine-review-{todo_id}")` to tear down the team.
 
 **5.** Synthesize into Refinement Report:
 

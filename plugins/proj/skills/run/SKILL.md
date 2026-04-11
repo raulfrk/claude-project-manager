@@ -225,7 +225,7 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER runs under `--bal
 
 **Agents (spawn in parallel via `Task` tool, one Task call per agent per todo)**:
 
-When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="preflight-adversarial-define-{todo_id}", description="Adversarial review agents (Ambiguity, Completeness, Research Validation) for todo {todo_id}")` and spawn each Agent with `team_name="preflight-adversarial-define-{todo_id}"`. After all agents return and findings are aggregated, call `TeamDelete(team_name="preflight-adversarial-define-{todo_id}")`.
 
 | Agent | Reads | Checks |
 |-------|-------|--------|
@@ -946,11 +946,11 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced
 
 **Batch sampling**: if the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (ranked by the 7-dimension complexity score). Override with `--force-preflight-all`.
 
-When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning any review agents for this batch, call `TeamCreate(name="preflight-adversarial-define-batch-{timestamp}", description="Adversarial review agents for sampled batch todos")` and spawn each Agent with that `team_name`. After all agents return and findings are aggregated (below), call `TeamDelete(team_name="preflight-adversarial-define-batch-{timestamp}")`.
 
 For each sampled todo, spawn the 3 review agents (Ambiguity, Completeness, Research Validation) **in parallel** (one Task call per agent per todo). Same tools, timeout, JSON schema, and severity semantics as the single-ID mode's Phase A.5b. See the Preflight Agents Reference appendix for prompt templates.
 
-After all agents return: aggregate findings into a single combined table keyed by todo. Apply the same BLOCKING prompt flow as structural checks. Timeouts and malformed JSON demote to WARNING.
+After all agents return: aggregate findings into a single combined table keyed by todo. Apply the same BLOCKING prompt flow as structural checks. Timeouts and malformed JSON demote to WARNING. Then call `TeamDelete(team_name="preflight-adversarial-define-batch-{timestamp}")`.
 
 **Phase B — Remaining steps (parallel agents):**
 
@@ -1183,7 +1183,7 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced
 
 **Batch sampling**: when the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (same ranking as Phase A.5b). Override with `--force-preflight-all`.
 
-When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning any pre-execute review agents for this batch, call `TeamCreate(name="preflight-adversarial-execute-{timestamp}", description="Pre-execute adversarial review agents (File Path Verifier, Spec-Plan Alignment, Impact Scanner)")` and spawn each Agent with that `team_name`. After findings aggregation completes, call `TeamDelete(team_name="preflight-adversarial-execute-{timestamp}")`.
 
 For each sampled todo, spawn 3 read-only agents **in parallel** via the Task tool:
 

@@ -277,7 +277,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo covering files
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs and their plan summaries.
 
 **Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-{timestamp}")`.
 Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
 Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
 Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
@@ -448,7 +448,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo covering files
      Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 **Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-indep-{timestamp}", description="Cross-review agents for N independent-todo plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-indep-{timestamp}")`.
 Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
 Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
 Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
@@ -575,7 +575,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo. Include any R
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs, their batch assignments, and plan summaries.
 
 **Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-deps-{timestamp}", description="Cross-review agents for N dependency-batched plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-deps-{timestamp}")`.
 Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
 Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
 Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
