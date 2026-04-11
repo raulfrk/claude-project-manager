@@ -11,12 +11,15 @@ import pytest
 import yaml
 
 from installer.settings_hooks import (
+    SettingsDocument,
     SettingsHookDiff,
     SettingsHooksError,
     _backup_with_retention,
+    _extract_cpm_id_from_command,
     _read_settings_json,
     apply_settings_hooks_diffs,
     compute_settings_hooks_diff,
+    discover_managed_ids,
     is_managed_entry,
     merge_settings_defaults,
     resolve_command_template,
@@ -214,33 +217,44 @@ class TestComputeSettingsHooksDiff:
         assert diffs[0].kind == "changed"
 
     def test_removed_when_in_actual_but_not_desired(self, tmp_path: Path) -> None:
-        """A managed id still in settings.json but present in desired (same id reused)
-        is `unchanged` or `changed`; drops from desired are covered by
-        test_orphan_managed_entry_detected_via_direct_apply path elsewhere.
-        Here we verify the positive case: diff carries an id listed in desired and
-        the stale matcher is tracked as the `actual`."""
+        """Orphan managed entry (in settings.json, NOT in any plugin default)
+        MUST surface as a `removed` diff. This is the regression fix for the
+        previously-unreachable `removed` branch — see todo 517."""
         plugin = tmp_path / "p"
-        _write_plugin_default(plugin, [_sample_entry("id-a", matchers=["startup"])])
+        # Desired contains id-a only; settings.json contains id-a (unchanged)
+        # PLUS an orphan id-gone that has no corresponding plugin default.
+        entry = _sample_entry("id-a", matchers=["startup"])
+        _write_plugin_default(plugin, [entry])
+        resolved_cmd = resolve_command_template(entry, Path())
         settings_data = {
             "hooks": {
                 "SessionStart": [
                     {
                         "matcher": "startup",
                         "__cpm_id": "id-a",
-                        "hooks": [
-                            {"command": "# cpm:id-a\nstale body", "type": "command"}
-                        ],
-                    }
+                        "hooks": [{"command": resolved_cmd, "type": "command"}],
+                    },
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "id-gone",
+                        "hooks": [{"command": "# cpm:id-gone\nrun", "type": "command"}],
+                    },
                 ]
             }
         }
         settings = tmp_path / "settings.json"
         settings.write_text(json.dumps(settings_data))
         diffs = compute_settings_hooks_diff(settings, [plugin])
-        assert len(diffs) == 1
-        assert diffs[0].cpm_id == "id-a"
-        assert diffs[0].kind == "changed"
-        assert diffs[0].actual is not None
+        by_id = {d.cpm_id: d for d in diffs}
+        assert set(by_id) == {"id-a", "id-gone"}
+        assert by_id["id-a"].kind == "unchanged"
+        orphan = by_id["id-gone"]
+        assert orphan.kind == "removed"
+        assert orphan.event == "SessionStart"
+        assert orphan.desired is None
+        assert orphan.actual is not None
+        assert orphan.actual["event"] == "SessionStart"
+        assert orphan.matchers == ["startup"]
 
     def test_symlink_resolved(self, tmp_path: Path) -> None:
         plugin = tmp_path / "p"
@@ -398,6 +412,187 @@ class TestReadSettingsJson:
         p.write_text("[1, 2, 3]")
         with pytest.raises(SettingsHooksError, match="top-level"):
             _read_settings_json(p)
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoverManagedIds — new unit tests for the orphan-detection helper.
+# ---------------------------------------------------------------------------
+
+
+def _doc_with_events(events: dict[str, list[dict]]) -> SettingsDocument:
+    return SettingsDocument.from_dict(
+        Path("/tmp/nonexistent/settings.json"), {"hooks": events}
+    )
+
+
+class TestDiscoverManagedIds:
+    def test_discover_managed_ids_prefix_collision(self) -> None:
+        """`foo` vs `foobar` must not match each other — anchored regex."""
+        doc = _doc_with_events(
+            {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"command": "# cpm:foobar\nrun", "type": "command"}],
+                    }
+                ]
+            }
+        )
+        discovered = discover_managed_ids(doc)
+        assert discovered == [
+            ("SessionStart", "foobar", doc.hooks.events["SessionStart"][0])
+        ]
+        # is_managed_entry must not prefix-match either
+        assert not is_managed_entry(doc.hooks.events["SessionStart"][0], "foo")
+        assert is_managed_entry(doc.hooks.events["SessionStart"][0], "foobar")
+
+    def test_discover_managed_ids_cross_event_collision(self, tmp_path: Path) -> None:
+        """foo desired in SessionStart + foo orphan in SessionEnd →
+        compute emits removed diff ONLY for SessionEnd and preserves
+        SessionStart as unchanged/changed/new."""
+        plugin = tmp_path / "p"
+        entry = _sample_entry("foo", event="SessionStart", matchers=["startup"])
+        _write_plugin_default(plugin, [entry])
+        resolved_cmd = resolve_command_template(entry, Path())
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "foo",
+                        "hooks": [{"command": resolved_cmd, "type": "command"}],
+                    }
+                ],
+                "SessionEnd": [
+                    {
+                        "matcher": "shutdown",
+                        "__cpm_id": "foo",
+                        "hooks": [{"command": "# cpm:foo\nstale", "type": "command"}],
+                    }
+                ],
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+        diffs = compute_settings_hooks_diff(settings, [plugin])
+        by_key = {(d.event, d.cpm_id): d for d in diffs}
+        assert set(by_key) == {("SessionStart", "foo"), ("SessionEnd", "foo")}
+        assert by_key[("SessionStart", "foo")].kind == "unchanged"
+        assert by_key[("SessionEnd", "foo")].kind == "removed"
+        assert by_key[("SessionEnd", "foo")].matchers == ["shutdown"]
+
+    def test_discover_managed_ids_duplicate_occurrence(self, tmp_path: Path) -> None:
+        """Same cpm_id in 2+ matchers within one event → discover returns
+        BOTH tuples; compute emits ONE removed diff via seen-set guard."""
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "orphan",
+                        "hooks": [{"command": "# cpm:orphan\nrun1", "type": "command"}],
+                    },
+                    {
+                        "matcher": "resume",
+                        "__cpm_id": "orphan",
+                        "hooks": [{"command": "# cpm:orphan\nrun2", "type": "command"}],
+                    },
+                ]
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+        # discover returns both occurrences
+        doc = SettingsDocument.from_dict(settings, json.loads(settings.read_text()))
+        discovered = discover_managed_ids(doc)
+        assert len(discovered) == 2
+        assert all(t[1] == "orphan" for t in discovered)
+        # compute emits ONE removed diff (with mass_remove=True since
+        # desired is empty in this test)
+        plugin = tmp_path / "empty_plugin"
+        plugin.mkdir()
+        diffs = compute_settings_hooks_diff(settings, [plugin], mass_remove=True)
+        orphan_diffs = [d for d in diffs if d.cpm_id == "orphan"]
+        assert len(orphan_diffs) == 1
+        assert orphan_diffs[0].kind == "removed"
+
+    def test_discover_managed_ids_metadata_only_block(self) -> None:
+        """Matcher with `__cpm_id` field but NO `hooks` key at all →
+        discover finds it via the field."""
+        doc = _doc_with_events(
+            {"SessionStart": [{"matcher": "startup", "__cpm_id": "meta-only"}]}
+        )
+        discovered = discover_managed_ids(doc)
+        assert len(discovered) == 1
+        event, cpm_id, _ = discovered[0]
+        assert event == "SessionStart"
+        assert cpm_id == "meta-only"
+
+    def test_discover_managed_ids_empty_desired_guard(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Empty desired + non-empty discovered → compute returns []
+        with stderr warning. With mass_remove=True → returns removed diffs."""
+        plugin = tmp_path / "empty_plugin"
+        plugin.mkdir()  # no default-settings-hooks.yaml → desired == {}
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "orphan-1",
+                        "hooks": [
+                            {"command": "# cpm:orphan-1\nrun", "type": "command"}
+                        ],
+                    },
+                    {
+                        "matcher": "resume",
+                        "__cpm_id": "orphan-2",
+                        "hooks": [
+                            {"command": "# cpm:orphan-2\nrun", "type": "command"}
+                        ],
+                    },
+                ]
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+
+        # Default: refuse mass-remove
+        diffs = compute_settings_hooks_diff(settings, [plugin])
+        assert diffs == []
+        captured = capsys.readouterr()
+        assert "refusing to mass-remove" in captured.err
+        assert "2 managed entries" in captured.err
+
+        # Explicit opt-in
+        diffs_mass = compute_settings_hooks_diff(settings, [plugin], mass_remove=True)
+        assert len(diffs_mass) == 2
+        assert all(d.kind == "removed" for d in diffs_mass)
+        assert {d.cpm_id for d in diffs_mass} == {"orphan-1", "orphan-2"}
+
+    def test_discover_managed_ids_mid_line_comment_ignored(self) -> None:
+        """`echo x  # cpm:foo` (mid-line) MUST NOT match the anchored regex."""
+        doc = _doc_with_events(
+            {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {
+                                "command": "echo x  # cpm:foo\necho done",
+                                "type": "command",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        discovered = discover_managed_ids(doc)
+        assert discovered == []
+        assert _extract_cpm_id_from_command("echo x  # cpm:foo\necho done") is None
+        # sanity: line-anchored with only leading whitespace DOES match
+        assert _extract_cpm_id_from_command("  # cpm:foo\n") == "foo"
 
 
 # ---------------------------------------------------------------------------
