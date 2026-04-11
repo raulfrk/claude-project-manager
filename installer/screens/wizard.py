@@ -11,8 +11,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Select, Static, Switch
 
-from installer._config_loader import load_existing_yaml
-from installer.wizard_specs import PROJ_YAML_PROMPTS
+from installer._config_loader import ConfigLoadError, load_existing_yaml
+from installer.wizard_specs import PROJ_YAML_PROMPTS, get_distinct_yaml_files
 
 
 # Plugins that require proj.yaml configuration
@@ -117,14 +117,36 @@ class WizardScreen(Screen[dict[str, Any] | None]):
         self._selected_plugins = selected_plugins
         self._needs_proj = bool(_PROJ_PLUGINS & set(selected_plugins))
         self._needs_worktree = "worktree" in selected_plugins
-        self._existing = self._read_existing_proj_yaml()
+        self._existing: dict[str, dict[str, Any]] = {}
+        self._existing_mtimes: dict[str, float] = {}
+        self._load_errors: dict[str, Exception] = {}
+        self._read_existing_all_yamls()
 
-    def _read_existing_proj_yaml(self) -> dict[str, Any]:
-        """Load ~/.claude/proj.yaml if present, returning {} on missing or parse error."""
-        try:
-            return load_existing_yaml(Path.home() / ".claude" / "proj.yaml")
-        except Exception:
-            return {}
+    def _read_existing_all_yamls(self) -> None:
+        """Load every distinct ~/.claude/<yaml_file>.yaml referenced by PROJ_YAML_PROMPTS.
+
+        Populates self._existing (bucket → dict), self._existing_mtimes (bucket
+        → st_mtime for TOCTOU re-check in the write path), and self._load_errors
+        (bucket → exception, for the corrupt-YAML error surface in 515.8).
+
+        Missing files produce empty buckets with mtime 0.0. ConfigLoadError on
+        any bucket is captured in _load_errors but does NOT abort the wizard —
+        the bucket falls back to {} and defaults.yaml provides the fallback.
+        """
+        claude_home = Path.home() / ".claude"
+        for bucket in get_distinct_yaml_files(PROJ_YAML_PROMPTS):
+            path = claude_home / f"{bucket}.yaml"
+            try:
+                self._existing[bucket] = load_existing_yaml(path)
+            except ConfigLoadError as exc:
+                self._existing[bucket] = {}
+                self._load_errors[bucket] = exc
+            try:
+                self._existing_mtimes[bucket] = path.stat().st_mtime
+            except FileNotFoundError:
+                self._existing_mtimes[bucket] = 0.0
+            except OSError:
+                self._existing_mtimes[bucket] = 0.0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -132,17 +154,19 @@ class WizardScreen(Screen[dict[str, Any] | None]):
             yield Static("Configuration Wizard", id="wizard-title")
             with VerticalScroll(id="wizard-scroll"):
                 current_group: str | None = None
+                proj_bucket = self._existing.get("proj", {})
                 for spec in PROJ_YAML_PROMPTS:
                     if spec.yaml_file != "proj" or spec.tier != "basic":
                         continue
-                    if spec.condition is not None and not spec.condition(
-                        self._existing
-                    ):
+                    # Hard contract: conditions always read the proj bucket,
+                    # regardless of the spec's own yaml_file.
+                    if spec.condition is not None and not spec.condition(proj_bucket):
                         continue
                     if spec.group != current_group:
                         yield Static(f"── {spec.group} ──", classes="group-header")
                         current_group = spec.group
-                    default = spec.default_factory(self._existing)
+                    bucket = self._existing.get(spec.yaml_file, {})
+                    default = spec.default_factory(bucket)
                     widget_id = spec.dotted_key.replace(".", "-")
                     row_id = f"row-{widget_id}"
                     if spec.type == "bool":
@@ -211,7 +235,8 @@ class WizardScreen(Screen[dict[str, Any] | None]):
                 try:
                     answers[spec.dotted_key] = int(value)
                 except (TypeError, ValueError):
-                    answers[spec.dotted_key] = spec.default_factory(self._existing)
+                    bucket = self._existing.get(spec.yaml_file, {})
+                    answers[spec.dotted_key] = spec.default_factory(bucket)
         return answers
 
     @on(Switch.Changed, "#git_tracking-enabled")
@@ -250,7 +275,8 @@ class WizardScreen(Screen[dict[str, Any] | None]):
                     self.dismiss(basic)
 
                 self.app.push_screen(
-                    AdvancedConfigScreen(self._existing, []), _on_advanced
+                    AdvancedConfigScreen(self._existing.get("proj", {}), []),
+                    _on_advanced,
                 )
             except ImportError:
                 self.dismiss(basic)

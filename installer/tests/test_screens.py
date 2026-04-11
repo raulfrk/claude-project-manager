@@ -330,6 +330,54 @@ class TestWizardScreen:
         assert len(results) == 1
         assert results[0] is None
 
+    @pytest.mark.asyncio
+    async def test_read_existing_all_yamls_populates_buckets(
+        self, mock_home: Path
+    ) -> None:
+        """_read_existing_all_yamls loads every distinct yaml_file into its own bucket."""
+        claude = mock_home / ".claude"
+        claude.mkdir(parents=True, exist_ok=True)
+        (claude / "proj.yaml").write_text("tracking_dir: /custom/proj\n")
+        (claude / "worktree.yaml").write_text("worktree_dir: /custom/wt\n")
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = WizardScreen(selected_plugins=["proj", "worktree"])
+            app.push_screen(screen)
+            await pilot.pause()
+            assert screen._existing["proj"] == {"tracking_dir": "/custom/proj"}
+            assert screen._existing["worktree"] == {"worktree_dir": "/custom/wt"}
+            assert screen._existing_mtimes["proj"] > 0
+            assert screen._existing_mtimes["worktree"] > 0
+
+    @pytest.mark.asyncio
+    async def test_read_existing_all_yamls_missing_files_empty(
+        self, mock_home: Path
+    ) -> None:
+        """Missing yaml files produce empty buckets with mtime 0."""
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = WizardScreen(selected_plugins=["proj"])
+            app.push_screen(screen)
+            await pilot.pause()
+            assert screen._existing["proj"] == {}
+            assert screen._existing_mtimes["proj"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_read_existing_all_yamls_corrupt_captured(
+        self, mock_home: Path
+    ) -> None:
+        """Corrupt YAML captured in _load_errors; bucket falls back to {}."""
+        claude = mock_home / ".claude"
+        claude.mkdir(parents=True, exist_ok=True)
+        (claude / "proj.yaml").write_text("foo: bar\n  baz: - - -\n}}\n")
+        app = _TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = WizardScreen(selected_plugins=["proj"])
+            app.push_screen(screen)
+            await pilot.pause()
+            assert screen._existing["proj"] == {}
+            assert "proj" in screen._load_errors
+
     # -- Integration fields no longer in WizardScreen --
     # (Sync toggles moved to dedicated integration config screens;
     #  see test_integration_screens.py for those tests.)
