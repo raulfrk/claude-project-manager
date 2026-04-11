@@ -89,7 +89,7 @@ async def test_e2e_tool_dispatches_correct_payload():
     assert result is not None
     assert len(captured) == 1
     payload = captured[0]
-    assert payload["tool"] == "hooks_fire_tool"
+    assert payload["tool"] == "router_fire_tool"
     assert payload["params"]["trigger_tool"] == "greet"
     assert payload["params"]["depth"] == 0
     source = json.loads(payload["params"]["source_result"])

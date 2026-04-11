@@ -14,7 +14,7 @@ from hook_dispatch.dispatch import (
     _build_hooks_field,
     _dispatch_hook,
     _format_error,
-    _inject_hooks,
+    _inject_dispatch,
     _merge_feedback,
     _resolve_hooks_transport,
     _serialize_result,
@@ -359,7 +359,7 @@ async def test_dispatch_payload_format_unix(mock_mcp, tmp_path, monkeypatch):
     monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
     sockets_dir = tmp_path / ".claude" / "sockets"
     sockets_dir.mkdir(parents=True)
-    (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-99999.sock")
+    (sockets_dir / "router").write_text("/tmp/claude-cpm-router-99999.sock")
 
     enable_hook_dispatch(mock_mcp, hooks_port=19100)
 
@@ -390,7 +390,7 @@ async def test_dispatch_payload_format_unix(mock_mcp, tmp_path, monkeypatch):
     url, kwargs = mock_client.post.call_args[0][0], mock_client.post.call_args[1]
     assert url == "http://localhost/hook"
     payload = kwargs["json"]
-    assert payload["tool"] == "hooks_fire_tool"
+    assert payload["tool"] == "router_fire_tool"
     assert payload["params"]["trigger_tool"] == "payload_tool"
     assert payload["params"]["depth"] == 0
     assert json.loads(payload["params"]["source_result"]) == {"status": "ok"}
@@ -432,8 +432,8 @@ async def test_lazy_resolution_reads_fresh_registry(mock_mcp, tmp_path, monkeypa
     monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
     sockets_dir = tmp_path / ".claude" / "sockets"
     sockets_dir.mkdir(parents=True)
-    registry_file = sockets_dir / "hooks"
-    registry_file.write_text("/tmp/claude-hooks-hooks-11111.sock")
+    registry_file = sockets_dir / "router"
+    registry_file.write_text("/tmp/claude-cpm-router-11111.sock")
 
     enable_hook_dispatch(mock_mcp, hooks_port=19100)
 
@@ -478,7 +478,7 @@ async def test_lazy_resolution_reads_fresh_registry(mock_mcp, tmp_path, monkeypa
         assert call_count == 1
 
         # Simulate hooks server restart — registry now points to 22222
-        registry_file.write_text("/tmp/claude-hooks-hooks-22222.sock")
+        registry_file.write_text("/tmp/claude-cpm-router-22222.sock")
 
         # Second call: must re-resolve, picking up the new path
         await mock_mcp._registered_tools["refreshable_tool"]()
@@ -494,12 +494,12 @@ class TestResolveHooksTransport:
     def test_reads_registry_file_in_unix_mode(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Unix mode reads ~/.claude/sockets/hooks for the socket path."""
+        """Unix mode reads ~/.claude/sockets/router for the socket path."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
-        registry_file = sockets_dir / "hooks"
-        registry_file.write_text("/tmp/claude-hooks-hooks-99999.sock")
+        registry_file = sockets_dir / "router"
+        registry_file.write_text("/tmp/claude-cpm-router-99999.sock")
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
@@ -510,7 +510,7 @@ class TestResolveHooksTransport:
         assert url == "http://localhost/hook"
         assert isinstance(transport, httpx.AsyncHTTPTransport)
         # Verify the transport was configured with the registry socket path
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks-99999.sock"
+        assert transport._pool._uds == "/tmp/claude-cpm-router-99999.sock"
 
     def test_fallback_when_registry_missing_uses_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -519,8 +519,8 @@ class TestResolveHooksTransport:
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
 
         mock_socks = [
-            Path("/tmp/claude-hooks-hooks-111.sock"),
-            Path("/tmp/claude-hooks-hooks-222.sock"),
+            Path("/tmp/claude-cpm-router-111.sock"),
+            Path("/tmp/claude-cpm-router-222.sock"),
         ]
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
@@ -532,7 +532,7 @@ class TestResolveHooksTransport:
 
         assert url == "http://localhost/hook"
         assert isinstance(transport, httpx.AsyncHTTPTransport)
-        assert "claude-hooks-hooks-" in transport._pool._uds
+        assert "claude-cpm-router-" in transport._pool._uds
 
     def test_fallback_when_registry_empty_uses_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -541,9 +541,9 @@ class TestResolveHooksTransport:
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
-        (sockets_dir / "hooks").write_text("   \n")
+        (sockets_dir / "router").write_text("   \n")
 
-        mock_socks = [Path("/tmp/claude-hooks-hooks-333.sock")]
+        mock_socks = [Path("/tmp/claude-cpm-router-333.sock")]
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
             patch("pathlib.Path.glob", return_value=mock_socks),
@@ -553,12 +553,16 @@ class TestResolveHooksTransport:
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
-        assert "claude-hooks-hooks-" in transport._pool._uds
+        assert "claude-cpm-router-" in transport._pool._uds
 
-    def test_fallback_legacy_when_no_glob_matches(
+    def test_no_fallback_when_no_glob_matches(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Falls back to legacy path when registry missing AND no glob matches."""
+        """Returns None transport when registry missing AND no glob matches.
+
+        Per D512.3 (HARD CUT): the legacy compat fallback path was removed.
+        Dispatch should fail rather than silently target a stale path.
+        """
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
 
         with (
@@ -568,7 +572,7 @@ class TestResolveHooksTransport:
             url, transport = _resolve_hooks_transport(19100)
 
         assert url == "http://localhost/hook"
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks.sock"
+        assert transport is None
 
     def test_tcp_mode_uses_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """TCP mode returns http URL with the given port, no UDS."""
@@ -800,13 +804,13 @@ class TestResolveHooksTransportStaleRegistry:
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
         # Registry points to sandbox PID socket that doesn't exist on host
-        (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-10.sock")
+        (sockets_dir / "router").write_text("/tmp/claude-cpm-router-10.sock")
 
-        mock_socks = [Path("/tmp/claude-hooks-hooks-4097643.sock")]
+        mock_socks = [Path("/tmp/claude-cpm-router-4097643.sock")]
         orig_exists = Path.exists
 
         def fake_exists(p: Path) -> bool:
-            if str(p) == "/tmp/claude-hooks-hooks-10.sock":
+            if str(p) == "/tmp/claude-cpm-router-10.sock":
                 return False
             return orig_exists(p)
 
@@ -829,7 +833,7 @@ class TestResolveHooksTransportStaleRegistry:
         ):
             _url, transport = _resolve_hooks_transport(19100)
 
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks-4097643.sock"
+        assert transport._pool._uds == "/tmp/claude-cpm-router-4097643.sock"
 
     def test_valid_registry_used_when_socket_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -838,7 +842,7 @@ class TestResolveHooksTransportStaleRegistry:
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         sockets_dir = tmp_path / ".claude" / "sockets"
         sockets_dir.mkdir(parents=True)
-        (sockets_dir / "hooks").write_text("/tmp/claude-hooks-hooks-99999.sock")
+        (sockets_dir / "router").write_text("/tmp/claude-cpm-router-99999.sock")
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
@@ -846,7 +850,7 @@ class TestResolveHooksTransportStaleRegistry:
         ):
             _url, transport = _resolve_hooks_transport(19100)
 
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks-99999.sock"
+        assert transport._pool._uds == "/tmp/claude-cpm-router-99999.sock"
 
     def test_glob_picks_newest_socket(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -855,14 +859,14 @@ class TestResolveHooksTransportStaleRegistry:
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
 
         mock_socks = [
-            Path("/tmp/claude-hooks-hooks-111.sock"),
-            Path("/tmp/claude-hooks-hooks-222.sock"),
-            Path("/tmp/claude-hooks-hooks-333.sock"),
+            Path("/tmp/claude-cpm-router-111.sock"),
+            Path("/tmp/claude-cpm-router-222.sock"),
+            Path("/tmp/claude-cpm-router-333.sock"),
         ]
         mtimes = {
-            "/tmp/claude-hooks-hooks-111.sock": 1000,
-            "/tmp/claude-hooks-hooks-222.sock": 2000,
-            "/tmp/claude-hooks-hooks-333.sock": 1500,
+            "/tmp/claude-cpm-router-111.sock": 1000,
+            "/tmp/claude-cpm-router-222.sock": 2000,
+            "/tmp/claude-cpm-router-333.sock": 1500,
         }
 
         with (
@@ -877,7 +881,7 @@ class TestResolveHooksTransportStaleRegistry:
             _url, transport = _resolve_hooks_transport(19100)
 
         # 222 has highest mtime
-        assert transport._pool._uds == "/tmp/claude-hooks-hooks-222.sock"
+        assert transport._pool._uds == "/tmp/claude-cpm-router-222.sock"
 
 
 # ── _build_hooks_field ───────────────────────────────────────────────────────
@@ -1040,7 +1044,7 @@ class TestBuildHooksField:
         assert field["errors"] == []
 
 
-# ── _inject_hooks ────────────────────────────────────────────────────────────
+# ── _inject_dispatch ────────────────────────────────────────────────────────────
 
 
 class TestInjectHooks:
@@ -1049,33 +1053,33 @@ class TestInjectHooks:
 
     def test_injects_into_json_object_string(self):
         original = json.dumps({"status": "ok", "data": 42})
-        result = _inject_hooks(original, self._hooks_field())
+        result = _inject_dispatch(original, self._hooks_field())
         parsed = json.loads(result)
         assert parsed["status"] == "ok"
         assert "_hooks" in parsed
 
     def test_wraps_json_non_object(self):
         original = json.dumps([1, 2, 3])
-        result = _inject_hooks(original, self._hooks_field())
+        result = _inject_dispatch(original, self._hooks_field())
         parsed = json.loads(result)
         assert parsed["result"] == [1, 2, 3]
         assert "_hooks" in parsed
 
     def test_wraps_non_json_string(self):
-        result = _inject_hooks("plain string result", self._hooks_field())
+        result = _inject_dispatch("plain string result", self._hooks_field())
         parsed = json.loads(result)
         assert parsed["result"] == "plain string result"
         assert "_hooks" in parsed
 
     def test_wraps_none(self):
-        result = _inject_hooks(None, self._hooks_field())
+        result = _inject_dispatch(None, self._hooks_field())
         parsed = json.loads(result)
         assert parsed["result"] is None
         assert "_hooks" in parsed
 
     def test_injects_into_dict(self):
         original = {"key": "val"}
-        result = _inject_hooks(original, self._hooks_field())
+        result = _inject_dispatch(original, self._hooks_field())
         assert isinstance(result, dict)
         assert result["key"] == "val"
         assert "_hooks" in result
@@ -1084,7 +1088,7 @@ class TestInjectHooks:
         """ContentBlock list gets serialized and wrapped with _hooks."""
         block = MagicMock()
         block.text = "block text"
-        result = _inject_hooks([block], self._hooks_field())
+        result = _inject_dispatch([block], self._hooks_field())
         parsed = json.loads(result)
         assert parsed["result"] == "block text"
         assert "_hooks" in parsed
@@ -1098,7 +1102,7 @@ class TestInjectHooks:
             "errors": [],
         }
         original = json.dumps({"data": "x" * 80_000})  # 80KB base
-        result = _inject_hooks(original, large_hooks)
+        result = _inject_dispatch(original, large_hooks)
         parsed = json.loads(result)
         # Chain should be truncated
         assert parsed["_hooks"]["chain"] == []
