@@ -21,3 +21,10 @@ repos:
         language: system
         pass_filenames: false
         files: '(marketplace\.json|\.test-summary\.json|README\.md)$'
+
+      - id: caveman-guard
+        name: caveman-guard (block caveman markers on main/dev)
+        entry: .pre-commit-hooks/caveman-guard.sh
+        language: system
+        pass_filenames: false
+        always_run: true
