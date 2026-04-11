@@ -71,12 +71,14 @@ sync:
   todoist:
     root_only: false
   trello:
-    default_list: "Todo"
-    on_delete: "archive"
+    default_board_id: ""
+    proj_label_name: "proj"
+    proj_task_label_name: "proj-task"
     list_mappings:
-      backlog: "Backlog"
-      todo: "Todo"
-      in_progress: "In Progress"
-      blocked: "Blocked"
+      created: "Backlog"
       done: "Done"
-      archive: "Archive"
+      projects: "Projects"
+      tasks: "proj-tasks"
+      active: ""
+      pending: ""
+      archived: ""
