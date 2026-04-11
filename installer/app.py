@@ -575,13 +575,6 @@ class InstallerApp(App):
                     )
                 )
 
-        self._push_summary(outcomes)
-        return outcomes
-
-    def _push_summary(self, outcomes: list[PluginOutcome]) -> None:
-        """Push the post-install ``SummaryScreen`` on the Textual event loop."""
-        self.call_later(self.push_screen, SummaryScreen(outcomes=outcomes))
-
         progress.write_log("[bold]Cleaning up orphan plugin caches...[/bold]")
         cache_root = Path.home() / ".claude" / "plugins" / "cache"
         installed_json = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
@@ -598,6 +591,13 @@ class InstallerApp(App):
                 progress.write_log("  [dim]no orphans found[/dim]")
         except Exception as exc:
             progress.write_log(f"  [yellow]cleanup skipped: {exc}[/yellow]")
+
+        self._push_summary(outcomes)
+        return outcomes
+
+    def _push_summary(self, outcomes: list[PluginOutcome]) -> None:
+        """Push the post-install ``SummaryScreen`` on the Textual event loop."""
+        self.call_later(self.push_screen, SummaryScreen(outcomes=outcomes))
 
     def _show_error(self, message: str) -> None:
         """Surface an error to the user via the placeholder Static + log."""
