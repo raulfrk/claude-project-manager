@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hooks-mcp-server"
-version = "2.0.0"
-description = "MCP server for central hook registry with schema-based param mapping"
+name = "router-mcp-server"
+version = "3.0.0"
+description = "MCP server for cpm router plugin (MCP-to-MCP dispatch registry)"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hooks-server = "server.main:main"
+router-server = "server.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server"]

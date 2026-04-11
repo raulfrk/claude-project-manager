@@ -1,4 +1,4 @@
-"""Hooks MCP server entrypoint."""
+"""Router MCP server entrypoint."""
 
 from __future__ import annotations
 
@@ -18,17 +18,17 @@ from server.tools import registry as registry_tools
 from server.tools import sync as sync_tools
 from server.tools import verify as verify_tools
 
-logger = logging.getLogger("hooks")
+logger = logging.getLogger("router")
 
-mcp = FastMCP("hooks")
+mcp = FastMCP("router")
 enable_hook_dispatch(
     mcp,
     exclude=[
-        "hooks_fire_tool",
-        "hooks_list_tool",
-        "hooks_recover_tool",
-        "hooks_sync_tool",
-        "hooks_invocations_tool",
+        "router_fire_tool",
+        "router_list_tool",
+        "router_recover_tool",
+        "router_sync_tool",
+        "router_invocations_tool",
     ],
 )
 registry_tools.register(mcp)
@@ -60,7 +60,7 @@ _run_startup_discovery()
 
 
 def main() -> None:
-    run_dual(mcp, "hooks", default_port=19100)
+    run_dual(mcp, "router", default_port=19100)
 
 
 if __name__ == "__main__":

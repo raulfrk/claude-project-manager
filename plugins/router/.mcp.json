@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "hooks": {
+    "router": {
       "command": "bash",
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/start.sh",
         "${CLAUDE_PLUGIN_ROOT}/server",
-        "hooks-server"
+        "router-server"
       ],
       "timeout": 120
     }
