@@ -323,6 +323,7 @@ class TestWizardScreenExtended:
 
             screen.query_one("#git_tracking-enabled", Switch).focus()
             await pilot.pause()
+            await pilot.pause()
 
             assert pilot.app.focused is not None
             assert pilot.app.focused.id == "git_tracking-enabled"

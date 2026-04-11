@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-import re
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
@@ -14,13 +14,56 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+_SEARCH_THRESHOLD = 0.5
+
+
+def fuzzy_score(query: str, text: str) -> float:
+    """Return a 0.0-1.0 similarity score between a query token and text.
+
+    For short queries (< 3 chars) falls back to exact substring containment.
+    An exact substring match always returns 1.0; otherwise uses
+    SequenceMatcher ratio.
+    """
+    if len(query) < 3:
+        return 1.0 if query.lower() in text.lower() else 0.0
+    text_lower = text.lower()
+    query_lower = query.lower()
+    if query_lower in text_lower:
+        return 1.0
+    return SequenceMatcher(None, query_lower, text_lower).ratio()
+
+
+def score_entry(query: str, entry: dict) -> float:  # type: ignore[type-arg]
+    """Score a decision entry against a query using token-based fuzzy matching.
+
+    Tokenizes the query, scores each token against all entry fields, and
+    returns the mean score across tokens.
+    """
+    tags = entry.get("tags", [])
+    tags_str = " ".join(str(t) for t in tags) if isinstance(tags, list) else str(tags)
+    combined = " ".join(
+        str(f)
+        for f in [
+            entry.get("decision", ""),
+            entry.get("context", ""),
+            tags_str,
+            entry.get("todo_id", ""),
+        ]
+    )
+    tokens = query.split()
+    if not tokens:
+        return 0.0
+    scores = [fuzzy_score(t, combined) for t in tokens]
+    return sum(scores) / len(scores)
+
+
 def register(app: FastMCP) -> None:
     """Register proj_decision_log tool with the MCP app."""
 
     @app.tool(
         description=(
             "Log, search, or list project decisions. "
-            "Actions: 'add' (log a decision), 'search' (find by keyword/regex), "
+            "Actions: 'add' (log a decision), 'search' (find by keyword/fuzzy match), "
             "'list' (recent entries, default 20). "
             "For 'list', pass N via the decision param to override the default count, "
             "or pass a number via the context param to filter entries from the last N days."
@@ -58,27 +101,20 @@ def register(app: FastMCP) -> None:
             entries = storage.load_decisions(cfg, name)
             if not entries:
                 return "No decisions found."
-            try:
-                pattern = re.compile(decision, re.IGNORECASE)
-            except re.error:
-                pattern = re.compile(re.escape(decision), re.IGNORECASE)
-            matches = [
-                e
-                for e in entries
-                if pattern.search(str(e.get("decision", "")))
-                or pattern.search(str(e.get("context", "")))
-            ]
+            scored = [(score_entry(decision, e), e) for e in entries]
+            matches = [(sc, e) for sc, e in scored if sc > _SEARCH_THRESHOLD]
             if not matches:
                 return f"No decisions matching '{decision}'."
+            matches.sort(key=lambda x: x[0], reverse=True)
             matches = matches[:10]
             lines = []
-            for e in matches:
+            for sc, e in matches:
                 ts = str(e.get("timestamp", ""))
                 dec = str(e.get("decision", ""))
                 ctx = str(e.get("context", ""))
                 tid = str(e.get("todo_id", ""))
                 tgs = e.get("tags", [])
-                parts = [f"[{ts}] {dec}"]
+                parts = [f"[{ts}] {dec}  (score: {sc:.2f})"]
                 if ctx:
                     parts.append(f"  context: {ctx}")
                 if tid:

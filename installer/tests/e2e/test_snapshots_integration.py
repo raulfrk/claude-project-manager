@@ -373,6 +373,7 @@ class TestIntegrationScreensExtended:
 
             screen.query_one("#trello-default-list", Input).focus()
             await pilot.pause()
+            await pilot.pause()
 
             assert pilot.app.focused is not None
             assert pilot.app.focused.id == "trello-default-list"

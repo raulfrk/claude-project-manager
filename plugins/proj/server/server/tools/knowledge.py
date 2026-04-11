@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.tools.config import require_config
+from server.tools.decisions import score_entry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 _VALID_SCOPES = ("all", "sessions", "notes", "requirements", "research", "decisions")
 _MAX_SNIPPETS = 5
 _CONTEXT_LINES = 3
+_DECISIONS_THRESHOLD = 0.5
 
 
 def _resolve_files(cfg: ProjConfig, name: str, scope: str) -> list[Path]:
@@ -46,17 +48,15 @@ def _resolve_files(cfg: ProjConfig, name: str, scope: str) -> list[Path]:
         if todos_dir.is_dir():
             files.extend(sorted(todos_dir.glob("*/research.md")))
 
-    if scope in ("all", "decisions"):
-        dp = storage.decisions_path(cfg, name)
-        if dp.exists():
-            files.append(dp)
+    # decisions are handled separately via structured fuzzy search
+    # so we do NOT add them to the raw file list here
 
     return files
 
 
 def _extract_snippets(
     file_path: Path, query: str, tracking_root: Path
-) -> list[dict[str, str | int]]:
+) -> list[dict[str, str | int | float]]:
     """Search a file for query matches and extract context snippets."""
     try:
         text = file_path.read_text()
@@ -64,7 +64,7 @@ def _extract_snippets(
         return []
 
     lines = text.splitlines()
-    matches: list[dict[str, str | int]] = []
+    matches: list[dict[str, str | int | float]] = []
 
     for i, line in enumerate(lines):
         if re.search(query, line, re.IGNORECASE):
@@ -87,6 +87,47 @@ def _extract_snippets(
     return matches
 
 
+def _search_decisions_fuzzy(
+    cfg: ProjConfig, name: str, query: str, tracking_root: Path
+) -> list[dict[str, str | int | float]]:
+    """Search the decision log using structured fuzzy scoring."""
+    entries = storage.load_decisions(cfg, name)
+    if not entries:
+        return []
+
+    scored = [(score_entry(query, e), e) for e in entries]
+    matches = [(sc, e) for sc, e in scored if sc > _DECISIONS_THRESHOLD]
+    matches.sort(key=lambda x: x[0], reverse=True)
+
+    results: list[dict[str, str | int | float]] = []
+    dp = storage.decisions_path(cfg, name)
+    try:
+        rel = str(dp.relative_to(tracking_root))
+    except ValueError:
+        rel = str(dp)
+
+    for sc, e in matches:
+        dec = str(e.get("decision", ""))
+        ctx = str(e.get("context", ""))
+        tags = e.get("tags", [])
+        tags_str = ", ".join(str(t) for t in tags) if isinstance(tags, list) else ""
+        context_block = dec
+        if ctx:
+            context_block += f"\n  context: {ctx}"
+        if tags_str:
+            context_block += f"\n  tags: {tags_str}"
+        results.append(
+            {
+                "source": rel,
+                "match": dec,
+                "context": context_block,
+                "score": round(sc, 3),
+            }
+        )
+
+    return results
+
+
 def register(app: FastMCP) -> None:
     """Register proj_search_knowledge tool with the MCP app."""
 
@@ -94,7 +135,7 @@ def register(app: FastMCP) -> None:
         description=(
             "Search across project knowledge stores (sessions, notes, requirements, "
             "research, decisions). Returns up to 5 snippets with surrounding context, "
-            "sorted by match density."
+            "sorted by match density. Decisions are searched with fuzzy token matching."
         )
     )
     def proj_search_knowledge(
@@ -111,18 +152,24 @@ def register(app: FastMCP) -> None:
         tracking_root = storage.tracking_dir(cfg, name)
         files = _resolve_files(cfg, name, scope)
 
-        all_snippets: list[dict[str, str | int]] = []
+        all_snippets: list[dict[str, str | int | float]] = []
         for fp in files:
             all_snippets.extend(_extract_snippets(fp, query, tracking_root))
 
+        # Decisions: use structured fuzzy search instead of raw file regex
+        if scope in ("all", "decisions"):
+            all_snippets.extend(_search_decisions_fuzzy(cfg, name, query, tracking_root))
+
         total_matches = len(all_snippets)
 
-        # Sort by match density: count how many times the query matches in the context
-        def _density(snippet: dict[str, str | int]) -> int:
+        # Sort by score field if present, else by regex match density
+        def _sort_key(snippet: dict[str, str | int | float]) -> float:
+            if "score" in snippet:
+                return float(snippet["score"])
             ctx = str(snippet.get("context", ""))
-            return len(re.findall(query, ctx, re.IGNORECASE))
+            return float(len(re.findall(query, ctx, re.IGNORECASE)))
 
-        all_snippets.sort(key=_density, reverse=True)
+        all_snippets.sort(key=_sort_key, reverse=True)
         top = all_snippets[:_MAX_SNIPPETS]
 
         return json.dumps({"snippets": top, "total_matches": total_matches}, indent=2)

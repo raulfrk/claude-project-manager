@@ -393,7 +393,7 @@ class TestAdvancedConfigScreenSnapshots:
             await _expand_collapsible(pilot, screen, "other-proj")
             sel = screen.query_one("#default_priority", Select)
             sel.value = "high"
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             assert sel.value == "high"
             result = screen._collect_values()
