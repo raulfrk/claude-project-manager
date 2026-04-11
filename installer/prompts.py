@@ -8,11 +8,16 @@ TUI path handles validation via widget reactive validators.
 
 from __future__ import annotations
 
-import sys
 from typing import Sequence
 
 from rich.console import Console
 from rich.prompt import IntPrompt, Prompt
+
+# Module-level stderr Console: binds to the real sys.stderr FD at import time so
+# pytest's capfd fixture can capture its output. The injected `console` parameter
+# stays separate (stdout prompt path, test input injection via Console(file=StringIO(...))).
+# The asymmetry is deliberate — do not "fix" it.
+_err = Console(stderr=True)
 
 
 def int_in_range(
@@ -42,14 +47,12 @@ def int_in_range(
             return clamped_default
         if low <= value <= high:
             return value
-        console.print(
+        _err.print(
             f"[yellow]Value must be between {low} and {high}. Got {value}. "
             f"({2 - attempt} attempt(s) left)[/yellow]",
-            file=sys.stderr,
         )
-    console.print(
+    _err.print(
         f"[yellow]3 invalid attempts — falling back to default {clamped_default}.[/yellow]",
-        file=sys.stderr,
     )
     return clamped_default
 
@@ -71,10 +74,9 @@ def prompt_choice(
         raise ValueError("prompt_choice: choices must not be empty")
     effective_default = default
     if default not in choices:
-        console.print(
+        _err.print(
             f"[yellow]Existing value '{default}' is not one of "
             f"{list(choices)} — coercing to '{choices[0]}'.[/yellow]",
-            file=sys.stderr,
         )
         effective_default = choices[0]
     try:
