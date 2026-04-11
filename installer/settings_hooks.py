@@ -9,6 +9,7 @@ touches the top-level ``hooks`` key.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -178,16 +179,41 @@ def resolve_command_template(entry: dict[str, Any], plugin_cache_dir: Path) -> s
 
 # ---- Dual detection ----
 
+# Anchored, line-based sentinel regex. Explicit id charset prevents prefix
+# collisions (asking for `foo` must not match `# cpm:foobar`). `re.MULTILINE`
+# so `^...$` anchor each line within a multi-line command body. Trailing
+# whitespace is tolerated; a mid-line `# cpm:x` comment (not at line start
+# with only leading whitespace) will NOT match.
+_SENTINEL_RE = re.compile(r"^\s*#\s*cpm:([A-Za-z0-9_.-]+)\s*$", re.MULTILINE)
+
+
+def _extract_cpm_id_from_command(command: str) -> str | None:
+    """Return the first `# cpm:<id>` sentinel line id, or None.
+
+    Strips `\\r` first so Windows line endings (`\\r\\n`) match cleanly.
+    Requires a non-empty id composed of `[A-Za-z0-9_.-]` characters.
+    Anchored `^...$` with `re.MULTILINE` — NOT a substring match — so
+    `# cpm:foobar` will NOT match when the caller is looking for `foo`.
+    """
+    if not command:
+        return None
+    m = _SENTINEL_RE.search(command.replace("\r", ""))
+    return m.group(1) if m else None
+
 
 def is_managed_entry(matcher_block: dict[str, Any], cpm_id: str) -> bool:
     """True if matcher_block is managed by cpm for the given id.
 
     Dual detection per AC15:
     - ``__cpm_id`` field equals cpm_id (preferred)
-    - OR any ``hooks[].command`` string contains ``# cpm:<id>`` as a line
+    - OR any ``hooks[].command`` string contains a line-anchored
+      ``# cpm:<id>`` sentinel
 
-    This lets us recover management even if the JSON field was stripped by a
-    user editor that re-serialized the file without unknown keys.
+    Delegates sentinel parsing to :func:`_extract_cpm_id_from_command` so
+    there is a single source of truth for the sentinel format. Exact
+    equality comparison on the extracted id — NOT substring — prevents
+    prefix collisions (e.g. query ``foo`` against sentinel ``# cpm:foobar``
+    returns False).
     """
     if not isinstance(matcher_block, dict):
         return False
@@ -195,13 +221,61 @@ def is_managed_entry(matcher_block: dict[str, Any], cpm_id: str) -> bool:
         return True
     hooks_list = matcher_block.get("hooks")
     if isinstance(hooks_list, list):
-        sentinel = f"# cpm:{cpm_id}"
         for h in hooks_list:
             if isinstance(h, dict):
                 cmd = h.get("command")
-                if isinstance(cmd, str) and sentinel in cmd:
-                    return True
+                if isinstance(cmd, str):
+                    if _extract_cpm_id_from_command(cmd) == cpm_id:
+                        return True
     return False
+
+
+def discover_managed_ids(
+    doc: SettingsDocument,
+) -> list[tuple[str, str, dict[str, Any]]]:
+    """Return ``(event, cpm_id, matcher_block)`` for every managed matcher.
+
+    Walks ``doc.hooks.events`` and returns one tuple per managed matcher
+    occurrence. Dual detection mirrors :func:`is_managed_entry`:
+
+    - ``matcher_block["__cpm_id"]`` field (preferred; must be non-empty str).
+    - ``# cpm:<id>`` sentinel in any ``hooks[].command`` (recovery path).
+
+    If both sources are present and disagree, the field wins.
+
+    Return type is ``list[tuple[str, str, dict[str, Any]]]``, NOT ``set``,
+    because ``dict`` is unhashable. Duplicate occurrences of the same
+    ``(event, cpm_id)`` are PRESERVED — callers decide dedup semantics
+    (``compute_settings_hooks_diff`` uses a seen-set so each unique
+    ``(event, cpm_id)`` yields ONE ``removed`` diff; ``apply_settings_hooks_diffs``
+    filters ALL occurrences in one pass for idempotency).
+
+    Empty-string ``__cpm_id`` and empty sentinel suffixes are skipped.
+    Non-dict matchers and non-dict hook entries are skipped.
+    """
+    out: list[tuple[str, str, dict[str, Any]]] = []
+    for event, matchers in doc.hooks.events.items():
+        for matcher in matchers:
+            if not isinstance(matcher, dict):
+                continue
+            field_id = matcher.get("__cpm_id")
+            cpm_id: str | None = None
+            if isinstance(field_id, str) and field_id:
+                cpm_id = field_id
+            else:
+                hooks_list = matcher.get("hooks")
+                if isinstance(hooks_list, list):
+                    for h in hooks_list:
+                        if isinstance(h, dict):
+                            cmd = h.get("command")
+                            if isinstance(cmd, str):
+                                extracted = _extract_cpm_id_from_command(cmd)
+                                if extracted:
+                                    cpm_id = extracted
+                                    break
+            if cpm_id:
+                out.append((event, cpm_id, matcher))
+    return out
 
 
 # ---- Diff computation ----
