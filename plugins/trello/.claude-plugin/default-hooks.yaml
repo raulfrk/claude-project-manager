@@ -134,3 +134,12 @@ hooks:
       "successes[*].id": "trello_card_id"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and project.trello_card_id"
+
+  - id: trello-on-todo-batch-complete
+    trigger_tool: todo_batch_complete
+    target_tool: trello_batch_archive_cards
+    server: trello
+    param_mapping:
+      card_ids: "${trello_card_ids}"
+    blocking: true
+    condition: "sync.trello.enabled and sync.trello.auto_sync"

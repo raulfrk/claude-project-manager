@@ -29,10 +29,10 @@ class TestDefaultHooksYaml:
         assert isinstance(data, dict)
         assert "hooks" in data
 
-    def test_has_9_hooks(self) -> None:
+    def test_has_11_hooks(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
-        assert len(data["hooks"]) == 10
+        assert len(data["hooks"]) == 11
 
     def test_all_hooks_have_required_fields(self) -> None:
         with _HOOKS_PATH.open() as f:
@@ -80,6 +80,7 @@ class TestDefaultHooksYaml:
             "todoist-on-proj-archive",
             "verify-todoist-complete",
             "todoist-on-todo-add-child",
+            "todoist-on-todo-batch-complete",
         }
         assert ids == expected
 

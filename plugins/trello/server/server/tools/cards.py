@@ -86,6 +86,26 @@ def register(app: FastMCP) -> None:
         card = client.put(f"/cards/{card_id}", params={"closed": True})
         return json.dumps(card)
 
+    @app.tool(
+        description=(
+            "Archive multiple cards in one batch call. "
+            "Loops over individual card archive requests (Trello REST has no "
+            "true bulk-archive endpoint). Returns "
+            "{archived: [<card_id>, ...], failed: [{card_id, error}, ...]}."
+        )
+    )
+    def trello_batch_archive_cards(card_ids: list[str]) -> str:
+        client = get_client()
+        archived: list[str] = []
+        failed: list[dict[str, str]] = []
+        for card_id in card_ids:
+            try:
+                client.put(f"/cards/{card_id}", params={"closed": True})
+                archived.append(card_id)
+            except Exception as exc:
+                failed.append({"card_id": card_id, "error": str(exc)})
+        return json.dumps({"archived": archived, "failed": failed})
+
     @app.tool(description="Delete a card permanently.")
     def delete_card(card_id: str) -> str:
         client = get_client()

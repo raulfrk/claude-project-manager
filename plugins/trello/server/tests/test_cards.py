@@ -172,6 +172,45 @@ class TestArchiveCard:
         assert json.loads(result) == archived
 
 
+class TestBatchArchiveCards:
+    def test_archives_all_cards(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
+        mock_trello_client.put.return_value = {"id": "c1", "closed": True}
+
+        result = card_tools["trello_batch_archive_cards"](["c1", "c2", "c3"])
+
+        assert mock_trello_client.put.call_count == 3
+        parsed = json.loads(result)
+        assert parsed["archived"] == ["c1", "c2", "c3"]
+        assert parsed["failed"] == []
+
+    def test_partial_failure_collects_errors(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        def put_side_effect(path: str, params: dict) -> dict:
+            if "c2" in path:
+                raise RuntimeError("boom")
+            return {"id": path.rsplit("/", 1)[1], "closed": True}
+
+        mock_trello_client.put.side_effect = put_side_effect
+
+        result = card_tools["trello_batch_archive_cards"](["c1", "c2", "c3"])
+
+        parsed = json.loads(result)
+        assert parsed["archived"] == ["c1", "c3"]
+        assert len(parsed["failed"]) == 1
+        assert parsed["failed"][0]["card_id"] == "c2"
+        assert "boom" in parsed["failed"][0]["error"]
+
+    def test_empty_list_returns_empty_result(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        result = card_tools["trello_batch_archive_cards"]([])
+
+        mock_trello_client.put.assert_not_called()
+        parsed = json.loads(result)
+        assert parsed == {"archived": [], "failed": []}
+
+
 class TestDeleteCard:
     def test_deletes_card(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
         mock_trello_client.delete.return_value = None

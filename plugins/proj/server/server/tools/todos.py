@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +22,12 @@ if TYPE_CHECKING:
 
 _UTC = UTC
 logger = logging.getLogger(__name__)
+
+# Module-level lock serializes todo_batch_complete across threads. Acquired
+# BEFORE the Phase 2 loop and released after, so concurrent batches with
+# overlapping parents cannot interleave saves and produce a partial family
+# archive.
+_BATCH_COMPLETE_LOCK = threading.Lock()
 
 # ── Trello list ID resolution (cached per board) ──────────────────────────────
 
@@ -536,7 +545,12 @@ def register(app: FastMCP) -> None:
             }
         )
 
-    @app.tool(description="Mark a todo as done.")
+    @app.tool(
+        description=(
+            "Mark a single todo as done. For 2+ ids, use todo_batch_complete "
+            "instead — atomic save + single hook dispatch."
+        )
+    )
     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -559,6 +573,339 @@ def register(app: FastMCP) -> None:
         result_data = json.loads(result_str)
         result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
         return json.dumps(result_data)
+
+    @app.tool(
+        description=(
+            "Batch-complete multiple todos in a validated transaction. "
+            "Fires aggregated blocking hook chain to integrations with the full "
+            "id list. Use whenever completing 2 or more todos; prefer over "
+            "looping todo_complete."
+        )
+    )
+    def todo_batch_complete(
+        todo_ids: list[str],
+        note: str = "",
+        project_name: str | None = None,
+    ) -> str:
+        _ = note  # reserved for future completion-note annotation
+        # ── Phase 0 — empty check ──────────────────────────────────────────
+        if not todo_ids:
+            return json.dumps(
+                {
+                    "error": "todo_ids cannot be empty.",
+                    "completed_ids": [],
+                    "skipped_ids": [],
+                    "invalid_ids": [],
+                }
+            )
+
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+
+        # ── Phase 1a — cross-project detection BEFORE dedupe ─────────────
+        # Scan the project index for any id that lives in a different
+        # project. Cross-project batches are not allowed.
+        cross_project_ids: list[str] = []
+        try:
+            index = storage.load_index(cfg)
+            for other_name in index.projects:
+                if other_name == name:
+                    continue
+                try:
+                    other_todos = storage.load_todos(cfg, other_name)
+                except FileNotFoundError:
+                    continue
+                other_ids = {t.id for t in other_todos}
+                for tid in todo_ids:
+                    if tid in other_ids and tid not in cross_project_ids:
+                        cross_project_ids.append(tid)
+        except Exception:
+            logger.debug("Cross-project scan failed", exc_info=True)
+        if cross_project_ids:
+            return json.dumps(
+                {
+                    "error": "Cross-project batch not allowed.",
+                    "invalid_ids": cross_project_ids,
+                    "completed_ids": [],
+                    "skipped_ids": [],
+                }
+            )
+
+        # ── Phase 1b — order-preserving dedupe ────────────────────────────
+        deduped_ids: list[str] = list(dict.fromkeys(todo_ids))
+
+        # ── Phase 1c — existence + status validation ──────────────────────
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.id: t for t in todos}
+        invalid_ids: list[str] = []
+        cancelled_ids: list[str] = []
+        skipped_ids: list[str] = []
+        to_complete: list[str] = []
+        for tid in deduped_ids:
+            todo = todo_map.get(tid)
+            if todo is None:
+                invalid_ids.append(tid)
+                continue
+            status_val = todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
+            if status_val == "cancelled":
+                cancelled_ids.append(tid)
+                continue
+            if status_val == TodoStatus.DONE.value:
+                skipped_ids.append(tid)
+                continue
+            to_complete.append(tid)
+
+        if invalid_ids or cancelled_ids:
+            return json.dumps(
+                {
+                    "error": "Validation failed.",
+                    "invalid_ids": invalid_ids,
+                    "cancelled_ids": cancelled_ids,
+                    "reason": (
+                        "missing ids" if invalid_ids else "cancelled todos cannot be completed"
+                    ),
+                    "completed_ids": [],
+                    "skipped_ids": skipped_ids,
+                }
+            )
+
+        # ── Phase 2 — sequenced save+archive under lock ───────────────────
+        # Acquire the module-level threading.Lock BEFORE the loop so
+        # concurrent batches with overlapping parents cannot interleave.
+        today = _now()
+        completed_ids: list[str] = []
+        archive_family_ids: set[str] = set()
+        # Captured while holding the lock, used post-lock for Phase 3/4.
+        todoist_task_ids: list[str] = []
+        trello_card_ids: list[str] = []
+        jira_issue_keys: list[str] = []
+
+        with _BATCH_COMPLETE_LOCK:
+            # Phase 2a: fcntl.flock around the todos.yaml file for
+            # cross-process safety. Non-blocking to surface contention
+            # as an error rather than hang.
+            todos_file = storage.todos_path(cfg, name)
+            try:
+                todos_file.parent.mkdir(parents=True, exist_ok=True)
+                todos_file.touch(exist_ok=True)
+                lock_fd = todos_file.open("r+b")
+            except OSError as exc:
+                return json.dumps(
+                    {
+                        "error": f"Failed to open todos.yaml for locking: {exc}",
+                        "completed_ids": [],
+                        "skipped_ids": skipped_ids,
+                    }
+                )
+            try:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Another todos.yaml writer holds the file lock. Retry shortly."
+                            ),
+                            "completed_ids": [],
+                            "skipped_ids": skipped_ids,
+                        }
+                    )
+
+                # Re-load todos under the lock to guarantee latest state.
+                todos = storage.load_todos(cfg, name)
+                todo_map = {t.id: t for t in todos}
+
+                # Re-validate — state may have changed since Phase 1c.
+                still_to_complete: list[str] = []
+                for tid in to_complete:
+                    todo = todo_map.get(tid)
+                    if todo is None:
+                        invalid_ids.append(tid)
+                        continue
+                    status_val = (
+                        todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
+                    )
+                    if status_val == TodoStatus.DONE.value:
+                        if tid not in skipped_ids:
+                            skipped_ids.append(tid)
+                        continue
+                    if status_val == "cancelled":
+                        cancelled_ids.append(tid)
+                        continue
+                    still_to_complete.append(tid)
+
+                if invalid_ids or cancelled_ids:
+                    return json.dumps(
+                        {
+                            "error": "Validation failed under lock.",
+                            "invalid_ids": invalid_ids,
+                            "cancelled_ids": cancelled_ids,
+                            "completed_ids": [],
+                            "skipped_ids": skipped_ids,
+                        }
+                    )
+
+                # In-memory Phase 2 loop: mark each id done and, for leaves
+                # or fully-done parents, schedule family archive. Parents
+                # with pending children stay in the active list (match
+                # _complete_child behavior).
+                for tid in still_to_complete:
+                    todo = todo_map[tid]
+                    todo.status = TodoStatus.DONE
+                    todo.updated = today
+                    completed_ids.append(tid)
+                    if todo.todoist_task_id:
+                        todoist_task_ids.append(todo.todoist_task_id)
+                    if todo.trello_card_id:
+                        trello_card_ids.append(todo.trello_card_id)
+                    if todo.jira_issue_key:
+                        jira_issue_keys.append(todo.jira_issue_key)
+
+                # Second pass: evaluate archival.
+                # - Leaf (no children, no parent): archive this todo alone.
+                # - Child (has parent): stay active; parent archives later.
+                # - Parent (has children): if EVERY descendant across the
+                #   full subtree is done, archive the whole family.
+                def _all_descendants_done(root_id: str) -> bool:
+                    root = todo_map.get(root_id)
+                    if root is None:
+                        return False
+                    status_val = (
+                        root.status.value if isinstance(root.status, TodoStatus) else root.status
+                    )
+                    if status_val != TodoStatus.DONE.value:
+                        return False
+                    return all(_all_descendants_done(c) for c in root.children)
+
+                for tid in completed_ids:
+                    todo = todo_map[tid]
+                    if todo.parent is None and not todo.children:
+                        # Leaf with no parent — archive this todo alone.
+                        archive_family_ids.add(tid)
+                        continue
+                    if todo.children and _all_descendants_done(tid):
+                        # Parent whose full subtree is now done — archive
+                        # the family.
+                        archive_family_ids.update(_collect_family(tid, todos))
+                    # A child (has parent) is marked done but stays in the
+                    # active list until its parent's family archives.
+                    # After marking children, also walk up the parent chain
+                    # to archive any newly-complete parent families.
+                    cur = todo.parent
+                    while cur:
+                        parent_todo = todo_map.get(cur)
+                        if parent_todo is None:
+                            break
+                        if (
+                            _all_descendants_done(cur)
+                            and (
+                                parent_todo.status.value
+                                if isinstance(parent_todo.status, TodoStatus)
+                                else parent_todo.status
+                            )
+                            == TodoStatus.DONE.value
+                        ):
+                            archive_family_ids.update(_collect_family(cur, todos))
+                        cur = parent_todo.parent
+
+                # Build remaining + to_archive lists.
+                to_archive = [t for t in todos if t.id in archive_family_ids]
+                remaining = [t for t in todos if t.id not in archive_family_ids]
+
+                # Clean up blocks/blocked_by references to archived ids.
+                for t in remaining:
+                    changed = False
+                    if any(b in archive_family_ids for b in t.blocks):
+                        t.blocks = [b for b in t.blocks if b not in archive_family_ids]
+                        changed = True
+                    if any(b in archive_family_ids for b in t.blocked_by):
+                        t.blocked_by = [b for b in t.blocked_by if b not in archive_family_ids]
+                        changed = True
+                    if changed:
+                        t.updated = today
+
+                # Phase 2a atomic save: single write at end of the loop.
+                if to_archive:
+                    storage.archive_and_remove_todos(cfg, name, remaining, to_archive)
+                else:
+                    storage.save_todos(cfg, name, remaining)
+            finally:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+
+        # ── Phase 3 — pre-enriched payload ────────────────────────────────
+        # Build the enriched source payload for hook dispatch. Include both
+        # plural and singular keys: plural lists feed batch hook param
+        # mappings (ids/card_ids/updates_json), singular keys feed condition
+        # evaluation in hooks_fire_tool (belt-and-braces).
+        try:
+            meta = storage.load_meta(cfg, name)
+        except FileNotFoundError:
+            meta = None
+
+        todoist_project_id_val = meta.todoist_project_id if meta is not None else None
+        trello_card_id_val = meta.trello_card_id if meta is not None else None
+        jira_project_key_val = (
+            meta.jira_issue_key.split("-")[0] if meta is not None and meta.jira_issue_key else None
+        )
+
+        # Pre-build full Jira bulk-update JSON string because the hook
+        # template engine cannot iterate lists. Hooks map
+        # updates_json: ${jira_updates_json} and get the native string.
+        jira_payload: dict[str, JsonValue] = {
+            "updates": [
+                {"key": key, "fields": {"resolution": {"name": "Done"}}} for key in jira_issue_keys
+            ]
+        }
+        jira_updates_json: str = json.dumps(jira_payload, ensure_ascii=True)
+
+        # Phase 3a — 90KB whole-field truncation. Estimate payload size and
+        # drop whole fields (never mid-string) if over the threshold, so
+        # downstream parsers never see sliced JSON.
+        _MAX_SOURCE_BYTES = 90 * 1024
+        truncation_notes: list[str] = []
+
+        def _estimate_size(
+            payload: dict[str, JsonValue],
+        ) -> int:
+            return len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+
+        result_data: dict[str, JsonValue] = {
+            "completed_ids": completed_ids,
+            "skipped_ids": skipped_ids,
+            "archived_ids": sorted(archive_family_ids),
+            "invalid_ids": [],
+            "project_name": name,
+            "todoist_task_ids": todoist_task_ids,
+            "trello_card_ids": trello_card_ids,
+            "jira_issue_keys": jira_issue_keys,
+            "jira_updates_json": jira_updates_json,
+            "todoist_project_id": todoist_project_id_val,
+            "trello_card_id": trello_card_id_val,
+            "jira_project_key": jira_project_key_val,
+        }
+
+        if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+            # Drop biggest whole fields first: jira_updates_json is the
+            # likeliest offender on large batches.
+            if "jira_updates_json" in result_data:
+                result_data["jira_updates_json"] = ""
+                truncation_notes.append(
+                    "jira_updates_json dropped: batch exceeded 90KB payload cap"
+                )
+            if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+                result_data["jira_issue_keys"] = []
+                truncation_notes.append("jira_issue_keys dropped: batch exceeded 90KB payload cap")
+            if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+                result_data["trello_card_ids"] = []
+                truncation_notes.append("trello_card_ids dropped: batch exceeded 90KB payload cap")
+        if truncation_notes:
+            result_data["truncation_notes"] = truncation_notes
+
+        return json.dumps(result_data, ensure_ascii=True)
 
     @app.tool(description="Revert a completed todo back to pending.")
     def todo_uncomplete(todo_id: str, project_name: str | None = None) -> str:
