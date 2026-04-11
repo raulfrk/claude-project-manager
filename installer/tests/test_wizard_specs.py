@@ -276,3 +276,186 @@ class TestDefaultsYamlCoverage:
 
         path = files("installer").joinpath("defaults.yaml")
         assert path.is_file()
+
+
+# ── 506: trello wizard_specs coverage + gating + schema tests ────────────────
+
+
+class TestTrelloWizardSpecs:
+    """Tests added by todo 506 covering the reconciled trello PromptSpec block."""
+
+    def _trello_specs(self) -> list[Any]:
+        return [s for s in PROJ_YAML_PROMPTS if s.dotted_key.startswith("sync.trello.")]
+
+    def test_trello_list_mappings_prompt_coverage(self) -> None:
+        """list_mappings.* keys in PROJ_YAML_PROMPTS match TrelloListMappings."""
+        list_mapping_keys = {
+            s.dotted_key.rsplit(".", 1)[-1]
+            for s in PROJ_YAML_PROMPTS
+            if s.dotted_key.startswith("sync.trello.list_mappings.")
+        }
+        assert list_mapping_keys == {
+            "created",
+            "done",
+            "projects",
+            "tasks",
+            "active",
+            "pending",
+            "archived",
+        }
+
+    def test_trello_default_board_id_is_basic_tier(self) -> None:
+        specs = [
+            s
+            for s in PROJ_YAML_PROMPTS
+            if s.dotted_key == "sync.trello.default_board_id"
+        ]
+        assert len(specs) == 1, (
+            "sync.trello.default_board_id must be in PROJ_YAML_PROMPTS exactly once"
+        )
+        assert specs[0].tier == "basic"
+
+    def test_trello_label_names_present(self) -> None:
+        label_specs = {
+            s.dotted_key: s
+            for s in PROJ_YAML_PROMPTS
+            if s.dotted_key
+            in ("sync.trello.proj_label_name", "sync.trello.proj_task_label_name")
+        }
+        assert set(label_specs.keys()) == {
+            "sync.trello.proj_label_name",
+            "sync.trello.proj_task_label_name",
+        }
+        assert label_specs["sync.trello.proj_label_name"].default_factory({}) == "proj"
+        assert (
+            label_specs["sync.trello.proj_task_label_name"].default_factory({})
+            == "proj-task"
+        )
+
+    def test_trello_label_name_tier_assignments(self) -> None:
+        """proj_label_name/proj_task_label_name live in basic tier per r2."""
+        for key in ("sync.trello.proj_label_name", "sync.trello.proj_task_label_name"):
+            specs = [s for s in PROJ_YAML_PROMPTS if s.dotted_key == key]
+            assert len(specs) == 1
+            assert specs[0].tier == "basic", (
+                f"{key} must be basic tier (user-facing label config)"
+            )
+
+    def test_trello_fields_gated_on_enabled(self) -> None:
+        """Every sync.trello.* PromptSpec has a non-None condition gated on enabled."""
+        for spec in self._trello_specs():
+            assert spec.condition is not None, (
+                f"{spec.dotted_key} missing condition lambda"
+            )
+            # When sync.trello.enabled is False, all gated rows must hide.
+            assert spec.condition({"sync": {"trello": {"enabled": False}}}) is False
+
+    def test_no_deprecated_trello_keys_in_wizard_specs(self) -> None:
+        """Ensure backlog/todo/in_progress/blocked/archive are removed."""
+        deprecated = {
+            "sync.trello.list_mappings.backlog",
+            "sync.trello.list_mappings.todo",
+            "sync.trello.list_mappings.in_progress",
+            "sync.trello.list_mappings.blocked",
+            "sync.trello.list_mappings.archive",
+        }
+        present = {s.dotted_key for s in PROJ_YAML_PROMPTS}
+        assert deprecated & present == set(), (
+            f"Deprecated trello keys leaked: {deprecated & present}"
+        )
+
+    def test_no_duplicate_default_list_or_on_delete_promptspec(self) -> None:
+        """default_list/on_delete are owned by TrelloConfigScreen, not PROJ_YAML_PROMPTS."""
+        present = {s.dotted_key for s in PROJ_YAML_PROMPTS}
+        assert "sync.trello.default_list" not in present
+        assert "sync.trello.on_delete" not in present
+
+    def test_wizard_defaults_yaml_has_trello_keys(self) -> None:
+        """defaults.yaml includes proj_label_name/proj_task_label_name entries."""
+        _ensure_defaults_loaded()
+        from installer.wizard_specs import _DEFAULTS_CACHE
+
+        data = _DEFAULTS_CACHE.get("data", {})
+        trello = data.get("sync", {}).get("trello", {})
+        assert trello.get("proj_label_name") == "proj"
+        assert trello.get("proj_task_label_name") == "proj-task"
+        # Deprecated keys should be gone.
+        mappings = trello.get("list_mappings", {})
+        for k in ("backlog", "todo", "in_progress", "blocked", "archive"):
+            assert k not in mappings, f"deprecated key {k!r} still in defaults.yaml"
+        for k in (
+            "created",
+            "done",
+            "projects",
+            "tasks",
+            "active",
+            "pending",
+            "archived",
+        ):
+            assert k in mappings, f"required key {k!r} missing from defaults.yaml"
+
+    def test_trello_list_mappings_prompt_spec_covers_dataclass(self) -> None:
+        """assert_prompt_spec_covers_schema must not flag TrelloListMappings fields."""
+        missing = assert_prompt_spec_covers_schema()
+        mapping_missing = [
+            m for m in missing if m.startswith("sync.trello.list_mappings.")
+        ]
+        assert mapping_missing == [], (
+            f"TrelloListMappings fields missing from PROJ_YAML_PROMPTS: {mapping_missing}"
+        )
+
+    def test_trello_sync_prompt_spec_covers_dataclass(self) -> None:
+        """assert_prompt_spec_covers_schema must not flag scalar TrelloSync fields.
+
+        Excluded fields (owned by TrelloConfigScreen/TrelloIntegrationScreen):
+        enabled, auto_sync, default_list, on_delete.
+        """
+        missing = assert_prompt_spec_covers_schema()
+        sync_missing = [
+            m
+            for m in missing
+            if m.startswith("sync.trello.")
+            and not m.startswith("sync.trello.list_mappings.")
+        ]
+        assert sync_missing == [], (
+            f"TrelloSync scalar fields missing from PROJ_YAML_PROMPTS: {sync_missing}"
+        )
+
+    def test_trello_enabled_requires_board_id(self) -> None:
+        """Wizard-side: when sync.trello.enabled=True and default_board_id=='',
+        the advanced config screen must block exit. This is enforced by a
+        dedicated check in installer/screens/advanced_config.py — here we
+        assert the PromptSpec carries the gating condition so the screen can
+        surface the check.
+        """
+        specs = [
+            s
+            for s in PROJ_YAML_PROMPTS
+            if s.dotted_key == "sync.trello.default_board_id"
+        ]
+        assert len(specs) == 1
+        spec = specs[0]
+        # Spec must be gated on enabled so the screen only asks when relevant.
+        assert spec.condition is not None
+        assert spec.condition({"sync": {"trello": {"enabled": True}}}) is True
+        assert spec.condition({"sync": {"trello": {"enabled": False}}}) is False
+        # Defaults yaml seeds empty-string — validator enforcement point is
+        # documented as a comment on the PromptSpec and in advanced_config.py.
+        assert spec.default_factory({}) == ""
+
+    def test_default_board_id_grep_counts(self) -> None:
+        """r2 regression: default_board_id must appear 0 times in
+        integration_config.py and at least once (as a PromptSpec dotted_key)
+        in wizard_specs.py.
+        """
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[2]
+        ws = (repo_root / "installer" / "wizard_specs.py").read_text()
+        ic = (repo_root / "installer" / "screens" / "integration_config.py").read_text()
+        assert "default_board_id" not in ic, (
+            "default_board_id leaked back into integration_config.py"
+        )
+        assert ws.count('dotted_key="sync.trello.default_board_id"') == 1, (
+            "sync.trello.default_board_id must be exactly one PromptSpec entry"
+        )

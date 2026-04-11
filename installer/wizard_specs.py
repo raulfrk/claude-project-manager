@@ -538,6 +538,12 @@ WIZARD_EXCLUDED_FIELDS: set[str] = {
     "sync.trello.allowed_board_ids",
     "sync.jira.allowed_project_keys",
     "base_repos",
+    # Trello fields owned by TrelloConfigScreen / TrelloIntegrationScreen in
+    # installer/screens/integration_config.py, NOT by PROJ_YAML_PROMPTS.
+    "sync.trello.enabled",
+    "sync.trello.auto_sync",
+    "sync.trello.default_list",
+    "sync.trello.on_delete",
 }
 
 
