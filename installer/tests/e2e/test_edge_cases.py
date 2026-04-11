@@ -309,6 +309,11 @@ class TestCorruptedMarketplaceJSON:
             # failed to build a status list. The app remains in the initial
             # (loading/placeholder) state without crashing.
             assert not isinstance(app.screen, PluginStatusScreen)
+            # _show_error() updates #placeholder with "[red]Error:[/red] ..."
+            from textual.widgets import Static
+
+            placeholder = app.query_one("#placeholder", Static)
+            assert "Error" in str(placeholder.render())
 
 
 # ---------------------------------------------------------------------------

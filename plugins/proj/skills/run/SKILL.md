@@ -1462,27 +1462,13 @@ Suggested next: `1. /proj:status` -- see updated project overview
 
 ## Preflight Agents Reference
 
+Full prompt templates are in `plugins/proj/skills/run/agents/`. Load them at runtime with Read tool when spawning agents.
+
 This appendix contains the prompt templates and output schemas for all 6 preflight review agents referenced by Phase A.5b (define-phase adversarial review) and Phase C0.5b (pre-execute adversarial review). All agents are spawned via the `Task` tool as `general-purpose` agents with read-only sub-tools, 90-second timeouts, and a strict JSON output schema. Timeouts and malformed JSON output are demoted to WARNING (never BLOCKING).
 
 ### Shared output schema
 
-All 6 agents return the same JSON envelope:
-
-```json
-{
-  "agent": "<agent_name>",
-  "findings": [
-    {
-      "severity": "BLOCKING|WARNING|INFO",
-      "title": "<short description>",
-      "evidence": "<direct quote, file:line reference, or path list>",
-      "suggested_fix": "<optional remediation>"
-    }
-  ]
-}
-```
-
-Agents must emit valid JSON with no preamble or postamble. If no findings, return `{"agent": "<name>", "findings": []}`.
+See: plugins/proj/skills/run/agents/shared_schema.md
 
 ### Phase A.5b — Define-phase agents
 
@@ -1490,96 +1476,19 @@ Agents must emit valid JSON with no preamble or postamble. If no findings, retur
 
 **Tools**: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`
 
-**Prompt template**:
-
-```
-You are the Ambiguity Agent for preflight review. Your job is to flag UNMEASURABLE
-or HANDWAVEY language in the todo's requirements and research.
-
-Read:
-- mcp__proj__content_get_requirements(todo_id="<id>")
-- mcp__proj__content_get_research(todo_id="<id>")
-
-For each finding, check:
-1. Undefined domain terms used without definition (e.g., "downstream", "upstream",
-   "the system", "the pipeline" — when it's unclear which system).
-2. Handwavey claims without measurable criteria (e.g., "handles load well",
-   "supports scale").
-3. Unmeasurable goals in the Goal or Acceptance Criteria sections.
-
-Severity rules:
-- BLOCKING: undefined term used >= 3 times, or any unmeasurable goal in
-  Acceptance Criteria.
-- WARNING: 1-2 uses of an undefined term, or handwavey claim in research
-  Recommended Approach.
-- INFO: stylistic suggestions.
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "ambiguity", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/ambiguity_agent.md
 
 #### 2. Completeness Agent
 
 **Tools**: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`
 
-**Prompt template**:
-
-```
-You are the Completeness Agent for preflight review. Your job is to flag
-MISSING elements that should be present in a well-formed requirements document.
-
-Read:
-- mcp__proj__content_get_requirements(todo_id="<id>")
-- mcp__proj__content_get_research(todo_id="<id>")
-
-For each finding, check:
-1. Missing failure modes: the "Edge Cases" section omits an obvious error path
-   (network failure, permission error, missing file, concurrency, timeout).
-2. Missing auth/security concerns: the todo touches authentication, authorization,
-   tokens, credentials, or user data without a security consideration.
-3. Stated-scope vs Out-of-Scope gaps: items in the Goal are not reflected in
-   Acceptance Criteria, OR items in Out of Scope contradict the Goal.
-
-Severity rules:
-- BLOCKING: missing failure mode for an error-prone area, OR security concern
-  not acknowledged when auth is touched.
-- WARNING: partial coverage, or gaps between Goal and Acceptance Criteria.
-- INFO: nice-to-have additions.
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "completeness", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/completeness_agent.md
 
 #### 3. Research Validation Agent
 
 **Tools**: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_research`, `mcp__proj__proj_explore_codebase`
 
-**Prompt template**:
-
-```
-You are the Research Validation Agent for preflight review. Your job is to verify
-that research.md is grounded in the actual repo.
-
-Read:
-- mcp__proj__content_get_research(todo_id="<id>")
-- For each file path mentioned in research.md, verify with Read or Glob.
-
-For each finding, check:
-1. File existence: every path referenced in research.md resolves to an existing
-   file in the repo tree.
-2. Option distinctness: when research lists multiple approach options, each
-   differs by library/tool choice, file/module placement, or data-flow direction.
-3. Realism of stated risks: risks are concrete and tied to the code, not
-   generic boilerplate.
-
-Severity rules:
-- BLOCKING: a referenced file does not exist.
-- WARNING: options are near-identical, or risks are generic.
-- INFO: additional research directions.
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "research_validation", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/research_validation_agent.md
 
 ### Phase C0.5b — Pre-execute agents
 
@@ -1587,91 +1496,19 @@ Output EXACTLY this JSON shape (no preamble):
 
 **Tools**: `Read`, `Glob`, `Grep`
 
-**Prompt template**:
-
-```
-You are the File Path Verifier for pre-execute preflight. Your job is to
-double-check every file path named in the approved implementation plan.
-
-Input:
-- Plan text (passed in the prompt below): <PLAN_TEXT>
-- Repo root: <REPO_ROOT> (use this as the filesystem root; if worktree_enabled,
-  this is the worktree tree, not main)
-
-For each path in the plan's "Files to modify" and "Files to create" sections:
-1. Use Read or Glob to verify the path.
-2. For "modify" entries: file must exist.
-3. For "create" entries: parent directory must exist, path must be inside the
-   repo root, file must NOT already exist.
-4. Detect case-sensitivity drift (e.g., plan says `Foo.py` but file is `foo.py`).
-5. Detect path-normalization bugs (`./` prefix, trailing slash, absolute vs relative).
-
-Severity rules:
-- BLOCKING: "modify" path does not exist, or "create" path already exists, or
-  path escapes the repo root.
-- WARNING: case mismatch, or path-normalization issue.
-- INFO: suggested normalization.
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "file_path_verifier", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/file_path_verifier.md
 
 #### 5. Spec-Plan Alignment Agent
 
 **Tools**: `Read`, `mcp__proj__content_get_requirements`
 
-**Prompt template**:
-
-```
-You are the Spec-Plan Alignment Agent for pre-execute preflight. Your job is to
-verify that the approved plan addresses every acceptance criterion.
-
-Read:
-- mcp__proj__content_get_requirements(todo_id="<id>")
-- Plan text (passed in the prompt below): <PLAN_TEXT>
-
-For each bullet in the requirements "Acceptance Criteria" section:
-1. Judge whether the plan addresses this criterion (directly via a concrete step,
-   or indirectly via a file/change that would satisfy it).
-2. Flag any criterion that the plan does NOT acknowledge.
-
-Severity rules:
-- BLOCKING: >= 1 acceptance criterion has no corresponding plan step or file change.
-- WARNING: criterion is partially addressed but lacks explicit implementation detail.
-- INFO: plan exceeds requirements (unplanned scope).
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "spec_plan_alignment", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/spec_plan_alignment_agent.md
 
 #### 6. Impact Scanner
 
 **Tools**: `Read`, `Glob`, `Grep`
 
-**Prompt template**:
-
-```
-You are the Impact Scanner for pre-execute preflight. Your job is to flag
-HIGH-IMPACT files that the plan touches (files referenced heavily elsewhere).
-
-Input:
-- Plan text: <PLAN_TEXT>
-- Repo root: <REPO_ROOT>
-
-For each file in the plan's file list:
-1. Use Grep to count references to the file's module/class/function name across
-   the repo.
-2. Rank files by reference count. The top 10 most-referenced are "high-impact".
-3. Flag any planned file that lands in the top 10.
-
-Severity rules:
-- WARNING ONLY: high-impact file touched. Never BLOCKING — impact scanning is
-  heuristic, not authoritative.
-- INFO: reference counts for all touched files.
-
-Output EXACTLY this JSON shape (no preamble):
-{"agent": "impact_scanner", "findings": [...]}
-```
+See: plugins/proj/skills/run/agents/impact_scanner.md
 
 ### Spawning pattern
 
