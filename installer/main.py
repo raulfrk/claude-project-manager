@@ -202,14 +202,15 @@ def _reinstall(args) -> int:
     state = detect_existing()
     display_detection(state, console)
 
-    if not state.installed_plugins:
+    installed = get_installed_plugins()
+    if not installed:
         console.print(
             "[yellow]No installed plugins found. Nothing to reinstall.[/yellow]"
         )
         return EXIT_SUCCESS
 
     # Determine which plugins to reinstall
-    plugins = args.plugins if args.plugins else list(state.installed_plugins)
+    plugins = args.plugins if args.plugins else list(installed)
 
     console.print(f"\n[bold]Reinstalling:[/bold] {', '.join(plugins)}")
     results: dict[str, bool] = {}
@@ -256,13 +257,14 @@ def _uninstall(args) -> int:
     state = detect_existing()
     display_detection(state, console)
 
-    if not state.installed_plugins:
+    installed = get_installed_plugins()
+    if not installed:
         console.print(
             "[yellow]No installed plugins found. Nothing to uninstall.[/yellow]"
         )
         return EXIT_SUCCESS
 
-    plugins = list(state.installed_plugins)
+    plugins = list(installed)
     console.print(f"\n[bold]Uninstalling:[/bold] {', '.join(plugins)}")
     results: dict[str, bool] = {}
     for name in plugins:

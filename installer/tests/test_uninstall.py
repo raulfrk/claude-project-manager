@@ -78,6 +78,7 @@ class TestRunUninstall:
         (cache / "proj").mkdir(parents=True)
 
         with (
+            patch("installer.uninstall.get_installed_plugins", return_value=["proj"]),
             patch("installer.uninstall.Confirm.ask", return_value=False),
             pytest.raises(UserCancelled),
         ):
@@ -88,7 +89,10 @@ class TestRunUninstall:
         (cache / "proj").mkdir(parents=True)
         (cache / "proj" / "plugin.json").write_text("{}")
 
-        with patch("installer.uninstall.Confirm.ask", return_value=True):
+        with (
+            patch("installer.uninstall.get_installed_plugins", return_value=["proj"]),
+            patch("installer.uninstall.Confirm.ask", return_value=True),
+        ):
             run_uninstall(full_cleanup=False, console=mock_console)
 
         assert not (cache / "proj").exists()
@@ -98,7 +102,10 @@ class TestRunUninstall:
         (cache / "proj").mkdir(parents=True)
         (mock_home / ".claude" / "proj.yaml").write_text("v: 1\n")
 
-        with patch("installer.uninstall.Confirm.ask", return_value=True):
+        with (
+            patch("installer.uninstall.get_installed_plugins", return_value=["proj"]),
+            patch("installer.uninstall.Confirm.ask", return_value=True),
+        ):
             run_uninstall(full_cleanup=True, console=mock_console)
 
         assert not (mock_home / ".claude" / "proj.yaml").exists()

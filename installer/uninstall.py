@@ -15,6 +15,7 @@ from installer.detect import (
     display_detection,
 )
 from installer.errors import UserCancelled
+from installer.plugin_cli import get_installed_plugins
 
 
 def remove_plugins(
@@ -124,7 +125,7 @@ def run_uninstall(full_cleanup: bool = False, console: Console | None = None) ->
 
     # Remove plugins
     console.print("[bold]Removing plugins...[/bold]")
-    plugins_to_remove = state.installed_plugins if state.installed_plugins else []
+    plugins_to_remove = get_installed_plugins()
     results = remove_plugins(plugins_to_remove, state, console)
 
     # Remove marketplace and cache directories if they're now empty

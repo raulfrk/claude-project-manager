@@ -3,16 +3,87 @@
 from __future__ import annotations
 
 import argparse
+import json
+import logging
+import socket
 import sys
 from datetime import date
+from pathlib import Path
 
 from server.lib import storage
 from server.tools.context import _build_context, ctx_detect_project_name
 from server.tools.digest import _deduplicate, _parse_session
 
+logger = logging.getLogger(__name__)
+
+_SOCKET_DIR = "/tmp"  # noqa: S108
+_SOCKET_PREFIX = "claude-cpm-"
+_SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
+
+
+def _call_proj_socket(tool: str, params: dict) -> None:  # type: ignore[type-arg]
+    """Call a tool on the proj MCP server via its Unix domain socket.
+
+    Resolves the socket path from the registry file (~/.claude/sockets/proj).
+    Falls back to globbing /tmp for PID-tagged sockets if registry is missing.
+    Silently no-ops if the socket is unreachable (MCP server not yet started).
+    """
+    # Resolve socket path from registry
+    sock_path: str | None = None
+    registry_file = _SOCKET_REGISTRY_DIR / "proj"
+    try:
+        path = registry_file.read_text().strip()
+        if path and Path(path).exists():
+            sock_path = path
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Fallback: glob for newest PID-tagged socket
+    if not sock_path:
+        candidates = sorted(
+            Path(_SOCKET_DIR).glob(f"{_SOCKET_PREFIX}proj-*.sock"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in candidates:
+            sock_path = str(candidate)
+            break
+
+    if not sock_path:
+        logger.debug("proj socket not found; skipping socket activation")
+        return
+
+    payload = json.dumps({"tool": tool, "params": params}).encode()
+    request = (
+        b"POST /hook HTTP/1.0\r\n"
+        b"Host: localhost\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(payload)).encode() + b"\r\n"
+        b"\r\n" + payload
+    )
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            sock.connect(sock_path)
+            sock.sendall(request)
+            # Read response (ignore content, just drain to avoid broken pipe)
+            response = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+    except Exception as exc:
+        logger.debug("proj socket call failed (%s): %s", type(exc).__name__, exc)
+
 
 def cmd_session_start(cwd: str | None, compact: bool) -> None:
-    """Print project context to stdout for SessionStart hook injection."""
+    """Print project context to stdout for SessionStart hook injection.
+
+    Also calls proj_load_session via the proj MCP socket so the MCP server's
+    in-memory state is updated immediately (without requiring Claude to act on
+    a text instruction).
+    """
     if not storage.config_exists():
         return
 
@@ -56,13 +127,15 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
                             print("**Decisions**: " + "; ".join(aggregated["decisions"][:5]))
                         if aggregated["questions"]:
                             print("**Open Questions**: " + "; ".join(aggregated["questions"][:3]))
-        else:
-            print(
-                f'\n⚡ **Activate**: Call `proj_load_session("{detected}")`'
-                " to register this project for MCP tools this session."
-            )
     except FileNotFoundError:
         print("Warning: project config not found, skipping session context", file=sys.stderr)
+        return
+
+    # Activate the project in the MCP server process via socket call.
+    # This ensures state.set_session_active() is set even if $CLAUDE_PROJECT_DIR
+    # was missing at MCP startup (Layer 1), so all subsequent MCP tool calls
+    # resolve the correct project without requiring Claude to call proj_load_session.
+    _call_proj_socket("proj_load_session", {"name": detected})
 
 
 def cmd_session_end(cwd: str | None) -> None:

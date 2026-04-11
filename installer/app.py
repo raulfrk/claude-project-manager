@@ -751,7 +751,7 @@ class InstallerApp(App):
         if not result.confirmed or self._state is None:
             self.exit()
             return
-        plugins = self._state.installed_plugins
+        plugins = get_installed_plugins()
         if not plugins:
             self.exit()
             return
