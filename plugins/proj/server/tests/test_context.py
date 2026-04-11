@@ -1033,3 +1033,113 @@ class TestSocketsCleanupStale:
 
         assert "## Active Project: myapp" in result
         assert not stale.exists()
+
+
+# ---------------------------------------------------------------------------
+# Hooks status line tests (router health probe integration)
+# ---------------------------------------------------------------------------
+
+
+class TestCtxSessionStartHooksStatus:
+    """Tests for the **Hooks** status line appended to ctx_session_start output."""
+
+    def _setup(self, cfg: ProjConfig, tmp_path: Path) -> Path:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        today = str(date.today())
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "NOTES.md").write_text("# myapp\n")
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[RepoEntry(label="code", path=str(repo))],
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta)
+        index = storage.load_index(cfg)
+        index.projects["myapp"] = ProjectEntry(
+            name="myapp", tracking_dir=str(proj_dir), created=today
+        )
+        storage.save_index(cfg, index)
+        return repo
+
+    def test_ctx_session_start_appends_reachable_line(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reachable router → `**Hooks**: ✓ router reachable` appended."""
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools import context as context_module
+
+        repo = self._setup(cfg, tmp_path)
+
+        async def _fake(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+            return True, ""
+
+        monkeypatch.setattr(context_module, "check_router_reachable", _fake)
+
+        app = FastMCP("hooks-status-ok")
+        context_module.register(app)
+
+        async def _invoke() -> str:
+            return await call_tool(app, "ctx_session_start", cwd=str(repo))
+
+        result = asyncio.run(_invoke())
+        assert "**Hooks**: ✓ router reachable" in result
+
+    def test_ctx_session_start_appends_unreachable_line(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unreachable router → `**Hooks**: ✗ router unreachable — fix: ...` appended."""
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools import context as context_module
+
+        repo = self._setup(cfg, tmp_path)
+
+        async def _fake(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+            return False, "router socket dead — restart Claude Code"
+
+        monkeypatch.setattr(context_module, "check_router_reachable", _fake)
+
+        app = FastMCP("hooks-status-fail")
+        context_module.register(app)
+
+        async def _invoke() -> str:
+            return await call_tool(app, "ctx_session_start", cwd=str(repo))
+
+        result = asyncio.run(_invoke())
+        assert "**Hooks**: ✗ router unreachable" in result
+        assert "router socket dead" in result
+
+    def test_ctx_session_start_degrades_on_helper_crash(
+        self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Helper raising → context still returned, no Hooks line."""
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools import context as context_module
+
+        repo = self._setup(cfg, tmp_path)
+
+        async def _crash(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+            raise RuntimeError("probe exploded")
+
+        monkeypatch.setattr(context_module, "check_router_reachable", _crash)
+
+        app = FastMCP("hooks-status-crash")
+        context_module.register(app)
+
+        async def _invoke() -> str:
+            return await call_tool(app, "ctx_session_start", cwd=str(repo))
+
+        result = asyncio.run(_invoke())
+        assert "## Active Project: myapp" in result
+        assert "**Hooks**:" not in result

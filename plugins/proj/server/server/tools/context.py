@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.enums import TERMINAL_STATUSES
+from server.lib.router_health import check_router_reachable
 from server.lib.sockets_cleanup import sockets_cleanup_stale
 from server.tools.config import require_config
 from server.tools.context_injection import inject_context
@@ -37,6 +38,17 @@ def _read_recent_notes(notes_path: Path, max_sections: int = 3, max_chars: int =
     if len(result) > max_chars:
         result = result[-max_chars:]  # fallback tail truncation if still too long
     return result
+
+
+def _format_hooks_status(lines: list[str], hooks_status: tuple[bool, str] | None) -> None:
+    """Append a `**Hooks**: ✓/✗` status line to *lines* (skips on None)."""
+    if hooks_status is None:
+        return
+    ok, detail = hooks_status
+    if ok:
+        lines.append("\n**Hooks**: ✓ router reachable")
+    else:
+        lines.append(f"\n**Hooks**: ✗ router unreachable — fix: {detail}")
 
 
 def _format_todos_section(todos: list[Todo], lines: list[str]) -> None:
@@ -220,7 +232,12 @@ def _collect_git_diff_paths(meta: ProjectMeta) -> list[str]:
     return paths
 
 
-def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) -> str:
+def _build_context(
+    cfg: ProjConfig,
+    project_name: str,
+    compact: bool = False,
+    hooks_status: tuple[bool, str] | None = None,
+) -> str:
     """Build a markdown context string for the active project."""
     meta = storage.load_meta(cfg, project_name)
     todos = storage.load_todos(cfg, project_name)
@@ -243,6 +260,11 @@ def _build_context(cfg: ProjConfig, project_name: str, compact: bool = False) ->
         )
 
     _format_todos_section(todos, lines)
+
+    try:
+        _format_hooks_status(lines, hooks_status)
+    except Exception:
+        logger.debug("format_hooks_status failed", exc_info=True)
 
     if not compact:
         if cfg.context_injection.enabled:
@@ -278,7 +300,7 @@ def register(app: FastMCP) -> None:
     """
 
     @app.tool(description="Build session context string for active project (SessionStart hook).")
-    def ctx_session_start(cwd: str | None = None, compact: bool = False) -> str:
+    async def ctx_session_start(cwd: str | None = None, compact: bool = False) -> str:
         if not storage.config_exists():
             return ""
         try:
@@ -290,13 +312,22 @@ def register(app: FastMCP) -> None:
             logger.debug("sockets_cleanup_stale failed", exc_info=True)
         cfg = storage.load_config()
 
+        hooks_status: tuple[bool, str] | None
+        try:
+            hooks_status = await check_router_reachable()
+        except Exception:
+            logger.debug("check_router_reachable failed", exc_info=True)
+            hooks_status = None
+
         # Session override takes precedence
         session_override = state.get_session_active()
         if session_override:
             index = storage.load_index(cfg)
             if session_override in index.projects:
                 try:
-                    return _build_context(cfg, session_override, compact=compact)
+                    return _build_context(
+                        cfg, session_override, compact=compact, hooks_status=hooks_status
+                    )
                 except FileNotFoundError:
                     pass
 
@@ -306,7 +337,9 @@ def register(app: FastMCP) -> None:
             if project_name:
                 state.set_session_active(project_name)
                 try:
-                    return _build_context(cfg, project_name, compact=compact)
+                    return _build_context(
+                        cfg, project_name, compact=compact, hooks_status=hooks_status
+                    )
                 except FileNotFoundError:
                     pass
 
