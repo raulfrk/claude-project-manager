@@ -10,6 +10,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Footer, Static
 
 from installer._config_loader import ConfigLoadError, load_existing_yaml
+from installer.cleanup import cleanup_orphaned_plugin_caches
 from installer.detect import InstallState, detect_existing
 from installer.errors import InstallerError
 from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
@@ -560,6 +561,23 @@ class InstallerApp(App):
             except InstallerError as exc:
                 progress.write_log(f"  [red]✗ {plugin_name}: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
+
+        progress.write_log("[bold]Cleaning up orphan plugin caches...[/bold]")
+        cache_root = Path.home() / ".claude" / "plugins" / "cache"
+        installed_json = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+        try:
+            removed = await asyncio.to_thread(
+                cleanup_orphaned_plugin_caches,
+                cache_root,
+                installed_json,
+            )
+            if removed:
+                for name in removed:
+                    progress.write_log(f"  [dim]removed orphan: {name}[/dim]")
+            else:
+                progress.write_log("  [dim]no orphans found[/dim]")
+        except Exception as exc:
+            progress.write_log(f"  [yellow]cleanup skipped: {exc}[/yellow]")
 
     def _show_error(self, message: str) -> None:
         """Surface an error to the user via the placeholder Static + log."""
