@@ -275,7 +275,7 @@ class WizardScreen(Screen[dict[str, Any] | None]):
                     self.dismiss(basic)
 
                 self.app.push_screen(
-                    AdvancedConfigScreen(self._existing.get("proj", {}), []),
+                    AdvancedConfigScreen(self._existing, []),
                     _on_advanced,
                 )
             except ImportError:

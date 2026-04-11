@@ -9,6 +9,7 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
+from installer.screens.advanced_config import AdvancedConfigScreen
 from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
 from installer.screens.detection import DetectionScreen, PluginDetectionRow
 from installer.screens.plugin_select import PluginSelectScreen
@@ -404,6 +405,71 @@ class TestWizardScreen:
             ):
                 with pytest.raises(NoMatches):
                     screen.query_one(widget_id)
+
+
+# ============================================================================
+# AdvancedConfigScreen
+# ============================================================================
+
+
+class TestAdvancedConfigScreen:
+    """Unit tests for the per-bucket existing dict contract."""
+
+    def test_normalize_bucketed_passthrough(self) -> None:
+        bucketed = {
+            "proj": {"tracking_dir": "/a"},
+            "worktree": {"worktree_dir": "/b"},
+        }
+        normalized = AdvancedConfigScreen._normalize_existing(bucketed)
+        assert normalized == bucketed
+
+    def test_normalize_flat_wraps_as_proj(self) -> None:
+        flat = {"tracking_dir": "/a", "sync": {"todoist": {"enabled": True}}}
+        normalized = AdvancedConfigScreen._normalize_existing(flat)
+        assert normalized == {"proj": flat}
+
+    def test_normalize_empty_stays_empty(self) -> None:
+        assert AdvancedConfigScreen._normalize_existing({}) == {"proj": {}}
+
+    def test_normalize_mixed_treated_as_flat(self) -> None:
+        """A dict with a non-yaml_file key is treated as flat (safe fallback)."""
+        flat_like = {"tracking_dir": "/a", "proj": {"nested": True}}
+        normalized = AdvancedConfigScreen._normalize_existing(flat_like)
+        assert normalized == {"proj": flat_like}
+
+    @pytest.mark.asyncio
+    async def test_submit_returns_dict(self, mock_home: Path) -> None:
+        """AdvancedConfigScreen.dismiss returns dict[str, Any] (or None on cancel)."""
+        app = _TestApp()
+        results: list[dict | None] = []
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = AdvancedConfigScreen({"proj": {}}, [])
+            app.push_screen(screen, callback=lambda r: results.append(r))
+            await pilot.pause()
+
+            btn = screen.query_one("#btn-submit")
+            await pilot.click(btn)
+            await pilot.pause()
+
+        assert len(results) == 1
+        assert results[0] is not None
+        assert isinstance(results[0], dict)
+
+    @pytest.mark.asyncio
+    async def test_cancel_returns_none(self, mock_home: Path) -> None:
+        app = _TestApp()
+        results: list[dict | None] = []
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = AdvancedConfigScreen({"proj": {}}, [])
+            app.push_screen(screen, callback=lambda r: results.append(r))
+            await pilot.pause()
+
+            btn = screen.query_one("#btn-cancel")
+            await pilot.click(btn)
+            await pilot.pause()
+
+        assert len(results) == 1
+        assert results[0] is None
 
 
 # ============================================================================

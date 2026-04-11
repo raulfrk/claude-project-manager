@@ -74,21 +74,52 @@ class AdvancedConfigScreen(Screen[dict[str, Any] | None]):
 
     def __init__(
         self,
-        existing: dict[str, Any],
+        existing: dict[str, dict[str, Any]] | dict[str, Any],
         selected_plugins: list[str],
     ) -> None:
+        """Initialize with per-bucket existing dict.
+
+        Accepts two shapes for backwards compatibility during the 515.5–515.6
+        transition:
+        - dict[str, dict[str, Any]]: per-bucket keyed by yaml_file (proj,
+          worktree, todoist, trello, jira). This is the canonical post-515.6
+          shape passed by WizardScreen.
+        - dict[str, Any]: a flat proj bucket. Wrapped as {"proj": existing}
+          so pre-515.6 callers still work.
+
+        Detection heuristic: if *any* value in `existing` is a dict AND the
+        key matches a known yaml_file name, treat as per-bucket. Otherwise
+        treat as a flat proj bucket.
+        """
         super().__init__()
-        self._existing = existing or {}
+        self._existing: dict[str, dict[str, Any]] = self._normalize_existing(
+            existing or {}
+        )
         self._selected_plugins = selected_plugins or []
+
+    @staticmethod
+    def _normalize_existing(
+        existing: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Coerce flat-or-bucketed shape into canonical per-bucket dict."""
+        yaml_files = {"proj", "worktree", "todoist", "trello", "jira"}
+        looks_bucketed = bool(existing) and all(
+            k in yaml_files and isinstance(v, dict) for k, v in existing.items()
+        )
+        if looks_bucketed:
+            return {k: v for k, v in existing.items()}
+        return {"proj": existing}
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll(id="advanced-form"):
             groups: dict[str, list[PromptSpec]] = {}
+            # Hard contract: conditions always read the proj bucket.
+            proj_bucket = self._existing.get("proj", {})
             for spec in PROJ_YAML_PROMPTS:
                 if spec.tier != "advanced":
                     continue
-                if spec.condition is not None and not spec.condition(self._existing):
+                if spec.condition is not None and not spec.condition(proj_bucket):
                     continue
                 groups.setdefault(spec.group, []).append(spec)
 
@@ -106,7 +137,8 @@ class AdvancedConfigScreen(Screen[dict[str, Any] | None]):
         yield Footer()
 
     def _compose_field(self, spec: PromptSpec) -> ComposeResult:
-        default = spec.default_factory(self._existing)
+        bucket = self._existing.get(spec.yaml_file, {})
+        default = spec.default_factory(bucket)
         widget_id = spec.dotted_key.replace(".", "-")
         label = spec.label
         if spec.type == "bool":
