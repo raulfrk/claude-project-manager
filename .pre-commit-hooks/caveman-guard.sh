@@ -40,6 +40,11 @@ for m in "${markers[@]}"; do
       .github/workflows/caveman-guard.yml|.pre-commit-hooks/caveman-guard.sh)
         continue
         ;;
+      CLAUDE.md|installer/claudemd.py)
+        # Files that document or implement the guard itself. They reference
+        # markers by name (not by content), so they are allowed to match.
+        continue
+        ;;
     esac
     if git diff --cached -- "$file" | grep -F -q "+$m"; then
       echo "caveman-guard: marker '$m' added in $file" >&2

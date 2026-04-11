@@ -34,9 +34,18 @@ jobs:
           )
           failed=0
           for m in "${markers[@]}"; do
-            # Search tracked files; exclude this workflow file itself and the
-            # caveman-guard pre-commit hook (both contain the markers by design).
-            matches=$(git grep -l -F -- "$m" -- ':!.github/workflows/caveman-guard.yml' ':!.pre-commit-hooks/caveman-guard.sh' || true)
+            # Search tracked files; exclude files that document or implement
+            # the guard itself (they reference markers by name, not by content):
+            #   - the guard workflow + pre-commit hook (literal marker lists)
+            #   - project CLAUDE.md (documents the marker contract)
+            #   - installer/claudemd.py (defines the MANAGED_SECTION variants
+            #     and references _CAVEMAN_APPEND by name in its docstring)
+            matches=$(git grep -l -F -- "$m" \
+              -- ':!.github/workflows/caveman-guard.yml' \
+                 ':!.pre-commit-hooks/caveman-guard.sh' \
+                 ':!CLAUDE.md' \
+                 ':!installer/claudemd.py' \
+              || true)
             if [ -n "$matches" ]; then
               echo "::error::Caveman marker '$m' found in tracked files:"
               echo "$matches"
