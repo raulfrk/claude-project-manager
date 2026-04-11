@@ -54,13 +54,20 @@ def _make_screen(existing: dict | None = None) -> AdvancedConfigScreen:
     return AdvancedConfigScreen(existing or {}, [])
 
 
-def _expand_collapsible(screen: AdvancedConfigScreen, group_id: str) -> None:
-    """Force a Collapsible open so its children are laid out."""
+async def _expand_collapsible(
+    pilot, screen: AdvancedConfigScreen, group_id: str
+) -> None:
+    """Expand the given Collapsible group and settle internally.
+
+    Regression guard: must remain async so _settle runs on every call site.
+    Opt-out token: `# noqa: no-settle` at end of a call line.
+    """
     try:
         coll = screen.query_one(f"#group-{group_id}", Collapsible)
         coll.collapsed = False
     except Exception:
         pass
+    await _settle(pilot, screen)
 
 
 async def _settle(pilot, screen: AdvancedConfigScreen) -> None:
@@ -129,8 +136,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
 
             for wid in (
                 "team_mode-enabled",
@@ -150,8 +156,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
             screen.query_one("#team_mode-trust_level", Input).focus()
             await pilot.pause()
 
@@ -171,8 +176,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
             screen.query_one("#team_mode-trust_level", Input).value = "9"
             await pilot.pause()
 
@@ -194,8 +198,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
             screen.query_one("#team_mode-trust_level", Input).value = "2"
             await pilot.pause()
 
@@ -214,8 +217,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
             screen.query_one("#team_mode-enabled", Switch).focus()
             await pilot.pause()
 
@@ -233,8 +235,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
             screen.query_one("#team_mode-max_agents", Input).focus()
             await pilot.pause()
 
@@ -252,8 +253,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "smart-gate")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "smart-gate")
 
             for wid in (
                 "smart_gate-enabled",
@@ -273,8 +273,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "resilience")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "resilience")
 
             assert screen.query_one("#resilience-max_retries", Input).region.width > 0
             assert (
@@ -292,8 +291,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "context-injection")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "context-injection")
 
             for wid in (
                 "context_injection-enabled",
@@ -313,8 +311,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "archive")
-            await _settle(pilot, screen)
+            await _expand_collapsible(pilot, screen, "archive")
 
             for wid in (
                 "archive-auto_archive",
@@ -335,8 +332,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "permissions")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "permissions")
 
             for wid in (
                 "permissions-auto_grant_read",
@@ -355,8 +351,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "other-proj")
-            await _settle(pilot, screen)
+            await _expand_collapsible(pilot, screen, "other-proj")
 
             for wid in (
                 "default_priority",
@@ -377,8 +372,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "other-proj")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "other-proj")
             screen.query_one("#default_priority", Select).focus()
             await pilot.pause()
 
@@ -396,8 +390,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "other-proj")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "other-proj")
             sel = screen.query_one("#default_priority", Select)
             sel.value = "high"
             await pilot.pause()
@@ -418,8 +411,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "todoist-extras")
-            await _settle(pilot, screen)
+            await _expand_collapsible(pilot, screen, "todoist-extras")
 
             assert screen.query_one("#sync-todoist-root_only", Switch).region.width > 0
 
@@ -441,8 +433,7 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "trello-list-mappings")
-            await _settle(pilot, screen)
+            await _expand_collapsible(pilot, screen, "trello-list-mappings")
 
             for wid in (
                 "sync-trello-list_mappings-created",
@@ -473,11 +464,10 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            _expand_collapsible(screen, "team-mode")
-            _expand_collapsible(screen, "smart-gate")
-            _expand_collapsible(screen, "archive")
-            _expand_collapsible(screen, "other-proj")
-            await pilot.pause()
+            await _expand_collapsible(pilot, screen, "team-mode")
+            await _expand_collapsible(pilot, screen, "smart-gate")
+            await _expand_collapsible(pilot, screen, "archive")
+            await _expand_collapsible(pilot, screen, "other-proj")
 
             assert screen.query_one("#team_mode-enabled", Switch).value is False
             assert screen.query_one("#team_mode-max_agents", Input).value == "7"
