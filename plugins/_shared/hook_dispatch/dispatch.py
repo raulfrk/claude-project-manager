@@ -11,6 +11,30 @@ from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, runtime_checkabl
 
 import httpx
 
+try:
+    from scrubbing import build_structured_error, scrub_secrets
+except ImportError:  # pragma: no cover — fallback if scrubbing is missing
+
+    def scrub_secrets(obj: object) -> object:  # type: ignore[misc]
+        return obj
+
+    def build_structured_error(  # type: ignore[misc]
+        integration: str,
+        failed_ids: list[str],
+        exc: Exception | str,
+        *,
+        target_tool: str = "",
+        error_type: str = "",
+    ) -> dict[str, object]:
+        return {
+            "integration": integration,
+            "target_tool": target_tool,
+            "error_type": error_type or "error",
+            "message": str(exc),
+            "failed_ids": list(failed_ids),
+        }
+
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
@@ -269,13 +293,42 @@ def _build_hooks_field(
         chain.append(entry)
 
     error_strings: list[JsonValue] = []
+    structured_errors: list[JsonValue] = []
     if has_error:
-        error_strings = [str(fire_response["_error"])]
+        scrubbed_top = scrub_secrets(str(fire_response["_error"]))
+        error_strings = [scrubbed_top]  # type: ignore[list-item]
+        structured_errors.append(
+            build_structured_error(
+                integration="hooks",
+                failed_ids=[],
+                exc=str(fire_response["_error"]),
+                target_tool=tool_name,
+                error_type="dispatch",
+            )  # type: ignore[arg-type]
+        )
     else:
-        error_strings = [
-            _format_error(str(e.get("error", str(e))), str(e.get("hook_id", "unknown")))
-            for e in errors_list
-        ]
+        for e in errors_list:
+            raw_err = str(e.get("error", str(e)))
+            hid = str(e.get("hook_id", "unknown"))
+            formatted = _format_error(raw_err, hid)
+            error_strings.append(scrub_secrets(formatted))  # type: ignore[arg-type]
+            target_tool_val = str(e.get("target_tool")) if e.get("target_tool") else ""
+            failed_ids_raw = e.get("failed_ids", [])
+            failed_ids: list[str] = [
+                str(fid) for fid in (failed_ids_raw if isinstance(failed_ids_raw, list) else [])
+            ]
+            integration_val = str(e.get("integration", "")) or _integration_from_tool(
+                target_tool_val
+            )
+            structured_errors.append(
+                build_structured_error(
+                    integration=integration_val,
+                    failed_ids=failed_ids,
+                    exc=raw_err,
+                    target_tool=target_tool_val,
+                    error_type=str(e.get("error_type", "")),
+                )  # type: ignore[arg-type]
+            )
 
     # Merge cascade errors from nested hook dispatch
     raw_cascade = fire_response.get("cascade_errors", [])
@@ -283,17 +336,30 @@ def _build_hooks_field(
         str(ce) for ce in (raw_cascade if isinstance(raw_cascade, list) else [])
     ]
     for ce in cascade_errors:
-        error_strings.append(ce)
+        error_strings.append(scrub_secrets(ce))  # type: ignore[arg-type]
 
     return {
         "_claude_instructions": (
-            "Hook chain completed. Check _hooks.errors and chain entries with "
-            "status=error for failures. Explain any errors to the user and suggest fixes."
+            "Hook chain completed. Check _hooks.errors and _hooks.structured_errors "
+            "and chain entries with status=error for failures. Explain any errors to "
+            "the user and suggest fixes."
         ),
         "hooks_fired": hooks_fired,
         "chain": chain,
         "errors": error_strings,
+        "structured_errors": structured_errors,
     }
+
+
+def _integration_from_tool(target_tool: str) -> str:
+    """Best-effort inference of integration name from target tool name."""
+    if target_tool.startswith("todoist_"):
+        return "todoist"
+    if target_tool.startswith("trello_") or "trello" in target_tool:
+        return "trello"
+    if target_tool.startswith("jira_"):
+        return "jira"
+    return ""
 
 
 # Keys in feedback params that are internal routing context, not mergeable data
