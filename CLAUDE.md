@@ -33,39 +33,6 @@ It contains the full workflow map, user vision, quality assessment, gap analysis
 
 Before starting any non-trivial task, evaluate whether it should be broken down into a todo list of smaller steps. Use task tracking to manage progress on multi-step work.
 
-## Branch layout and caveman experiment
-
-This repository uses three long-lived branches:
-
-- **`main`** — release branch.
-- **`dev`** — integration branch for all non-experimental work. Pull requests target `dev`; releases merge `dev` → `main`.
-- **`dev-caveman`** — permanent experimental sidecar for the caveman-mode adoption work (todo 519). Branches off `dev`. **Never merges to `dev` or `main`.**
-
-### Caveman-only content
-
-The caveman experiment adds constraints and output conventions that only apply when the assistant is running against the `dev-caveman` branch. Specifically, the following marker strings **must not appear** on `main` or `dev`:
-
-- `Caveman-Aware Output`
-- `CPM-CAVEMAN-BACKUP`
-- `Caveman Mode Precedence`
-- `_CAVEMAN_APPEND`
-- `# cpm:caveman`
-
-Two independent guards enforce this:
-
-1. **CI** — `.github/workflows/caveman-guard.yml` runs on every push and PR targeting `main`/`dev`. Any diff containing a marker fails the build.
-2. **Pre-commit** — `.pre-commit-hooks/caveman-guard.sh` wired into `.pre-commit-config.yaml` rejects local commits on `main`/`dev` that add any marker. It is a no-op on every other branch, including `dev-caveman`.
-
-If you need to do caveman work, check out `dev-caveman`, do the work there, and leave it there. Do not rebase `dev-caveman` onto `dev` with a merge.
-
-### Branch switching and global `~/.claude/CLAUDE.md`
-
-The global `~/.claude/CLAUDE.md` is **not** a tracked file and is shared across every repository the installer has touched. When switching branches between `dev` and `dev-caveman`, its managed section must be updated to match the active branch. This happens exclusively inside the installer wizard sync step — **not** from a SessionStart hook and **not** from a git post-checkout hook.
-
-**After every branch switch between `dev` and `dev-caveman`, run `claude-installer update`** to refresh `~/.claude/CLAUDE.md`. The installer backs up the previous managed content to `~/.claude/CLAUDE.md.pre-caveman` with a `# CPM-CAVEMAN-BACKUP v1 <timestamp>` magic header and restores it atomically on switch-back. User-added content outside the managed markers is preserved via a non-managed-region diff.
-
-Full design and rationale in `tracking/claude-project-manager/todos/519/requirements.md`.
-
 ## Implementation Validation
 
 After completing any implementation, always validate the result against the specs (requirements, research, or overhaul document) that were provided for that work. Check for gaps, deviations, and missing test coverage before marking a todo as done.
