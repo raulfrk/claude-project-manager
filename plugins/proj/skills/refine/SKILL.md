@@ -7,6 +7,8 @@ argument-hint: "<todo-id>"
 
 Refine todo: $ARGUMENTS
 
+**Interaction rule**: This skill MUST use `AskUserQuestion` for every user-facing prompt. Do not emit inline numbered text lists for user input. Steps 7, 8.6, and 9 all route their choices through `AskUserQuestion`. The 4-option cap of `AskUserQuestion` applies — prompts must fit within 4 options.
+
 **Quality level behavior** (controlled by `/proj:run`, not this skill):
 - `--fast`: refine is skipped entirely (`/proj:run` guards this before invoking refine)
 - `--careful` / `--paranoid`: refine is auto-enabled (run invokes this skill even without `--refine` flag)
@@ -194,14 +196,15 @@ Proceeding to plan mode.
 ```
 Auto-continue without prompting.
 
-**7.** If issues found, prompt:
+**7.** If issues found, call `AskUserQuestion` **once** with exactly these four options:
+- `Apply` — Update requirements.md and research.md with all suggested amendments
+- `Edit` — Modify amendments before applying (enters step 9 edit flow)
+- `Skip` — Proceed to plan mode without changes
+- `Stop` — Exit workflow
 
-```
-1. **Apply** — Update requirements.md and research.md with all suggested amendments
-2. **Edit** — Modify amendments before applying (display as numbered list, pick which to keep/modify/drop)
-3. **Skip** — Proceed to plan mode without changes
-4. **Stop** — Exit workflow
-```
+Pass the refinement report summary (agent counts, critical issues, suggested amendments) as the `question`/context for the call so the user can decide in-place. Do NOT print these choices as an inline numbered list — the `AskUserQuestion` call is the only user-facing prompt.
+
+**Non-interactive fallback**: Under `--no-interactive`, the Apply/Reject gate defaults to `Skip` (logged note); step 8.6 defaults to `Continue`; step 9 defaults to `Keep-all`. No `AskUserQuestion` calls are made in this mode.
 
 **8.** Apply flow:
 1. Backup: call `content_get_requirements` and store as `pre_refine_requirements`. If research exists, same for research.
@@ -209,10 +212,18 @@ Auto-continue without prompting.
 3. Call `content_set_requirements` with updated content.
 4. If research amendments: call `content_set_research` with updated content.
 5. Display: "Requirements updated with N amendments."
-6. Re-run the 5 preflight checks (the same structural checks from the preflight block in `/proj:run`). If any new failures: display and offer (1) Fix (2) Continue (3) Undo amendments.
+6. Re-run the 5 preflight checks (the same structural checks from the preflight block in `/proj:run`). If any new failures, call `AskUserQuestion` **once** with exactly these three options and include the failing preflight check names in the `question` text:
+   - `Fix` — Spawn a fix pass to address the failing checks
+   - `Continue` — Proceed to plan mode despite failures
+   - `Undo amendments` — Restore pre-refine requirements/research
+   Do not print an inline numbered list — the `AskUserQuestion` call is the only user-facing prompt here.
 7. Undo: restore from `pre_refine_requirements` backup via `content_set_requirements`.
 
 **9.** Edit flow:
-1. Display amendments as a numbered list.
-2. User specifies which to keep, modify, or drop.
-3. Apply the edited subset using the same Apply flow (step 8).
+1. For each amendment (one at a time), call `AskUserQuestion` with exactly these four options — this respects the 4-option cap of `AskUserQuestion`:
+   - `Keep` — Accept this amendment as-is
+   - `Modify` — Rewrite this amendment (follow-up via a second `AskUserQuestion` or open-ended prompt only if unavoidable)
+   - `Drop` — Exclude this amendment
+   - `Stop` — Halt the edit flow; apply only decisions made so far
+   Pass the amendment text (and its source agent) as the `question`/context. Issue one `AskUserQuestion` call per amendment — do NOT batch multiple amendments into a single call, and do NOT print the amendments as an inline numbered list.
+2. Apply the edited subset using the same Apply flow (step 8).
