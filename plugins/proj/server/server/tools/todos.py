@@ -677,6 +677,10 @@ def register(app: FastMCP) -> None:
         today = _now()
         completed_ids: list[str] = []
         archive_family_ids: set[str] = set()
+        # Captured while holding the lock, used post-lock for Phase 3/4.
+        todoist_task_ids: list[str] = []
+        trello_card_ids: list[str] = []
+        jira_issue_keys: list[str] = []
 
         with _BATCH_COMPLETE_LOCK:
             # Phase 2a: fcntl.flock around the todos.yaml file for
@@ -752,6 +756,12 @@ def register(app: FastMCP) -> None:
                     todo.status = TodoStatus.DONE
                     todo.updated = today
                     completed_ids.append(tid)
+                    if todo.todoist_task_id:
+                        todoist_task_ids.append(todo.todoist_task_id)
+                    if todo.trello_card_id:
+                        trello_card_ids.append(todo.trello_card_id)
+                    if todo.jira_issue_key:
+                        jira_issue_keys.append(todo.jira_issue_key)
 
                 # Second pass: evaluate archival.
                 # - Leaf (no children, no parent): archive this todo alone.
@@ -826,16 +836,76 @@ def register(app: FastMCP) -> None:
                     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
                 lock_fd.close()
 
-        # ── Phase 3/4 — placeholder (518.3/518.4) ────────────────────────
-        return json.dumps(
-            {
-                "completed_ids": completed_ids,
-                "skipped_ids": skipped_ids,
-                "archived_ids": sorted(archive_family_ids),
-                "invalid_ids": [],
-                "project_name": name,
-            }
+        # ── Phase 3 — pre-enriched payload ────────────────────────────────
+        # Build the enriched source payload for hook dispatch. Include both
+        # plural and singular keys: plural lists feed batch hook param
+        # mappings (ids/card_ids/updates_json), singular keys feed condition
+        # evaluation in hooks_fire_tool (belt-and-braces).
+        try:
+            meta = storage.load_meta(cfg, name)
+        except FileNotFoundError:
+            meta = None
+
+        todoist_project_id_val = meta.todoist_project_id if meta is not None else None
+        trello_card_id_val = meta.trello_card_id if meta is not None else None
+        jira_project_key_val = (
+            meta.jira_issue_key.split("-")[0] if meta is not None and meta.jira_issue_key else None
         )
+
+        # Pre-build full Jira bulk-update JSON string because the hook
+        # template engine cannot iterate lists. Hooks map
+        # updates_json: ${jira_updates_json} and get the native string.
+        jira_payload: dict[str, JsonValue] = {
+            "updates": [
+                {"key": key, "fields": {"resolution": {"name": "Done"}}} for key in jira_issue_keys
+            ]
+        }
+        jira_updates_json: str = json.dumps(jira_payload, ensure_ascii=True)
+
+        # Phase 3a — 90KB whole-field truncation. Estimate payload size and
+        # drop whole fields (never mid-string) if over the threshold, so
+        # downstream parsers never see sliced JSON.
+        _MAX_SOURCE_BYTES = 90 * 1024
+        truncation_notes: list[str] = []
+
+        def _estimate_size(
+            payload: dict[str, JsonValue],
+        ) -> int:
+            return len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+
+        result_data: dict[str, JsonValue] = {
+            "completed_ids": completed_ids,
+            "skipped_ids": skipped_ids,
+            "archived_ids": sorted(archive_family_ids),
+            "invalid_ids": [],
+            "project_name": name,
+            "todoist_task_ids": todoist_task_ids,
+            "trello_card_ids": trello_card_ids,
+            "jira_issue_keys": jira_issue_keys,
+            "jira_updates_json": jira_updates_json,
+            "todoist_project_id": todoist_project_id_val,
+            "trello_card_id": trello_card_id_val,
+            "jira_project_key": jira_project_key_val,
+        }
+
+        if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+            # Drop biggest whole fields first: jira_updates_json is the
+            # likeliest offender on large batches.
+            if "jira_updates_json" in result_data:
+                result_data["jira_updates_json"] = ""
+                truncation_notes.append(
+                    "jira_updates_json dropped: batch exceeded 90KB payload cap"
+                )
+            if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+                result_data["jira_issue_keys"] = []
+                truncation_notes.append("jira_issue_keys dropped: batch exceeded 90KB payload cap")
+            if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+                result_data["trello_card_ids"] = []
+                truncation_notes.append("trello_card_ids dropped: batch exceeded 90KB payload cap")
+        if truncation_notes:
+            result_data["truncation_notes"] = truncation_notes
+
+        return json.dumps(result_data, ensure_ascii=True)
 
     @app.tool(description="Revert a completed todo back to pending.")
     def todo_uncomplete(todo_id: str, project_name: str | None = None) -> str:
