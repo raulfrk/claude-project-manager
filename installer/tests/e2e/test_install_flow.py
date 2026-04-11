@@ -198,7 +198,7 @@ class TestDefaultPreselection:
 
     @pytest.mark.asyncio
     async def test_default_plugins_preselected(self, e2e_app):
-        """sandbox, hooks, proj are pre-selected by default."""
+        """sandbox, router, proj are pre-selected by default."""
         app: InstallerApp = e2e_app(mode="install")
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -211,7 +211,7 @@ class TestDefaultPreselection:
             # Verify preselection matches DEFAULT_PRESELECT
             assert screen._selected == DEFAULT_PRESELECT
             assert "sandbox" in screen._selected
-            assert "hooks" in screen._selected
+            assert "router" in screen._selected
             assert "proj" in screen._selected
 
             # Non-default plugins should NOT be selected
