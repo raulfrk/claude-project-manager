@@ -32,6 +32,10 @@ class PluginSelectScreen(Screen[list[str]]):
     """Interactive plugin selection with checkboxes grouped by category.
 
     Returns a list of selected plugin names via ``dismiss()``.
+
+    Note: kept as a standalone widget for the CLI-mode selection path and
+    unit/snapshot tests. Not used in the main TUI flow (app.py uses
+    PluginStatusScreen instead, added in todo-535).
     """
 
     CSS = """

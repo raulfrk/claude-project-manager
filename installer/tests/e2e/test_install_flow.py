@@ -65,8 +65,8 @@ class TestFullInstallFlow:
             assert isinstance(screen, PluginStatusScreen)
 
             # Restrict install to the core plugin set that doesn't trigger
-            # integration config screens (keeping parity with the original
-            # DEFAULT_PRESELECT-based test).
+            # integration config screens. Uses _install_only helper to mark
+            # only these plugins for install on PluginStatusScreen.
             _install_only(screen, {"sandbox", "router", "proj"})
 
             btn = screen.query_one("#btn-confirm")
