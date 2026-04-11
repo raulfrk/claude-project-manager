@@ -1,5 +1,18 @@
 name: CI
 
+# Action version policy (todo-528, 2026-04-11):
+# - First-party actions/* stay on floating major tags (v4, v5) — GitHub guarantees
+#   Node 24 readiness for its own actions ahead of the Sept 2026 Node 20 cutoff.
+# - Third-party actions are SHA-pinned with a trailing version comment for auditability.
+# - astral-sh/setup-uv: pinned to v4.2.0 (latest v4.x, Node 20 JS action — still within
+#   the Node 24 window; upgrading to v8 is out of scope for this ticket).
+# - pre-commit/action@v3.0.1: composite action (not JS), so the Node 20→24 deprecation
+#   does NOT apply. No FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 fallback required.
+# - docker/setup-buildx-action: pinned to v3.12.0 (latest v3.x). Docker actions; not
+#   affected by the JS runtime env-var fallback.
+# - docker/build-push-action: pinned to v6.19.2. DO NOT bump to v7/v8 — cache schema
+#   break between v6 and later majors.
+
 on:
   push:
     branches: [main, dev]
@@ -22,7 +35,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           enable-cache: true
 
@@ -33,7 +46,7 @@ jobs:
             uv sync --frozen --directory "$dir" --group dev --group test
           done
 
-      - uses: pre-commit/action@v3.0.1
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
 
   test:
     needs: pre-commit
@@ -64,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           enable-cache: true
 
@@ -83,7 +96,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Cache Docker layers
         uses: actions/cache@v4
@@ -93,7 +106,7 @@ jobs:
           restore-keys: buildx-e2e-
 
       - name: Build e2e test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: installer/tests/e2e/Dockerfile
