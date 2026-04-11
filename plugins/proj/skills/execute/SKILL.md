@@ -789,7 +789,7 @@ After the combined report, show a summary line (e.g. "2 passed, 1 failed") and p
 If all checks pass, display the combined report and proceed to Phase 3 without prompting.
 
 Phase 3 — Satisfaction check (sequential, in dependency order):
-For each completed todo, run the satisfaction loop (step 5a-5d) before calling `todo_complete`.
+For each completed todo, run the satisfaction loop (step 5a-5d). **Batch completion rule:** collect all satisfied todo IDs into a list rather than calling `todo_complete` per-todo. If 2 or more are satisfied, make ONE `mcp__proj__todo_batch_complete` call with the full id list — this fires a single aggregated hook chain to Todoist/Trello/Jira instead of N sequential hooks. If only 1 is satisfied, fall back to `mcp__proj__todo_complete`.
 Clear `executing_agents = {}` after satisfaction checks complete.
 
 **Note:** Root todo execution does NOT auto-recurse into children. To execute children, specify their IDs explicitly.

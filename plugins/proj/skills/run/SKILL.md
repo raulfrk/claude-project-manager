@@ -816,20 +816,24 @@ If all checks pass, display the report and proceed without prompting.
 **Satisfaction check** (sequential, main conversation):
 
 Satisfaction mode is determined by `quality_level.satisfaction`:
-- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch.
-- IF satisfaction == "per-todo": Run individual satisfaction loop per todo (default behavior below).
-- IF satisfaction == "skip": Auto-complete all todos without prompting (call `mcp__proj__todo_complete` on each).
-- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes.
+- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch. On yes, call `mcp__proj__todo_batch_complete` with all batch ids in one call.
+- IF satisfaction == "per-todo": Run individual satisfaction loop per todo (default behavior below). Collect satisfied ids into a batch and finalize with one `todo_batch_complete` call at batch end (see note below).
+- IF satisfaction == "skip": Auto-complete all todos without prompting via a single `mcp__proj__todo_batch_complete` call with the full id list.
+- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes, then finalize with one `todo_batch_complete` call.
 
-For per-todo and per-todo + re-verify modes, for each completed todo in the batch, run the satisfaction loop:
+**Batch completion rule:** whenever 2 or more todos need to be marked done in the same batch, ALWAYS use `mcp__proj__todo_batch_complete(todo_ids=[...])` — never loop `todo_complete`. The batch tool fires a single aggregated hook chain (one call per integration) instead of N sequential chains, and guarantees atomic save under a file lock. Only use `todo_complete` for true single-todo completion.
+
+For per-todo and per-todo + re-verify modes, collect satisfied ids into `satisfied_ids = []` and run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
-      1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
+      1. **Satisfied** — append `<id>` to `satisfied_ids` (do NOT call `todo_complete` yet).
       2. **Not satisfied** — fix in scope: ask what's missing. Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `context="run:satisfaction:<todo_id>"`, `tags="correction,quality"`, `todo_id=<todo_id>`. Then create new todo (`todo_add`), run full workflow (`/proj:run <new_id> --iter 5`), then re-ask satisfaction on original todo
       3. **Redefine** — refine requirements and re-run workflow: run interactive define on the todo, then re-run `/proj:run <id> --from decompose`
 
+   After the loop completes for the batch: if `len(satisfied_ids) >= 2`, call `mcp__proj__todo_batch_complete(todo_ids=satisfied_ids)`. If `len(satisfied_ids) == 1`, call `mcp__proj__todo_complete` on that id.
+
    When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
 
-Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent. Otherwise display warning.
+Auto-complete parent: if `manual_skipped_ids` is empty, run the satisfaction loop (3-option: Satisfied / Not satisfied / Redefine) for the parent todo before calling `mcp__proj__todo_complete` on parent (single id — not batch). Otherwise display warning.
 
 IF quality_level == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
@@ -1389,16 +1393,20 @@ If all checks pass, display the report and proceed without prompting.
 **Satisfaction check** (sequential, main conversation):
 
 Satisfaction mode is determined by `quality_level.satisfaction`:
-- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch.
-- IF satisfaction == "per-todo": Run individual satisfaction loop per todo (default behavior below).
-- IF satisfaction == "skip": Auto-complete all todos without prompting (call `mcp__proj__todo_complete` on each).
-- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes.
+- IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch. On yes, call `mcp__proj__todo_batch_complete` with all batch ids.
+- IF satisfaction == "per-todo": Run individual satisfaction loop per todo; collect satisfied ids and finalize with a single `todo_batch_complete` call at batch end.
+- IF satisfaction == "skip": Auto-complete all todos without prompting via one `mcp__proj__todo_batch_complete` call with the full id list.
+- IF satisfaction == "per-todo + re-verify": Run individual satisfaction per todo, then re-run verification after any fixes, then finalize with one `todo_batch_complete`.
 
-For per-todo and per-todo + re-verify modes, for each completed todo (excluding `manual_skipped_ids`), run the satisfaction loop:
+**Batch completion rule:** whenever 2 or more todos need to be marked done in the same batch, ALWAYS use `mcp__proj__todo_batch_complete(todo_ids=[...])` — never loop `todo_complete`. Only use `todo_complete` for single-todo completion.
+
+For per-todo and per-todo + re-verify modes, collect satisfied ids into `satisfied_ids = []`. For each completed todo (excluding `manual_skipped_ids`), run the satisfaction loop:
    a. Ask: "Are you satisfied with the outcome of todo <id>, or is there anything else that needs to be done?"
-      1. **Satisfied** — mark done: call `mcp__proj__todo_complete`
+      1. **Satisfied** — append `<id>` to `satisfied_ids` (do NOT call `todo_complete` yet).
       2. **Not satisfied** — fix in scope: ask what's missing. Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `context="run:satisfaction:<todo_id>"`, `tags="correction,quality"`, `todo_id=<todo_id>`. Then fix, re-ask
       3. **Redefine** — refine requirements and re-run workflow
+
+   After the loop: if `len(satisfied_ids) >= 2`, call `mcp__proj__todo_batch_complete(todo_ids=satisfied_ids)`. If `len(satisfied_ids) == 1`, call `mcp__proj__todo_complete` on that id.
 
    When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
 

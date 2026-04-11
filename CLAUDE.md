@@ -46,6 +46,15 @@ After completing any implementation, always validate the result against the spec
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
 - **Worktree isolation is ON by default** for `/proj:run` at all quality levels except `--paranoid`. Pass `--no-worktree` to opt out. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants.
 
+## Batch Completion Enforcement
+
+**Always use `mcp__proj__todo_batch_complete` when marking 2 or more todos done in the same operation.** Never loop `todo_complete` across multiple ids. The batch tool:
+- Validates, deduplicates, and atomically saves all ids under a cross-process file lock (`threading.Lock` + `fcntl.flock`).
+- Fires ONE aggregated hook chain per integration (Todoist `todoist_complete_tasks`, Trello `trello_batch_archive_cards`, Jira `jira_bulk_update_issues`) instead of N sequential chains.
+- Returns a `_hooks.structured_errors` sidecar that identifies which integration/ids failed per hook.
+
+Single-todo completion continues to use `mcp__proj__todo_complete`. Skills that mark todos done in a loop (execute, run, quick) must collect ids first and call the batch tool at the end of the loop.
+
 ## Todo Tags
 
 Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
