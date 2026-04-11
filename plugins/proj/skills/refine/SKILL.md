@@ -1,7 +1,7 @@
 ---
 name: refine
 description: Stress-test requirements with review agents (3 core + up to 4 tag/quality-based). Sub-skill invoked by run, not user-invocable.
-allowed-tools: mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__proj_get_todo_context, mcp__proj__notes_append, Read, Glob, Grep, Task
+allowed-tools: mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__content_patch_requirements, mcp__proj__content_patch_research, mcp__proj__proj_get_todo_context, mcp__proj__notes_append, Read, Glob, Grep, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -204,11 +204,19 @@ Auto-continue without prompting.
 **8.** Apply flow:
 1. Backup: call `content_get_requirements` and store as `pre_refine_requirements`. If research exists, same for research.
 2. Merge accepted amendments into content.
-3. Call `content_set_requirements` with updated content.
-4. If research amendments: call `content_set_research` with updated content.
-5. Display: "Requirements updated with N amendments."
-6. Re-run the 5 preflight checks (the same structural checks from the preflight block in `/proj:run`). If any new failures: display and offer (1) Fix (2) Continue (3) Undo amendments.
-7. Undo: restore from `pre_refine_requirements` backup via `content_set_requirements`.
+3. (Preferred path — see 8.3a) For each accepted amendment, classify as section-localized (modifies text entirely within one `##` or `###` block) or wholesale. For section-localized, call `content_patch_requirements` with `section=<heading>`, `pattern=<escaped old text>`, `replacement=<new text>`. If returned `ok=false` and error != 'no match', log and fall back to `content_set_requirements`. If 'no match', refresh via `content_get_requirements` and retry fallback.
+4. Fallback path: call `content_set_requirements` with updated content.
+5. If research amendments: use `content_patch_research` with the same classification, otherwise fall back to `content_set_research`.
+6. Display: "Requirements updated with N amendments."
+7. Re-run the 5 preflight checks (the same structural checks from the preflight block in `/proj:run`). If any new failures: display and offer (1) Fix (2) Continue (3) Undo amendments.
+8. Undo: restore from `pre_refine_requirements` backup via `content_set_requirements`.
+
+**Patch tool usage notes:**
+- **Literal section match** — `section` is compared as a literal, case-sensitive string against the heading text (stripped of leading `#` markers and surrounding whitespace). No fuzzy or regex matching.
+- **First occurrence** — if two headings have the same text, only the first match's body is scoped. Disambiguate by editing the duplicate first or by using `section=None` (whole-file scope) with a more specific `pattern`.
+- **MULTILINE default** — patterns are compiled with `re.MULTILINE`, so `^` and `$` match line boundaries. Use `\A`/`\Z` to anchor the whole scope.
+- **Code-fence edge case** — `#`/`##` lines inside fenced code blocks (` ``` ` or `~~~`) are ignored for section detection, so fenced examples containing Markdown headings will not break section boundaries.
+- **No match vs error** — `ok=false` with `error='no match'` means the file/section was found but the pattern did not match; any other `error` string indicates a validation or I/O failure. Handle them distinctly in the fallback logic above.
 
 **9.** Edit flow:
 1. Display amendments as a numbered list.
