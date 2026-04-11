@@ -1,7 +1,7 @@
 ---
 name: define
 description: Gather requirements and research implementation approach for a todo. Runs interactive Q&A, then researches the codebase. Use when asked "define 1", "clarify requirements for 1", or "research 1".
-allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task
+allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task, AskUserQuestion
 argument-hint: "<todo-id> [--no-interactive] [--skip-bg-prep]"
 ---
 
@@ -56,14 +56,17 @@ Spawn two background Task agents (general-purpose, read-only tools only: `Read, 
 Store agent handles as `bg_explore_agents`.
 Do NOT wait for them — proceed to step 3 immediately.
 
-**3.** Free-form writing
+**3.** Entry mode selection
 
 If existing requirements or research are present, display them under a "Previous context" heading so the user can see what already exists.
 
-Prompt the user:
-> "Describe the goals, constraints, and anything else important for this todo. Write as much or as little as you want — I'll ask follow-up questions next."
+Call `AskUserQuestion` with a single question offering 3-4 starter options. Example options:
+- **Describe goals now** — free-form write goals, constraints, and context
+- **Use existing notes as-is** — proceed with previous context unchanged
+- **Load from similar prior todo** — pull requirements from a related completed todo
+- **Skip directly to Q&A** — jump straight to gap-driven probing without free-form input
 
-Record the user's response as the freeform input.
+Record the selected value as `entry_mode`. If the user chose "Describe goals now", prompt for the free-form text and record it as the freeform input. Otherwise, set the freeform input to the existing context (or empty) and proceed.
 
 **4.** Gap analysis
 
@@ -77,28 +80,32 @@ Analyze the freeform input (plus any previous context) for:
 
 Produce a structured gap list. Classify each gap as:
 - **CRITICAL** — blocks writing a quality requirements doc (must be resolved)
-- **MINOR** — would improve the doc but can be inferred or defaulted
+- **MINOR** — can be inferred without prompting
+
+Anchor definition: **CRITICAL = blocks quality requirements doc; MINOR = can be inferred without prompting.** CRITICAL gaps MUST be raised to the user via `AskUserQuestion` in step 5. MINOR gaps are filled by inference and recorded silently in the transcript.
 
 Present the gap list to the user before proceeding.
 
 **5.** Probing Q&A
 
 Drive questions from the gap analysis — do NOT use predefined category lists. Rules:
-- Address CRITICAL gaps first, then MINOR gaps if the user is willing
-- Ask one focused question at a time
-- When the user is uncertain about a question, offer 2-3 concrete options with tradeoffs
-- Continue until all CRITICAL gaps are addressed
-- Record every Q&A pair as a transcript
+- Batch all CRITICAL gaps into one `AskUserQuestion` call (up to 4 questions per call). Split into additional rounds for 5+ gaps.
+- MINOR gaps are filled by inference without prompting — do NOT include them in `AskUserQuestion` calls.
+- Every batched question MUST include a 1-2 sentence rationale in its `question` or `description` field covering **decision impact** (what this controls in the requirements doc) and **default-option reasoning** (why the pre-selected option is a safe default).
+- When the user is uncertain about a question, the multiple-choice options must themselves present 2-3 concrete tradeoffs — do not fall back to open-ended text unless truly unavoidable.
+- Continue batched rounds until all CRITICAL gaps are addressed.
+- Record every Q&A pair (including the rationale text shown) as a transcript.
 
 When the user contradicts or corrects a prior assumption during Q&A, immediately call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<the correction>`, `tags="correction"`, `context="define:qa:{todo_id}"`, `todo_id={todo_id}`.
 
-When all CRITICAL gaps are resolved, ask:
-> "All critical gaps are covered. Would you like to:"
-> 1. Proceed — write requirements and research now
-> 2. Address remaining minor gaps
-> 3. Add something else
+When all CRITICAL gaps are resolved, route the completion branch through `AskUserQuestion` as well. Call it with one question — "All critical gaps are covered. How would you like to proceed?" — and these enumerable options:
+- **Proceed** — write requirements and research now
+- **Address minor gaps** — batch remaining MINOR gaps via `AskUserQuestion` instead of inferring
+- **Add something else** — open-ended follow-up before writing
 
-If the user picks 2, continue with MINOR gaps. If 3, continue open-ended Q&A.
+If the user picks "Address minor gaps", continue with additional batched `AskUserQuestion` rounds covering the MINOR gaps. If "Add something else", accept open-ended input, then return to this completion branch.
+
+**Degraded-harness fallback**: when `AskUserQuestion` is unavailable or the skill is invoked under `--no-interactive`, log a deterministic default answer for each gap with `source: "degraded-harness-default"` in the transcript and proceed. The default MUST match the pre-selected option that the batched `AskUserQuestion` call would have surfaced.
 
 **5.5.** Collect background exploration (if `bg_explore_agents` exist)
 
