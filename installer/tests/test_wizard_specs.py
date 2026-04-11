@@ -60,6 +60,19 @@ class TestPromptSpecTable:
         tuples = [(s.yaml_file, s.dotted_key) for s in PROJ_YAML_PROMPTS]
         assert len(tuples) == len(set(tuples))
 
+    def test_no_duplicate_dotted_keys(self) -> None:
+        """Regression guard: (yaml_file, dotted_key) tuples must be unique.
+        Failure message enumerates every duplicate tuple so offenders are obvious."""
+        from collections import Counter
+
+        tuples = [(s.yaml_file, s.dotted_key) for s in PROJ_YAML_PROMPTS]
+        counts = Counter(tuples)
+        duplicates = {k: v for k, v in counts.items() if v > 1}
+        assert not duplicates, (
+            f"Duplicate (yaml_file, dotted_key) tuples in PROJ_YAML_PROMPTS: "
+            f"{sorted(duplicates.items())}"
+        )
+
     def test_dotted_key_format_valid(self) -> None:
         for spec in PROJ_YAML_PROMPTS:
             for segment in spec.dotted_key.split("."):
