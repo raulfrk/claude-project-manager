@@ -120,7 +120,7 @@ jobs:
       # files written back to the bind-mounted workspace (snapshots, caches) are
       # owned by the runner user, not root — otherwise the auto-commit step
       # would fail to `git add` root-owned files.
-      - name: Generate snapshot goldens
+      - name: Run e2e tests (also generates missing goldens)
         run: |
           if [ "${{ github.event.inputs.regenerate_snapshots }}" = "true" ]; then
             MODE="SNAPSHOT_UPDATE=1"
@@ -150,15 +150,6 @@ jobs:
             git commit -m "CI: regenerate snapshot goldens from Docker [skip ci]"
             git push
           fi
-
-      - name: Run e2e tests
-        run: |
-          docker run --rm \
-            --user $(id -u):$(id -g) \
-            -e TEXTUAL_ANIMATIONS=none \
-            -v ${{ github.workspace }}:/app \
-            cpm-e2e:latest \
-            pytest installer/tests/e2e/ -v
 
       - name: Move cache
         if: always()
