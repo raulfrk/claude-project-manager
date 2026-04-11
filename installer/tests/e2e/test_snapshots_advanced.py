@@ -14,7 +14,6 @@ Expected group ids (see wizard_specs.PROJ_YAML_PROMPTS):
     group-permissions
     group-other-proj
     group-todoist-extras
-    group-trello-extras
     group-trello-list-mappings   (only when sync.trello.enabled in existing)
 
 Widget ids come from ``spec.dotted_key.replace(".", "-")``, e.g.
@@ -69,7 +68,7 @@ async def _settle(pilot, screen: AdvancedConfigScreen) -> None:
 
     After Collapsible expand/collapse the VerticalScroll container may
     auto-scroll asynchronously, producing different SVGs across runs for
-    collapsibles near the bottom (trello_extras, trello_list_mappings).
+    collapsibles near the bottom (trello_list_mappings).
     Scroll to home + multiple pauses pin the viewport.
     """
     from textual.containers import VerticalScroll
@@ -84,7 +83,10 @@ async def _settle(pilot, screen: AdvancedConfigScreen) -> None:
 
 
 class TestAdvancedConfigScreenSnapshots:
-    """25 snapshots covering the AdvancedConfigScreen (todo 514.29)."""
+    """24 snapshots covering the AdvancedConfigScreen (todo 514.29; 506.7
+    removed trello_extras after default_list/on_delete moved to
+    TrelloConfigScreen).
+    """
 
     @pytest.mark.asyncio
     async def test_advanced_initial_render(self) -> None:
@@ -96,6 +98,8 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             # Required groups must all exist in the DOM.
+            # Note: `trello-list-mappings` only renders when sync.trello.enabled
+            # is True in the existing config, so it is NOT in this baseline set.
             for group_id in (
                 "team-mode",
                 "smart-gate",
@@ -105,7 +109,6 @@ class TestAdvancedConfigScreenSnapshots:
                 "permissions",
                 "other-proj",
                 "todoist-extras",
-                "trello-extras",
             ):
                 region = screen.query_one(f"#group-{group_id}", Collapsible).region
                 assert region.width > 0, f"group-{group_id} has zero width"
@@ -424,26 +427,11 @@ class TestAdvancedConfigScreenSnapshots:
             _assert_snapshot(svg, "advanced_expand_todoist_extras")
 
     @pytest.mark.asyncio
-    async def test_advanced_expand_trello_extras(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            _expand_collapsible(screen, "trello-extras")
-            await _settle(pilot, screen)
-
-            assert screen.query_one("#sync-trello-default_list", Input).region.width > 0
-            assert screen.query_one("#sync-trello-on_delete", Select).region.width > 0
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_expand_trello_extras")
-
-    @pytest.mark.asyncio
     async def test_advanced_expand_trello_list_mappings(self) -> None:
         """Trello list mapping fields only appear when sync.trello.enabled is
-        True in the existing config."""
+        True in the existing config. Keys match TrelloListMappings dataclass
+        (todo 506.3): created, done, projects, tasks, active, pending, archived.
+        """
         app = _ScreenHost()
         async with app.run_test(size=_TERM_SIZE) as pilot:
             screen = AdvancedConfigScreen(
@@ -457,12 +445,13 @@ class TestAdvancedConfigScreenSnapshots:
             await _settle(pilot, screen)
 
             for wid in (
-                "sync-trello-list_mappings-backlog",
-                "sync-trello-list_mappings-todo",
-                "sync-trello-list_mappings-in_progress",
-                "sync-trello-list_mappings-blocked",
+                "sync-trello-list_mappings-created",
                 "sync-trello-list_mappings-done",
-                "sync-trello-list_mappings-archive",
+                "sync-trello-list_mappings-projects",
+                "sync-trello-list_mappings-tasks",
+                "sync-trello-list_mappings-active",
+                "sync-trello-list_mappings-pending",
+                "sync-trello-list_mappings-archived",
             ):
                 assert screen.query_one(f"#{wid}", Input).region.width > 0
 
