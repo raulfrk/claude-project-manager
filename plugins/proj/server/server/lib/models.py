@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+
+_logger = logging.getLogger(__name__)
+
+# Soft cap for Trello label-name length (UX guidance, not API limit).
+trello_label_name_length_limit = 50
 
 # Recursive type alias for variable JSON/YAML data.
 # Uses Mapping (covariant) instead of dict (invariant) so that dict[str, str] etc.
@@ -180,6 +186,7 @@ class TrelloListMappings:
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
+            "created": self.created,
             "done": self.done,
             "projects": self.projects,
             "tasks": self.tasks,
@@ -190,8 +197,26 @@ class TrelloListMappings:
 
     @classmethod
     def from_dict(cls, data: JsonDict) -> TrelloListMappings:
+        # Compat shim: pre-506 configs used `backlog` for what is now `created`.
+        # If `backlog` is present and `created` is absent, migrate the value.
+        # If both are present, `created` wins and we warn once.
+        if "backlog" in data:
+            if "created" in data:
+                _logger.warning(
+                    "TrelloListMappings: both 'backlog' and 'created' present in config; "
+                    "using 'created' and ignoring legacy 'backlog'",
+                )
+                created_raw = data.get("created", "Backlog")
+            else:
+                _logger.warning(
+                    "TrelloListMappings: legacy 'backlog' key found; "
+                    "migrating to 'created' (update your proj.yaml)",
+                )
+                created_raw = data.get("backlog", "Backlog")
+        else:
+            created_raw = data.get("created", "Backlog")
         return cls(
-            created=str(data.get("created", "Backlog")),
+            created=str(created_raw),
             done=str(data.get("done", "Done")),
             projects=str(data.get("projects", "Projects")),
             tasks=str(data.get("tasks", "proj-tasks")),
@@ -211,14 +236,19 @@ class TrelloSync:
     default_list: str = "Active"
     list_mappings: TrelloListMappings = field(default_factory=TrelloListMappings)
     on_delete: str = "archive"  # "archive" or "delete"
+    proj_label_name: str = "proj"
+    proj_task_label_name: str = "proj-task"
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
             "auto_sync": self.auto_sync,
             "default_board_id": self.default_board_id,
+            "default_list": self.default_list,
             "list_mappings": self.list_mappings.to_dict(),
             "on_delete": self.on_delete,
+            "proj_label_name": self.proj_label_name,
+            "proj_task_label_name": self.proj_task_label_name,
         }
 
     @classmethod
@@ -231,6 +261,8 @@ class TrelloSync:
             default_list=str(data.get("default_list", "Active")),
             list_mappings=TrelloListMappings.from_dict(lm_raw if isinstance(lm_raw, dict) else {}),
             on_delete=str(data.get("on_delete", "archive")),
+            proj_label_name=str(data.get("proj_label_name", "proj")),
+            proj_task_label_name=str(data.get("proj_task_label_name", "proj-task")),
         )
 
 
