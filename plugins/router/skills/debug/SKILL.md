@@ -1,14 +1,14 @@
 ---
-name: hooks-debug
+name: debug
 description: Debug hook execution by listing recent failures with error details.
-allowed-tools: mcp__plugin_hooks_hooks__hooks_recover_tool
+allowed-tools: mcp__plugin_router_router__router_recover_tool
 context: fork
 agent: general-purpose
 ---
 
 List recent hook failures to help debug execution issues.
 
-**1.** Call `mcp__plugin_hooks_hooks__hooks_recover_tool` with no arguments (lists all failures as a JSON array).
+**1.** Call `mcp__plugin_router_router__router_recover_tool` with no arguments (lists all failures as a JSON array).
 
 **2.** Parse the JSON response. If the array is empty:
 - Output: "No hook failures recorded. All hooks are healthy."
@@ -35,11 +35,11 @@ List recent hook failures to help debug execution issues.
 
 ## Prerequisites
 
-- Hooks plugin MCP server is running and reachable.
+- Router plugin MCP server is running and reachable.
 
 ## Error Handling
 
-- **Hooks MCP unavailable**: displays error from tool call and stops.
+- **Router MCP unavailable**: displays error from tool call and stops.
 - **No failures**: displays `No hook failures recorded. All hooks are healthy.` and stops.
 
 ## Output

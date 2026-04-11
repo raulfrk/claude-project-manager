@@ -1,7 +1,7 @@
 ---
-name: hooks-add
+name: add
 description: Register a new MCP-to-MCP hook linking a trigger tool to a target tool on a server.
-allowed-tools: mcp__plugin_hooks_hooks__hooks_register_tool
+allowed-tools: mcp__plugin_router_router__router_register_tool
 argument-hint: "<trigger_tool> <target_tool> <server> [param_mapping=JSON] [blocking=true|false] [condition=EXPR] [--verification] [feedback_mapping=JSON] [feedback_tool=TOOL]"
 context: fork
 agent: general-purpose
@@ -35,7 +35,7 @@ If $ARGUMENTS is empty or missing required fields, run interactive Q&A:
    - If feedback_mapping is {} (empty) but feedback_tool is set: warn "No params will be mapped to feedback_tool — is this intentional? (yes/no)" and proceed only on yes
    - Both feedback_mapping and feedback_tool are required together; prompt for the missing one if only one is provided
 
-**Register**: Call `mcp__plugin_hooks_hooks__hooks_register_tool` with the collected values. If `--verification` flag is present or the user answered yes to the verification question, pass `verification=True`. If `feedback_mapping` and `feedback_tool` have been provided (non-default), include them in the register call parameters.
+**Register**: Call `mcp__plugin_router_router__router_register_tool` with the collected values. If `--verification` flag is present or the user answered yes to the verification question, pass `verification=True`. If `feedback_mapping` and `feedback_tool` have been provided (non-default), include them in the register call parameters.
 
 **On success**, display the created hook:
 ```
@@ -54,15 +54,15 @@ Registered hook <id>:
 
 ## Prerequisites
 
-- Hooks plugin MCP server is running and reachable.
+- Router plugin MCP server is running and reachable.
 
 ## Error Handling
 
 - **No arguments and not interactive**: starts interactive Q&A to collect required fields.
-- **Duplicate hook**: displays error from `hooks_register_tool`.
-- **Cycle detected**: displays error from `hooks_register_tool`.
-- **Invalid param_mapping JSON**: displays error from `hooks_register_tool`.
-- **Hooks MCP unavailable**: displays error from tool call and stops.
+- **Duplicate hook**: displays error from `router_register_tool`.
+- **Cycle detected**: displays error from `router_register_tool`.
+- **Invalid param_mapping JSON**: displays error from `router_register_tool`.
+- **Router MCP unavailable**: displays error from tool call and stops.
 
 ## Output
 

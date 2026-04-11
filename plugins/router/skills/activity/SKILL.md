@@ -1,13 +1,14 @@
 ---
+name: activity
+description: Display a summary of recent hook activity (successes and failures).
+allowed-tools: mcp__plugin_router_router__router_invocations_tool
 context: fork
 agent: general-purpose
 ---
 
-# hooks-debug
-
 Display a summary of recent hook activity (successes and failures).
 
-**1.** Call `mcp__plugin_hooks_hooks__hooks_invocations_tool` with `type="all"` and `limit=50`.
+**1.** Call `mcp__plugin_router_router__router_invocations_tool` with `type="all"` and `limit=50`.
 
 **2.** Parse the response. Separate entries by `_type`:
 - `_type="invocation"` — successful hook executions
@@ -36,4 +37,4 @@ Display a summary of recent hook activity (successes and failures).
 - If no entries at all: output "No hook activity recorded yet."
 - Truncate long error strings to 80 chars.
 
-Suggested next: `1. /hooks:list` — see registered hooks | `2. /hooks:recover` — retry failed hooks
+Suggested next: `1. /router:list` — see registered hooks | `2. /router:recover` — retry failed hooks

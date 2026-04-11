@@ -1,7 +1,7 @@
 ---
 name: map
 description: Generate an interactive HTML visualization of the hook network. Shows hooks as a directed graph with condition-status color coding.
-allowed-tools: mcp__plugin_hooks_hooks__hooks_list_tool, Read, Bash
+allowed-tools: mcp__plugin_router_router__router_list_tool, Read, Bash
 argument-hint: "[--output <path>]"
 context: fork
 agent: general-purpose
@@ -15,7 +15,7 @@ Extract `--output <path>` from $ARGUMENTS. Default: `/tmp/hooks-map.html`.
 
 **2.** Load hook data
 
-Call `mcp__plugin_hooks_hooks__hooks_list_tool` (no arguments) to get all registered hooks. Each hook has: `id`, `trigger_tool`, `target_tool`, `server`, `blocking`, `verification`, `condition`, `condition_status` (one of: `always`, `active`, `inactive`, `runtime`), `param_mapping`.
+Call `mcp__plugin_router_router__router_list_tool` (no arguments) to get all registered hooks. Each hook has: `id`, `trigger_tool`, `target_tool`, `server`, `blocking`, `verification`, `condition`, `condition_status` (one of: `always`, `active`, `inactive`, `runtime`), `param_mapping`.
 
 `condition_status` is pre-computed by the hooks server — do NOT recompute it. Use the value directly for color coding.
 
@@ -163,7 +163,7 @@ The generated HTML file must follow this exact structure. All CSS and JS are inl
 
   <script>
     // ── Embedded data blob (injected by the skill at generation time) ──
-    // hooksData: array of hook objects from hooks_list_tool
+    // hooksData: array of hook objects from router_list_tool
     const hooksData = {{HOOKS_JSON}};
 
     // ── Empty-state check ──
@@ -345,7 +345,7 @@ The generated HTML file must follow this exact structure. All CSS and JS are inl
 
 ### Data format
 
-The `{{HOOKS_JSON}}` placeholder is replaced at generation time with the JSON-serialized array from `hooks_list_tool`. Each element has this shape:
+The `{{HOOKS_JSON}}` placeholder is replaced at generation time with the JSON-serialized array from `router_list_tool`. Each element has this shape:
 
 ```json
 {

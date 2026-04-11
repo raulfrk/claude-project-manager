@@ -1,7 +1,7 @@
 ---
-name: hooks-list
+name: list
 description: List all registered MCP-to-MCP hooks, grouped by trigger tool, showing status and routing info.
-allowed-tools: mcp__plugin_hooks_hooks__hooks_list_tool
+allowed-tools: mcp__plugin_router_router__router_list_tool
 argument-hint: "[trigger_tool]"
 context: fork
 agent: general-purpose
@@ -13,10 +13,10 @@ List all registered hooks from the hooks registry.
 - If a trigger tool name is provided, pass it as `trigger_tool` to filter results.
 - If empty, list all hooks.
 
-**1.** Call `mcp__plugin_hooks_hooks__hooks_list_tool` with optional `trigger_tool` filter.
+**1.** Call `mcp__plugin_router_router__router_list_tool` with optional `trigger_tool` filter.
 
 **2.** Parse the JSON response. If `hooks` array is empty:
-- Output: "No hooks registered. Run `/proj:hooks-add` to create one."
+- Output: "No hooks registered. Run `/router:add` to create one."
 - Stop.
 
 **3.** Group hooks by `trigger_tool`. For each group, display a header and table:
@@ -52,12 +52,12 @@ List all registered hooks from the hooks registry.
 
 ## Prerequisites
 
-- Hooks plugin MCP server is running and reachable.
+- Router plugin MCP server is running and reachable.
 
 ## Error Handling
 
-- **Hooks MCP unavailable**: displays error from tool call and stops.
-- **No hooks registered**: displays "No hooks registered. Run `/proj:hooks-add` to create one." and stops.
+- **Router MCP unavailable**: displays error from tool call and stops.
+- **No hooks registered**: displays "No hooks registered. Run `/router:add` to create one." and stops.
 
 ## Output
 
