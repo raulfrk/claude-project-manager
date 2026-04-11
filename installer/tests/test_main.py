@@ -295,21 +295,23 @@ class TestUpdate:
 class TestReinstall:
     """Tests for _reinstall()."""
 
+    @patch("installer.main.get_installed_plugins", return_value=[])
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_no_installed_plugins(self, mock_detect, _disp):
+    def test_no_installed_plugins(self, mock_detect, _disp, _gip):
         mock_detect.return_value = InstallState(installed_plugins=[])
         args = _make_args(reinstall=True)
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_success(
-        self, mock_detect, _disp, mock_uninstall, mock_install, _wizard
+        self, mock_detect, _disp, mock_uninstall, mock_install, _wizard, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(reinstall=True)
@@ -318,13 +320,14 @@ class TestReinstall:
         mock_uninstall.assert_called_once_with("proj")
         mock_install.assert_called_once_with("proj")
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_skip_wizard(
-        self, mock_detect, _disp, _uninstall, _install, mock_wizard
+        self, mock_detect, _disp, _uninstall, _install, mock_wizard, _gip
     ):
         """--skip-wizard prevents wizard from running after reinstall."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
@@ -332,26 +335,28 @@ class TestReinstall:
         _reinstall(args)
         mock_wizard.assert_not_called()
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_runs_wizard_when_not_skipped(
-        self, mock_detect, _disp, _uninstall, _install, mock_wizard
+        self, mock_detect, _disp, _uninstall, _install, mock_wizard, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(reinstall=True, skip_wizard=False)
         _reinstall(args)
         mock_wizard.assert_called_once_with(["proj"], skip=False)
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.Confirm")
     @patch("installer.main.install_plugin", side_effect=InstallerError("fail"))
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_failure_no_retry(
-        self, mock_detect, _disp, _uninstall, _install, mock_confirm
+        self, mock_detect, _disp, _uninstall, _install, mock_confirm, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         mock_confirm.ask.return_value = False
@@ -359,12 +364,13 @@ class TestReinstall:
         result = _reinstall(args)
         assert result == EXIT_ERROR
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj", "hooks"])
     @patch("installer.main.install_plugin")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_with_specific_plugins(
-        self, mock_detect, _disp, mock_uninstall, mock_install
+        self, mock_detect, _disp, mock_uninstall, mock_install, _gip
     ):
         """--plugins limits reinstall to named plugins."""
         mock_detect.return_value = InstallState(installed_plugins=["proj", "hooks"])
@@ -383,30 +389,33 @@ class TestReinstall:
 class TestUninstall:
     """Tests for _uninstall()."""
 
+    @patch("installer.main.get_installed_plugins", return_value=[])
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_no_installed_plugins(self, mock_detect, _disp):
+    def test_no_installed_plugins(self, mock_detect, _disp, _gip):
         mock_detect.return_value = InstallState(installed_plugins=[])
         args = _make_args(uninstall=True)
         result = _uninstall(args)
         assert result == EXIT_SUCCESS
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_uninstall_success(self, mock_detect, _disp, mock_uninstall):
+    def test_uninstall_success(self, mock_detect, _disp, mock_uninstall, _gip):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(uninstall=True)
         result = _uninstall(args)
         assert result == EXIT_SUCCESS
         mock_uninstall.assert_called_once_with("proj")
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.cleanup_config_files")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_with_full_cleanup(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup
+        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
     ):
         """--full-cleanup triggers config file removal after uninstall."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
@@ -416,12 +425,13 @@ class TestUninstall:
         mock_uninstall.assert_called_once()
         mock_cleanup.assert_called_once()
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.cleanup_config_files")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_without_full_cleanup(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup
+        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
     ):
         """Without --full-cleanup, config files are not removed."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
@@ -430,12 +440,13 @@ class TestUninstall:
         assert result == EXIT_SUCCESS
         mock_cleanup.assert_not_called()
 
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.Confirm")
     @patch("installer.main.uninstall_plugin", side_effect=InstallerError("fail"))
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_failure_no_retry(
-        self, mock_detect, _disp, mock_uninstall, mock_confirm
+        self, mock_detect, _disp, mock_uninstall, mock_confirm, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         mock_confirm.ask.return_value = False
@@ -443,12 +454,16 @@ class TestUninstall:
         result = _uninstall(args)
         assert result == EXIT_ERROR
 
+    @patch(
+        "installer.main.get_installed_plugins",
+        return_value=["proj", "hooks", "sandbox"],
+    )
     @patch("installer.main.cleanup_config_files")
     @patch("installer.main.uninstall_plugin")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_multiple_plugins(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup
+        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
     ):
         """Multiple installed plugins are all uninstalled."""
         mock_detect.return_value = InstallState(

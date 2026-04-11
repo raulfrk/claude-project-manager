@@ -20,17 +20,23 @@ _SEARCH_THRESHOLD = 0.5
 def fuzzy_score(query: str, text: str) -> float:
     """Return a 0.0-1.0 similarity score between a query token and text.
 
-    For short queries (< 3 chars) falls back to exact substring containment.
-    An exact substring match always returns 1.0; otherwise uses
-    SequenceMatcher ratio.
+    For short queries (< 3 chars) checks that every character in the query
+    appears somewhere in the text (character-presence check).
+    An exact substring match always returns 1.0; otherwise compares the query
+    against each whitespace-separated word in the text and returns the maximum
+    SequenceMatcher ratio, enabling typo tolerance for individual words.
     """
     if len(query) < 3:
-        return 1.0 if query.lower() in text.lower() else 0.0
+        t = text.lower()
+        return 1.0 if all(c in t for c in query.lower()) else 0.0
     text_lower = text.lower()
     query_lower = query.lower()
     if query_lower in text_lower:
         return 1.0
-    return SequenceMatcher(None, query_lower, text_lower).ratio()
+    words = text_lower.split()
+    if not words:
+        return SequenceMatcher(None, query_lower, text_lower).ratio()
+    return max(SequenceMatcher(None, query_lower, w).ratio() for w in words)
 
 
 def score_entry(query: str, entry: dict) -> float:  # type: ignore[type-arg]
