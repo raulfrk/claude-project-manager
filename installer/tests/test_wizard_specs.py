@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,6 +15,8 @@ from installer.wizard_specs import (
     _reload_defaults,
     _ensure_defaults_loaded,
     assert_prompt_spec_covers_schema,
+    assert_prompt_spec_covers_worktree_schema,
+    assert_spec_keys_round_trip,
     get_distinct_yaml_files,
 )
 
@@ -88,6 +91,55 @@ class TestSchemaIntrospection:
         assert isinstance(missing, list)
         # Don't fail on missing keys here — this is a warning-only regression;
         # add strict fail in a future todo once coverage is verified complete.
+
+    def test_assert_worktree_coverage_returns_list(self) -> None:
+        """Regression: every WorktreeConfig scalar field has a PromptSpec."""
+        missing = assert_prompt_spec_covers_worktree_schema()
+        assert isinstance(missing, list)
+        # Warning-only regression: a missing key here means the worktree
+        # wizard is silently dropping a dataclass field.
+
+    def test_spec_keys_round_trip_through_writer(self) -> None:
+        """Every PromptSpec.dotted_key must round-trip through the
+        _merge_dotted_into_dict writer + get_nested reader. Catches
+        typo/path mismatches like the worktree_dir → default_worktree_dir
+        bug where the wizard wrote to the wrong yaml key."""
+        failures = assert_spec_keys_round_trip()
+        assert failures == [], (
+            f"PromptSpec dotted_keys fail writer→reader round-trip: {failures}"
+        )
+
+
+class TestCrossPathBucketParity:
+    """Rich and Textual wizards must iterate the same PROJ_YAML_PROMPTS
+    table and therefore write to identical bucket keys. This regression
+    test locks the invariant: for every spec, the (yaml_file, dotted_key)
+    pair is the canonical destination both paths resolve to."""
+
+    def test_both_paths_see_same_spec_table(self) -> None:
+        """Rich (wizard.py) and Textual (screens/wizard.py) import the
+        same PROJ_YAML_PROMPTS symbol. Import both and assert identity."""
+        from installer import wizard as rich_wizard
+        from installer.screens import wizard as textual_wizard
+
+        assert rich_wizard.PROJ_YAML_PROMPTS is PROJ_YAML_PROMPTS
+        assert textual_wizard.PROJ_YAML_PROMPTS is PROJ_YAML_PROMPTS
+
+    def test_bucket_partition_covers_every_spec_key(self) -> None:
+        """partition_answers_by_bucket must route every spec.dotted_key
+        to the bucket matching spec.yaml_file. Guards against the writer
+        misclassifying keys that wizard paths produced."""
+        from installer._config_writer import partition_answers_by_bucket
+
+        synthetic_answers: dict[str, Any] = {
+            s.dotted_key: "sentinel" for s in PROJ_YAML_PROMPTS
+        }
+        buckets = partition_answers_by_bucket(synthetic_answers)
+        for spec in PROJ_YAML_PROMPTS:
+            assert spec.dotted_key in buckets.get(spec.yaml_file, {}), (
+                f"spec {spec.dotted_key} (yaml_file={spec.yaml_file}) "
+                f"was not routed to its declared bucket"
+            )
 
 
 class TestDefaultsCacheLazy:

@@ -791,7 +791,7 @@ class TestInstallerAppHelpers:
             "projects_base_dir": str(mock_home / "projects"),
             "sandbox_integration": True,
             "zoxide_integration": False,
-            "worktree_dir": str(mock_home / "worktrees"),
+            "default_worktree_dir": str(mock_home / "worktrees"),
         }
         app._write_config_files(config)
         wt_yaml = mock_home / ".claude" / "worktree.yaml"

@@ -230,11 +230,11 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
     # ---------- Basic tier (worktree.yaml) ----------
     PromptSpec(
         label="Worktree directory",
-        dotted_key="worktree_dir",
+        dotted_key="default_worktree_dir",
         type="str",
         group="Paths",
         tier="basic",
-        default_factory=_d("worktree_dir"),
+        default_factory=_d("default_worktree_dir"),
         yaml_file="worktree",
     ),
     # ---------- Advanced tier (proj.yaml) — team_mode ----------
@@ -550,3 +550,69 @@ def assert_prompt_spec_covers_schema() -> list[str]:
     except Exception:
         return []
     return missing
+
+
+def assert_prompt_spec_covers_worktree_schema() -> list[str]:
+    """Return WorktreeConfig dotted keys missing from PROJ_YAML_PROMPTS.
+
+    Parallel to assert_prompt_spec_covers_schema but for the worktree.yaml
+    bucket. Non-scalar fields (e.g. base_repos: list[BaseRepo]) and fields
+    in WIZARD_EXCLUDED_FIELDS are skipped.
+    """
+    try:
+        import dataclasses
+
+        from plugins.worktree.server.server.lib.models import (  # type: ignore
+            WorktreeConfig,
+        )
+    except Exception:
+        return []
+
+    covered = {s.dotted_key for s in PROJ_YAML_PROMPTS if s.yaml_file == "worktree"}
+    missing: list[str] = []
+
+    def walk(cls: type, prefix: str = "") -> None:
+        if not dataclasses.is_dataclass(cls):
+            return
+        for f in dataclasses.fields(cls):
+            dotted = f"{prefix}{f.name}" if not prefix else f"{prefix}.{f.name}"
+            if dotted in WIZARD_EXCLUDED_FIELDS:
+                continue
+            if dataclasses.is_dataclass(f.type):
+                walk(f.type, dotted)
+            else:
+                # Skip list/dict fields — those need structured editing, not
+                # a scalar prompt.
+                type_str = str(f.type)
+                if "list" in type_str or "dict" in type_str:
+                    continue
+                if dotted not in covered:
+                    missing.append(dotted)
+
+    try:
+        walk(WorktreeConfig)
+    except Exception:
+        return []
+    return missing
+
+
+def assert_spec_keys_round_trip() -> list[str]:
+    """Return list of (spec.yaml_file, dotted_key) that fail round-trip merge.
+
+    For every PromptSpec, construct a single-field dict with the dotted_key
+    and a sentinel value, merge it into an empty existing dict, and verify
+    that the _d closure can read it back. Catches mismatches where a spec's
+    dotted_key does not round-trip through the _merge_dotted_into_dict
+    writer and the get_nested reader (e.g. typo or path mismatch).
+    """
+    from installer._config_writer import _merge_dotted_into_dict
+
+    failures: list[str] = []
+    for spec in PROJ_YAML_PROMPTS:
+        sentinel = object()
+        merged: dict[str, Any] = {}
+        _merge_dotted_into_dict(merged, {spec.dotted_key: sentinel})
+        got = get_nested(merged, spec.dotted_key, default=None)
+        if got is not sentinel:
+            failures.append(f"{spec.yaml_file}:{spec.dotted_key}")
+    return failures

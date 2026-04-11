@@ -239,8 +239,8 @@ class TestWizardScreen:
         assert config["projects_base_dir"] == "~/projects"
         assert config["sandbox_integration"] is True
         assert config["zoxide_integration"] is False
-        # worktree_dir lives in worktree.yaml (yaml_file="worktree"), not WizardScreen
-        assert "worktree_dir" not in config
+        # default_worktree_dir lives in worktree.yaml (yaml_file="worktree"), not WizardScreen
+        assert "default_worktree_dir" not in config
 
     @pytest.mark.asyncio
     async def test_custom_values_override(self, mock_home: Path):
@@ -270,7 +270,7 @@ class TestWizardScreen:
 
     @pytest.mark.asyncio
     async def test_worktree_dir_not_in_proj_wizard_basic_tier(self, mock_home: Path):
-        """worktree_dir lives in worktree.yaml (514 dual-path), not WizardScreen basic tier."""
+        """default_worktree_dir lives in worktree.yaml (514 dual-path), not WizardScreen basic tier."""
         from textual.css.query import NoMatches
 
         app = _TestApp()
@@ -280,11 +280,11 @@ class TestWizardScreen:
             await pilot.pause()
 
             with pytest.raises(NoMatches):
-                screen.query_one("#worktree_dir")
+                screen.query_one("#default_worktree_dir")
 
     @pytest.mark.asyncio
     async def test_worktree_dir_hidden_without_worktree(self):
-        """worktree_dir input is absent when worktree is not selected."""
+        """default_worktree_dir input is absent when worktree is not selected."""
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = WizardScreen(selected_plugins=["proj", "hooks"])
@@ -294,7 +294,7 @@ class TestWizardScreen:
             from textual.css.query import NoMatches
 
             with pytest.raises(NoMatches):
-                screen.query_one("#worktree_dir")
+                screen.query_one("#default_worktree_dir")
 
     @pytest.mark.asyncio
     async def test_cancel_returns_none(self):
@@ -339,14 +339,16 @@ class TestWizardScreen:
         claude = mock_home / ".claude"
         claude.mkdir(parents=True, exist_ok=True)
         (claude / "proj.yaml").write_text("tracking_dir: /custom/proj\n")
-        (claude / "worktree.yaml").write_text("worktree_dir: /custom/wt\n")
+        (claude / "worktree.yaml").write_text("default_worktree_dir: /custom/wt\n")
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = WizardScreen(selected_plugins=["proj", "worktree"])
             app.push_screen(screen)
             await pilot.pause()
             assert screen._existing["proj"] == {"tracking_dir": "/custom/proj"}
-            assert screen._existing["worktree"] == {"worktree_dir": "/custom/wt"}
+            assert screen._existing["worktree"] == {
+                "default_worktree_dir": "/custom/wt"
+            }
             assert screen._existing_mtimes["proj"] > 0
             assert screen._existing_mtimes["worktree"] > 0
 
@@ -418,7 +420,7 @@ class TestAdvancedConfigScreen:
     def test_normalize_bucketed_passthrough(self) -> None:
         bucketed = {
             "proj": {"tracking_dir": "/a"},
-            "worktree": {"worktree_dir": "/b"},
+            "worktree": {"default_worktree_dir": "/b"},
         }
         normalized = AdvancedConfigScreen._normalize_existing(bucketed)
         assert normalized == bucketed

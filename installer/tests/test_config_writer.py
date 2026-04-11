@@ -25,8 +25,8 @@ class TestPartitionAnswersByBucket:
         assert buckets["proj"] == {"tracking_dir": "/a"}
 
     def test_worktree_key_goes_to_worktree_bucket(self) -> None:
-        buckets = partition_answers_by_bucket({"worktree_dir": "/wt"})
-        assert buckets["worktree"] == {"worktree_dir": "/wt"}
+        buckets = partition_answers_by_bucket({"default_worktree_dir": "/wt"})
+        assert buckets["worktree"] == {"default_worktree_dir": "/wt"}
 
     def test_unknown_key_defaults_to_proj(self) -> None:
         buckets = partition_answers_by_bucket({"unknown_legacy_key": "x"})
@@ -109,13 +109,13 @@ class TestWriteBucket:
         write_bucket(
             path,
             yaml.safe_load(path.read_text()),
-            {"worktree_dir": "/new"},
+            {"default_worktree_dir": "/new"},
             bucket="worktree",
             expected_mtime=stale_mtime,
         )
         assert "drift detected" in caplog.text
         loaded = yaml.safe_load(path.read_text())
-        assert loaded["worktree_dir"] == "/new"
+        assert loaded["default_worktree_dir"] == "/new"
         assert loaded["existing"] == "value"
 
     def test_matching_mtime_no_warning(
@@ -128,7 +128,7 @@ class TestWriteBucket:
         write_bucket(
             path,
             yaml.safe_load(path.read_text()),
-            {"worktree_dir": "/new"},
+            {"default_worktree_dir": "/new"},
             bucket="worktree",
             expected_mtime=fresh_mtime,
         )
@@ -146,7 +146,7 @@ class TestWriteBucket:
                 write_bucket(
                     path,
                     {},
-                    {"worktree_dir": "/new"},
+                    {"default_worktree_dir": "/new"},
                     bucket="worktree",
                 )
         finally:

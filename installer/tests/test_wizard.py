@@ -196,7 +196,7 @@ class TestRichWizardPromptSpec:
         self, mock_home: Path, rich_console: Console
     ):
         wt_yaml = mock_home / ".claude" / "worktree.yaml"
-        wt_yaml.write_text("worktree_dir: /custom/worktrees\n")
+        wt_yaml.write_text("default_worktree_dir: /custom/worktrees\n")
 
         captured: list = []
 

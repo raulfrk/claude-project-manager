@@ -803,15 +803,16 @@ class TestWriteConfigFiles:
                 "projects_base_dir": "~/projects",
                 "sandbox_integration": False,
                 "zoxide_integration": False,
-                "worktree_dir": "~/worktrees",
+                "default_worktree_dir": "~/worktrees",
             }
         )
 
         wt_yaml = mock_home / ".claude" / "worktree.yaml"
         assert wt_yaml.exists()
         content = wt_yaml.read_text()
-        # Key renamed from default_worktree_dir to worktree_dir in 514 PromptSpec refactor
-        assert "worktree_dir: ~/worktrees" in content
+        # dotted_key matches WorktreeConfig.default_worktree_dir (515.10 fix
+        # of the 514 rename bug — yaml still uses the dataclass field name).
+        assert "default_worktree_dir: ~/worktrees" in content
 
     def test_no_worktree_yaml_without_plugin(self, mock_home: Path):
         """worktree.yaml is NOT created when worktree is not selected."""

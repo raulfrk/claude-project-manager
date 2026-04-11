@@ -23,7 +23,8 @@ quality_level: "careful"
 worktree_isolation: true
 
 # ---------- Basic tier (worktree.yaml) ----------
-worktree_dir: "~/worktrees"
+# Note: the yaml key is default_worktree_dir to match WorktreeConfig dataclass.
+default_worktree_dir: "~/worktrees"
 
 # ---------- Advanced tier (proj.yaml) — team_mode ----------
 team_mode:
