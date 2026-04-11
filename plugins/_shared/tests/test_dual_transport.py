@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hook_transport.dual_transport import (
+    SOCKET_PREFIX,
     _cleanup_stale_socket,
     _delete_socket_registry,
     _run_dual_async,
@@ -80,10 +81,15 @@ async def test_start_http_calls_serve():
 # ── _socket_path tests ──────────────────────────────────────────────────────
 
 
+def test_socket_prefix_constant():
+    """SOCKET_PREFIX is the cpm-namespaced literal."""
+    assert SOCKET_PREFIX == "claude-cpm-"
+
+
 def test_socket_path_format():
     """Socket path follows expected PID-tagged format."""
-    path = _socket_path("hooks")
-    assert path.startswith("/tmp/claude-hooks-hooks-")
+    path = _socket_path("router")
+    assert path.startswith("/tmp/claude-cpm-router-")
     assert path.endswith(".sock")
     assert str(os.getpid()) in path
 
@@ -174,7 +180,7 @@ async def test_pre_run_sync_callback_invoked():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=my_pre_run)
+        await _run_dual_async(mock_mcp, "router", default_port=19100, pre_run=my_pre_run)
 
     assert called == ["sync"]
 
@@ -211,7 +217,7 @@ async def test_pre_run_async_callback_invoked():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=my_async_pre_run)
+        await _run_dual_async(mock_mcp, "router", default_port=19100, pre_run=my_async_pre_run)
 
     assert called == ["async"]
 
@@ -244,7 +250,7 @@ async def test_pre_run_none_is_noop():
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
         # Should not raise
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100, pre_run=None)
+        await _run_dual_async(mock_mcp, "router", default_port=19100, pre_run=None)
 
 
 @pytest.mark.anyio
@@ -315,7 +321,7 @@ async def test_tcp_fallback_via_env(monkeypatch):
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+        await _run_dual_async(mock_mcp, "router", default_port=19100)
 
     mock_uvicorn.Config.assert_called_once()
     call_kwargs = mock_uvicorn.Config.call_args
@@ -351,7 +357,7 @@ async def test_tcp_port_from_env_var(monkeypatch):
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+        await _run_dual_async(mock_mcp, "router", default_port=19100)
 
     call_kwargs = mock_uvicorn.Config.call_args
     assert call_kwargs.kwargs.get("port") == 19999
@@ -384,7 +390,7 @@ async def test_stdio_shutdown_sets_should_exit():
         mock_mcp._mcp_server.run = AsyncMock(return_value=None)
         mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-        await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+        await _run_dual_async(mock_mcp, "router", default_port=19100)
 
     assert mock_server.should_exit is True
 
@@ -397,18 +403,18 @@ class TestSocketRegistry:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
-        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-12345.sock")
-        registry_file = tmp_path / "hooks"
+        _write_socket_registry("router", "/tmp/claude-cpm-router-12345.sock")
+        registry_file = tmp_path / "router"
         assert registry_file.exists()
-        assert registry_file.read_text() == "/tmp/claude-hooks-hooks-12345.sock"
+        assert registry_file.read_text() == "/tmp/claude-cpm-router-12345.sock"
 
     def test_delete_removes_registry_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
-        registry_file = tmp_path / "hooks"
+        registry_file = tmp_path / "router"
         registry_file.write_text("/tmp/some-socket.sock")
-        _delete_socket_registry("hooks")
+        _delete_socket_registry("router")
         assert not registry_file.exists()
 
     def test_delete_silently_handles_missing_file(
@@ -416,7 +422,7 @@ class TestSocketRegistry:
     ) -> None:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
         # Should not raise
-        _delete_socket_registry("hooks")
+        _delete_socket_registry("router")
 
     @pytest.mark.anyio
     async def test_run_dual_async_writes_registry(
@@ -449,12 +455,12 @@ class TestSocketRegistry:
             mock_mcp._mcp_server.run = AsyncMock(return_value=None)
             mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-            await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+            await _run_dual_async(mock_mcp, "router", default_port=19100)
 
-        registry_file = tmp_path / "hooks"
+        registry_file = tmp_path / "router"
         assert registry_file.exists()
         content = registry_file.read_text()
-        assert "hooks" in content
+        assert "router" in content
         assert str(os.getpid()) in content
 
     @pytest.mark.anyio
@@ -496,7 +502,7 @@ class TestSocketRegistry:
             mock_mcp._mcp_server.run = AsyncMock(return_value=None)
             mock_mcp._mcp_server.create_initialization_options.return_value = {}
 
-            await _run_dual_async(mock_mcp, "hooks", default_port=19100)
+            await _run_dual_async(mock_mcp, "router", default_port=19100)
 
         # Verify _delete_socket_registry was NOT registered via atexit
         delete_calls = [c for c in registered_atexit_calls if "_delete_socket_registry" in c[0]]
@@ -506,7 +512,7 @@ class TestSocketRegistry:
         )
 
         # Registry file should still exist (not deleted)
-        assert (tmp_path / "hooks").exists()
+        assert (tmp_path / "router").exists()
 
     def test_registry_persists_after_delete_not_called(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -515,9 +521,9 @@ class TestSocketRegistry:
         monkeypatch.setattr("hook_transport.dual_transport._SOCKET_REGISTRY_DIR", tmp_path)
 
         # Old process writes registry
-        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-old.sock")
-        assert (tmp_path / "hooks").exists()
+        _write_socket_registry("router", "/tmp/claude-cpm-router-old.sock")
+        assert (tmp_path / "router").exists()
 
         # New process overwrites registry (no deletion in between)
-        _write_socket_registry("hooks", "/tmp/claude-hooks-hooks-new.sock")
-        assert (tmp_path / "hooks").read_text() == "/tmp/claude-hooks-hooks-new.sock"
+        _write_socket_registry("router", "/tmp/claude-cpm-router-new.sock")
+        assert (tmp_path / "router").read_text() == "/tmp/claude-cpm-router-new.sock"

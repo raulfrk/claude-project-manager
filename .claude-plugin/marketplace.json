@@ -104,18 +104,18 @@
       ]
     },
     {
-      "name": "hooks",
-      "source": "./plugins/hooks",
-      "description": "Central MCP-to-MCP hook registry with schema-based param mapping, auto-registration, and recovery",
-      "version": "2.0.0",
+      "name": "router",
+      "source": "./plugins/router",
+      "description": "MCP-to-MCP dispatch registry for cpm plugins. Chain tool execution across plugins via post-execution hooks on a shared socket registry. Not to be confused with Claude Code's native hooks feature in settings.json.",
+      "version": "2.1.0",
       "author": {
         "name": "raulfrk"
       },
       "license": "MIT",
       "category": "utilities",
       "keywords": [
-        "hooks",
-        "registry",
+        "router",
+        "dispatch",
         "mcp",
         "automation"
       ]

@@ -39,13 +39,10 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
-def _resolve_hooks_socket_path() -> str:
-    """Read the hooks server socket path from the registry file.
+def _resolve_router_socket_path() -> str:
+    """Read the router server socket path from the registry file."""
 
-    Falls back to the legacy path if the registry file does not exist.
-    """
-
-    registry_file = Path.home() / ".claude" / "sockets" / "hooks"
+    registry_file = Path.home() / ".claude" / "sockets" / "router"
     try:
         path = registry_file.read_text().strip()
         if path and Path(path).exists():
@@ -53,13 +50,13 @@ def _resolve_hooks_socket_path() -> str:
     except (FileNotFoundError, OSError):
         pass
     candidates = sorted(
-        Path("/tmp").glob("claude-hooks-hooks-*.sock"),  # noqa: S108
+        Path("/tmp").glob("claude-cpm-router-*.sock"),  # noqa: S108
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-hooks-hooks.sock"  # noqa: S108
+    return "/tmp/claude-cpm-router.sock"  # noqa: S108
 
 
 def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
@@ -212,15 +209,15 @@ def register(app: FastMCP) -> None:
         try:
             import httpx
 
-            sock_path = _resolve_hooks_socket_path()
+            sock_path = _resolve_router_socket_path()
             transport = httpx.HTTPTransport(uds=sock_path)
             with httpx.Client(transport=transport, timeout=5.0) as client:
                 client.post(
                     "http://localhost/hook",
-                    json={"tool": "hooks_sync_tool", "params": {}},
+                    json={"tool": "router_sync_tool", "params": {}},
                 )
         except Exception:
-            logger.debug("Hooks server sync failed", exc_info=True)
+            logger.debug("Router server sync failed", exc_info=True)
 
         first_repo = str(repo_entries[0].path) if repo_entries else ""
         return json.dumps(

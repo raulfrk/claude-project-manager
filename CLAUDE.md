@@ -11,7 +11,7 @@ Claude Code plugin marketplace for project management workflows. Nine plugins:
 - `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync)
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
 - `jira` — Jira MCP server (issues, projects, epics, bulk operations)
-- `hooks` — central MCP-to-MCP hook registry with schema-based param mapping, auto-registration, and recovery
+- `router` — central MCP-to-MCP router (formerly `hooks`); schema-based param mapping, auto-registration, and recovery
 - `todoist` — Todoist task and project management via REST API
 - `zoxide` — zoxide frecency database integration (boost, remove, query paths)
 - `analyse` — guided code review skill (walk through features, explain code, create todos)
@@ -22,7 +22,7 @@ A comprehensive overhaul requirements document exists at:
 `~/projects/tracking/claude-project-manager/overhaul-requirements.md` (7,565 lines)
 
 It contains the full workflow map, user vision, quality assessment, gap analysis, 31 change proposals, and 35 implementation todos across 6 phases. **Read this file before starting any overhaul work.** Key architectural decisions:
-- **Hooks plugin** (`plugins/hooks/`) — central MCP→MCP registry with schema-based param mapping, auto-registration, and recovery
+- **Router plugin** (`plugins/router/`) — central MCP→MCP registry with schema-based param mapping, auto-registration, and recovery (formerly `plugins/hooks/`)
 - **Sandbox is single source of truth** for settings.json — proj must never write settings files directly
 - **Proj must not read worktree.yaml directly** — use worktree MCP tools
 - **Remove deny functionality** from sandbox (denyWrite/denyRead)
@@ -124,14 +124,14 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 
 ## Hook Architecture
 
-**Dispatch flow** (full path): tool called → `_wrap_tool_fn` wrapper (injected by `enable_hook_dispatch`) → tool executes → result serialized to JSON (max 100KB) → POST to hooks server via Unix domain socket (`/tmp/claude-hooks-hooks.sock`) with `{tool: "hooks_fire_tool", params: {trigger_tool, source_result, depth: 0}}` → `hooks_fire_tool` loads registry, matches hooks by `trigger_tool` → evaluates each hook's `condition` against `~/.claude/proj.yaml` → POSTs to target server socket (from `hooks.yaml` `servers` map, e.g. `unix:///tmp/claude-hooks-todoist.sock`) → target tool executes → result returned.
+**Dispatch flow** (full path): tool called → `_wrap_tool_fn` wrapper (injected by `enable_hook_dispatch`) → tool executes → result serialized to JSON (max 100KB) → POST to router server via Unix domain socket (resolved from `~/.claude/sockets/router`, prefix `/tmp/claude-cpm-router-<pid>.sock`) with `{tool: "router_fire_tool", params: {trigger_tool, source_result, depth: 0}}` → `router_fire_tool` loads registry, matches hooks by `trigger_tool` → evaluates each hook's `condition` against `~/.claude/proj.yaml` → POSTs to target server socket (from `hooks.yaml` `servers` map, e.g. `unix:///tmp/claude-cpm-todoist-<pid>.sock`) → target tool executes → result returned.
 
-**Transport**: Unix domain sockets at `/tmp/claude-hooks-{plugin}.sock` (default). Set `HOOK_TRANSPORT=tcp` env var to fall back to TCP on 127.0.0.1 (legacy ports below). Each plugin's `run_dual()` call passes the plugin name for socket path construction.
+**Transport**: Unix domain sockets at `/tmp/claude-cpm-{plugin}-{pid}.sock` (default). Set `HOOK_TRANSPORT=tcp` env var to fall back to TCP on 127.0.0.1 (legacy ports below). Each plugin's `run_dual()` call passes the plugin name for socket path construction.
 
 **Port assignments** (TCP fallback only, via `HOOK_TRANSPORT=tcp`):
 | Plugin | Port |
 |--------|-------|
-| hooks | 19100 |
+| router | 19100 |
 | sandbox | 19101 |
 | proj | 19102 |
 | worktree | 19103 |
@@ -140,7 +140,7 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 | todoist | 19106 |
 | zoxide | 19107 |
 
-**`enable_hook_dispatch()`** (source: `plugins/_shared/hook_dispatch/dispatch.py`): called in each plugin's `main.py` **before** any `register()` calls. Monkey-patches `mcp.tool()` on the FastMCP instance so all subsequently registered tools get a post-execution wrapper. The patch intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms. After the original tool function returns, the wrapper calls `_dispatch_hook()` which serializes the result and POSTs to the hooks server. If the hooks server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged. Tool exceptions propagate without dispatch.
+**`enable_hook_dispatch()`** (source: `plugins/_shared/hook_dispatch/dispatch.py`): called in each plugin's `main.py` **before** any `register()` calls. Monkey-patches `mcp.tool()` on the FastMCP instance so all subsequently registered tools get a post-execution wrapper. The patch intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms. After the original tool function returns, the wrapper calls `_dispatch_hook()` which serializes the result and POSTs to the router server. If the router server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged. Tool exceptions propagate without dispatch.
 
 Usage pattern in each plugin's `main.py`:
 ```python
@@ -150,7 +150,7 @@ enable_hook_dispatch(mcp, exclude={"meta_tool_1", "meta_tool_2"})
 # register() calls come after — they use the patched mcp.tool()
 ```
 
-The `exclude` parameter prevents dispatch for meta-tools that should not trigger hooks. The hooks plugin excludes: `hooks_fire_tool`, `hooks_list_tool`, `hooks_recover_tool`.
+The `exclude` parameter prevents dispatch for meta-tools that should not trigger hooks. The router plugin excludes: `router_fire_tool`, `router_list_tool`, `router_recover_tool`.
 
 **Condition evaluation**: `hooks.yaml` conditions are evaluated against `~/.claude/proj.yaml` at fire time. Dot-path resolution walks nested YAML keys. Supports `and`/`or` operators (`and` binds tighter) and `!` negation. Missing keys or missing config file evaluate to `False`.
 
@@ -171,9 +171,9 @@ Condition-to-`proj.yaml` path mapping (from `default-hooks.yaml` files):
 
 Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"`.
 
-**Blocking vs non-blocking**: the dispatcher always awaits the `hooks_fire_tool` HTTP response (30s timeout). Inside `hooks_fire_tool`, blocking hooks (`blocking: true`) are awaited concurrently via `asyncio.gather`; non-blocking hooks (`blocking: false`, the default) are dispatched in background daemon threads and return immediately.
+**Blocking vs non-blocking**: the dispatcher always awaits the `router_fire_tool` HTTP response (30s timeout). Inside `router_fire_tool`, blocking hooks (`blocking: true`) are awaited concurrently via `asyncio.gather`; non-blocking hooks (`blocking: false`, the default) are dispatched in background daemon threads and return immediately.
 
-**Depth tracking**: `max_depth=3` (configurable in `hooks.yaml` `settings.max_depth`). Prevents runaway cascades when hooks trigger tools that trigger hooks. The `depth` param is passed through the dispatch chain and checked at the start of `hooks_fire_tool`.
+**Depth tracking**: `max_depth=3` (configurable in `hooks.yaml` `settings.max_depth`). Prevents runaway cascades when hooks trigger tools that trigger hooks. The `depth` param is passed through the dispatch chain and checked at the start of `router_fire_tool`.
 
 **Verification hooks**: hooks with `verification: true` fire in Phase 2 after all primary hooks complete. They receive an enriched source containing `hook_results` from Phase 1 blocking hooks. Verification hooks are always blocking and do not increment depth.
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Breaking changes
+- **Plugin `hooks` renamed to `router`.** MCP-to-MCP registry plugin now at `plugins/router/`. Tool names updated: `hooks_fire_tool` → `router_fire_tool` (etc.). MCP tool prefix: `mcp__plugin_hooks_hooks__*` → `mcp__plugin_router_router__*`. Slash commands: `/proj:hooks-*` → `/router:*`. Socket path prefix: `claude-hooks-` → `claude-cpm-`. Registry directory: `~/.claude/sockets/router`.
+- **No backwards-compat fallback.** Users must run `claude-installer update` and restart any running MCP servers. Manual cleanup: `rm -rf ~/.claude/plugins/cache/claude-project-manager/hooks ~/.claude/sockets/hooks /tmp/claude-hooks-*.sock`. Settings.json: `enabledPlugins: hooks@claude-project-manager` → `router@claude-project-manager`, `permissions.allow: mcp__plugin_hooks_hooks__*` → `mcp__plugin_router_router__*`, `permissions.allow: Skill(hooks::*)` → `Skill(router::*)`.
+
 ### Added
 - Documentation: `docs/architecture.md`, `docs/plugins.md`, `docs/development.md`
 - This changelog (rewritten in Keep a Changelog format)

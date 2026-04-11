@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hook_dispatch")
 
+DISPATCH_PLUGIN_NAME = "router"
+
 _MAX_RESULT_BYTES = 100 * 1024  # 100 KB
 
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
@@ -95,20 +97,23 @@ def _serialize_result(result: _RawToolOutput) -> str:
 
 
 def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTransport | None]:
-    """Resolve the hooks server transport URL.
+    """Resolve the router server transport URL.
 
-    In Unix mode (default): reads ~/.claude/sockets/hooks to get the current
-    session's socket path. Falls back to legacy path if registry missing.
+    In Unix mode (default): reads ~/.claude/sockets/{DISPATCH_PLUGIN_NAME} to get the
+    current session's socket path. Then falls back to newest PID-tagged socket glob.
+    No legacy compat path — this is a hard-cut rename.
     In TCP mode (HOOK_TRANSPORT=tcp): returns http://127.0.0.1:{hooks_port}/hook
     """
     from pathlib import Path
+
+    from hook_transport.dual_transport import SOCKET_PREFIX
 
     transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
     if transport_mode == "tcp":
         return f"http://127.0.0.1:{hooks_port}/hook", httpx.AsyncHTTPTransport(proxy=None)
 
     # Unix mode: read registry file for current session's socket path
-    registry_file = Path.home() / ".claude" / "sockets" / "hooks"
+    registry_file = Path.home() / ".claude" / "sockets" / DISPATCH_PLUGIN_NAME
     sock_path: str | None = None
     try:
         path = registry_file.read_text().strip()
@@ -120,7 +125,7 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
     # Fallback: glob for newest PID-tagged socket if registry missing/empty/stale
     if not sock_path:
         candidates = sorted(
-            Path("/tmp").glob("claude-hooks-hooks-*.sock"),
+            Path("/tmp").glob(f"{SOCKET_PREFIX}{DISPATCH_PLUGIN_NAME}-*.sock"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -129,13 +134,12 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
             break  # newest first
 
     if not sock_path:
-        sock_path = "/tmp/claude-hooks-hooks.sock"  # last-resort legacy
         logger.warning(
-            "hooks socket registry not found at %s and no PID-tagged sockets in /tmp, "
-            "falling back to legacy path %s",
+            "router socket registry not found at %s and no PID-tagged sockets in /tmp; "
+            "dispatch will fail",
             registry_file,
-            sock_path,
         )
+        return "http://localhost/hook", None
 
     return "http://localhost/hook", httpx.AsyncHTTPTransport(uds=sock_path)
 
@@ -156,7 +160,7 @@ async def _dispatch_hook(
     hooks_url, hooks_transport = _resolve_hooks_transport(hooks_port)
     serialized = _serialize_result(result)
     payload = {
-        "tool": "hooks_fire_tool",
+        "tool": f"{DISPATCH_PLUGIN_NAME}_fire_tool",
         "params": {
             "trigger_tool": tool_name,
             "source_result": serialized,
@@ -169,7 +173,7 @@ async def _dispatch_hook(
             try:
                 data: dict[str, JsonValue] = resp.json()
                 # Unwrap the HTTP handler envelope: {"ok": true, "result": <inner>}
-                # The inner result is the hooks_fire_tool return value (may be a
+                # The inner result is the router_fire_tool return value (may be a
                 # JSON string that needs parsing, or already a dict).
                 if isinstance(data, dict) and "result" in data:
                     inner = data["result"]
@@ -228,7 +232,7 @@ def _format_error(error: str, hook_id: str) -> str:
 def _build_hooks_field(
     fire_response: dict[str, JsonValue] | None, tool_name: str
 ) -> dict[str, JsonValue] | None:
-    """Map a hooks_fire_tool response to the _hooks injection format.
+    """Map a router_fire_tool response to the _hooks injection format.
 
     Returns None when injection should be skipped (zero hooks, nested dispatch).
     Returns a hooks_field dict when injection should proceed.
@@ -418,16 +422,17 @@ def _merge_feedback(original_result: str, fire_response: dict[str, JsonValue] | 
         return original_result
 
 
-def _inject_hooks(
+def _inject_dispatch(
     original: _RawToolOutput, hooks_field: dict[str, JsonValue]
 ) -> str | dict[str, JsonValue]:
     """Inject a _hooks field into a tool result.
 
     Handles all result shapes: JSON object string, JSON non-object, non-JSON string,
     None, dict, ContentBlock list. Truncates chain if post-injection size > 100KB.
+    The envelope key remains ``_hooks`` by design (consumer-facing API).
     """
 
-    def _build_with_hooks(base: dict[str, JsonValue]) -> str:
+    def _build_with_dispatch(base: dict[str, JsonValue]) -> str:
         base["_hooks"] = hooks_field
         result_str = json.dumps(base, ensure_ascii=True)
         if len(result_str.encode()) > _MAX_RESULT_BYTES:
@@ -449,11 +454,11 @@ def _inject_hooks(
         try:
             parsed = json.loads(original)
             if isinstance(parsed, dict):
-                return _build_with_hooks(parsed)
+                return _build_with_dispatch(parsed)
             else:
-                return _build_with_hooks({"result": parsed})
+                return _build_with_dispatch({"result": parsed})
         except (json.JSONDecodeError, ValueError):
-            return _build_with_hooks({"result": original})
+            return _build_with_dispatch({"result": original})
 
     if isinstance(original, dict):
         original["_hooks"] = hooks_field
@@ -559,7 +564,7 @@ def _wrap_tool_fn[**P, R](
             effective_result: _RawToolOutput = merged if merged != serialized else result  # type: ignore[assignment]
             hooks_field = _build_hooks_field(fire_response, tool_name)
             if hooks_field is not None:
-                return _inject_hooks(effective_result, hooks_field)
+                return _inject_dispatch(effective_result, hooks_field)
             return effective_result  # type: ignore[return-value]
 
         async_wrapper.__name__ = fn.__name__
@@ -583,7 +588,7 @@ def _wrap_tool_fn[**P, R](
         effective_result: _RawToolOutput = merged if merged != serialized else result  # type: ignore[assignment]
         hooks_field = _build_hooks_field(fire_response, tool_name)
         if hooks_field is not None:
-            return _inject_hooks(effective_result, hooks_field)
+            return _inject_dispatch(effective_result, hooks_field)
         return effective_result  # type: ignore[return-value]
 
     sync_to_async_wrapper.__name__ = fn.__name__

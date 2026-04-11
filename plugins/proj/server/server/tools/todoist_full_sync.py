@@ -997,13 +997,13 @@ def _resolve_todoist_socket() -> str:
     except (FileNotFoundError, OSError):
         pass
     candidates = sorted(
-        Path("/tmp").glob("claude-hooks-todoist-*.sock"),  # noqa: S108
+        Path("/tmp").glob("claude-cpm-todoist-*.sock"),  # noqa: S108
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-hooks-todoist.sock"  # noqa: S108
+    return "/tmp/claude-cpm-todoist.sock"  # noqa: S108
 
 
 def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:

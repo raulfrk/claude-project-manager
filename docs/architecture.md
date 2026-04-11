@@ -30,8 +30,8 @@ claude-project-manager/
     _shared/                  # Shared dependency: claude-hook-transport
     sandbox/                  # MCP server plugin
     worktree/                 # MCP server + skills plugin
-    proj/                     # MCP server + skills + hooks plugin
-    hooks/                    # MCP server + skills plugin
+    proj/                     # MCP server + skills plugin
+    router/                   # MCP server + skills plugin (MCP-to-MCP hook router; formerly `hooks`)
     todoist/                  # MCP server plugin
     trello/                   # MCP server plugin
     jira/                     # MCP server plugin
@@ -99,10 +99,10 @@ The full dispatch path:
 2. **Wrapper intercepts** -- `_wrap_tool_fn` (injected by `enable_hook_dispatch`) wraps the tool execution
 3. **Tool executes** -- The original tool function runs and returns a result
 4. **Result serialized** -- The result is serialized to JSON (max 100KB)
-5. **POST to hooks server** -- Sends `{tool: "hooks_fire_tool", params: {trigger_tool, source_result, depth: 0}}` to the hooks server via Unix domain socket (`/tmp/claude-hooks-hooks.sock`)
-6. **Registry lookup** -- `hooks_fire_tool` loads the hook registry and matches hooks by `trigger_tool`
+5. **POST to router server** -- Sends `{tool: "router_fire_tool", params: {trigger_tool, source_result, depth: 0}}` to the router server via Unix domain socket (resolved from `~/.claude/sockets/router`, prefix `/tmp/claude-cpm-router-<pid>.sock`)
+6. **Registry lookup** -- `router_fire_tool` loads the hook registry and matches hooks by `trigger_tool`
 7. **Condition evaluation** -- Each matched hook's `condition` is evaluated against `~/.claude/proj.yaml`
-8. **Target dispatch** -- POSTs to the target server socket (e.g., `unix:///tmp/claude-hooks-todoist.sock`)
+8. **Target dispatch** -- POSTs to the target server socket (e.g., `unix:///tmp/claude-cpm-todoist-<pid>.sock`)
 9. **Target executes** -- The target tool runs and returns its result
 
 ### enable_hook_dispatch()
@@ -121,9 +121,9 @@ enable_hook_dispatch(mcp, exclude={"meta_tool_1", "meta_tool_2"})
 
 Key behaviors:
 - Intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms
-- If the hooks server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged
+- If the router server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged
 - Tool exceptions propagate without dispatch
-- The `exclude` parameter prevents dispatch for meta-tools (e.g., hooks plugin excludes `hooks_fire_tool`, `hooks_list_tool`, `hooks_recover_tool`)
+- The `exclude` parameter prevents dispatch for meta-tools (e.g., router plugin excludes `router_fire_tool`, `router_list_tool`, `router_recover_tool`)
 
 ### hooks.yaml and Conditions
 
@@ -151,7 +151,7 @@ Compound conditions are common, e.g., `"sync.todoist.enabled and sync.todoist.au
 
 ### Blocking vs Non-Blocking Hooks
 
-The dispatcher always awaits the `hooks_fire_tool` HTTP response (30s timeout). Inside `hooks_fire_tool`:
+The dispatcher always awaits the `router_fire_tool` HTTP response (30s timeout). Inside `router_fire_tool`:
 
 - **Blocking hooks** (`blocking: true`) -- Awaited concurrently via `asyncio.gather`. Results are returned to the caller.
 - **Non-blocking hooks** (`blocking: false`, the default) -- Dispatched in background daemon threads and return immediately.
@@ -162,7 +162,7 @@ Hooks with `verification: true` fire in Phase 2 after all primary hooks complete
 
 ### Depth Tracking
 
-`max_depth=3` (configurable in `hooks.yaml` `settings.max_depth`). Prevents runaway cascades when hooks trigger tools that trigger hooks. The `depth` param is passed through the dispatch chain and checked at the start of `hooks_fire_tool`.
+`max_depth=3` (configurable in `hooks.yaml` `settings.max_depth`). Prevents runaway cascades when hooks trigger tools that trigger hooks. The `depth` param is passed through the dispatch chain and checked at the start of `router_fire_tool`.
 
 ---
 
@@ -173,7 +173,7 @@ Hooks with `verification: true` fire in Phase 2 after all primary hooks complete
 All inter-plugin communication uses Unix domain sockets at:
 
 ```
-/tmp/claude-hooks-{plugin}.sock
+/tmp/claude-cpm-{plugin}-{pid}.sock
 ```
 
 Each plugin's `run_dual()` call passes the plugin name for socket path construction. This is the default transport and requires no configuration.
@@ -238,13 +238,13 @@ Versions must be bumped in three places simultaneously:
 ```
 proj ──── permissions mgmt ────> sandbox
 worktree ── permissions mgmt ──> sandbox
-proj ──── hook dispatch ────────> hooks ───> todoist, trello, jira
-worktree ── hook dispatch ──────> hooks
+proj ──── hook dispatch ────────> router ──> todoist, trello, jira
+worktree ── hook dispatch ──────> router
 ```
 
 **sandbox** is the single source of truth for `settings.json`. Neither `proj` nor `worktree` write settings files directly -- they call sandbox MCP tools.
 
-**hooks** is the central dispatcher. All plugins with MCP servers have hook dispatch enabled, and `hooks_fire_tool` routes events to the correct target server.
+**router** is the central dispatcher (formerly `hooks`). All plugins with MCP servers have hook dispatch enabled, and `router_fire_tool` routes events to the correct target server.
 
 **proj** does not read `worktree.yaml` directly -- it uses worktree MCP tools for any worktree operations.
 

@@ -44,13 +44,13 @@ def _resolve_trello_socket() -> str:
     except (FileNotFoundError, OSError):
         pass
     candidates = sorted(
-        Path("/tmp").glob("claude-hooks-trello-*.sock"),  # noqa: S108
+        Path("/tmp").glob("claude-cpm-trello-*.sock"),  # noqa: S108
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-hooks-trello.sock"  # noqa: S108
+    return "/tmp/claude-cpm-trello.sock"  # noqa: S108
 
 
 def _get_board_lists(board_id: str) -> list[dict[str, JsonValue]]:
@@ -840,7 +840,7 @@ def register(app: FastMCP) -> None:
         # Build the enriched source payload for hook dispatch. Include both
         # plural and singular keys: plural lists feed batch hook param
         # mappings (ids/card_ids/updates_json), singular keys feed condition
-        # evaluation in hooks_fire_tool (belt-and-braces).
+        # evaluation in router_fire_tool (belt-and-braces).
         try:
             meta = storage.load_meta(cfg, name)
         except FileNotFoundError:

@@ -63,13 +63,13 @@ def _resolve_trello_socket() -> str:
     except (FileNotFoundError, OSError):
         pass
     candidates = sorted(
-        Path("/tmp").glob("claude-hooks-trello-*.sock"),  # noqa: S108
+        Path("/tmp").glob("claude-cpm-trello-*.sock"),  # noqa: S108
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-hooks-trello.sock"  # noqa: S108
+    return "/tmp/claude-cpm-trello.sock"  # noqa: S108
 
 
 def _call_trello_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
