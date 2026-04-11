@@ -3,8 +3,6 @@ name: migrate
 description: Detect and migrate projects from legacy formats to current structure. Auto-detects needed migrations, creates backups, auto-rollbacks on failure. Use when asked "migrate projects", "fix legacy format", or "update project structure".
 allowed-tools: mcp__proj__proj_migrate_ids, mcp__proj__proj_migrate_dirs, mcp__proj__proj_session_context, mcp__proj__proj_list_full, mcp__proj__tracking_git_flush, Bash
 argument-hint: "[--dry-run] [--force] [--restore <timestamp>] [project-name]"
-context: fork
-agent: general-purpose
 ---
 
 Migrate projects from legacy formats to current structure.

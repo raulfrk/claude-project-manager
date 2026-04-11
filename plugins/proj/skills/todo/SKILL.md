@@ -3,8 +3,6 @@ name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
 allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_ready, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__proj_update_meta, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_proj_proj__proj_identify_batches
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
-context: fork
-agent: general-purpose
 ---
 
 Manage project todos. Parse $ARGUMENTS to determine the operation:
