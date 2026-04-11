@@ -870,3 +870,166 @@ class TestBuildContextInjectionEnabled:
         assert "### Recent Notes" not in result
         assert "### Key Decisions" not in result
         assert "### Project Knowledge" not in result
+
+
+# ---------------------------------------------------------------------------
+# Sockets cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestSocketsCleanupStale:
+    """Tests for sockets_cleanup_stale helper and its ctx_session_start wiring."""
+
+    def _write_installed(self, path: Path, plugins: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"plugins": plugins}))
+
+    def test_stale_hooks_removed_router_live(self, tmp_path: Path) -> None:
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        sockets = tmp_path / "sockets"
+        sockets.mkdir()
+        stale = sockets / "hooks"
+        stale.write_text("")
+        installed = tmp_path / "installed_plugins.json"
+        self._write_installed(installed, {"router@claude-project-manager": {}})
+
+        removed = sockets_cleanup_stale(sockets, installed)
+
+        assert removed == ["hooks"]
+        assert not stale.exists()
+
+    def test_stale_perms_removed_sandbox_live(self, tmp_path: Path) -> None:
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        sockets = tmp_path / "sockets"
+        sockets.mkdir()
+        stale = sockets / "perms"
+        stale.write_text("")
+        installed = tmp_path / "installed_plugins.json"
+        self._write_installed(installed, {"sandbox@claude-project-manager": {}})
+
+        removed = sockets_cleanup_stale(sockets, installed)
+
+        assert removed == ["perms"]
+        assert not stale.exists()
+
+    def test_missing_sockets_dir_returns_empty(self, tmp_path: Path) -> None:
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        installed = tmp_path / "installed_plugins.json"
+        self._write_installed(installed, {"router@claude-project-manager": {}})
+
+        removed = sockets_cleanup_stale(tmp_path / "nope", installed)
+
+        assert removed == []
+
+    def test_missing_installed_json_returns_empty(self, tmp_path: Path) -> None:
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        sockets = tmp_path / "sockets"
+        sockets.mkdir()
+        (sockets / "hooks").write_text("")
+
+        removed = sockets_cleanup_stale(sockets, tmp_path / "absent.json")
+
+        assert removed == []
+        assert (sockets / "hooks").exists()
+
+    def test_broken_json_returns_empty(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        sockets = tmp_path / "sockets"
+        sockets.mkdir()
+        (sockets / "hooks").write_text("")
+        installed = tmp_path / "installed_plugins.json"
+        installed.write_text("not json")
+
+        with caplog.at_level(logging.WARNING, logger="server.lib.sockets_cleanup"):
+            removed = sockets_cleanup_stale(sockets, installed)
+
+        assert removed == []
+        assert (sockets / "hooks").exists()
+        assert any("could not parse" in rec.message for rec in caplog.records)
+
+    def test_second_call_no_op(self, tmp_path: Path) -> None:
+        from server.lib.sockets_cleanup import sockets_cleanup_stale
+
+        sockets = tmp_path / "sockets"
+        sockets.mkdir()
+        (sockets / "hooks").write_text("")
+        (sockets / "custom").write_text("")  # not in allowlist, must be untouched
+        installed = tmp_path / "installed_plugins.json"
+        self._write_installed(installed, {"router@claude-project-manager": {}})
+
+        first = sockets_cleanup_stale(sockets, installed)
+        second = sockets_cleanup_stale(sockets, installed)
+
+        assert first == ["hooks"]
+        assert second == []
+        assert (sockets / "custom").exists()
+        assert not (sockets / "hooks").exists()
+
+    def test_ctx_session_start_regression(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ctx_session_start removes stale socket files and returns context string."""
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools import context as context_module
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        sockets = fake_home / ".claude" / "sockets"
+        sockets.mkdir(parents=True)
+        stale = sockets / "hooks"
+        stale.write_text("")
+        installed = fake_home / ".claude" / "plugins" / "installed_plugins.json"
+        installed.parent.mkdir(parents=True)
+        installed.write_text(json.dumps({"plugins": {"router@claude-project-manager": {}}}))
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        config_path = tmp_path / "proj.yaml"
+        monkeypatch.setattr(storage, "_DEFAULT_CONFIG_PATH", config_path)
+        monkeypatch.delenv("PROJ_CONFIG", raising=False)
+        cfg = ProjConfig(tracking_dir=str(tmp_path / "tracking"))
+        storage.save_config(cfg)
+
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        today = str(date.today())
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
+        (proj_dir / "NOTES.md").write_text("# myapp\n")
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[RepoEntry(label="code", path=str(repo_path))],
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta)
+        index = storage.load_index(cfg)
+        index.projects["myapp"] = ProjectEntry(
+            name="myapp", tracking_dir=str(proj_dir), created=today
+        )
+        storage.save_index(cfg, index)
+
+        app = FastMCP("regression-proj")
+        context_module.register(app)
+
+        import asyncio
+
+        async def _invoke() -> str:
+            return await call_tool(app, "ctx_session_start", cwd=str(repo_path))
+
+        result = asyncio.run(_invoke())
+
+        assert "## Active Project: myapp" in result
+        assert not stale.exists()

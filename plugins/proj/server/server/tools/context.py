@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.enums import TERMINAL_STATUSES
+from server.lib.sockets_cleanup import sockets_cleanup_stale
 from server.tools.config import require_config
 from server.tools.context_injection import inject_context
 from server.tools.git import _active_branches, _git_log
@@ -280,6 +281,13 @@ def register(app: FastMCP) -> None:
     def ctx_session_start(cwd: str | None = None, compact: bool = False) -> str:
         if not storage.config_exists():
             return ""
+        try:
+            sockets_cleanup_stale(
+                Path.home() / ".claude" / "sockets",
+                Path.home() / ".claude" / "plugins" / "installed_plugins.json",
+            )
+        except Exception:
+            logger.debug("sockets_cleanup_stale failed", exc_info=True)
         cfg = storage.load_config()
 
         # Session override takes precedence
