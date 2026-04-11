@@ -223,9 +223,31 @@ class InstallerApp(App):
         if not selected:
             self.exit()
             return
-        # Push configuration wizard; stash a reference so the completion
-        # callback can read _existing_mtimes for the TOCTOU drift check.
+        # Create the wizard screen eagerly so we can inspect _load_errors
+        # (populated during __init__ by _read_existing_all_yamls) BEFORE
+        # showing the wizard. If any yaml file failed to parse, surface a
+        # modal that lets the user continue with defaults or cancel.
         self._wizard_screen = WizardScreen(selected_plugins=selected)
+        if self._wizard_screen._load_errors:
+            from installer.screens.corrupt_yaml import CorruptYamlScreen
+
+            def _after_corrupt_choice(proceed: bool | None) -> None:
+                if not proceed:
+                    self.push_screen(
+                        PluginSelectScreen(branch=self._branch),
+                        callback=self._on_plugins_selected,
+                    )
+                    return
+                self.push_screen(
+                    self._wizard_screen,
+                    callback=self._on_wizard_complete,
+                )
+
+            self.push_screen(
+                CorruptYamlScreen(self._wizard_screen._load_errors),
+                callback=_after_corrupt_choice,
+            )
+            return
         self.push_screen(
             self._wizard_screen,
             callback=self._on_wizard_complete,
