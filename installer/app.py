@@ -40,8 +40,6 @@ from installer.update import (
     compare_versions,
 )
 from installer.claudemd import ensure_managed_section, remove_managed_section
-from installer.wizard import _atomic_write, _merge_dotted_into_dict
-from installer.wizard_specs import PROJ_YAML_PROMPTS
 
 
 class InstallerApp(App):
@@ -225,9 +223,11 @@ class InstallerApp(App):
         if not selected:
             self.exit()
             return
-        # Push configuration wizard
+        # Push configuration wizard; stash a reference so the completion
+        # callback can read _existing_mtimes for the TOCTOU drift check.
+        self._wizard_screen = WizardScreen(selected_plugins=selected)
         self.push_screen(
-            WizardScreen(selected_plugins=selected),
+            self._wizard_screen,
             callback=self._on_wizard_complete,
         )
 
@@ -248,7 +248,10 @@ class InstallerApp(App):
             return
 
         self.wizard_config = config
-        self._write_config_files(config)
+        expected_mtimes = getattr(
+            getattr(self, "_wizard_screen", None), "_existing_mtimes", None
+        )
+        self._write_config_files(config, expected_mtimes=expected_mtimes)
 
         # Chain integration config screens for selected plugins
         self._pending_integrations: list[str] = []
@@ -543,60 +546,45 @@ class InstallerApp(App):
             pass
         self.log.error(message)
 
-    def _write_config_files(self, config: dict[str, Any]) -> None:
-        """Write ~/.claude/proj.yaml and ~/.claude/worktree.yaml.
+    def _write_config_files(
+        self,
+        config: dict[str, Any],
+        expected_mtimes: dict[str, float] | None = None,
+    ) -> None:
+        """Write every ~/.claude/<yaml_file>.yaml touched by wizard answers.
 
-        Loads existing yaml to preserve unknown keys, merges dotted-key wizard
-        answers on top, and writes atomically. Integration screens write their
-        own yaml files later in the flow.
+        Uses installer._config_writer to partition answers by bucket, merge
+        with preserved unknown keys, normalize, and atomically write with
+        fcntl advisory locks and TOCTOU mtime re-check.
+
+        expected_mtimes is the WizardScreen._existing_mtimes dict captured at
+        read time; passed through so the writer can detect drift from other
+        writers.
         """
-        import yaml
-
-        yaml_file_by_key = {s.dotted_key: s.yaml_file for s in PROJ_YAML_PROMPTS}
-        proj_answers: dict[str, Any] = {}
-        worktree_answers: dict[str, Any] = {}
-        for dotted_key, value in config.items():
-            target = yaml_file_by_key.get(dotted_key, "proj")
-            if target == "worktree":
-                worktree_answers[dotted_key] = value
-            elif target == "proj":
-                proj_answers[dotted_key] = value
-
-        # ---- Write proj.yaml ----
-        proj_path = Path.home() / ".claude" / "proj.yaml"
-        try:
-            existing_proj = load_existing_yaml(proj_path)
-        except ConfigLoadError as exc:
-            self._show_error(f"Failed to load {proj_path}: {exc.original}")
-            return
-        _merge_dotted_into_dict(existing_proj, proj_answers)
-
-        try:
-            from plugins.proj.server.server.lib.models import ProjConfig  # type: ignore
-
-            existing_proj = ProjConfig.from_dict(existing_proj).to_dict()
-        except Exception:
-            pass
-
-        _atomic_write(
-            proj_path,
-            yaml.safe_dump(existing_proj, sort_keys=False, default_flow_style=False),
+        from installer._config_writer import (
+            partition_answers_by_bucket,
+            write_bucket,
         )
 
-        # ---- Write worktree.yaml ----
-        if worktree_answers:
-            worktree_path = Path.home() / ".claude" / "worktree.yaml"
+        buckets = partition_answers_by_bucket(config)
+        claude_home = Path.home() / ".claude"
+        expected_mtimes = expected_mtimes or {}
+
+        for bucket_name, answers in buckets.items():
+            if not answers:
+                continue
+            path = claude_home / f"{bucket_name}.yaml"
             try:
-                existing_worktree = load_existing_yaml(worktree_path)
+                existing = load_existing_yaml(path)
             except ConfigLoadError as exc:
-                self._show_error(f"Failed to load {worktree_path}: {exc.original}")
+                self._show_error(f"Failed to load {path}: {exc.original}")
                 return
-            _merge_dotted_into_dict(existing_worktree, worktree_answers)
-            _atomic_write(
-                worktree_path,
-                yaml.safe_dump(
-                    existing_worktree, sort_keys=False, default_flow_style=False
-                ),
+            write_bucket(
+                path,
+                existing,
+                answers,
+                bucket=bucket_name,
+                expected_mtime=expected_mtimes.get(bucket_name),
             )
 
         # Ensure managed section in global CLAUDE.md
