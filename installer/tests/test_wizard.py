@@ -293,14 +293,28 @@ class TestRichWizardPromptSpec:
         assert _masked_default(True, "short") == "****"
         assert _masked_default(True, "") == ""
 
-    def test_setup_trello_loads_existing_default_list(
+    def test_setup_trello_loads_existing_board_id_and_labels(
         self, mock_home: Path, rich_console: Console
     ):
-        """Advanced proj tier surfaces sync.trello.default_list from existing yaml."""
+        """Basic proj tier surfaces sync.trello.default_board_id + label names from yaml.
+
+        506.8: default_list moved to TrelloConfigScreen (inline), so the Rich
+        wizard no longer prompts for it. The replacement basic-tier prompts
+        are default_board_id + proj_label_name + proj_task_label_name.
+        """
         proj_yaml = mock_home / ".claude" / "proj.yaml"
         proj_yaml.write_text(
             yaml.safe_dump(
-                {"sync": {"trello": {"enabled": True, "default_list": "MyCustomList"}}}
+                {
+                    "sync": {
+                        "trello": {
+                            "enabled": True,
+                            "default_board_id": "MyBoardId",
+                            "proj_label_name": "cpm",
+                            "proj_task_label_name": "cpm-task",
+                        }
+                    }
+                }
             )
         )
 
@@ -326,11 +340,15 @@ class TestRichWizardPromptSpec:
         ):
             _setup_proj_yaml(rich_console, [])
 
-        trello_list_defaults = [
-            d for label, d in captured if "Trello default list" in label
+        board_id_defaults = [d for label, d in captured if "Trello board ID" in label]
+        assert board_id_defaults
+        assert board_id_defaults[0] == "MyBoardId"
+
+        proj_label_defaults = [
+            d for label, d in captured if "Trello label — project" in label
         ]
-        assert trello_list_defaults
-        assert trello_list_defaults[0] == "MyCustomList"
+        assert proj_label_defaults
+        assert proj_label_defaults[0] == "cpm"
 
     # ---------------- Preserve unknown keys ----------------
 

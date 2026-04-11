@@ -559,7 +559,10 @@ class TrelloConfigScreen(BaseIntegrationScreen):
 
     @property
     def _credential_keys(self) -> tuple[str, ...]:
-        return ("api_key", "token", "default_board_id")
+        # `default_board_id` owned by proj.yaml via PROJ_YAML_PROMPTS
+        # (installer/wizard_specs.py sync.trello.default_board_id).
+        # trello.yaml keeps only credentials.
+        return ("api_key", "token")
 
     @property
     def _proj_yaml_section(self) -> tuple[str, ...]:
@@ -586,17 +589,6 @@ class TrelloConfigScreen(BaseIntegrationScreen):
                 id="token",
                 password=True,
                 value=existing.get("token", ""),
-            )
-        # Default Board ID (plain text)
-        with Vertical(classes="field-group"):
-            yield Label("Default Board ID", classes="field-label")
-            yield Label(
-                "The board ID from your Trello board URL",
-                classes="field-hint",
-            )
-            yield Input(
-                id="default_board_id",
-                value=existing.get("default_board_id", ""),
             )
         existing_proj = self._read_proj_yaml()
         default_list_value = str(
@@ -645,9 +637,6 @@ class TrelloConfigScreen(BaseIntegrationScreen):
         values: dict[str, str | bool] = {
             "api_key": self.query_one("#api_key", Input).value.strip(),
             "token": self.query_one("#token", Input).value.strip(),
-            "default_board_id": self.query_one(
-                "#default_board_id", Input
-            ).value.strip(),
             "enabled": self.query_one("#sync_enabled", Switch).value,
             "auto_sync": self.query_one("#auto_sync", Switch).value,
         }

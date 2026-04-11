@@ -147,7 +147,11 @@ class TestTrelloConfigScreen:
 
     @pytest.mark.asyncio
     async def test_shows_all_fields(self):
-        """Screen contains sync toggle, masked API key, masked token, board ID."""
+        """Screen contains sync toggle, masked API key, masked token.
+
+        `default_board_id` is owned by proj.yaml via PROJ_YAML_PROMPTS and is
+        no longer rendered here (506.8).
+        """
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = TrelloConfigScreen()
@@ -163,13 +167,18 @@ class TestTrelloConfigScreen:
             token = screen.query_one("#token", Input)
             assert token.password is True
 
-            board_id = screen.query_one("#default_board_id", Input)
-            assert board_id is not None
-            assert board_id.password is False
+    def test_trello_credential_keys_exclude_default_board_id(self) -> None:
+        """506: default_board_id must not be in TrelloConfigScreen._credential_keys."""
+        screen = TrelloConfigScreen()
+        assert "default_board_id" not in screen._credential_keys
+        assert screen._credential_keys == ("api_key", "token")
 
     @pytest.mark.asyncio
     async def test_default_values_from_existing_config(self, mock_home: Path):
-        """Existing config values are loaded into the form fields."""
+        """Existing config values are loaded into the form fields.
+
+        default_board_id moved to proj.yaml and is no longer read here.
+        """
         config_path = mock_home / ".claude" / "trello.yaml"
         config_path.write_text(
             yaml.dump(
@@ -177,7 +186,6 @@ class TestTrelloConfigScreen:
                     "enabled": True,
                     "api_key": "key-abc",
                     "token": "tok-xyz",
-                    "default_board_id": "board-123",
                 }
             ),
             encoding="utf-8",
@@ -192,7 +200,6 @@ class TestTrelloConfigScreen:
             assert screen.query_one("#sync_enabled", Switch).value is True
             assert screen.query_one("#api_key", Input).value == "key-abc"
             assert screen.query_one("#token", Input).value == "tok-xyz"
-            assert screen.query_one("#default_board_id", Input).value == "board-123"
 
     @pytest.mark.asyncio
     async def test_skip_returns_none(self):
@@ -737,13 +744,16 @@ class TestConfigWriteOnContinue:
         assert diff_text  # non-empty
 
     def test_write_all_configs_trello(self, mock_home: Path):
-        """TrelloConfigScreen writes all 3 credential keys and sync.trello section."""
+        """TrelloConfigScreen writes credentials to trello.yaml and flags to proj.yaml.
+
+        506.8: default_board_id moved to proj.yaml via PROJ_YAML_PROMPTS and is
+        no longer written by this screen. trello.yaml holds only api_key/token.
+        """
         screen = TrelloConfigScreen()
         screen._write_all_configs(
             {
                 "api_key": "k",
                 "token": "t",
-                "default_board_id": "b123",
                 "enabled": True,
                 "auto_sync": True,
             }
@@ -753,7 +763,9 @@ class TestConfigWriteOnContinue:
         data = yaml.safe_load(trello_yaml.read_text())
         assert data["api_key"] == "k"
         assert data["token"] == "t"
-        assert data["default_board_id"] == "b123"
+        assert "default_board_id" not in data, (
+            "default_board_id must not be in trello.yaml (moved to proj.yaml)"
+        )
 
         proj_yaml = mock_home / ".claude" / "proj.yaml"
         proj_data = yaml.safe_load(proj_yaml.read_text())
