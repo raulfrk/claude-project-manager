@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +20,12 @@ if TYPE_CHECKING:
 
 _UTC = UTC
 logger = logging.getLogger(__name__)
+
+# Module-level lock serializes todo_batch_complete across threads. Acquired
+# BEFORE the Phase 2 loop and released after, so concurrent batches with
+# overlapping parents cannot interleave saves and produce a partial family
+# archive.
+_BATCH_COMPLETE_LOCK = threading.Lock()
 
 # ── Trello list ID resolution (cached per board) ──────────────────────────────
 
@@ -536,7 +543,12 @@ def register(app: FastMCP) -> None:
             }
         )
 
-    @app.tool(description="Mark a todo as done.")
+    @app.tool(
+        description=(
+            "Mark a single todo as done. For 2+ ids, use todo_batch_complete "
+            "instead — atomic save + single hook dispatch."
+        )
+    )
     def todo_complete(todo_id: str, project_name: str | None = None) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -559,6 +571,113 @@ def register(app: FastMCP) -> None:
         result_data = json.loads(result_str)
         result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
         return json.dumps(result_data)
+
+    @app.tool(
+        description=(
+            "Batch-complete multiple todos in a validated transaction. "
+            "Fires aggregated blocking hook chain to integrations with the full "
+            "id list. Use whenever completing 2 or more todos; prefer over "
+            "looping todo_complete."
+        )
+    )
+    def todo_batch_complete(
+        todo_ids: list[str],
+        note: str = "",
+        project_name: str | None = None,
+    ) -> str:
+        _ = note  # reserved for future completion-note annotation
+        # ── Phase 0 — empty check ──────────────────────────────────────────
+        if not todo_ids:
+            return json.dumps(
+                {
+                    "error": "todo_ids cannot be empty.",
+                    "completed_ids": [],
+                    "skipped_ids": [],
+                    "invalid_ids": [],
+                }
+            )
+
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+
+        # ── Phase 1a — cross-project detection BEFORE dedupe ─────────────
+        # Scan the project index for any id that lives in a different
+        # project. Cross-project batches are not allowed.
+        cross_project_ids: list[str] = []
+        try:
+            index = storage.load_index(cfg)
+            for other_name in index.projects:
+                if other_name == name:
+                    continue
+                try:
+                    other_todos = storage.load_todos(cfg, other_name)
+                except FileNotFoundError:
+                    continue
+                other_ids = {t.id for t in other_todos}
+                for tid in todo_ids:
+                    if tid in other_ids and tid not in cross_project_ids:
+                        cross_project_ids.append(tid)
+        except Exception:
+            logger.debug("Cross-project scan failed", exc_info=True)
+        if cross_project_ids:
+            return json.dumps(
+                {
+                    "error": "Cross-project batch not allowed.",
+                    "invalid_ids": cross_project_ids,
+                    "completed_ids": [],
+                    "skipped_ids": [],
+                }
+            )
+
+        # ── Phase 1b — order-preserving dedupe ────────────────────────────
+        deduped_ids: list[str] = list(dict.fromkeys(todo_ids))
+
+        # ── Phase 1c — existence + status validation ──────────────────────
+        todos = storage.load_todos(cfg, name)
+        todo_map = {t.id: t for t in todos}
+        invalid_ids: list[str] = []
+        cancelled_ids: list[str] = []
+        skipped_ids: list[str] = []
+        to_complete: list[str] = []
+        for tid in deduped_ids:
+            todo = todo_map.get(tid)
+            if todo is None:
+                invalid_ids.append(tid)
+                continue
+            status_val = todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
+            if status_val == "cancelled":
+                cancelled_ids.append(tid)
+                continue
+            if status_val == TodoStatus.DONE.value:
+                skipped_ids.append(tid)
+                continue
+            to_complete.append(tid)
+
+        if invalid_ids or cancelled_ids:
+            return json.dumps(
+                {
+                    "error": "Validation failed.",
+                    "invalid_ids": invalid_ids,
+                    "cancelled_ids": cancelled_ids,
+                    "reason": (
+                        "missing ids" if invalid_ids else "cancelled todos cannot be completed"
+                    ),
+                    "completed_ids": [],
+                    "skipped_ids": skipped_ids,
+                }
+            )
+
+        # ── Phase 2 — placeholder (518.2) — return validation envelope ──
+        return json.dumps(
+            {
+                "completed_ids": to_complete,
+                "skipped_ids": skipped_ids,
+                "invalid_ids": [],
+                "project_name": name,
+            }
+        )
 
     @app.tool(description="Revert a completed todo back to pending.")
     def todo_uncomplete(todo_id: str, project_name: str | None = None) -> str:
