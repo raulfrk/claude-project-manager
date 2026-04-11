@@ -140,8 +140,6 @@ jobs:
           else
             MODE="SNAPSHOT_CREATE_MISSING=1"
           fi
-          # Run the FULL e2e dir — same set as "Run e2e tests" below — so
-          # step 1 and step 2 see identical test order + fixture state.
           # TEXTUAL_ANIMATIONS=none disables Collapsible/Select cursor
           # animations that caused nondeterministic renders between the
           # generate and validate passes.
