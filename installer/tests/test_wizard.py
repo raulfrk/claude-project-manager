@@ -222,6 +222,66 @@ class TestRichWizardPromptSpec:
         assert wt_defaults
         assert wt_defaults[0] == "/custom/worktrees"
 
+    def test_render_prompts_rich_condition_reads_proj_bucket(
+        self, rich_console: Console
+    ) -> None:
+        """Conditions receive proj_existing when called from non-proj setup.
+
+        Hard contract parity with Textual path: spec.condition lambdas always
+        see the proj bucket, regardless of the spec's own yaml_file.
+        """
+        from installer.wizard import _render_prompts_rich
+        from installer.wizard_specs import PromptSpec
+
+        seen_bucket: list[dict] = []
+
+        def _cond(d: dict) -> bool:
+            seen_bucket.append(d)
+            return d.get("sentinel_proj") is True
+
+        # A synthetic worktree-file spec guarded by a condition that looks
+        # for a key only ever set in proj.yaml.
+        spec = PromptSpec(
+            label="Test field",
+            dotted_key="worktree_dir",
+            type="str",
+            group="Paths",
+            tier="basic",
+            default_factory=lambda existing: existing.get("worktree_dir", "/w"),
+            yaml_file="worktree",
+            condition=_cond,
+        )
+
+        with patch(
+            "installer.wizard.Prompt.ask",
+            side_effect=lambda *a, **k: k.get("default", ""),
+        ):
+            # No proj_existing → condition sees merged-view of worktree bucket
+            # (sentinel not present → False → field skipped).
+            answers = _render_prompts_rich(
+                [spec],
+                {"worktree_dir": "/wt"},
+                rich_console,
+                tier="basic",
+                yaml_file="worktree",
+            )
+            assert "worktree_dir" not in answers
+            assert seen_bucket[-1] == {"worktree_dir": "/wt"}
+
+            # With proj_existing → condition sees proj bucket ONLY
+            # (sentinel set → True → field rendered).
+            seen_bucket.clear()
+            answers = _render_prompts_rich(
+                [spec],
+                {"worktree_dir": "/wt"},
+                rich_console,
+                tier="basic",
+                yaml_file="worktree",
+                proj_existing={"sentinel_proj": True},
+            )
+            assert "worktree_dir" in answers
+            assert seen_bucket[-1] == {"sentinel_proj": True}
+
     def test_setup_todoist_loads_existing_api_token_masked(
         self, mock_home: Path, rich_console: Console
     ):

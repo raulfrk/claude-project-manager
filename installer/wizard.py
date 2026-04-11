@@ -123,8 +123,17 @@ def _render_prompts_rich(
     console: Console,
     tier: str,
     yaml_file: str,
+    proj_existing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Iterate PromptSpec entries filtered by tier+yaml_file, honor conditions, emit group headers."""
+    """Iterate PromptSpec entries filtered by tier+yaml_file, honor conditions, emit group headers.
+
+    Parity with Textual path (515.5/515.6):
+    - spec.default_factory receives `existing` (the bucket for this yaml_file).
+    - spec.condition receives `proj_existing` when provided (honors the hard
+      contract that conditions always read the proj bucket). Falls back to
+      the legacy merged-view behaviour when proj_existing is None — used by
+      _setup_proj_yaml itself where existing IS the proj bucket.
+    """
     answers: dict[str, Any] = {}
     current_group: str | None = None
     for spec in specs:
@@ -133,10 +142,15 @@ def _render_prompts_rich(
         if spec.tier != tier:
             continue
         if spec.condition is not None:
-            merged_view = dict(existing)
-            _merge_dotted_into_dict(merged_view, answers)
-            if not spec.condition(merged_view):
-                continue
+            if proj_existing is not None:
+                # Hard contract: conditions always see the proj bucket.
+                if not spec.condition(proj_existing):
+                    continue
+            else:
+                merged_view = dict(existing)
+                _merge_dotted_into_dict(merged_view, answers)
+                if not spec.condition(merged_view):
+                    continue
         if spec.group != current_group:
             console.print(f"\n[bold cyan]── {spec.group} ──[/bold cyan]")
             current_group = spec.group
@@ -199,16 +213,34 @@ def _setup_worktree_yaml(console: Console) -> dict[str, Any]:
         return {}
     mtime_before = path.stat().st_mtime if path.exists() else None
 
+    # Load proj.yaml for condition evaluation — the hard contract requires
+    # spec.condition lambdas to always read the proj bucket, regardless of
+    # the spec's own yaml_file. Parity with Textual path (515.5/515.6).
+    try:
+        proj_existing = load_existing_yaml(Path.home() / ".claude" / "proj.yaml")
+    except ConfigLoadError:
+        proj_existing = {}
+
     console.print("\n[bold]worktree.yaml configuration[/bold]")
 
     basic_answers = _render_prompts_rich(
-        PROJ_YAML_PROMPTS, existing, console, tier="basic", yaml_file="worktree"
+        PROJ_YAML_PROMPTS,
+        existing,
+        console,
+        tier="basic",
+        yaml_file="worktree",
+        proj_existing=proj_existing,
     )
     _merge_dotted_into_dict(existing, basic_answers)
 
     if Confirm.ask("\nShow advanced options?", default=False, console=console):
         advanced_answers = _render_prompts_rich(
-            PROJ_YAML_PROMPTS, existing, console, tier="advanced", yaml_file="worktree"
+            PROJ_YAML_PROMPTS,
+            existing,
+            console,
+            tier="advanced",
+            yaml_file="worktree",
+            proj_existing=proj_existing,
         )
         _merge_dotted_into_dict(existing, advanced_answers)
 
