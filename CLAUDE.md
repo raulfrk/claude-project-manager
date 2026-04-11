@@ -197,3 +197,28 @@ Add `context: fork` and `agent: general-purpose` to skills that can run autonomo
 - Skill does NOT need plan mode approval mid-execution
 - Examples: hooks-*, status, todo, todoist-sync, trello-sync, jira-sync, jira-sync-trello
 - Do NOT add to: interactive skills (define, init, load), sub-skills, or skills needing plan approval (execute, run, quick)
+
+## Caveman Mode Precedence
+
+This section exists ONLY on the `dev-caveman` branch and is stripped on `dev` and `main` by the Pre-Wave D CI guard and pre-commit hook. See `docs/caveman-bench.md` for the runbook.
+
+**What this is.** The caveman experiment ships an ultra-compressed communication mode (see the `caveman` plugin: `/caveman`, `/caveman:compress`, `/caveman:caveman-commit`, `/caveman:caveman-review`). On dev-caveman, cpm skills may produce compressed output; on dev and main they produce normal prose. Branch selection is the switch.
+
+**How to get compressed behavior.** After checking out dev-caveman, run `claude-installer update`. The installer wizard's sync step invokes `plugins/proj/server/server/scripts/claudemd_branch_aware.py`, which detects the current git branch and rewrites the managed section of `~/.claude/CLAUDE.md` accordingly:
+
+- On a `*caveman*` branch in the `claude-project-manager` project: the managed section is `_MANAGED_SECTION_DEFAULT + _CAVEMAN_APPEND`, and a sidecar backup is written to `~/.claude/CLAUDE.md.pre-caveman` with a magic header `# CPM-CAVEMAN-BACKUP v1 <ISO timestamp>` so a later restore knows what it's restoring from.
+- On `dev` or `main`: the sidecar header is validated, non-managed regions are diffed against the current file to preserve user edits made while on dev-caveman, and the default managed section is restored atomically.
+
+**You must re-run the installer after switching branches.** The managed section does NOT auto-refresh on branch checkout. Forgetting this means the wrong caveman state leaks across branches. This is a deliberate design choice (D519.3 — installer-wizard-only enforcement): branch checkout should not silently mutate the user's home directory; the wizard run is the opt-in moment.
+
+**Precedence order when caveman rules conflict with existing rules.** Caveman compression is a presentation layer, not a rule override. In order:
+
+1. Security and safety rules (refusals, destructive-operation gating, user-confirmation requirements) — ALWAYS full prose, never compressed.
+2. Commit messages, code comments, test strings, and error messages in source — ALWAYS normal prose. Caveman mode never touches these.
+3. YAML frontmatter, MCP tool names, file paths, shell commands, code blocks — never abbreviated or compressed regardless of mode.
+4. Load-bearing instructional qualifiers in SKILL.md bodies (e.g. "ON by default except `--paranoid`", "never use `--no-verify`", explicit default values) — preserved verbatim even under compression.
+5. Everything else (status updates, explanations, step prose) — caveman compression applies on dev-caveman only.
+
+If a caveman rewrite would drop a qualifier in categories 1-4, the rewrite is wrong. Re-open and fix in full prose.
+
+**Banned markers comment.** The strings `Caveman Mode Precedence`, `_CAVEMAN_APPEND`, and `# cpm:caveman` are rejected by the pre-commit hook and CI workflow on `main`/`dev`. This section intentionally contains the first of those strings; the installer source intentionally contains the second and third. They exist on dev-caveman only and the guards enforce the boundary.
