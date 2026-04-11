@@ -163,10 +163,10 @@ def marketplace_json(tmp_path: Path) -> Path:
 def mock_detect(monkeypatch: pytest.MonkeyPatch) -> InstallState:
     """Mock ``installer.detect.detect_existing`` at both source and import site."""
     state = InstallState(
-        installed_plugins=["proj", "hooks", "sandbox"],
+        installed_plugins=["proj", "router", "sandbox"],
         mcp_entries=[
             "plugin_proj_proj",
-            "plugin_hooks_hooks",
+            "plugin_router_router",
             "plugin_sandbox_sandbox",
         ],
     )
@@ -202,7 +202,7 @@ def mock_plugin_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
         MagicMock(
             return_value=[
                 "proj@claude-project-manager",
-                "hooks@claude-project-manager",
+                "router@claude-project-manager",
                 "sandbox@claude-project-manager",
             ]
         ),

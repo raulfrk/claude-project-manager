@@ -345,10 +345,10 @@ async def test_wizard_prefilled_from_existing_yamls(
 async def test_detection_snapshot() -> None:
     """Snapshot of the detection screen with mixed plugin states."""
     state = InstallState(
-        installed_plugins=["proj", "hooks", "sandbox"],
+        installed_plugins=["proj", "router", "sandbox"],
         mcp_entries=[
             "plugin_proj_proj",
-            "plugin_hooks_hooks",
+            "plugin_router_router",
             "plugin_sandbox_sandbox",
         ],
     )
@@ -357,7 +357,7 @@ async def test_detection_snapshot() -> None:
             plugin="proj", installed_version="3.5.0", available_version="4.0.0"
         ),
         PluginDetectionRow(
-            plugin="hooks", installed_version="2.0.0", available_version="2.0.0"
+            plugin="router", installed_version="2.0.0", available_version="2.0.0"
         ),
         PluginDetectionRow(
             plugin="sandbox", installed_version="1.0.0", available_version="1.0.0"

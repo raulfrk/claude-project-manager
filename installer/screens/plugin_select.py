@@ -192,13 +192,13 @@ class PluginSelectScreen(Screen[list[str]]):
         self._check_dependency_warnings()
 
     def _check_dependency_warnings(self) -> None:
-        """Show warning if hooks is deselected but dependents are selected."""
+        """Show warning if router is deselected but dependents are selected."""
         warning_bar = self.query_one("#warning-bar", Static)
-        if "hooks" not in self._selected:
-            dependents = [n for n in self._selected if n not in ("hooks", "analyse")]
+        if "router" not in self._selected:
+            dependents = [n for n in self._selected if n not in ("router", "analyse")]
             if dependents:
                 warning_bar.update(
-                    f"Warning: hooks not selected but recommended for: "
+                    f"Warning: router not selected but recommended for: "
                     f"{', '.join(sorted(dependents))}. "
                     f"Hook dispatch will be disabled."
                 )

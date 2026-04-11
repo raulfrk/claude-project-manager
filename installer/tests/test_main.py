@@ -717,7 +717,7 @@ class TestInstallerAppHelpers:
 
         app = InstallerApp(mode="update")
         state = InstallState(
-            installed_plugins=["proj", "hooks"],
+            installed_plugins=["proj", "router"],
             cache_dir=Path("/nonexistent"),
         )
         with (
@@ -731,7 +731,7 @@ class TestInstallerAppHelpers:
 
         plugin_names = [r.plugin for r in rows]
         assert "proj" in plugin_names
-        assert "hooks" in plugin_names
+        assert "router" in plugin_names
         assert "sandbox" in plugin_names
 
     def test_proj_plugins_constant(self):
@@ -739,7 +739,7 @@ class TestInstallerAppHelpers:
         from installer.app import InstallerApp
 
         assert "proj" in InstallerApp._PROJ_PLUGINS
-        assert "hooks" in InstallerApp._PROJ_PLUGINS
+        assert "router" in InstallerApp._PROJ_PLUGINS
         assert "sandbox" in InstallerApp._PROJ_PLUGINS
         assert "worktree" not in InstallerApp._PROJ_PLUGINS
 

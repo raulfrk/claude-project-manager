@@ -76,7 +76,7 @@ def remove_marketplace(name: str = _MARKETPLACE_NAME) -> None:
 def get_installed_plugins(
     marketplace: str = _MARKETPLACE_NAME,
 ) -> list[str]:
-    """Return plugin IDs installed from *marketplace* (e.g. ``hooks@claude-project-manager``)."""
+    """Return plugin IDs installed from *marketplace* (e.g. ``router@claude-project-manager``)."""
     result = _run(["claude", "plugin", "list", "--json"])
     try:
         data = json.loads(result.stdout)
@@ -93,7 +93,7 @@ def get_installed_plugins(
 def get_available_plugins(
     marketplace: str = _MARKETPLACE_NAME,
 ) -> list[str]:
-    """Return plugin IDs available from *marketplace* (e.g. ``hooks@claude-project-manager``)."""
+    """Return plugin IDs available from *marketplace* (e.g. ``router@claude-project-manager``)."""
     result = _run(["claude", "plugin", "list", "--available", "--json"])
     try:
         data = json.loads(result.stdout)
@@ -108,7 +108,7 @@ def get_available_plugins(
 
 
 def install_plugin(plugin_id: str) -> None:
-    """Install a plugin by its full ID (e.g. ``hooks@claude-project-manager``)."""
+    """Install a plugin by its full ID (e.g. ``router@claude-project-manager``)."""
     _run(["claude", "plugin", "install", plugin_id])
 
 
