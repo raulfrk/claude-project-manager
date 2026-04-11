@@ -24,6 +24,62 @@ from installer.prompts import int_in_range, prompt_choice
 from installer.wizard_specs import PROJ_YAML_PROMPTS, PromptSpec
 
 
+def _sync_claudemd_branch_aware(claude_md: Path, *, console: Console) -> None:
+    """Run the branch-aware claudemd helper if it's importable.
+
+    The helper lives at ``plugins/proj/server/server/scripts/claudemd_branch_aware.py``
+    which is not on ``sys.path`` in every deployment. Loaded by file path
+    so it degrades to a no-op if the script file is missing.
+    """
+    import importlib.util
+    import sys
+
+    # The installer package is at <repo>/installer/wizard.py; derive the
+    # repo root and locate the script relative to it.
+    repo_root = Path(__file__).resolve().parent.parent
+    script_path = (
+        repo_root
+        / "plugins"
+        / "proj"
+        / "server"
+        / "server"
+        / "scripts"
+        / "claudemd_branch_aware.py"
+    )
+    if not script_path.exists():
+        return  # feature not deployed in this install layout; no-op
+
+    try:
+        mod_name = "_installer_claudemd_branch_aware"
+        spec = importlib.util.spec_from_file_location(mod_name, script_path)
+        if spec is None or spec.loader is None:
+            return
+        module = sys.modules.get(mod_name)
+        if module is None:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = module
+            spec.loader.exec_module(module)
+        result = module.sync_claude_md(
+            claude_md_path=claude_md,
+            project_name="claude-project-manager",
+            repo_root=repo_root,
+        )
+        if result.status == "caveman":
+            console.print(
+                f"[dim]claudemd: caveman variant installed on branch "
+                f"{result.branch!r}[/dim]"
+            )
+        elif result.status == "default" and result.modified:
+            console.print(
+                f"[dim]claudemd: default variant restored on branch "
+                f"{result.branch!r}[/dim]"
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Branch-aware sync is best-effort. A failure here must never
+        # block the wizard from completing.
+        console.print(f"[dim]claudemd branch-aware sync skipped: {exc}[/dim]")
+
+
 def _resolve_plugin_dir(cache_dir: Path, plugin_name: str) -> Path | None:
     """Return the highest-version subdir of cache_dir/plugin_name, or None.
 
@@ -682,6 +738,8 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
         _hooks_diff_prompt(plugin_dirs, console=console)
         _settings_hooks_diff_prompt(plugin_dirs, console=console)
 
-    ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    ensure_managed_section(claude_md)
+    _sync_claudemd_branch_aware(claude_md, console=console)
 
     console.print("\n[green]Setup wizard complete.[/green]")

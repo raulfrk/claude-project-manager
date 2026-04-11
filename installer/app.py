@@ -610,7 +610,48 @@ class InstallerApp(App):
             )
 
         # Ensure managed section in global CLAUDE.md
-        ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+        claude_md = Path.home() / ".claude" / "CLAUDE.md"
+        ensure_managed_section(claude_md)
+        self._sync_claudemd_branch_aware(claude_md)
+
+    def _sync_claudemd_branch_aware(self, claude_md: Path) -> None:
+        """Run the branch-aware claudemd helper if available.
+
+        Best-effort: failures never block the TUI flow.
+        """
+        import importlib.util
+        import sys
+
+        repo_root = Path(__file__).resolve().parent.parent
+        script_path = (
+            repo_root
+            / "plugins"
+            / "proj"
+            / "server"
+            / "server"
+            / "scripts"
+            / "claudemd_branch_aware.py"
+        )
+        if not script_path.exists():
+            return
+        try:
+            mod_name = "_installer_claudemd_branch_aware"
+            spec = importlib.util.spec_from_file_location(mod_name, script_path)
+            if spec is None or spec.loader is None:
+                return
+            module = sys.modules.get(mod_name)
+            if module is None:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[mod_name] = module
+                spec.loader.exec_module(module)
+            module.sync_claude_md(
+                claude_md_path=claude_md,
+                project_name="claude-project-manager",
+                repo_root=repo_root,
+            )
+        except Exception:  # noqa: BLE001, S110
+            # Best-effort; never block the TUI save path.
+            pass
 
     # -- Update flow callbacks --
 

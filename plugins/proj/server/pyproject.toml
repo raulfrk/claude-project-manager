@@ -62,6 +62,11 @@ ignore = ["S603", "S607"]
 [tool.basedpyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
+# claudemd_branch_aware.py imports from `installer.claudemd` which is not
+# a dependency of this package — it is loaded at runtime by the installer
+# wizard which runs inside the installer's own venv. Exclude it from the
+# proj-server type-check pass; the installer runs its own basedpyright.
+exclude = ["server/scripts/claudemd_branch_aware.py"]
 reportUnusedFunction = false  # @mcp.tool() decorated functions flagged as unused
 # reportUnknownMemberType: blocked by httpx/mcp stubs (would cascade 100+ errors)
 reportUnknownMemberType = false
