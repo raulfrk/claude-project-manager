@@ -27,5 +27,5 @@ def register(app: FastMCP) -> None:
             "Returns a summary of changes."
         )
     )
-    def hooks_sync_tool() -> str:
+    def router_sync_tool() -> str:
         return hooks_sync()

@@ -131,7 +131,7 @@ def register(app: FastMCP) -> None:
             "{status: 'no_verification_hooks', trigger: trigger_tool}."
         )
     )
-    async def hooks_verify_tool(
+    async def router_verify_tool(
         trigger_tool: str,
         source_result: str = "{}",
     ) -> str:

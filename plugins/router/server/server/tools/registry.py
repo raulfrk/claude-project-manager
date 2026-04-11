@@ -266,7 +266,7 @@ def register(app: FastMCP) -> None:
             "YAML created on first register if it doesn't exist."
         )
     )
-    def hooks_register_tool(
+    def router_register_tool(
         trigger_tool: str,
         target_tool: str,
         server: str,
@@ -297,7 +297,7 @@ def register(app: FastMCP) -> None:
             "Empty array when no matches (not an error)."
         )
     )
-    def hooks_list_tool(trigger_tool: str | None = None) -> str:
+    def router_list_tool(trigger_tool: str | None = None) -> str:
         return hooks_list(trigger_tool=trigger_tool)
 
     @app.tool(
@@ -306,5 +306,5 @@ def register(app: FastMCP) -> None:
             "Removes the hook from ~/.claude/hooks.yaml. Idempotent."
         )
     )
-    def hooks_unregister_tool(hook_id: str) -> str:
+    def router_unregister_tool(hook_id: str) -> str:
         return hooks_unregister(hook_id)

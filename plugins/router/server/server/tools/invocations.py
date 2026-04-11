@@ -79,7 +79,7 @@ def register(app: FastMCP) -> None:
             "Results sorted newest-first."
         )
     )
-    def hooks_invocations_tool(
+    def router_invocations_tool(
         hook_id: str | None = None,
         trigger_tool: str | None = None,
         target_tool: str | None = None,

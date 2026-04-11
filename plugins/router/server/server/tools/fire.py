@@ -745,7 +745,7 @@ def register(app: FastMCP) -> None:
             "non_blocking_dispatched, depth, max_depth}."
         )
     )
-    async def hooks_fire_tool(
+    async def router_fire_tool(
         trigger_tool: str,
         source_result: str = "{}",
         depth: int = 0,

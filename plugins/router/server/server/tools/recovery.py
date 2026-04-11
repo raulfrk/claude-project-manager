@@ -150,7 +150,7 @@ def register(app: FastMCP) -> None:
             "Returns JSON summary: {retried, succeeded, still_failed, cleared}."
         )
     )
-    async def hooks_recover_tool(
+    async def router_recover_tool(
         hook_id: str | None = None,
         clear: bool = False,
     ) -> str:
