@@ -1,0 +1,81 @@
+# installer/defaults.yaml — single source of truth for wizard default fallbacks.
+#
+# Every PromptSpec in installer/wizard_specs.py uses _d("<dotted_key>") which
+# resolves against this file. Keys here MUST match PromptSpec.dotted_key values.
+#
+# DO NOT hand-edit to add new fields — add the PromptSpec first, then mirror
+# its fallback here. The bidirectional schema test (test_wizard_specs.py)
+# enforces round-trip coverage.
+#
+# Loaded lazily via importlib.resources on first _d() factory invocation to
+# avoid bricking --update/--uninstall/--status on a missing/corrupt file.
+
+# ---------- Basic tier (proj.yaml) ----------
+tracking_dir: "~/projects/tracking"
+projects_base_dir: "~/projects"
+sandbox_integration: true
+zoxide_integration: false
+git_tracking:
+  enabled: false
+  github_enabled: false
+  github_repo_format: "cpm-tracking-{project}"
+quality_level: "careful"
+worktree_isolation: true
+
+# ---------- Basic tier (worktree.yaml) ----------
+worktree_dir: "~/worktrees"
+
+# ---------- Advanced tier (proj.yaml) — team_mode ----------
+team_mode:
+  enabled: true
+  max_agents: 30
+  trust_level: 1
+
+# ---------- Advanced tier (proj.yaml) — smart_gate ----------
+smart_gate:
+  enabled: true
+  auto_execute_threshold: 3
+  full_review_threshold: 8
+
+# ---------- Advanced tier (proj.yaml) — resilience ----------
+resilience:
+  max_retries: 2
+  backoff_seconds: 5
+
+# ---------- Advanced tier (proj.yaml) — context_injection ----------
+context_injection:
+  enabled: true
+  max_tokens: 20000
+  include_claudemd: false
+
+# ---------- Advanced tier (proj.yaml) — archive ----------
+archive:
+  auto_archive: true
+  after_days: 30
+  keep_history: true
+  purge_after_days: 365
+
+# ---------- Advanced tier (proj.yaml) — permissions ----------
+permissions:
+  auto_grant_read: true
+  auto_grant_edit: true
+
+# ---------- Advanced tier (proj.yaml) — misc ----------
+default_priority: "medium"
+claudemd_management: true
+worktree_integration: true
+
+# ---------- Advanced tier (proj.yaml) — sync.todoist ----------
+sync:
+  todoist:
+    root_only: false
+  trello:
+    default_list: "Todo"
+    on_delete: "archive"
+    list_mappings:
+      backlog: "Backlog"
+      todo: "Todo"
+      in_progress: "In Progress"
+      blocked: "Blocked"
+      done: "Done"
+      archive: "Archive"
