@@ -652,19 +652,37 @@ class InstallerApp(App):
         if not result.confirmed or self._state is None:
             self.exit()
             return
-        plugins = self._state.installed_plugins
+        reset_configs = result.options.get("reset_configs", False)
+        self.run_worker(
+            self._prepare_and_reinstall(reset_configs),
+            exclusive=True,
+        )
+
+    async def _prepare_and_reinstall(self, reset_configs: bool) -> None:
+        """Query authoritative plugin list, push progress screen, run worker."""
+        try:
+            plugins = await asyncio.to_thread(get_installed_plugins)
+        except InstallerError as exc:
+            progress = ProgressScreen(description="Reinstalling plugins...", total=1)
+            self.push_screen(progress, callback=self._on_progress_done)
+            await progress.wait_ready()
+            progress.write_log(
+                f"  [red]✗ Failed to query installed plugins: {exc}[/red]"
+            )
+            progress.advance(1, detail="Failed")
+            return
         if not plugins:
-            self.exit()
+            progress = ProgressScreen(description="Reinstalling plugins...", total=1)
+            self.push_screen(progress, callback=self._on_progress_done)
+            await progress.wait_ready()
+            progress.write_log("  Nothing to reinstall")
+            progress.advance(1, detail="Nothing to reinstall")
             return
         progress = ProgressScreen(
             description="Reinstalling plugins...", total=len(plugins)
         )
         self.push_screen(progress, callback=self._on_progress_done)
-        reset_configs = result.options.get("reset_configs", False)
-        self.run_worker(
-            self._run_reinstall_worker(plugins, progress, reset_configs),
-            exclusive=True,
-        )
+        await self._run_reinstall_worker(plugins, progress, reset_configs)
 
     async def _run_reinstall_worker(
         self,

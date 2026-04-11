@@ -52,6 +52,7 @@ def _parse_mcp_entries(settings_path: Path) -> list[str]:
     return sorted(entries)
 
 
+# NOTE: on-disk inventory, NOT authoritative. Use plugin_cli.get_installed_plugins() for install/reinstall decisions.
 def _parse_installed_plugins(cache_dir: Path) -> list[str]:
     """List plugin names from the cache directory."""
     if not cache_dir.is_dir():
