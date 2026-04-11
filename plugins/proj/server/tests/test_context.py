@@ -233,6 +233,61 @@ class TestProjSessionContext:
         # Also verify the project-level trello_card_id
         assert data["project"]["trello_card_id"] == "abc123"
 
+    async def test_session_context_exposes_trello_label_names_defaults(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """Trello label names default to 'proj' / 'proj-task' when absent."""
+        cfg.trello.enabled = True
+        storage.save_config(cfg)
+
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        state.set_session_active("myapp")
+
+        result = await call_tool(mcp_app, "proj_session_context")
+        data = json.loads(result)
+
+        trello = data["integrations"]["trello"]
+        assert trello["proj_label_name"] == "proj"
+        assert trello["proj_task_label_name"] == "proj-task"
+
+    async def test_session_context_exposes_trello_label_names_custom(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """Custom trello label names surface on the session_context dict."""
+        cfg.trello.enabled = True
+        cfg.trello.proj_label_name = "cpm"
+        cfg.trello.proj_task_label_name = "cpm-task"
+        storage.save_config(cfg)
+
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        state.set_session_active("myapp")
+
+        result = await call_tool(mcp_app, "proj_session_context")
+        data = json.loads(result)
+
+        trello = data["integrations"]["trello"]
+        assert trello["proj_label_name"] == "cpm"
+        assert trello["proj_task_label_name"] == "cpm-task"
+
+    async def test_session_context_surfaces_empty_label_name(
+        self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
+    ) -> None:
+        """Empty string in proj.yaml surfaces as empty (not defaulted)."""
+        cfg.trello.enabled = True
+        cfg.trello.proj_label_name = ""
+        cfg.trello.proj_task_label_name = ""
+        storage.save_config(cfg)
+
+        _setup_project_with_todos(cfg, "myapp", tmp_path)
+        state.set_session_active("myapp")
+
+        result = await call_tool(mcp_app, "proj_session_context")
+        data = json.loads(result)
+
+        trello = data["integrations"]["trello"]
+        assert trello["proj_label_name"] == ""
+        assert trello["proj_task_label_name"] == ""
+
 
 # ---------------------------------------------------------------------------
 # proj_status_context tests
