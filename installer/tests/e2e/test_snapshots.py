@@ -299,6 +299,43 @@ async def test_wizard_snapshot() -> None:
         _assert_snapshot(svg, "wizard")
 
 
+@pytest.mark.asyncio
+async def test_wizard_prefilled_from_existing_yamls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wizard snapshot with pre-seeded ~/.claude/proj.yaml + worktree.yaml.
+
+    Regression for 515: WizardScreen must load existing values from
+    ~/.claude/<bucket>.yaml so the user sees their current config on second
+    run, not hardcoded defaults.
+    """
+    fake_home = tmp_path / "home"
+    claude_dir = fake_home / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "proj.yaml").write_text(
+        "tracking_dir: /custom/tracking\n"
+        "default_priority: high\n"
+        "git_tracking:\n"
+        "  enabled: true\n",
+        encoding="utf-8",
+    )
+    (claude_dir / "worktree.yaml").write_text(
+        "default_worktree_dir: /custom/worktrees\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(fake_home))
+    # Path.home() uses HOME on POSIX; WizardScreen reads via Path.home() / ".claude".
+
+    selected = ["proj", "hooks", "sandbox", "worktree"]
+    app = _ScreenHost()
+    async with app.run_test(size=_TERM_SIZE) as pilot:
+        screen = WizardScreen(selected_plugins=selected)
+        app.push_screen(screen)
+        await pilot.pause()
+        svg = app.export_screenshot()
+        _assert_snapshot(svg, "wizard_prefilled")
+
+
 # ---------------------------------------------------------------------------
 # 3. DetectionScreen -- mixed installed/outdated/missing
 # ---------------------------------------------------------------------------
