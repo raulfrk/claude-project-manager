@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -305,30 +306,70 @@ def _read_settings_json(path: Path) -> dict[str, Any]:
 def compute_settings_hooks_diff(
     current_path: Path,
     plugin_dirs: Iterable[Path],
+    *,
+    mass_remove: bool = False,
 ) -> list[SettingsHookDiff]:
-    """Compute per-hook-id diffs between desired (plugin defaults) and actual (settings.json)."""
+    """Compute per-hook-id diffs between desired (plugin defaults) and actual (settings.json).
+
+    Orphan-detection strategy:
+
+    1. Call :func:`discover_managed_ids` to find every managed matcher in
+       ``settings.json`` independently of ``desired``.
+    2. Key ``actual_by_event_id`` by ``(event, cpm_id)`` TUPLE (NOT by
+       ``cpm_id`` alone) so cross-event collisions are preserved: an id
+       desired in ``SessionStart`` but orphan in ``SessionEnd`` yields
+       distinct diffs for each event.
+    3. Emit ``new``/``changed``/``unchanged`` for ids in ``desired`` using
+       ``(desired_event, cpm_id)`` lookup.
+    4. Emit ``removed`` for discovered ``(event, cpm_id)`` pairs NOT in
+       ``desired_keys``. A seen-set guard ensures duplicate occurrences
+       within one ``(event, cpm_id)`` yield exactly one removed diff.
+
+    Empty-desired guard: if ``desired == {}`` AND discovered is non-empty,
+    this refuses to mass-remove and returns ``[]`` with a stderr warning
+    unless the caller opts in via ``mass_remove=True``. Prevents a wall of
+    spurious removals when plugin defaults fail to load.
+    """
     resolved_path = current_path.resolve() if current_path.exists() else current_path
     current_raw = _read_settings_json(resolved_path)
     doc = SettingsDocument.from_dict(resolved_path, current_raw)
 
     desired = merge_settings_defaults(list(plugin_dirs))
 
-    actual_by_id: dict[str, tuple[str, dict[str, Any]]] = {}
-    for event, matchers in doc.hooks.events.items():
-        for matcher in matchers:
-            for cpm_id in desired.keys():
-                if is_managed_entry(matcher, cpm_id):
-                    actual_by_id[cpm_id] = (event, matcher)
-                    break
+    discovered = discover_managed_ids(doc)
+
+    if not desired and discovered:
+        print(
+            f"Warning: no plugin defaults found but {len(discovered)} managed "
+            "entries discovered in settings.json; refusing to mass-remove. "
+            "Pass mass_remove=True to override.",
+            file=sys.stderr,
+        )
+        if not mass_remove:
+            return []
+
+    # Key by (event, cpm_id) tuple — NOT cpm_id alone — to preserve
+    # cross-event occurrences. First occurrence wins for the diff's
+    # `actual` field.
+    actual_by_event_id: dict[tuple[str, str], dict[str, Any]] = {}
+    for event, cpm_id, matcher in discovered:
+        actual_by_event_id.setdefault((event, cpm_id), matcher)
 
     diffs: list[SettingsHookDiff] = []
-    seen_ids: set[str] = set()
+
+    # Build the set of desired (event, cpm_id) keys so the orphan loop
+    # below can skip ids that are desired in the same event.
+    desired_keys: set[tuple[str, str]] = set()
     for cpm_id, entry in desired.items():
-        seen_ids.add(cpm_id)
+        desired_event = str(entry.get("event") or "SessionStart")
+        desired_keys.add((desired_event, cpm_id))
+
+    for cpm_id, entry in desired.items():
         event = str(entry.get("event") or "SessionStart")
         matchers_list = list(entry.get("matchers") or [])
-        if cpm_id in actual_by_id:
-            actual_event, actual_matcher = actual_by_id[cpm_id]
+        key = (event, cpm_id)
+        actual_matcher = actual_by_event_id.get(key)
+        if actual_matcher is not None:
             desired_resolved = resolve_command_template(entry, Path())
             actual_cmds: list[str] = []
             actual_hooks = actual_matcher.get("hooks")
@@ -349,7 +390,7 @@ def compute_settings_hooks_diff(
                     event=event,
                     matchers=matchers_list,
                     desired=entry,
-                    actual={"event": actual_event, "matcher": actual_matcher},
+                    actual={"event": event, "matcher": actual_matcher},
                 )
             )
         else:
@@ -364,18 +405,27 @@ def compute_settings_hooks_diff(
                 )
             )
 
-    for cpm_id, (event, matcher) in actual_by_id.items():
-        if cpm_id not in seen_ids:
-            diffs.append(
-                SettingsHookDiff(
-                    cpm_id=cpm_id,
-                    kind="removed",
-                    event=event,
-                    matchers=[str(matcher.get("matcher") or "")],
-                    desired=None,
-                    actual={"event": event, "matcher": matcher},
-                )
+    # Orphan loop: emit one `removed` diff per unique (event, cpm_id) not
+    # desired in that event. Seen-set dedups duplicate occurrences within
+    # the same (event, cpm_id).
+    emitted_removed: set[tuple[str, str]] = set()
+    for event, cpm_id, matcher in discovered:
+        key = (event, cpm_id)
+        if key in desired_keys:
+            continue
+        if key in emitted_removed:
+            continue
+        emitted_removed.add(key)
+        diffs.append(
+            SettingsHookDiff(
+                cpm_id=cpm_id,
+                kind="removed",
+                event=event,
+                matchers=[str(matcher.get("matcher") or "")],
+                desired=None,
+                actual={"event": event, "matcher": matcher},
             )
+        )
 
     return diffs
 
@@ -440,9 +490,19 @@ def apply_settings_hooks_diffs(
 
     _backup_with_retention(resolved_path)
 
-    for diff in actionable:
+    # Buffer new managed matchers per event so we can sort by cpm_id before
+    # append — deterministic order prevents platform-dependent churn from
+    # plugin_dirs iteration order.
+    pending_appends: dict[str, list[dict[str, Any]]] = {}
+
+    # Sort actionable by cpm_id so the final append order is deterministic
+    # regardless of how plugin_dirs were iterated.
+    for diff in sorted(actionable, key=lambda d: d.cpm_id):
         event = diff.event
         if diff.cpm_id in remove_ids:
+            # Filter-all: `is_managed_entry` checks all matchers in the
+            # event, so duplicates with the same cpm_id are removed in one
+            # pass (idempotent).
             matchers_list = doc.hooks.events.get(event, [])
             doc.hooks.events[event] = [
                 m for m in matchers_list if not is_managed_entry(m, diff.cpm_id)
@@ -463,7 +523,15 @@ def apply_settings_hooks_diffs(
                 "__cpm_id": diff.cpm_id,
                 "hooks": [{"command": resolved_cmd, "type": "command"}],
             }
-            doc.hooks.events[event].append(new_block)
+            pending_appends.setdefault(event, []).append(new_block)
+
+    # Append buffered managed matchers in sorted order by cpm_id (already
+    # sorted above, but re-sort defensively in case multiple matchers
+    # within a single diff reordered insertion).
+    for event, blocks in pending_appends.items():
+        blocks_sorted = sorted(blocks, key=lambda b: str(b.get("__cpm_id") or ""))
+        doc.hooks.events.setdefault(event, [])
+        doc.hooks.events[event].extend(blocks_sorted)
 
     try:
         _atomic_write_json(resolved_path, doc.to_dict())
