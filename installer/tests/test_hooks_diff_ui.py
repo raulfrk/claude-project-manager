@@ -11,6 +11,7 @@ from textual.widgets import Checkbox, Static
 
 from installer.hooks_diff import HookDiff
 from installer.screens.hooks_diff import HooksDiffScreen
+from installer.settings_hooks import SettingsHookDiff
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -443,3 +444,51 @@ class TestHooksDiffPromptRich:
         _hooks_diff_prompt([tmp_path], console=console)
 
         assert len(apply_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Settings-hooks mode: verify Removed section rendering + checkbox routing.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_settings_hooks_removed_diff_renders_and_routes_to_remove() -> None:
+    """Pipe a `SettingsHookDiff(kind="removed")` through HooksDiffScreen and
+    verify: (1) the Removed badge renders, (2) the checkbox defaults to
+    UNCHECKED (safer — user opts in), (3) toggling it on routes the cpm_id
+    into `_collect_selections()["remove"]`, not `apply`."""
+    removed_diff = SettingsHookDiff(
+        cpm_id="orphan-hook",
+        kind="removed",
+        event="SessionEnd",
+        matchers=["shutdown"],
+        desired=None,
+        actual={
+            "event": "SessionEnd",
+            "matcher": {
+                "matcher": "shutdown",
+                "__cpm_id": "orphan-hook",
+                "hooks": [{"command": "# cpm:orphan-hook\nrun", "type": "command"}],
+            },
+        },
+    )
+
+    app = _TestApp()
+    async with app.run_test() as pilot:
+        screen = HooksDiffScreen(mode="settings_hooks", diffs=[removed_diff])
+        app.push_screen(screen)
+        await pilot.pause()
+
+        # The screen rendered — find the checkbox for the removed id.
+        cb = screen.query_one("#hook-cb-orphan-hook", Checkbox)
+        assert cb.value is False  # default UNCHECKED for removed
+
+        # Unchecked → nothing collected.
+        selections_empty = screen._collect_selections()
+        assert selections_empty == {"apply": set(), "remove": set()}
+
+        # Toggle on, re-collect — must route to `remove`, NOT `apply`.
+        cb.value = True
+        await pilot.pause()
+        selections_on = screen._collect_selections()
+        assert selections_on == {"apply": set(), "remove": {"orphan-hook"}}
