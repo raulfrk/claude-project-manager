@@ -332,12 +332,14 @@ class TestIntegrationScreensExtended:
     async def test_trello_loads_existing_defaults(
         self, stub_httpx, _isolate_home: Path
     ) -> None:
+        # Post-506: default_board_id moved from trello.yaml (TrelloConfigScreen)
+        # to proj.yaml sync.trello.default_board_id (PROJ_YAML_PROMPTS basic tier).
+        # TrelloConfigScreen owns only credentials + display-local defaults now.
         _write_yaml(
             _isolate_home / ".claude" / "trello.yaml",
             {
                 "api_key": "key-existing",
                 "token": "tok-existing",
-                "default_board_id": "board-xyz",
                 "enabled": True,
                 "auto_sync": True,
             },
@@ -354,7 +356,6 @@ class TestIntegrationScreensExtended:
 
             assert screen.query_one("#api_key", Input).value == "key-existing"
             assert screen.query_one("#token", Input).value == "tok-existing"
-            assert screen.query_one("#default_board_id", Input).value == "board-xyz"
             assert screen.query_one("#trello-default-list", Input).value == "Inbox"
             assert screen.query_one("#trello-on-delete", Select).value == "delete"
 
