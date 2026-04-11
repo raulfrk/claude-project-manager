@@ -1,39 +1,60 @@
 ---
 name: trello-setup
-description: Ensure the proj (blue) and proj-task (green) labels and project card exist on the Trello board. Sub-skill of trello-sync.
+description: Ensure the configured project-card label and task-card label plus the project card exist on the Trello board. Sub-skill of trello-sync.
 allowed-tools: mcp__trello__get_board, mcp__trello__list_boards, mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__config_load
 ---
 
-Ensure the `proj` label and project card exist on the configured Trello board. This is a sub-skill used by `/proj:trello-sync`.
+Ensure the configured `proj_label_name` (default `proj`, blue) and `proj_task_label_name` (default `proj-task`, green) labels plus the project card exist on the configured Trello board. This is a sub-skill used by `/proj:trello-sync`. It is the SOLE owner of label non-empty validation; `/proj:trello-sync` delegates all label creation here.
+
+**Naming footgun**: the label name is singular (`proj-task`, set via `sync.trello.proj_task_label_name`). The list name is plural (`proj-tasks`, set via `sync.trello.list_mappings.tasks`). One-character difference. Do not conflate.
 
 **1.** Read config and active project
 
-- Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
-  - From the result, extract `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card), and `project.name`.
+- Call `mcp__proj__proj_session_context` — read all config, project metadata, and integration settings in one call.
+  - From the result, extract `integrations.trello.enabled`, `integrations.trello.board_id` (global default), `integrations.trello.card_id` (project's card), `integrations.trello.proj_label_name`, `integrations.trello.proj_task_label_name`, and `project.name`.
 - Check prerequisites:
   - `integrations.trello.enabled` must be `true`. If not, stop with: "Trello sync not enabled. Run `/proj:init-plugin` to enable it."
-  - A board ID must be set (per-project `trello.board_id` or global `integrations.trello.board_id`). If neither is set, stop and ask the user to configure a board ID.
+  - A board ID must be set (per-project `trello.board_id` or global `integrations.trello.board_id`). If neither is set, stop with: "sync.trello.default_board_id is empty but sync.trello.enabled is True — set the board ID in proj.yaml or disable trello sync."
 - Resolve effective board ID = per-project `trello.board_id` if set, else global `integrations.trello.board_id`.
 
+**Label-name preflight (applied to both `proj_label_name` and `proj_task_label_name`)**
+
+Run the following normalization pipeline on each configured name BEFORE any comparison or Trello API call. The pipeline MUST be identical on both sides of any equality check.
+
+1. `value.strip()` — leading/trailing whitespace removed. Trello itself silently trims leading/trailing whitespace on label writes, so comparing `NFC(strip(configured))` vs `NFC(strip(board_label.name))` prevents a false-miss when the user typed `"  proj  "` and Trello stored `"proj"`.
+2. If the stripped value is empty (or the configured field was empty to begin with), stop with: `"Label name is empty — set sync.trello.proj_label_name in proj.yaml"` (or `proj_task_label_name` respectively). This skill is the single source of non-empty validation.
+3. Reject any control character (newline `\n`, tab `\t`, carriage return `\r`, or any character with `ord(c) < 32`). Stop with: `"Label name contains control characters — pick a printable name"`.
+4. NFC-normalize via `unicodedata.normalize("NFC", value)`. This handles composed vs decomposed forms (e.g. `café` NFC vs `cafe` + combining acute NFD).
+5. Soft length cap: if `len(stripped_nfc_name) > 50` (see `trello_label_name_length_limit` in `plugins/proj/server/server/lib/models.py`), log a warning but do NOT block. Trello's API accepts up to ~16384 chars but >50 hurts UX. Hard cap enforcement is out of scope for 506.
+
+Comparison is **case-sensitive**. `proj`, `Proj`, and `PROJ` are three distinct labels. Trello is case-sensitive too; do not lowercase either side.
+
 **Failure: Trello MCP server unavailable**
-If the Trello MCP server is not reachable -- for example, a tool call raises a
-tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
+If the Trello MCP server is not reachable — for example, a tool call raises a
+tool-not-found error, returns a connection error, or is simply not registered — stop immediately
 and say:
 
 > "Trello MCP server not available. Check your MCP server configuration and restart Claude Code."
 
 Do not proceed with any further steps.
 
-**2.** Ensure `proj` and `proj-task` labels exist
+**2.** Ensure configured label-name labels exist
 
-- Call `mcp__trello__get_board` with `boardId` set to the effective board ID to retrieve board labels.
-- For label name `proj` (color `blue`):
-  - If no label named `proj` exists, create one (name `proj`, color `blue`).
-  - Record its ID as `proj_label_id`.
-- For label name `proj-task` (color `green`):
-  - If no label named `proj-task` exists, create one (name `proj-task`, color `green`).
-  - Record its ID as `proj_task_label_id`.
+- Let `proj_label_name` and `proj_task_label_name` be the NFC-stripped values from the preflight above.
+- Call `mcp__trello__get_board` (or `mcp__trello__get_labels`) with `boardId` set to the effective board ID to retrieve board labels.
+- For each configured name (`proj_label_name` with preferred color `blue`, then `proj_task_label_name` with preferred color `green`), apply the match/tiebreak rule:
+  1. Filter `existing_labels` down to labels whose `NFC(strip(name))` equals the configured name (case-sensitive).
+  2. If the filter produces **zero** matches, create a new label via `mcp__trello__create_label` with `boardId`, `name=<configured name>`, `color=<preferred color>`. Log: `"Created new label id=<id> name=<name> color=<color>"`. Record the returned ID as `proj_label_id` / `proj_task_label_id`.
+  3. If the filter produces **exactly one** match, record its ID. Log: `"Using existing label id=<id> name=<name> color=<color>"`. This log line lets the user spot silent hijack of a pre-existing label with the same name (see "Trello built-in label hijack" below).
+  4. If the filter produces **multiple** matches (Trello allows duplicate label names with different colors on a single board), apply this tiebreak:
+     - **First**: prefer an exact `(name, color)` match with the preferred color.
+     - **Else**: prefer the first entry in `get_labels` pagination order (stable per API call).
+     - **Else**: hard error with `"Multiple labels named '<name>' found on board: id=X color=Y, id=Z color=W. Delete one manually, then re-run trello-setup."`
 - Both IDs are used downstream: `proj_label_id` for the project tracking card and `proj_task_label_id` for per-todo cards.
+
+**Label rename orphan note**: if the user changes `sync.trello.proj_label_name` or `sync.trello.proj_task_label_name` in `proj.yaml` AFTER labels were already created on the board, the OLD label remains on the board as an orphan. This skill does not migrate it. To rename: update the config, then manually delete or rename the old label on Trello. The `Using existing label` / `Created new label` logs let you audit what was bound.
+
+**Trello built-in label hijack note**: Trello boards are pre-seeded with colored labels (blue, green, yellow, etc.) that users may have renamed. If someone renamed the built-in blue label to `"proj"` BEFORE running this skill, the match step above will silently bind to that pre-existing label. The orphan-log line (`Using existing label id=X name=N color=C`) is the only detection; read it and decide whether to keep the binding or delete the old label and re-run.
 
 **3.** Ensure project card exists
 

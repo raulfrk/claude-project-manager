@@ -1,7 +1,7 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Card-per-todo model -- each todo becomes its own Trello card in the tasks list; project gets a tracking card in the projects list. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__create_label, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards, mcp__trello__toggle_card_label
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards, mcp__trello__toggle_card_label
 context: fork
 agent: general-purpose
 ---
@@ -127,16 +127,10 @@ If the Trello MCP server is not reachable, stop immediately and say:
 
 > "Trello MCP server not available. Check your MCP server configuration and restart Claude Code."
 
-**2.** Ensure `proj` and `proj-task` labels exist
+**2.** Ensure configured labels exist (delegated to `trello-setup`)
 
-- Call `mcp__trello__get_labels` with `boardId` set to the effective board ID. Store the result as `existing_labels` (list of `{id, name, color, ...}`).
-- For label name `proj` (color `blue`):
-  - If `existing_labels` contains a label with `name == "proj"` -> record its ID as `proj_label_id`.
-  - Otherwise call `mcp__trello__create_label` with `boardId`, `name="proj"`, `color="blue"`. Record the returned ID as `proj_label_id`.
-- For label name `proj-task` (color `green`):
-  - If `existing_labels` contains a label with `name == "proj-task"` -> record its ID as `proj_task_label_id`.
-  - Otherwise call `mcp__trello__create_label` with `boardId`, `name="proj-task"`, `color="green"`. Record the returned ID as `proj_task_label_id`.
-- If either creation fails, log a warning and continue; list placement is still applied. The next sync's diff will re-emit a `push_update_labels` entry to add the missing label via `toggle_card_label`.
+- Delegate to the `trello-setup` sub-skill, which owns the label preflight (name normalization, case-sensitivity, tiebreak for duplicate names, orphan logging) and is the SOLE source of non-empty label validation. The sub-skill reads `integrations.trello.proj_label_name` and `integrations.trello.proj_task_label_name` from `session_context` and either binds to an existing board label or issues the appropriate toolcall to create one.
+- After delegation, record the returned `proj_label_id` and `proj_task_label_id`. Do NOT re-validate label names here, do NOT re-implement label creation logic, and do NOT read `sync.trello.*` directly. Single access pattern: `session_context.integrations.trello.*`.
 
 **3.** Ensure required lists exist
 

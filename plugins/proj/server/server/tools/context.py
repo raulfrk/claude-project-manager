@@ -403,6 +403,11 @@ def register(app: FastMCP) -> None:
                     "enabled": cfg.trello.enabled,
                     "board_id": cfg.trello.default_board_id,
                     "card_id": meta.trello_card_id,
+                    # Surface label names as-is (including empty strings) so
+                    # preflight can distinguish absent (default applies) from
+                    # explicitly-set-to-empty (trello-setup errors).
+                    "proj_label_name": cfg.trello.proj_label_name,
+                    "proj_task_label_name": cfg.trello.proj_task_label_name,
                 },
                 "jira": {
                     "enabled": cfg.jira.enabled,
