@@ -65,6 +65,30 @@ class TestTrelloListMappingsModel:
         assert restored.pending == original.pending
         assert restored.archived == original.archived
 
+    def test_trello_sync_round_trip_created_field(self) -> None:
+        """Regression: TrelloListMappings.to_dict must include `created`."""
+        original = TrelloListMappings(created="Inbox")
+        restored = TrelloListMappings.from_dict(original.to_dict())
+        assert restored.created == "Inbox"
+
+    def test_trello_list_mappings_backlog_compat_shim(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Legacy `backlog` key migrates to `created` when `created` is absent."""
+        with caplog.at_level("WARNING"):
+            lm = TrelloListMappings.from_dict({"backlog": "Inbox"})
+        assert lm.created == "Inbox"
+        assert any("backlog" in rec.message for rec in caplog.records)
+
+    def test_trello_list_mappings_backlog_and_created_prefers_created(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When both `backlog` and `created` are present, `created` wins."""
+        with caplog.at_level("WARNING"):
+            lm = TrelloListMappings.from_dict({"backlog": "Old", "created": "New"})
+        assert lm.created == "New"
+        assert any("backlog" in rec.message for rec in caplog.records)
+
 
 class TestTrelloSyncModelWithListMappings:
     def test_trello_sync_roundtrip(self) -> None:
@@ -79,6 +103,27 @@ class TestTrelloSyncModelWithListMappings:
         assert restored.list_mappings.active == "In Progress"
         assert restored.list_mappings.pending == "Blocked"
         assert restored.list_mappings.archived == "Done"
+
+    def test_trello_sync_label_defaults(self) -> None:
+        ts = TrelloSync()
+        assert ts.proj_label_name == "proj"
+        assert ts.proj_task_label_name == "proj-task"
+
+    def test_trello_sync_round_trip_with_labels(self) -> None:
+        restored = TrelloSync.from_dict(
+            {"proj_label_name": "cpm", "proj_task_label_name": "cpm-task"}
+        )
+        assert restored.proj_label_name == "cpm"
+        assert restored.proj_task_label_name == "cpm-task"
+        d = restored.to_dict()
+        assert d["proj_label_name"] == "cpm"
+        assert d["proj_task_label_name"] == "cpm-task"
+
+    def test_trello_sync_round_trip_default_list(self) -> None:
+        """Regression: TrelloSync.to_dict must include `default_list`."""
+        original = TrelloSync(default_list="Sprint")
+        restored = TrelloSync.from_dict(original.to_dict())
+        assert restored.default_list == "Sprint"
 
 
 class TestProjectTrelloConfigListMappings:
