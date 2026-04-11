@@ -1,7 +1,7 @@
 ---
 name: init-plugin
 description: First-time setup wizard for the proj plugin. Run this before using any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_hooks_hooks__hooks_list_tool, mcp__plugin_hooks_hooks__hooks_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 ---
 
 Set up the proj plugin. This is required before any other `/proj:*` command works.
@@ -62,7 +62,7 @@ Auto-detect which plugins are available by attempting to call their MCP tools. D
 Check each plugin by calling a lightweight tool from its server:
 - **sandbox**: call `mcp__plugin_sandbox_sandbox__sandbox_list` with `scope="user"` and `format="json"` — if it returns a result, sandbox is installed
 - **worktree**: call `mcp__plugin_worktree_worktree__wt_list_repos` — if it returns a result, worktree is installed
-- **hooks**: call `mcp__plugin_hooks_hooks__hooks_list_tool` — if it returns a result, hooks is installed
+- **router**: call `mcp__plugin_router_router__router_list_tool` — if it returns a result, router is installed
 - **todoist**: call `mcp__plugin_todoist_todoist__todoist_find_projects` with `name=""` — if it returns a result (even empty), todoist plugin is installed
 - **trello**: call `mcp__plugin_trello_trello__list_boards` — if it returns a result, trello is installed
 - **jira**: call `mcp__plugin_jira_jira__jira_list_projects` — if it returns a result, jira is installed
@@ -258,7 +258,7 @@ Build the server list and call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_all
 - Always include: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
 - If `auto_allow_mcps: true`, also include: `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`
 - If `auto_allow_mcps: true` and worktree detected: `"plugin_worktree_worktree"`
-- If `auto_allow_mcps: true` and hooks detected: `"plugin_hooks_hooks"`
+- If `auto_allow_mcps: true` and router detected: `"plugin_router_router"`
 - If `auto_allow_mcps: true` and todoist enabled: the `todoist_mcp_server` value (e.g. `"claude_ai_Todoist"`) AND `"plugin_todoist_todoist"`
 - If `auto_allow_mcps: true` and trello enabled: `"plugin_trello_trello"`
 - If `auto_allow_mcps: true` and jira enabled: `"plugin_jira_jira"`
@@ -286,11 +286,11 @@ Parse `permissions_allow` from the result.
 
 If sandbox plugin is not detected, skip all of step 7 with: "Sandbox plugin not detected — skipping permission and sandbox setup."
 
-## Step 8: Hook setup (if hooks plugin detected)
+## Step 8: Hook setup (if router plugin detected)
 
-### 8a. Verify hooks server connectivity
-Call `mcp__plugin_hooks_hooks__hooks_list_tool` to check reachability.
-- If unreachable: warn "Hooks server not reachable. You can check manually with `GET http://127.0.0.1:19100/health`."
+### 8a. Verify router server connectivity
+Call `mcp__plugin_router_router__router_list_tool` to check reachability.
+- If unreachable: warn "Router server not reachable. You can check manually with `GET http://127.0.0.1:19100/health`."
   Offer: (1) Continue without hooks (2) Stop and fix.
   If user continues, skip to step 9.
 - If reachable: proceed.
@@ -299,7 +299,7 @@ Call `mcp__plugin_hooks_hooks__hooks_list_tool` to check reachability.
 Inspect the hooks list result.
 - If no hooks registered: warn "No hooks registered. Will attempt to register default hooks for detected plugins."
 
-For each detected and enabled plugin, register its default hooks by calling `mcp__plugin_hooks_hooks__hooks_register_tool` for each hook entry from the plugin's `default-hooks.yaml`. Only register hooks whose conditions match enabled integrations:
+For each detected and enabled plugin, register its default hooks by calling `mcp__plugin_router_router__router_register_tool` for each hook entry from the plugin's `default-hooks.yaml`. Only register hooks whose conditions match enabled integrations:
 - **proj** hooks: register if `git_tracking.enabled` (tracking flush hooks) or `sandbox_integration` (sandbox sync hook)
 - **todoist** hooks: register if `todoist_enabled`
 - **trello** hooks: register if `trello_enabled`

@@ -33,7 +33,7 @@ cd claude-project-manager
 cd plugins/sandbox/server && uv sync && cd -
 cd plugins/worktree/server && uv sync && cd -
 cd plugins/proj/server && uv sync && cd -
-cd plugins/hooks/server && uv sync && cd -
+cd plugins/router/server && uv sync && cd -
 cd plugins/todoist/server && uv sync && cd -
 cd plugins/trello/server && uv sync && cd -
 cd plugins/jira/server && uv sync && cd -
@@ -114,7 +114,7 @@ Each plugin has its own test suite. Tests run with pytest and pytest-xdist for p
 cd plugins/proj/server && uv run pytest -q
 cd plugins/worktree/server && uv run pytest -q
 cd plugins/sandbox/server && uv run pytest -q
-cd plugins/hooks/server && uv run pytest -q
+cd plugins/router/server && uv run pytest -q
 cd plugins/todoist/server && uv run pytest -q
 cd plugins/trello/server && uv run pytest -q
 cd plugins/jira/server && uv run pytest -q
@@ -285,7 +285,7 @@ To add hooks to a plugin:
 
 1. Call `enable_hook_dispatch(mcp, exclude={...})` in `main.py` before `register()` calls
 2. Create `default-hooks.yaml` in the plugin directory to define default hooks
-3. Use `hooks_register_tool` or `/proj:hooks-add` to register hooks
-4. Test with `/proj:hooks-test <hook-id>`
+3. Use `router_register_tool` or `/router:add` to register hooks
+4. Test with `/router:test <hook-id>`
 
 The `exclude` parameter should list meta-tools that should not trigger hooks.

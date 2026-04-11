@@ -9,7 +9,7 @@ Detailed reference for all 9 plugins in the claude-project-manager marketplace.
 - [sandbox](#sandbox)
 - [worktree](#worktree)
 - [proj](#proj)
-- [hooks](#hooks)
+- [router](#router)
 - [todoist](#todoist)
 - [trello](#trello)
 - [jira](#jira)
@@ -296,12 +296,12 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `/proj:sandbox-sync` | Check sandbox settings match expected config | -- |
 | `/proj:sandbox-audit` | Audit current permissions | -- |
 | `/proj:sandbox-debug` | Debug permission issues | -- |
-| `/proj:hooks-add` | Register a new hook | -- |
-| `/proj:hooks-list` | List all registered hooks | -- |
-| `/proj:hooks-remove` | Remove a hook by ID | -- |
-| `/proj:hooks-test` | Test-fire a hook by ID | -- |
-| `/proj:hooks-recover` | Recover from hook failures | -- |
-| `/proj:hooks-debug` | Debug hook execution failures | -- |
+| `/router:add` | Register a new hook | -- |
+| `/router:list` | List all registered hooks | -- |
+| `/router:remove` | Remove a hook by ID | -- |
+| `/router:test` | Test-fire a hook by ID | -- |
+| `/router:recover` | Recover from hook failures | -- |
+| `/router:debug` | Debug hook execution failures | -- |
 
 ### Sub-skills (not user-invocable)
 
@@ -357,39 +357,43 @@ Stored in `~/.claude/proj.yaml`. Created during `/proj:init-plugin`.
 
 ---
 
-## hooks
+## router
 
 **Version**: 1.10.1 | **Category**: utilities | **License**: MIT
 
-Central MCP-to-MCP hook registry. Manages hook registrations, fires hooks when trigger tools execute, evaluates conditions against `~/.claude/proj.yaml`, and provides recovery for failed hooks.
+Central MCP-to-MCP router (formerly `hooks`). Manages hook registrations, fires hooks when trigger tools execute, evaluates conditions against `~/.claude/proj.yaml`, and provides recovery for failed hooks.
 
 ### Install
 
 ```console
-/plugin install raulfrk/claude-project-manager:hooks
+/plugin install raulfrk/claude-project-manager:router
 ```
 
 ### MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `hooks_fire_tool(trigger_tool, source_result, depth)` | Fire hooks for a trigger tool (called by dispatch, not directly) |
-| `hooks_register_tool(hook_id, trigger_tool, target_tool, server, ...)` | Register a new hook |
-| `hooks_unregister_tool(hook_id)` | Remove a hook registration |
-| `hooks_list_tool(trigger_tool?)` | List hooks, optionally filtered by trigger |
-| `hooks_sync_tool()` | Sync hook registry with default-hooks.yaml files |
-| `hooks_recover_tool(hook_id?)` | Recover from hook failures |
-| `hooks_verify_tool(hook_id)` | Verify a hook is correctly configured |
-| `hooks_invocations_tool(hook_id?, limit?)` | View recent hook invocations and failures |
+| `router_fire_tool(trigger_tool, source_result, depth)` | Fire hooks for a trigger tool (called by dispatch, not directly) |
+| `router_register_tool(hook_id, trigger_tool, target_tool, server, ...)` | Register a new hook |
+| `router_unregister_tool(hook_id)` | Remove a hook registration |
+| `router_list_tool(trigger_tool?)` | List hooks, optionally filtered by trigger |
+| `router_sync_tool()` | Sync hook registry with default-hooks.yaml files |
+| `router_recover_tool(hook_id?)` | Recover from hook failures |
+| `router_verify_tool(hook_id)` | Verify a hook is correctly configured |
+| `router_invocations_tool(hook_id?, limit?)` | View recent hook invocations and failures |
 
 ### Skills
 
 | Skill | Description |
 |-------|-------------|
-| `/hooks:map` | Generate interactive HTML visualization of the hook network |
-| `/hooks:hooks-debug` | Debug hook execution failures |
-
-Note: Most hook management skills are accessed through the `proj` plugin (`/proj:hooks-*`).
+| `/router:map` | Generate interactive HTML visualization of the hook network |
+| `/router:add` | Register a new hook |
+| `/router:list` | List all registered hooks |
+| `/router:remove` | Remove a hook by ID |
+| `/router:test` | Test-fire a hook by ID |
+| `/router:recover` | Recover from hook failures |
+| `/router:debug` | Debug hook execution failures |
+| `/router:activity` | View recent hook invocation activity |
 
 ### Config
 
@@ -403,13 +407,13 @@ Settings:
 
 ```
 # List all registered hooks
-/proj:hooks-list
+/router:list
 
 # Test-fire a specific hook
-/proj:hooks-test hook-123
+/router:test hook-123
 
 # View the hook network as a graph
-/hooks:map
+/router:map
 ```
 
 ---

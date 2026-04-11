@@ -54,7 +54,7 @@ The system uses **Unix domain sockets** for plugin-to-plugin communication:
 
 **Direction 1: Proj → Trello (Hooks)**
 - `proj` plugin registers hooks in `~/.claude/hooks.yaml`
-- When a `proj` tool runs, the hook dispatcher sends a POST to the `trello` plugin socket at `/tmp/claude-hooks-trello.sock`
+- When a `proj` tool runs, the hook dispatcher sends a POST to the `trello` plugin socket at `/tmp/claude-cpm-trello-<pid>.sock`
 - Example hook: `todo_add` → triggers `trello_add_card_hook` on trello plugin
 
 **Direction 2: Trello → Proj (Missing, Would Require New Pattern)**
