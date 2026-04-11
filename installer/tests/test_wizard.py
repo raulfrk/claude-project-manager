@@ -225,12 +225,13 @@ class TestRichWizardPromptSpec:
     def test_setup_todoist_loads_existing_api_token_masked(
         self, mock_home: Path, rich_console: Console
     ):
-        """Existing token is surfaced as masked default ****<last4>."""
+        """Existing token is surfaced as masked default with proportional reveal."""
         from installer.wizard import _masked_default
 
-        assert _masked_default("sk-abcdef12345XYZ9") == "****XYZ9"
-        assert _masked_default("short") == "****"
-        assert _masked_default("") == ""
+        # len 18 → suffix_len = max(2, 18//4) = 4 → reveal last 4
+        assert _masked_default(True, "sk-abcdef12345XYZ9") == "****XYZ9"
+        assert _masked_default(True, "short") == "****"
+        assert _masked_default(True, "") == ""
 
     def test_setup_trello_loads_existing_default_list(
         self, mock_home: Path, rich_console: Console

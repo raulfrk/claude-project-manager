@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from installer._config_loader import ConfigLoadError, get_nested, load_existing_yaml
+from installer._config_loader import (
+    ConfigLoadError,
+    _masked_default,
+    get_nested,
+    load_existing_yaml,
+)
 
 
 class TestLoadExistingYaml:
@@ -128,6 +133,50 @@ class TestLoadExistingYaml:
         assert data == {"api_token": None}
         # get_nested contract: explicit null → default
         assert get_nested(data, "api_token", "default") == "default"
+
+
+class TestMaskedDefault:
+    def test_non_sensitive_passthrough(self) -> None:
+        assert _masked_default(False, "plain") == "plain"
+
+    def test_non_sensitive_none(self) -> None:
+        assert _masked_default(False, None) == ""
+
+    def test_non_sensitive_int(self) -> None:
+        assert _masked_default(False, 42) == "42"
+
+    def test_sensitive_none(self) -> None:
+        assert _masked_default(True, None) == ""
+
+    def test_sensitive_empty(self) -> None:
+        assert _masked_default(True, "") == ""
+
+    def test_sensitive_len_4(self) -> None:
+        assert _masked_default(True, "abcd") == "****"
+
+    def test_sensitive_len_7(self) -> None:
+        assert _masked_default(True, "abcdefg") == "****"
+
+    def test_sensitive_len_8(self) -> None:
+        # len 8 → suffix_len = max(2, 8//4) = 2 → reveal last 2
+        assert _masked_default(True, "abcdefgh") == "****gh"
+
+    def test_sensitive_len_16(self) -> None:
+        # len 16 → suffix_len = max(2, 16//4) = 4 → reveal last 4
+        assert _masked_default(True, "abcdefghijklmnop") == "****mnop"
+
+    def test_sensitive_len_32(self) -> None:
+        # len 32 → suffix_len = max(2, 32//4) = 8 → reveal last 8
+        s = "abcdefghijklmnopqrstuvwxyz012345"
+        assert _masked_default(True, s) == "****yz012345"
+
+    def test_sensitive_proportional_ceiling(self) -> None:
+        """Reveal never exceeds 25% of content."""
+        for length in (8, 12, 16, 20, 24, 32, 64):
+            s = "x" * length
+            masked = _masked_default(True, s)
+            revealed = masked[4:]  # strip "****"
+            assert len(revealed) <= length // 4 or len(revealed) == 2
 
 
 class TestGetNested:

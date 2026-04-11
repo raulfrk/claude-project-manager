@@ -12,7 +12,12 @@ import yaml
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
-from installer._config_loader import ConfigLoadError, get_nested, load_existing_yaml
+from installer._config_loader import (
+    ConfigLoadError,
+    _masked_default,
+    get_nested,
+    load_existing_yaml,
+)
 from installer.claudemd import ensure_managed_section
 from installer.hooks_diff import apply_diffs, compute_hooks_diff
 from installer.prompts import int_in_range, prompt_choice
@@ -77,15 +82,6 @@ def _merge_dotted_into_dict(
             cursor = nxt
         cursor[parts[-1]] = value
     return existing
-
-
-def _masked_default(value: str, min_len: int = 8) -> str:
-    """Return a masked preview of a credential value for display as a prompt default."""
-    if not value:
-        return ""
-    if len(value) < min_len:
-        return "****"
-    return f"****{value[-4:]}"
 
 
 def _dispatch_rich_prompt(spec: PromptSpec, default: Any, console: Console) -> Any:
@@ -369,10 +365,10 @@ def _setup_todoist_config(console: Console) -> None:
     token_input = Prompt.ask(
         "Todoist API token",
         password=True,
-        default=_masked_default(existing_token),
+        default=_masked_default(True, existing_token),
         console=console,
     )
-    if token_input == _masked_default(existing_token) and existing_token:
+    if token_input == _masked_default(True, existing_token) and existing_token:
         api_token = existing_token
     else:
         api_token = token_input
@@ -443,12 +439,12 @@ def _setup_trello_config(console: Console) -> None:
     key_input = Prompt.ask(
         "Trello API key",
         password=True,
-        default=_masked_default(existing_key),
+        default=_masked_default(True, existing_key),
         console=console,
     )
     api_key = (
         existing_key
-        if key_input == _masked_default(existing_key) and existing_key
+        if key_input == _masked_default(True, existing_key) and existing_key
         else key_input
     )
 
@@ -456,12 +452,12 @@ def _setup_trello_config(console: Console) -> None:
     token_input = Prompt.ask(
         "Trello token",
         password=True,
-        default=_masked_default(existing_token),
+        default=_masked_default(True, existing_token),
         console=console,
     )
     token = (
         existing_token
-        if token_input == _masked_default(existing_token) and existing_token
+        if token_input == _masked_default(True, existing_token) and existing_token
         else token_input
     )
 
@@ -552,12 +548,12 @@ def _setup_jira_config(console: Console) -> None:
     pat_input = Prompt.ask(
         "Personal access token",
         password=True,
-        default=_masked_default(existing_pat),
+        default=_masked_default(True, existing_pat),
         console=console,
     )
     personal_access_token = (
         existing_pat
-        if pat_input == _masked_default(existing_pat) and existing_pat
+        if pat_input == _masked_default(True, existing_pat) and existing_pat
         else pat_input
     )
 

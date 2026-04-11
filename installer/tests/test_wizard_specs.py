@@ -167,6 +167,46 @@ class TestDefaultsCacheLazy:
         assert "worktree" in distinct
 
 
+class TestSensitiveFieldCoverage:
+    def test_sensitive_field_name_coverage(self) -> None:
+        """Any PromptSpec whose dotted_key matches a credential-ish name
+        must have sensitive=True. Guards against future regressions when
+        credential entries get added to PROJ_YAML_PROMPTS."""
+
+        # Match whole segments only so "max_tokens" ≠ "token".
+        credential_segments = {
+            "api_key",
+            "token",
+            "api_token",
+            "password",
+            "secret",
+            "credential",
+            "private_key",
+        }
+
+        def _has_credential_segment(dotted: str) -> bool:
+            for seg in dotted.split("."):
+                parts = seg.lower().split("_")
+                # Check the full segment AND any 2-word subsequence
+                # (so "api_token" and "api_key" both match).
+                for i in range(len(parts)):
+                    if parts[i] in credential_segments:
+                        return True
+                    if i + 1 < len(parts):
+                        pair = f"{parts[i]}_{parts[i + 1]}"
+                        if pair in credential_segments:
+                            return True
+            return False
+
+        offenders: list[str] = []
+        for spec in PROJ_YAML_PROMPTS:
+            if _has_credential_segment(spec.dotted_key) and not spec.sensitive:
+                offenders.append(spec.dotted_key)
+        assert offenders == [], (
+            f"Credential-shaped keys missing sensitive=True: {offenders}"
+        )
+
+
 class TestDefaultsYamlCoverage:
     def test_every_prompt_key_has_defaults_value(self) -> None:
         """Every PromptSpec dotted_key resolves to a non-None default."""

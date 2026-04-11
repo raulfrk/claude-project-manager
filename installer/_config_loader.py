@@ -131,6 +131,35 @@ def load_existing_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _masked_default(sensitive: bool, value: Any) -> str:
+    """Return a masked preview of a credential value for display as a prompt default.
+
+    Called from both the Rich wizard path (installer/wizard.py) and the
+    Textual render path. Lives in _config_loader.py — a neutral module —
+    to avoid a `prompts.py` → `wizard_specs.py` circular import risk.
+
+    Behavior:
+    - sensitive=False: return the value as a plain string (no mask).
+    - sensitive=True, empty value: return "".
+    - sensitive=True, short value (<8 chars): return "****" (no reveal).
+    - sensitive=True, long value: return `****<suffix>` where suffix is
+      the last `max(2, len // 4)` characters. This proportional rule
+      caps revealed content at ~25% for short-but-maskable secrets
+      (len 8 reveals 2 chars, len 16 reveals 4, len 32 reveals 8),
+      replacing the naive "fixed last 4" rule which exposed 50% of an
+      8-char secret.
+    """
+    if not sensitive:
+        return "" if value is None else str(value)
+    s = "" if value is None else str(value)
+    if not s:
+        return ""
+    if len(s) < 8:
+        return "****"
+    suffix_len = max(2, len(s) // 4)
+    return f"****{s[-suffix_len:]}"
+
+
 def get_nested(d: dict[str, Any], dotted_key: str, default: Any = None) -> Any:
     """Walk dict d by dotted_key, returning default on any miss.
 
