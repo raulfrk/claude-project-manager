@@ -100,6 +100,15 @@ hooks:
     verification: true
     condition: "sync.todoist.enabled and sync.todoist.auto_sync"
 
+  - id: todoist-on-todo-batch-complete
+    trigger_tool: todo_batch_complete
+    target_tool: todoist_complete_tasks
+    server: todoist
+    param_mapping:
+      ids: "${todoist_task_ids}"
+    blocking: true
+    condition: "sync.todoist.enabled and sync.todoist.auto_sync"
+
   - id: todoist-on-todo-add-child
     trigger_tool: todo_add_child
     target_tool: todoist_add_tasks
