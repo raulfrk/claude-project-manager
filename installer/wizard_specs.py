@@ -3,11 +3,17 @@
 Both the Rich path (installer/wizard.py) and the Textual path
 (installer/screens/wizard.py + advanced_config.py) iterate PROJ_YAML_PROMPTS
 and dispatch to Rich Prompts or Textual widgets based on PromptSpec.type.
+
+Hard contract (conditions): `PromptSpec.condition` lambdas receive the
+proj.yaml bucket ONLY, regardless of the spec's own `yaml_file`. A trello
+spec that needs to check `sync.trello.enabled` reads it from the proj bucket
+(that's where it lives in real proj.yaml files). No cross-file walking.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 from installer._config_loader import get_nested
@@ -31,15 +37,117 @@ class PromptSpec:
     choices: list[str] | None = None
     int_range: tuple[int, int] | None = None
     condition: Callable[[dict[str, Any]], bool] | None = None
+    sensitive: bool = False
 
 
-def _d(key: str, fallback: Any) -> Callable[[dict[str, Any]], Any]:
-    """Build a default_factory that reads `key` from existing, else fallback."""
+# Lazy mutable container: populated on first _d() factory call, NOT at import.
+# Prevents missing/corrupt defaults.yaml from bricking --update/--uninstall/
+# --status (which never invoke a factory).
+_DEFAULTS_CACHE: dict[str, Any] = {}
+
+
+def _ensure_defaults_loaded() -> None:
+    """Populate _DEFAULTS_CACHE from installer/defaults.yaml on first call."""
+    if "data" in _DEFAULTS_CACHE:
+        return
+    from importlib.resources import files
+
+    import yaml
+
+    try:
+        text = (
+            files("installer").joinpath("defaults.yaml").read_text(encoding="utf-8-sig")
+        )
+    except (FileNotFoundError, ModuleNotFoundError) as e:
+        raise RuntimeError(
+            "installer/defaults.yaml not found — packaging bug; verify "
+            "pyproject.toml [tool.hatch.build.targets.wheel] force-include "
+            f"or artifacts entry. Original: {e}"
+        ) from e
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        raise RuntimeError(f"installer/defaults.yaml corrupt: {e}") from e
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"installer/defaults.yaml must be a mapping, got {type(data).__name__}"
+        )
+    _DEFAULTS_CACHE["data"] = data
+
+
+def _reload_defaults(path: Path | None = None) -> None:
+    """Test helper: clear cache so next _d() call re-reads.
+
+    If path is given, load directly from that file; otherwise the next
+    _ensure_defaults_loaded() call will re-read from the packaged resource.
+    """
+    _DEFAULTS_CACHE.clear()
+    if path is not None:
+        import yaml
+
+        text = path.read_text(encoding="utf-8-sig")
+        data = yaml.safe_load(text) or {}
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"defaults override {path} must be a mapping, got {type(data).__name__}"
+            )
+        _DEFAULTS_CACHE["data"] = data
+
+
+# Scalar/list types considered valid for a defaults.yaml leaf value.
+# A dict in place of a scalar means the existing yaml nested-walked past the
+# intended leaf — fall through to the default on type mismatch.
+_SCALAR_TYPES = (str, int, float, bool, list, type(None))
+
+
+def _d(key: str) -> Callable[[dict[str, Any]], Any]:
+    """Build a lazy default_factory that reads `key` from existing, else defaults.yaml.
+
+    The closure reads `_DEFAULTS_CACHE` at factory-call time (not at spec
+    construction time) so `_reload_defaults` can rebind defaults between
+    test cases.
+
+    Type-mismatch guard: if the existing yaml returns a dict where a scalar
+    is expected (e.g. `tracking_dir: {foo: bar}`), the factory falls through
+    to the defaults.yaml value. Prevents downstream rendering crashes.
+    """
 
     def factory(existing: dict[str, Any]) -> Any:
-        return get_nested(existing, key, fallback)
+        _ensure_defaults_loaded()
+        defaults = _DEFAULTS_CACHE.get("data", {})
+        fallback = get_nested(defaults, key, None)
+        existing_val = get_nested(existing, key, None)
+        if existing_val is None:
+            return fallback
+        # Type-mismatch guard: existing yaml has wrong shape (e.g. dict
+        # where string expected). Fall through to the default.
+        if fallback is not None and not isinstance(existing_val, _SCALAR_TYPES):
+            return fallback
+        if fallback is not None:
+            # int/float are interchangeable; bool is treated as int in Python
+            # so compare types strictly, with numeric cross-tolerance.
+            if type(existing_val) is not type(fallback):
+                numeric = (int, float)
+                if isinstance(existing_val, numeric) and isinstance(fallback, numeric):
+                    return existing_val
+                # bool is an int subclass — if fallback is bool but existing
+                # is a non-bool int, treat as mismatch (yaml "1" vs True).
+                if isinstance(fallback, bool) and not isinstance(existing_val, bool):
+                    return fallback
+                if isinstance(existing_val, bool) and not isinstance(fallback, bool):
+                    return fallback
+                return fallback
+        return existing_val
 
     return factory
+
+
+def get_distinct_yaml_files(specs: list[PromptSpec]) -> list[str]:
+    """Return the distinct yaml_file values referenced by specs, in order."""
+    seen: dict[str, None] = {}
+    for spec in specs:
+        seen.setdefault(spec.yaml_file, None)
+    return list(seen.keys())
 
 
 PROJ_YAML_PROMPTS: list[PromptSpec] = [
@@ -50,7 +158,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Paths",
         tier="basic",
-        default_factory=_d("tracking_dir", "~/projects/tracking"),
+        default_factory=_d("tracking_dir"),
     ),
     PromptSpec(
         label="Projects base directory",
@@ -58,7 +166,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Paths",
         tier="basic",
-        default_factory=_d("projects_base_dir", "~/projects"),
+        default_factory=_d("projects_base_dir"),
     ),
     PromptSpec(
         label="Enable sandbox integration",
@@ -66,7 +174,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Integrations",
         tier="basic",
-        default_factory=_d("sandbox_integration", True),
+        default_factory=_d("sandbox_integration"),
     ),
     PromptSpec(
         label="Enable zoxide integration",
@@ -74,7 +182,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Integrations",
         tier="basic",
-        default_factory=_d("zoxide_integration", False),
+        default_factory=_d("zoxide_integration"),
     ),
     PromptSpec(
         label="Enable git tracking",
@@ -82,7 +190,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Git tracking",
         tier="basic",
-        default_factory=_d("git_tracking.enabled", False),
+        default_factory=_d("git_tracking.enabled"),
     ),
     PromptSpec(
         label="Enable GitHub tracking",
@@ -90,7 +198,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Git tracking",
         tier="basic",
-        default_factory=_d("git_tracking.github_enabled", False),
+        default_factory=_d("git_tracking.github_enabled"),
         condition=lambda ex: bool(get_nested(ex, "git_tracking.enabled", False)),
     ),
     PromptSpec(
@@ -99,7 +207,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Git tracking",
         tier="basic",
-        default_factory=_d("git_tracking.github_repo_format", "cpm-tracking-{project}"),
+        default_factory=_d("git_tracking.github_repo_format"),
         condition=lambda ex: bool(get_nested(ex, "git_tracking.github_enabled", False)),
     ),
     PromptSpec(
@@ -108,7 +216,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="choice",
         group="Execution",
         tier="basic",
-        default_factory=_d("quality_level", "careful"),
+        default_factory=_d("quality_level"),
         choices=["fast", "balanced", "careful", "paranoid"],
     ),
     PromptSpec(
@@ -117,7 +225,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Execution",
         tier="basic",
-        default_factory=_d("worktree_isolation", True),
+        default_factory=_d("worktree_isolation"),
     ),
     # ---------- Basic tier (worktree.yaml) ----------
     PromptSpec(
@@ -126,7 +234,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Paths",
         tier="basic",
-        default_factory=_d("worktree_dir", "~/worktrees"),
+        default_factory=_d("worktree_dir"),
         yaml_file="worktree",
     ),
     # ---------- Advanced tier (proj.yaml) — team_mode ----------
@@ -136,7 +244,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Team mode",
         tier="advanced",
-        default_factory=_d("team_mode.enabled", True),
+        default_factory=_d("team_mode.enabled"),
     ),
     PromptSpec(
         label="Max parallel agents",
@@ -144,7 +252,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Team mode",
         tier="advanced",
-        default_factory=_d("team_mode.max_agents", 30),
+        default_factory=_d("team_mode.max_agents"),
         int_range=(1, 100),
     ),
     PromptSpec(
@@ -153,7 +261,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Team mode",
         tier="advanced",
-        default_factory=_d("team_mode.trust_level", 1),
+        default_factory=_d("team_mode.trust_level"),
         int_range=(0, 3),
     ),
     # ---------- Advanced tier (proj.yaml) — smart_gate ----------
@@ -163,7 +271,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Smart gate",
         tier="advanced",
-        default_factory=_d("smart_gate.enabled", True),
+        default_factory=_d("smart_gate.enabled"),
     ),
     PromptSpec(
         label="Auto-execute score threshold",
@@ -171,7 +279,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Smart gate",
         tier="advanced",
-        default_factory=_d("smart_gate.auto_execute_threshold", 3),
+        default_factory=_d("smart_gate.auto_execute_threshold"),
         int_range=(0, 14),
     ),
     PromptSpec(
@@ -180,7 +288,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Smart gate",
         tier="advanced",
-        default_factory=_d("smart_gate.full_review_threshold", 8),
+        default_factory=_d("smart_gate.full_review_threshold"),
         int_range=(0, 14),
     ),
     # ---------- Advanced tier (proj.yaml) — resilience ----------
@@ -190,7 +298,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Resilience",
         tier="advanced",
-        default_factory=_d("resilience.max_retries", 2),
+        default_factory=_d("resilience.max_retries"),
         int_range=(0, 5),
     ),
     PromptSpec(
@@ -199,7 +307,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Resilience",
         tier="advanced",
-        default_factory=_d("resilience.backoff_seconds", 5),
+        default_factory=_d("resilience.backoff_seconds"),
         int_range=(0, 60),
     ),
     # ---------- Advanced tier (proj.yaml) — context_injection ----------
@@ -209,7 +317,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Context injection",
         tier="advanced",
-        default_factory=_d("context_injection.enabled", True),
+        default_factory=_d("context_injection.enabled"),
     ),
     PromptSpec(
         label="Max context tokens per agent",
@@ -217,7 +325,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Context injection",
         tier="advanced",
-        default_factory=_d("context_injection.max_tokens", 20000),
+        default_factory=_d("context_injection.max_tokens"),
         int_range=(1000, 200000),
     ),
     PromptSpec(
@@ -226,7 +334,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Context injection",
         tier="advanced",
-        default_factory=_d("context_injection.include_claudemd", False),
+        default_factory=_d("context_injection.include_claudemd"),
     ),
     # ---------- Advanced tier (proj.yaml) — archive ----------
     PromptSpec(
@@ -235,7 +343,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Archive",
         tier="advanced",
-        default_factory=_d("archive.auto_archive", True),
+        default_factory=_d("archive.auto_archive"),
     ),
     PromptSpec(
         label="Archive after N days",
@@ -243,7 +351,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Archive",
         tier="advanced",
-        default_factory=_d("archive.after_days", 30),
+        default_factory=_d("archive.after_days"),
         int_range=(1, 365),
     ),
     PromptSpec(
@@ -252,7 +360,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Archive",
         tier="advanced",
-        default_factory=_d("archive.keep_history", True),
+        default_factory=_d("archive.keep_history"),
     ),
     PromptSpec(
         label="Purge archive after N days",
@@ -260,7 +368,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="int",
         group="Archive",
         tier="advanced",
-        default_factory=_d("archive.purge_after_days", 365),
+        default_factory=_d("archive.purge_after_days"),
         int_range=(0, 3650),
     ),
     # ---------- Advanced tier (proj.yaml) — permissions ----------
@@ -270,7 +378,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Permissions",
         tier="advanced",
-        default_factory=_d("permissions.auto_grant_read", True),
+        default_factory=_d("permissions.auto_grant_read"),
     ),
     PromptSpec(
         label="Grant edit permissions automatically",
@@ -278,7 +386,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Permissions",
         tier="advanced",
-        default_factory=_d("permissions.auto_grant_edit", True),
+        default_factory=_d("permissions.auto_grant_edit"),
     ),
     # ---------- Advanced tier (proj.yaml) — misc ----------
     PromptSpec(
@@ -287,7 +395,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="choice",
         group="Other proj",
         tier="advanced",
-        default_factory=_d("default_priority", "medium"),
+        default_factory=_d("default_priority"),
         choices=["low", "medium", "high"],
     ),
     PromptSpec(
@@ -296,7 +404,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Other proj",
         tier="advanced",
-        default_factory=_d("claudemd_management", True),
+        default_factory=_d("claudemd_management"),
     ),
     PromptSpec(
         label="Worktree integration enabled",
@@ -304,7 +412,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Other proj",
         tier="advanced",
-        default_factory=_d("worktree_integration", True),
+        default_factory=_d("worktree_integration"),
     ),
     # ---------- Advanced tier (proj.yaml) — sync.todoist ----------
     PromptSpec(
@@ -313,7 +421,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="bool",
         group="Todoist extras",
         tier="advanced",
-        default_factory=_d("sync.todoist.root_only", False),
+        default_factory=_d("sync.todoist.root_only"),
     ),
     # ---------- Advanced tier (proj.yaml) — sync.trello ----------
     PromptSpec(
@@ -322,7 +430,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello extras",
         tier="advanced",
-        default_factory=_d("sync.trello.default_list", "Todo"),
+        default_factory=_d("sync.trello.default_list"),
     ),
     PromptSpec(
         label="Trello on-delete action",
@@ -330,7 +438,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="choice",
         group="Trello extras",
         tier="advanced",
-        default_factory=_d("sync.trello.on_delete", "archive"),
+        default_factory=_d("sync.trello.on_delete"),
         choices=["archive", "delete"],
     ),
     # ---------- Advanced tier (proj.yaml) — sync.trello.list_mappings ----------
@@ -340,7 +448,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.backlog", "Backlog"),
+        default_factory=_d("sync.trello.list_mappings.backlog"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
     PromptSpec(
@@ -349,7 +457,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.todo", "Todo"),
+        default_factory=_d("sync.trello.list_mappings.todo"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
     PromptSpec(
@@ -358,7 +466,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.in_progress", "In Progress"),
+        default_factory=_d("sync.trello.list_mappings.in_progress"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
     PromptSpec(
@@ -367,7 +475,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.blocked", "Blocked"),
+        default_factory=_d("sync.trello.list_mappings.blocked"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
     PromptSpec(
@@ -376,7 +484,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.done", "Done"),
+        default_factory=_d("sync.trello.list_mappings.done"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
     PromptSpec(
@@ -385,7 +493,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         type="str",
         group="Trello list mappings",
         tier="advanced",
-        default_factory=_d("sync.trello.list_mappings.archive", "Archive"),
+        default_factory=_d("sync.trello.list_mappings.archive"),
         condition=lambda ex: bool(get_nested(ex, "sync.trello.enabled", False)),
     ),
 ]
