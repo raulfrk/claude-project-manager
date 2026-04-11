@@ -47,11 +47,11 @@ def marketplace_json(tmp_path: Path) -> Path:
                 "keywords": ["sandbox"],
             },
             {
-                "name": "hooks",
-                "description": "Hook dispatch",
+                "name": "router",
+                "description": "Central MCP-to-MCP hook registry",
                 "version": "0.3.0",
                 "category": "core",
-                "keywords": ["hooks"],
+                "keywords": ["router", "hooks"],
             },
             {
                 "name": "proj",

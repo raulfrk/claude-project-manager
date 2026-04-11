@@ -80,11 +80,11 @@ _ALL_PLUGINS = [
         "keywords": ["jira", "issues"],
     },
     {
-        "name": "hooks",
+        "name": "router",
         "description": "Central MCP-to-MCP hook registry",
         "version": "2.0.0",
         "category": "utilities",
-        "keywords": ["hooks", "registry"],
+        "keywords": ["router", "hooks"],
     },
     {
         "name": "zoxide",

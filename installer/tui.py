@@ -22,12 +22,12 @@ CATEGORY_ORDER: list[tuple[str, str]] = [
 
 # Map marketplace categories to installer categories.
 # "productivity" (proj) is core; "utilities" is split by name.
-_CORE_PLUGINS = {"sandbox", "hooks", "proj"}
+_CORE_PLUGINS = {"sandbox", "router", "proj"}
 _UTILITY_PLUGINS = {"worktree", "zoxide", "analyse"}
 # Everything else falls into integrations.
 
 # Plugins pre-selected by default (core set)
-DEFAULT_PRESELECT = {"sandbox", "hooks", "proj"}
+DEFAULT_PRESELECT = {"sandbox", "router", "proj"}
 
 # Marketplace data path (relative to installer package)
 _MARKETPLACE_PATH = (
@@ -151,12 +151,12 @@ def _build_selection_table(
 
 
 def _check_dependency_warnings(selected_names: list[str], console: Console) -> None:
-    """Warn if hooks is deselected but other core plugins are selected."""
-    if "hooks" not in selected_names:
-        hook_dependents = [n for n in selected_names if n not in ("hooks", "analyse")]
+    """Warn if router is deselected but other core plugins are selected."""
+    if "router" not in selected_names:
+        hook_dependents = [n for n in selected_names if n not in ("router", "analyse")]
         if hook_dependents:
             console.print(
-                f"\n[yellow]Warning:[/yellow] [bold]hooks[/bold] is not selected but "
+                f"\n[yellow]Warning:[/yellow] [bold]router[/bold] is not selected but "
                 f"is recommended for: {', '.join(hook_dependents)}. "
                 f"Hook dispatch will be disabled for these plugins."
             )

@@ -19,7 +19,7 @@ from installer.tui import (
 class TestClassifyCategory:
     def test_core_plugins(self):
         assert _classify_category("sandbox", "core") == "core"
-        assert _classify_category("hooks", "core") == "core"
+        assert _classify_category("router", "core") == "core"
         assert _classify_category("proj", "productivity") == "core"
 
     def test_utility_plugins(self):
@@ -62,13 +62,13 @@ class TestLoadPlugins:
 
 
 class TestCheckDependencyWarnings:
-    def test_no_warning_when_hooks_selected(self, mock_console):
-        _check_dependency_warnings(["hooks", "proj", "sandbox"], mock_console)
+    def test_no_warning_when_router_selected(self, mock_console):
+        _check_dependency_warnings(["router", "proj", "sandbox"], mock_console)
         # Console.print should not be called with "Warning"
         for call in mock_console.file.write.call_args_list:
             assert "Warning" not in str(call)
 
-    def test_warning_when_hooks_missing(self, mock_console):
+    def test_warning_when_router_missing(self, mock_console):
         _check_dependency_warnings(["proj", "sandbox"], mock_console)
         # Should have printed a warning — verify console.print was called
         # (mock_console is a real Console writing to a MagicMock file)
@@ -76,10 +76,10 @@ class TestCheckDependencyWarnings:
             str(call.args[0]) if call.args else ""
             for call in mock_console.file.write.call_args_list
         )
-        assert "hooks" in output
+        assert "router" in output
 
     def test_no_warning_for_standalone_plugins(self, mock_console):
-        """Standalone plugins without hooks should not trigger a dependency warning."""
+        """Standalone plugins without router should not trigger a dependency warning."""
         _check_dependency_warnings(["analyse"], mock_console)
         _check_dependency_warnings(["worktree"], mock_console)
 

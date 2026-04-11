@@ -30,11 +30,11 @@ _MARKETPLACE_DATA = {
             "keywords": ["sandbox"],
         },
         {
-            "name": "hooks",
-            "description": "Hook dispatch",
+            "name": "router",
+            "description": "Central MCP-to-MCP hook registry",
             "version": "0.3.0",
             "category": "core",
-            "keywords": ["hooks"],
+            "keywords": ["router", "hooks"],
         },
         {
             "name": "proj",
@@ -88,7 +88,7 @@ class TestPluginSelectScreen:
 
     @pytest.mark.asyncio
     async def test_initial_defaults_selected(self, mp_path: Path):
-        """Default plugins (sandbox, hooks, proj) are pre-selected."""
+        """Default plugins (sandbox, router, proj) are pre-selected."""
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = PluginSelectScreen(marketplace_path=mp_path)
@@ -96,7 +96,7 @@ class TestPluginSelectScreen:
             await pilot.pause()
 
             assert "sandbox" in screen._selected
-            assert "hooks" in screen._selected
+            assert "router" in screen._selected
             assert "proj" in screen._selected
             assert "worktree" not in screen._selected
             assert "trello" not in screen._selected
@@ -137,7 +137,7 @@ class TestPluginSelectScreen:
             assert len(screen._selected) == 5
             assert screen._selected == {
                 "sandbox",
-                "hooks",
+                "router",
                 "proj",
                 "worktree",
                 "trello",
@@ -173,7 +173,7 @@ class TestPluginSelectScreen:
             await pilot.pause()
 
         assert len(results) == 1
-        assert set(results[0]) == {"sandbox", "hooks", "proj"}
+        assert set(results[0]) == {"sandbox", "router", "proj"}
 
     @pytest.mark.asyncio
     async def test_cancel_returns_empty(self, mp_path: Path):
@@ -193,16 +193,16 @@ class TestPluginSelectScreen:
         assert results[0] == []
 
     @pytest.mark.asyncio
-    async def test_dependency_warning_when_hooks_deselected(self, mp_path: Path):
-        """Warning appears when hooks is deselected but dependents remain."""
+    async def test_dependency_warning_when_router_deselected(self, mp_path: Path):
+        """Warning appears when router is deselected but dependents remain."""
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = PluginSelectScreen(marketplace_path=mp_path)
             app.push_screen(screen)
             await pilot.pause()
 
-            # Deselect hooks via the internal method (avoids key-routing issues)
-            screen._toggle_plugin("hooks")
+            # Deselect router via the internal method (avoids key-routing issues)
+            screen._toggle_plugin("router")
             await pilot.pause()
 
             warning_bar = screen.query_one("#warning-bar")
