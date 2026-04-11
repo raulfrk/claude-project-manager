@@ -6,6 +6,7 @@ import asyncio
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, ProgressBar, RichLog, Static
 
@@ -135,7 +136,7 @@ class ProgressScreen(Screen[None]):
         status.update(f"{self._current}/{self._total}")
 
     def write_log(self, message: str) -> None:
-        """Append a line to the log area. Safe to call before mount.
+        """Append a line to the log area. Safe to call before mount or after dismiss.
 
         Named ``write_log`` (not ``log``) because Textual's ``DOMNode.log``
         is a reserved Logger descriptor; overriding it as a method breaks
@@ -144,7 +145,11 @@ class ProgressScreen(Screen[None]):
         if not self._mounted.is_set():
             self._log_buffer.append(message)
             return
-        log_widget = self.query_one("#progress-log", RichLog)
+        try:
+            log_widget = self.query_one("#progress-log", RichLog)
+        except NoMatches:
+            # Screen is dismissing or already dismissed — drop the message silently.
+            return
         log_widget.write(message)
 
     def advance(self, steps: int = 1, detail: str = "") -> None:
