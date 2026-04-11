@@ -314,7 +314,7 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             _expand_collapsible(screen, "archive")
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             for wid in (
                 "archive-auto_archive",
@@ -356,7 +356,7 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             _expand_collapsible(screen, "other-proj")
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             for wid in (
                 "default_priority",
@@ -419,7 +419,7 @@ class TestAdvancedConfigScreenSnapshots:
             await pilot.pause()
 
             _expand_collapsible(screen, "todoist-extras")
-            await pilot.pause()
+            await _settle(pilot, screen)
 
             assert screen.query_one("#sync-todoist-root_only", Switch).region.width > 0
 
