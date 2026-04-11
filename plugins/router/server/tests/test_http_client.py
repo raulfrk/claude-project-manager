@@ -170,7 +170,7 @@ class TestPostHook:
             mock_transport_cls.return_value = MagicMock()
             fr = await post_hook(
                 hook_id="h1",
-                url="unix:///tmp/claude-hooks-todoist.sock",
+                url="unix:///tmp/claude-cpm-todoist.sock",
                 target_tool="some_tool",
                 params={"key": "val"},
             )
@@ -178,7 +178,7 @@ class TestPostHook:
         assert fr.ok is True
         assert fr.result == "done"
         # Verify UDS transport was created with the socket path
-        mock_transport_cls.assert_called_once_with(uds="/tmp/claude-hooks-todoist.sock")
+        mock_transport_cls.assert_called_once_with(uds="/tmp/claude-cpm-todoist.sock")
         # Verify the effective URL used localhost, not the unix:// path
         mock_client.post.assert_awaited_once()
         call_args = mock_client.post.call_args

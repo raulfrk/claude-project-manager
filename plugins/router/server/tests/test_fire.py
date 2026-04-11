@@ -61,19 +61,19 @@ class TestResolveServerUrl:
     ) -> None:
         """In Unix mode, reads the socket path from the registry file."""
         registry_file = tmp_path / "trello"
-        registry_file.write_text("/tmp/claude-hooks-trello-99999.sock")
+        registry_file.write_text("/tmp/claude-cpm-trello-99999.sock")
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
         with patch("server.tools.fire.os.path.exists", return_value=True):
             result = _resolve_server_url("trello", 19100)
-        assert result == "unix:///tmp/claude-hooks-trello-99999.sock"
+        assert result == "unix:///tmp/claude-cpm-trello-99999.sock"
 
     def test_unix_mode_stale_registry_falls_back_to_glob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stale registry (socket doesn't exist) falls back to glob."""
         registry_file = tmp_path / "trello"
-        registry_file.write_text("/tmp/claude-hooks-trello-10.sock")  # sandbox PID
+        registry_file.write_text("/tmp/claude-cpm-trello-10.sock")  # sandbox PID
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
         with (
@@ -81,13 +81,13 @@ class TestResolveServerUrl:
             patch(
                 "server.tools.fire.glob.glob",
                 return_value=[
-                    "/tmp/claude-hooks-trello-99999.sock",
+                    "/tmp/claude-cpm-trello-99999.sock",
                 ],
             ),
             patch("server.tools.fire.os.path.getmtime", return_value=1000),
         ):
             result = _resolve_server_url("trello", 19100)
-        assert result == "unix:///tmp/claude-hooks-trello-99999.sock"
+        assert result == "unix:///tmp/claude-cpm-trello-99999.sock"
 
     def test_unix_mode_falls_back_to_name_when_no_sockets(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

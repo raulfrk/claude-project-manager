@@ -115,10 +115,10 @@ class TestProjInitHooksSync:
         data = json.loads(result)
         assert "project_name" in data
         assert data["project_name"] == "hooktest"
-        # Verify post was called with hooks_sync_tool
+        # Verify post was called with router_sync_tool
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
-        assert call_args[1]["json"]["tool"] == "hooks_sync_tool"
+        assert call_args[1]["json"]["tool"] == "router_sync_tool"
 
     def test_proj_init_succeeds_when_hooks_unreachable(
         self, cfg: ProjConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
