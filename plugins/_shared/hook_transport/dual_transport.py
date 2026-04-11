@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hook_transport.dual")
 
 SOCKET_DIR = "/tmp"
-SOCKET_PREFIX = "claude-hooks-"
+SOCKET_PREFIX = "claude-cpm-"
 
 _PreRunFn = Callable[[], None] | Callable[[], Coroutine[None, None, None]]
 

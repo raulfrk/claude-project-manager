@@ -65,7 +65,7 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
         logger.debug("Socket registry lookup failed", exc_info=True)
 
     # Fallback: glob for newest PID-tagged socket
-    prefix = f"/tmp/claude-hooks-{server_name}-"  # noqa: S108
+    prefix = f"/tmp/claude-cpm-{server_name}-"  # noqa: S108
     candidates = sorted(
         glob.glob(f"{prefix}*.sock"),
         key=lambda p: os.path.getmtime(p),
