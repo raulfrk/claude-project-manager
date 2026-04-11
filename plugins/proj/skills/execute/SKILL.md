@@ -350,7 +350,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
      Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
-   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
+   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
    - Wait for batch completion. Report any failures.
    - **Write checkpoint** after batch completion to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml
@@ -648,7 +648,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
      Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
    - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
-   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
+   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
    - Wait for this batch to complete before starting the next batch. Report any failures.
    - **Write checkpoint** after each batch to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml

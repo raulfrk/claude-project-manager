@@ -563,7 +563,7 @@ ELSE:
 
 2. For each batch in dependency order (excluding `manual_skipped_ids`):
    - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
-   - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content. Each implements the approved plan. Agents do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
+   - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content. Each implements the approved plan. Agents do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
@@ -961,7 +961,7 @@ After all agents return: aggregate findings into a single combined table keyed b
 **Team mode:**
 1. `TeamCreate(name="run-decompose-{project}-{timestamp}", description="Run: decomposing todos {id1}, {id2}, ...")`
 2. For each batch in dependency order:
-   - Spawn one Agent per todo in this batch with `team_name`. Each runs `agent_steps` autonomously. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content. If agents hit an issue, they report via `SendMessage` to the team lead rather than improvising.
+   - Spawn one Agent per todo in this batch with `team_name`. Each runs `agent_steps` autonomously. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content. If agents hit an issue, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
    - Wait for this batch to complete before starting the next batch. Report failures.
 3. After all batches complete: `TeamDelete(team_name)`
 4. If any agents failed, log the failures to `tracking/{project}/.team-state/failed-teams.yaml`.
@@ -1292,7 +1292,7 @@ ELSE:
    - If `worktree_enabled` and todo has `worktree_path`:
      Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
      Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`. Prefix all git commit messages with `[todo-{id}]` when working in the worktree."
-   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising.
+   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
    - Wait for this batch to complete before starting the next batch. Report failures.
    - **Write checkpoint** after each batch to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml
