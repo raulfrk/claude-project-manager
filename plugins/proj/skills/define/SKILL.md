@@ -40,7 +40,9 @@ Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo t
 
 Extract keywords from the todo title and description/notes.
 
-Spawn two background Task agents (general-purpose, read-only tools only: `Read, Glob, Grep`):
+**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` and spawn each Agent with that `team_name`. The team is torn down at step 5.5 after `bg_explore_agents` are collected via `TeamDelete(team_name="define-bg-{todo_id}")`.
+
+Spawn two background Task agents (general-purpose, read-only tools only: `Read, Glob, Grep`) with `team_name="define-bg-{todo_id}"`:
 
   **Agent A — File discovery:**
     - Glob for files matching title keywords (*.py, *.ts, *.md, etc.)
@@ -111,6 +113,7 @@ If the user picks "Address minor gaps", continue with additional batched `AskUse
 
 Wait for `bg_explore_agents` to complete.
 Merge results into `bg_file_discovery` (list of relevant files) and `bg_pattern_summary` (patterns and conventions observed).
+After collection, call `TeamDelete(team_name="define-bg-{todo_id}")` to tear down the background exploration team.
 If agents failed, log warning and continue — results are advisory only.
 
 **6.** Write requirements and research
@@ -230,7 +233,7 @@ Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo t
 
 **NI-1c.** Background codebase exploration (skip if `skip_bg_prep` is true)
 
-Same as step 2c: extract keywords, spawn two read-only background Task agents (Agent A for file discovery, Agent B for test/pattern exploration). Store handles as `bg_explore_agents`. Do NOT wait — proceed to NI-2 immediately.
+Same as step 2c: extract keywords, then **spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Call `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` and spawn two read-only background Task agents (Agent A for file discovery, Agent B for test/pattern exploration) with `team_name="define-bg-{todo_id}"`. Store handles as `bg_explore_agents`. Do NOT wait — proceed to NI-2 immediately. The team is torn down at step NI-2.5 after collection.
 
 **NI-2. Explore codebase**
 
@@ -238,7 +241,7 @@ Use Read, Glob, and Grep to explore the codebase for existing patterns, relevant
 
 **NI-2.5.** Collect background exploration (if `bg_explore_agents` exist)
 
-Wait for `bg_explore_agents` to complete. Merge results into `bg_file_discovery` and `bg_pattern_summary`. If agents failed, log warning and continue.
+Wait for `bg_explore_agents` to complete. Merge results into `bg_file_discovery` and `bg_pattern_summary`. After collection, call `TeamDelete(team_name="define-bg-{todo_id}")` to tear down the background exploration team. If agents failed, log warning and continue.
 
 **NI-3. Write requirements and research**
 

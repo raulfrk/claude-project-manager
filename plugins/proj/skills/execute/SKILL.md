@@ -216,7 +216,9 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **Phase C0 — Speculative planning** (if quality_level != careful/paranoid AND trust != 0 AND trust != 3):
 
-For each todo in the current batch, spawn a read-only Task agent:
+**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")` and spawn each read-only Task agent with that `team_name`. After all speculative plans are collected, call `TeamDelete(team_name="exec-spec-{timestamp}")`.
+
+For each todo in the current batch, spawn a read-only Task agent (with `team_name="exec-spec-{timestamp}"`):
 - Tools: Read, Glob, Grep, proj_get_todo_context, proj_explore_codebase, content_get_requirements, content_get_research (NO write tools)
 - Output: structured JSON plan `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
 
@@ -230,6 +232,8 @@ If `--batch-approve`: auto-approve all speculative plans without review. Display
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
 
 Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+
+**IF `pipeline_enabled` AND trust level is NOT 3**: before the loop begins, call `TeamCreate(name="exec-plan-{timestamp}", description="Pipeline execution agents for {N} independent todos")` so all pipeline-spawned background Task agents are wrapped in a team. The team is torn down in Phase 2 after all pipeline agents are collected via `TeamDelete(team_name="exec-plan-{timestamp}")`. **Never spawn 2+ bare parallel Task agents outside a team.**
 
 For each todo in the range:
 **1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
@@ -272,7 +276,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo covering files
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+     Spawn a background `general-purpose` Task agent with `team_name="exec-plan-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs and their plan summaries.
 
@@ -338,7 +342,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
 
 **2.** For the single batch of independent todos:
    IF `pipeline_enabled`:
-       Wait for all `executing_agents` in this batch to complete. Report any failures.
+       Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-plan-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
        -- batch failure short-circuit --
        IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
    ELSE:
@@ -381,7 +385,7 @@ Persist each todo's individual report to `todos/<id>/verification-report.md` in 
 
 After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with the verification report + implementation context + instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
+- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-indep-{timestamp}", description="Fix agents for failed verification (Pattern A indep)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-indep-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
 - **Proceed**: continue to Phase 3 despite failures.
 - **Skip**: skip remaining verification for this session and go directly to Phase 3.
 
@@ -403,6 +407,8 @@ Phase 1 — Plan (sequential, in main conversation):
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
 
 Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+
+**IF `pipeline_enabled` AND trust level is NOT 3**: before the loop begins, call `TeamCreate(name="exec-fallback-{timestamp}", description="Pipeline execution agents (Pattern B fallback) for {N} independent todos")` so all pipeline-spawned background Task agents are wrapped in a team. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down in Phase 2 after agent collection.
 
 For each todo in the range:
 **1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
@@ -445,7 +451,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo covering files
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+     Spawn a background `general-purpose` Task agent with `team_name="exec-fallback-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 **Cross-review** (if quality_level == paranoid AND N > 1):
 After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-indep-{timestamp}", description="Cross-review agents for N independent-todo plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-indep-{timestamp}")`.
@@ -458,12 +464,14 @@ Phase 2 — Execute (parallel Task agents):
 
 Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
 
+**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** If `pipeline_enabled` was true in Phase 1, the `exec-fallback-{timestamp}` team was already created at the start of Phase 1 and will be torn down below. Otherwise, before spawning in the ELSE branch below, call `TeamCreate(name="exec-fallback-{timestamp}", description="Pattern B fallback execution agents for {N} independent todos")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="exec-fallback-{timestamp}")` before proceeding to Phase 2a.
+
 IF `pipeline_enabled`:
-    Wait for all `executing_agents` in this batch to complete. Report any failures.
+    Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-fallback-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
     -- batch failure short-circuit --
     IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
 ELSE:
-After all plans are approved (or skipped for trust 3), spawn one `general-purpose` Task agent per todo (excluding manual-skipped ones).
+After all plans are approved (or skipped for trust 3), spawn one `general-purpose` Task agent per todo (excluding manual-skipped ones) with `team_name="exec-fallback-{timestamp}"`.
 Each agent receives: the todo details, its requirements.md, its research.md, parent context, AND the approved implementation plan (or context only if trust 3).
 If `worktree_enabled` and todo has `worktree_path`:
   Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
@@ -471,6 +479,7 @@ If `worktree_enabled` and todo has `worktree_path`:
   Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
 IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
 Each agent implements according to its approved plan. Agents do NOT call `todo_complete`.
+After all agents return (ELSE branch), call `TeamDelete(team_name="exec-fallback-{timestamp}")` before proceeding to Phase 2a.
 
 Phase 2a — Verification (skip entirely if `--no-verify` was passed in $ARGUMENTS):
 After all agents complete, verify each completed todo sequentially in the main conversation. For each todo, run the verification checks from step **4a.** (Automated checks, Spec validation, Diff review). Collect all results, then display a combined batch report:
@@ -489,7 +498,7 @@ Persist each todo's individual report to `todos/<id>/verification-report.md` in 
 
 After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with the verification report + implementation context + instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
+- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", description="Fix agents for failed verification (Pattern B indep fallback)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-indep-fallback-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
 - **Proceed**: continue to Phase 3 despite failures.
 - **Skip**: skip remaining verification for this session and go directly to Phase 3.
 
@@ -514,7 +523,9 @@ Main conversation reports summary, including any skipped manual todos.
 
 **Phase C0 — Speculative planning** (if quality_level != careful/paranoid AND trust != 0 AND trust != 3):
 
-For each todo in the current batch, spawn a read-only Task agent:
+**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="exec-spec-deps-{timestamp}", description="Speculative planning agents for dependency-batched todos")` and spawn each read-only Task agent below with that `team_name`. After all speculative plans are collected, call `TeamDelete(team_name="exec-spec-deps-{timestamp}")`.
+
+For each todo in the current batch, spawn a read-only Task agent (with `team_name="exec-spec-deps-{timestamp}"`):
 - Tools: Read, Glob, Grep, proj_get_todo_context, proj_explore_codebase, content_get_requirements, content_get_research (NO write tools)
 - Output: structured JSON plan `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
 
@@ -528,6 +539,8 @@ If `--batch-approve`: auto-approve all speculative plans without review. Display
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
 
 Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+
+**Pipeline team setup (if `pipeline_enabled` AND trust level is NOT 3):** Before the per-todo loop starts, call `TeamCreate(name="exec-plan-deps-{timestamp}", description="Background pipeline execution agents for dependency-batched todos")`. All pipeline agents spawned in step 6 below use `team_name="exec-plan-deps-{timestamp}"`. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down after Phase 2 completion.
 
 Group todos into dependency batches (topological order). Todos within the same batch have no blocked_by relationships between them and can run in parallel. Batches themselves execute sequentially. For each todo across all batches:
 **1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
@@ -570,7 +583,7 @@ Call `EnterPlanMode`. Create an implementation plan for this todo. Include any R
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+     Spawn a background `general-purpose` Task agent with `team_name="exec-plan-deps-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs, their batch assignments, and plan summaries.
 
@@ -636,7 +649,7 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
 
 **2.** For each batch in dependency order:
    IF `pipeline_enabled`:
-       Wait for all `executing_agents` in this batch to complete. Report any failures.
+       Wait for all `executing_agents` in this batch to complete. Report any failures. After all batches are collected, call `TeamDelete(team_name="exec-plan-deps-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
        -- batch failure short-circuit --
        IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
    ELSE:
@@ -679,7 +692,7 @@ Persist each todo's individual report to `todos/<id>/verification-report.md` in 
 
 After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with the verification report + implementation context + instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
+- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-deps-{timestamp}", description="Fix agents for failed verification (Pattern A deps)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-deps-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
 - **Proceed**: continue to Phase 3 despite failures.
 - **Skip**: skip remaining verification for this session and go directly to Phase 3.
 
@@ -699,6 +712,8 @@ Phase 1 — Plan (sequential, in dependency order):
 Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
 
 Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+
+**Pipeline team setup (if `pipeline_enabled` AND trust level is NOT 3):** Before the per-todo loop starts, call `TeamCreate(name="exec-fallback-deps-{timestamp}", description="Background pipeline execution agents (Pattern B fallback, deps)")` so all pipeline-spawned background Task agents are wrapped in a team. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down in Phase 2 after agent collection.
 
 Execute in topological order (respect blocked_by chains). For each todo:
 **1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
@@ -741,10 +756,10 @@ Call `EnterPlanMode`. Create an implementation plan for this todo. Include any R
 **5.** Store the approved plan in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust level is NOT 3:
      Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+     Spawn a background `general-purpose` Task agent with `team_name="exec-fallback-deps-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
 **Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent.
+After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", description="Cross-review agents for N dependency-batched plans (Pattern B fallback)")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-deps-fallback-{timestamp}")`.
 Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
 Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
 Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
@@ -755,7 +770,7 @@ Phase 2 — Execute (sequential, in dependency order):
 Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
 
 IF `pipeline_enabled`:
-    Wait for all `executing_agents` in this batch to complete. Report any failures.
+    Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-fallback-deps-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
     -- batch failure short-circuit --
     IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
 ELSE:
@@ -783,7 +798,7 @@ Persist each todo's individual report to `todos/<id>/verification-report.md` in 
 
 After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with the verification report + implementation context + instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
+- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", description="Fix agents for failed verification (Pattern B deps fallback)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-deps-fallback-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
 - **Proceed**: continue to Phase 3 despite failures.
 - **Skip**: skip remaining verification for this session and go directly to Phase 3.
 
