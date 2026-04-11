@@ -225,6 +225,8 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER runs under `--bal
 
 **Agents (spawn in parallel via `Task` tool, one Task call per agent per todo)**:
 
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+
 | Agent | Reads | Checks |
 |-------|-------|--------|
 | Ambiguity Agent | requirements.md + research.md | undefined domain terms, handwavey claims, unmeasurable goals |
@@ -944,6 +946,8 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced
 
 **Batch sampling**: if the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (ranked by the 7-dimension complexity score). Override with `--force-preflight-all`.
 
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
+
 For each sampled todo, spawn the 3 review agents (Ambiguity, Completeness, Research Validation) **in parallel** (one Task call per agent per todo). Same tools, timeout, JSON schema, and severity semantics as the single-ID mode's Phase A.5b. See the Preflight Agents Reference appendix for prompt templates.
 
 After all agents return: aggregate findings into a single combined table keyed by todo. Apply the same BLOCKING prompt flow as structural checks. Timeouts and malformed JSON demote to WARNING.
@@ -1178,6 +1182,8 @@ If all pass: silent, proceed to Phase C0.5b.
 Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`. Also skipped under trust 3 (no plan to review).
 
 **Batch sampling**: when the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (same ranking as Phase A.5b). Override with `--force-preflight-all`.
+
+When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
 
 For each sampled todo, spawn 3 read-only agents **in parallel** via the Task tool:
 

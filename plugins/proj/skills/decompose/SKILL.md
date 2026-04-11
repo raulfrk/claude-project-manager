@@ -5,6 +5,8 @@ allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__pr
 argument-hint: "<todo-id>"
 ---
 
+<!-- n-distinct-agents-rule: not applicable — decompose does not spawn review/check agents -->
+
 Decompose todo $ARGUMENTS into sub-todos.
 
 **1.** Call `mcp__proj__todo_get` to get the todo.
