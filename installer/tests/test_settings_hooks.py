@@ -596,6 +596,124 @@ class TestDiscoverManagedIds:
 
 
 # ---------------------------------------------------------------------------
+# TestOrphanEndToEnd — integration + round-trip tests for orphan removal.
+# ---------------------------------------------------------------------------
+
+
+class TestOrphanEndToEnd:
+    def test_settings_hooks_orphan_end_to_end(self, tmp_path: Path) -> None:
+        """Seed settings.json with a managed matcher NOT in current plugin
+        defaults, run compute, run apply with the removed diff, re-read the
+        file, assert the orphan is removed but user-owned entries survive."""
+        plugin = tmp_path / "p"
+        _write_plugin_default(plugin, [_sample_entry("kept", matchers=["startup"])])
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "kept",
+                        "hooks": [
+                            {
+                                "command": resolve_command_template(
+                                    _sample_entry("kept", matchers=["startup"]),
+                                    Path(),
+                                ),
+                                "type": "command",
+                            }
+                        ],
+                    },
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "orphan-me",
+                        "hooks": [
+                            {
+                                "command": "# cpm:orphan-me\nrun orphan",
+                                "type": "command",
+                            }
+                        ],
+                    },
+                    {
+                        "matcher": "resume",
+                        "hooks": [{"command": "user-owned-cmd", "type": "command"}],
+                    },
+                ]
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+
+        diffs = compute_settings_hooks_diff(settings, [plugin])
+        orphan_diffs = [d for d in diffs if d.cpm_id == "orphan-me"]
+        assert len(orphan_diffs) == 1
+        assert orphan_diffs[0].kind == "removed"
+
+        apply_settings_hooks_diffs(
+            settings, diffs, apply_ids=set(), remove_ids={"orphan-me"}
+        )
+
+        final = json.loads(settings.read_text())
+        matchers = final["hooks"]["SessionStart"]
+        # Orphan gone
+        assert not any(m.get("__cpm_id") == "orphan-me" for m in matchers)
+        # Managed `kept` survives
+        assert any(m.get("__cpm_id") == "kept" for m in matchers)
+        # User-owned `resume` matcher survives
+        assert any(
+            m.get("matcher") == "resume"
+            and any(h.get("command") == "user-owned-cmd" for h in m.get("hooks", []))
+            for m in matchers
+        )
+
+        # Round-trip: re-discover returns empty for orphan-me
+        reread_doc = SettingsDocument.from_dict(settings, final)
+        rediscovered_ids = {t[1] for t in discover_managed_ids(reread_doc)}
+        assert "orphan-me" not in rediscovered_ids
+        assert "kept" in rediscovered_ids
+
+    def test_settings_hooks_apply_idempotent(self, tmp_path: Path) -> None:
+        """Applying the same removed diff twice is a no-op on the second run."""
+        plugin = tmp_path / "p"
+        plugin.mkdir()  # empty → desired == {}
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "zombie",
+                        "hooks": [
+                            {
+                                "command": "# cpm:zombie\nrun",
+                                "type": "command",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+
+        diffs = compute_settings_hooks_diff(settings, [plugin], mass_remove=True)
+        assert len(diffs) == 1
+        apply_settings_hooks_diffs(
+            settings, diffs, apply_ids=set(), remove_ids={"zombie"}
+        )
+        after_first = json.loads(settings.read_text())
+        assert not any(
+            m.get("__cpm_id") == "zombie" for m in after_first["hooks"]["SessionStart"]
+        )
+
+        # Second apply — diffs list is empty now (nothing to discover), but
+        # feeding the same diff again must be idempotent.
+        apply_settings_hooks_diffs(
+            settings, diffs, apply_ids=set(), remove_ids={"zombie"}
+        )
+        after_second = json.loads(settings.read_text())
+        assert after_first == after_second
+
+
+# ---------------------------------------------------------------------------
 # TestPluginIdConflict
 # ---------------------------------------------------------------------------
 
