@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
 import threading
@@ -669,11 +671,167 @@ def register(app: FastMCP) -> None:
                 }
             )
 
-        # ── Phase 2 — placeholder (518.2) — return validation envelope ──
+        # ── Phase 2 — sequenced save+archive under lock ───────────────────
+        # Acquire the module-level threading.Lock BEFORE the loop so
+        # concurrent batches with overlapping parents cannot interleave.
+        today = _now()
+        completed_ids: list[str] = []
+        archive_family_ids: set[str] = set()
+
+        with _BATCH_COMPLETE_LOCK:
+            # Phase 2a: fcntl.flock around the todos.yaml file for
+            # cross-process safety. Non-blocking to surface contention
+            # as an error rather than hang.
+            todos_file = storage.todos_path(cfg, name)
+            try:
+                todos_file.parent.mkdir(parents=True, exist_ok=True)
+                todos_file.touch(exist_ok=True)
+                lock_fd = todos_file.open("r+b")
+            except OSError as exc:
+                return json.dumps(
+                    {
+                        "error": f"Failed to open todos.yaml for locking: {exc}",
+                        "completed_ids": [],
+                        "skipped_ids": skipped_ids,
+                    }
+                )
+            try:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Another todos.yaml writer holds the file lock. Retry shortly."
+                            ),
+                            "completed_ids": [],
+                            "skipped_ids": skipped_ids,
+                        }
+                    )
+
+                # Re-load todos under the lock to guarantee latest state.
+                todos = storage.load_todos(cfg, name)
+                todo_map = {t.id: t for t in todos}
+
+                # Re-validate — state may have changed since Phase 1c.
+                still_to_complete: list[str] = []
+                for tid in to_complete:
+                    todo = todo_map.get(tid)
+                    if todo is None:
+                        invalid_ids.append(tid)
+                        continue
+                    status_val = (
+                        todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
+                    )
+                    if status_val == TodoStatus.DONE.value:
+                        if tid not in skipped_ids:
+                            skipped_ids.append(tid)
+                        continue
+                    if status_val == "cancelled":
+                        cancelled_ids.append(tid)
+                        continue
+                    still_to_complete.append(tid)
+
+                if invalid_ids or cancelled_ids:
+                    return json.dumps(
+                        {
+                            "error": "Validation failed under lock.",
+                            "invalid_ids": invalid_ids,
+                            "cancelled_ids": cancelled_ids,
+                            "completed_ids": [],
+                            "skipped_ids": skipped_ids,
+                        }
+                    )
+
+                # In-memory Phase 2 loop: mark each id done and, for leaves
+                # or fully-done parents, schedule family archive. Parents
+                # with pending children stay in the active list (match
+                # _complete_child behavior).
+                for tid in still_to_complete:
+                    todo = todo_map[tid]
+                    todo.status = TodoStatus.DONE
+                    todo.updated = today
+                    completed_ids.append(tid)
+
+                # Second pass: evaluate archival.
+                # - Leaf (no children, no parent): archive this todo alone.
+                # - Child (has parent): stay active; parent archives later.
+                # - Parent (has children): if EVERY descendant across the
+                #   full subtree is done, archive the whole family.
+                def _all_descendants_done(root_id: str) -> bool:
+                    root = todo_map.get(root_id)
+                    if root is None:
+                        return False
+                    status_val = (
+                        root.status.value if isinstance(root.status, TodoStatus) else root.status
+                    )
+                    if status_val != TodoStatus.DONE.value:
+                        return False
+                    return all(_all_descendants_done(c) for c in root.children)
+
+                for tid in completed_ids:
+                    todo = todo_map[tid]
+                    if todo.parent is None and not todo.children:
+                        # Leaf with no parent — archive this todo alone.
+                        archive_family_ids.add(tid)
+                        continue
+                    if todo.children and _all_descendants_done(tid):
+                        # Parent whose full subtree is now done — archive
+                        # the family.
+                        archive_family_ids.update(_collect_family(tid, todos))
+                    # A child (has parent) is marked done but stays in the
+                    # active list until its parent's family archives.
+                    # After marking children, also walk up the parent chain
+                    # to archive any newly-complete parent families.
+                    cur = todo.parent
+                    while cur:
+                        parent_todo = todo_map.get(cur)
+                        if parent_todo is None:
+                            break
+                        if (
+                            _all_descendants_done(cur)
+                            and (
+                                parent_todo.status.value
+                                if isinstance(parent_todo.status, TodoStatus)
+                                else parent_todo.status
+                            )
+                            == TodoStatus.DONE.value
+                        ):
+                            archive_family_ids.update(_collect_family(cur, todos))
+                        cur = parent_todo.parent
+
+                # Build remaining + to_archive lists.
+                to_archive = [t for t in todos if t.id in archive_family_ids]
+                remaining = [t for t in todos if t.id not in archive_family_ids]
+
+                # Clean up blocks/blocked_by references to archived ids.
+                for t in remaining:
+                    changed = False
+                    if any(b in archive_family_ids for b in t.blocks):
+                        t.blocks = [b for b in t.blocks if b not in archive_family_ids]
+                        changed = True
+                    if any(b in archive_family_ids for b in t.blocked_by):
+                        t.blocked_by = [b for b in t.blocked_by if b not in archive_family_ids]
+                        changed = True
+                    if changed:
+                        t.updated = today
+
+                # Phase 2a atomic save: single write at end of the loop.
+                if to_archive:
+                    storage.archive_and_remove_todos(cfg, name, remaining, to_archive)
+                else:
+                    storage.save_todos(cfg, name, remaining)
+            finally:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+
+        # ── Phase 3/4 — placeholder (518.3/518.4) ────────────────────────
         return json.dumps(
             {
-                "completed_ids": to_complete,
+                "completed_ids": completed_ids,
                 "skipped_ids": skipped_ids,
+                "archived_ids": sorted(archive_family_ids),
                 "invalid_ids": [],
                 "project_name": name,
             }
