@@ -78,7 +78,7 @@ MUST assert ``pilot.app.focused.id == <expected>`` before exporting.
 
     ProgressScreen:
         AUTO_FOCUS = ""   *** no focusable widgets — state-based only ***
-        State is driven by ``.advance()``, ``.log()``, and the internal
+        State is driven by ``.advance()``, ``.write_log()``, and the internal
         ``--complete`` CSS class.
 
     BaseIntegrationScreen (Todoist/Trello/Jira):
@@ -450,14 +450,14 @@ async def test_progress_snapshot() -> None:
         await pilot.pause()
 
         # Simulate mid-progress state
-        screen.log("[bold]Checking marketplace...[/bold]")
-        screen.log("  [green]Marketplace registered.[/green]")
+        screen.write_log("[bold]Checking marketplace...[/bold]")
+        screen.write_log("  [green]Marketplace registered.[/green]")
         screen.advance(1, detail="Marketplace ready")
-        screen.log("  Installing proj...")
-        screen.log("  [green]proj installed[/green]")
+        screen.write_log("  Installing proj...")
+        screen.write_log("  [green]proj installed[/green]")
         screen.advance(1, detail="Installed proj")
-        screen.log("  Installing hooks...")
-        screen.log("  [green]hooks installed[/green]")
+        screen.write_log("  Installing hooks...")
+        screen.write_log("  [green]hooks installed[/green]")
         screen.advance(1, detail="Installed hooks")
         await pilot.pause()
 

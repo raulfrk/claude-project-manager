@@ -125,7 +125,7 @@ async def test_progress_completed_snapshot() -> None:
         # the complete state. ProgressScreen.dismiss is called on the last
         # advance; we screenshot the moment after the last state update.
         for i in range(1, 6):
-            screen.log(f"  [green]Step {i} complete[/green]")
+            screen.write_log(f"  [green]Step {i} complete[/green]")
             screen.advance(1, detail=f"Step {i}/5 done")
             await pilot.pause()
 
@@ -143,15 +143,15 @@ async def test_progress_failed_snapshot() -> None:
         app.push_screen(screen)
         await pilot.pause()
 
-        screen.log("[bold]Checking marketplace...[/bold]")
-        screen.log("  [green]Marketplace registered.[/green]")
+        screen.write_log("[bold]Checking marketplace...[/bold]")
+        screen.write_log("  [green]Marketplace registered.[/green]")
         screen.advance(1, detail="Marketplace ready")
-        screen.log("  Installing proj...")
-        screen.log("  [green]proj installed[/green]")
+        screen.write_log("  Installing proj...")
+        screen.write_log("  [green]proj installed[/green]")
         screen.advance(1, detail="Installed proj")
-        screen.log("  Installing hooks...")
-        screen.log("  [red]ERROR: hooks install failed[/red]")
-        screen.log("  [red]subprocess returned exit code 1[/red]")
+        screen.write_log("  Installing hooks...")
+        screen.write_log("  [red]ERROR: hooks install failed[/red]")
+        screen.write_log("  [red]subprocess returned exit code 1[/red]")
         await pilot.pause()
 
         svg = app.export_screenshot()

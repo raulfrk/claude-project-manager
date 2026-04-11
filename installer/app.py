@@ -496,33 +496,33 @@ class InstallerApp(App):
 
         # Marketplace setup
         try:
-            progress.log("[bold]Checking marketplace...[/bold]")
+            progress.write_log("[bold]Checking marketplace...[/bold]")
             if force_reinstall_marketplace:
-                progress.log("  Removing and re-adding marketplace...")
+                progress.write_log("  Removing and re-adding marketplace...")
                 await asyncio.to_thread(remove_marketplace)
                 await asyncio.to_thread(add_marketplace, branch=branch)
-                progress.log("  [green]Marketplace reinstalled.[/green]")
+                progress.write_log("  [green]Marketplace reinstalled.[/green]")
             else:
                 registered = await asyncio.to_thread(check_marketplace_registered)
                 if not registered:
                     branch_msg = f" (branch: {branch})" if branch else ""
-                    progress.log(f"  Adding marketplace...{branch_msg}")
+                    progress.write_log(f"  Adding marketplace...{branch_msg}")
                     await asyncio.to_thread(add_marketplace, branch=branch)
-                    progress.log("  [green]Marketplace registered.[/green]")
+                    progress.write_log("  [green]Marketplace registered.[/green]")
                 elif branch:
-                    progress.log(f"  Re-adding for branch: {branch}")
+                    progress.write_log(f"  Re-adding for branch: {branch}")
                     await asyncio.to_thread(remove_marketplace)
                     await asyncio.to_thread(add_marketplace, branch=branch)
-                    progress.log(f"  [green]Updated to branch {branch}.[/green]")
+                    progress.write_log(f"  [green]Updated to branch {branch}.[/green]")
                 else:
-                    progress.log("  [dim]Already registered.[/dim]")
+                    progress.write_log("  [dim]Already registered.[/dim]")
             progress.advance(1, detail="Marketplace ready")
         except InstallerError as exc:
-            progress.log(f"  [red]Error: {exc}[/red]")
+            progress.write_log(f"  [red]Error: {exc}[/red]")
             return
 
         # Build name→ID map
-        progress.log("[bold]Discovering plugins...[/bold]")
+        progress.write_log("[bold]Discovering plugins...[/bold]")
         available = await asyncio.to_thread(get_available_plugins)
         installed_ids = await asyncio.to_thread(get_installed_plugins)
         name_to_id: dict[str, str] = {}
@@ -530,33 +530,35 @@ class InstallerApp(App):
             name = pid.split("@")[0]
             name_to_id.setdefault(name, pid)
         installed_names = {pid.split("@")[0] for pid in installed_ids}
-        progress.log(f"  {len(available)} available, {len(installed_ids)} installed")
+        progress.write_log(
+            f"  {len(available)} available, {len(installed_ids)} installed"
+        )
 
         # Install plugins
         done: set[str] = set()
         for plugin_name in plugins:
             plugin_id = name_to_id.get(plugin_name)
             if plugin_id is None:
-                progress.log(f"  [red]✗ {plugin_name} not found[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name} not found[/red]")
                 progress.advance(1, detail=f"Skipped: {plugin_name}")
                 continue
 
             if skip_installed and plugin_name in installed_names:
-                progress.log(f"  [dim]✓ {plugin_name} already installed[/dim]")
+                progress.write_log(f"  [dim]✓ {plugin_name} already installed[/dim]")
                 progress.advance(1, detail=f"Skipped: {plugin_name}")
                 continue
 
             try:
                 if plugin_name in installed_names:
-                    progress.log(f"  Uninstalling {plugin_name}...")
+                    progress.write_log(f"  Uninstalling {plugin_name}...")
                     await asyncio.to_thread(uninstall_plugin, plugin_id)
-                progress.log(f"  Installing {plugin_id}...")
+                progress.write_log(f"  Installing {plugin_id}...")
                 await asyncio.to_thread(install_plugin, plugin_id)
                 done.add(plugin_name)
-                progress.log(f"  [green]✓ {plugin_name} installed[/green]")
+                progress.write_log(f"  [green]✓ {plugin_name} installed[/green]")
                 progress.advance(1, detail=f"Installed {plugin_name}")
             except InstallerError as exc:
-                progress.log(f"  [red]✗ {plugin_name}: {exc}[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name}: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
 
     def _show_error(self, message: str) -> None:
@@ -634,13 +636,13 @@ class InstallerApp(App):
         updated: set[str] = set()
         for plugin_name in selected:
             try:
-                progress.log(f"  Updating {plugin_name}...")
+                progress.write_log(f"  Updating {plugin_name}...")
                 await asyncio.to_thread(update_plugin, plugin_name)
                 updated.add(plugin_name)
-                progress.log(f"  [green]✓ {plugin_name} updated[/green]")
+                progress.write_log(f"  [green]✓ {plugin_name} updated[/green]")
                 progress.advance(1, detail=f"Updated {plugin_name}")
             except InstallerError as exc:
-                progress.log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
 
     # -- Reinstall flow callbacks --
@@ -675,15 +677,15 @@ class InstallerApp(App):
         reinstalled: set[str] = set()
         for plugin_name in plugins:
             try:
-                progress.log(f"  Uninstalling {plugin_name}...")
+                progress.write_log(f"  Uninstalling {plugin_name}...")
                 await asyncio.to_thread(uninstall_plugin, plugin_name)
-                progress.log(f"  Installing {plugin_name}...")
+                progress.write_log(f"  Installing {plugin_name}...")
                 await asyncio.to_thread(install_plugin, plugin_name)
                 reinstalled.add(plugin_name)
-                progress.log(f"  [green]✓ {plugin_name} reinstalled[/green]")
+                progress.write_log(f"  [green]✓ {plugin_name} reinstalled[/green]")
                 progress.advance(1, detail=f"Reinstalled {plugin_name}")
             except InstallerError as exc:
-                progress.log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
 
     # -- Uninstall flow callbacks --
@@ -718,23 +720,23 @@ class InstallerApp(App):
         removed: set[str] = set()
         for plugin_name in plugins:
             try:
-                progress.log(f"  Uninstalling {plugin_name}...")
+                progress.write_log(f"  Uninstalling {plugin_name}...")
                 await asyncio.to_thread(uninstall_plugin, plugin_name)
                 removed.add(plugin_name)
-                progress.log(f"  [green]✓ {plugin_name} removed[/green]")
+                progress.write_log(f"  [green]✓ {plugin_name} removed[/green]")
                 progress.advance(1, detail=f"Removed {plugin_name}")
             except InstallerError as exc:
-                progress.log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
+                progress.write_log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
                 progress.advance(1, detail=f"Failed: {plugin_name}")
 
         if full_cleanup:
             claude_md = Path.home() / ".claude" / "CLAUDE.md"
             if remove_managed_section(claude_md):
-                progress.log(
+                progress.write_log(
                     "  [green]✓ Removed managed section from CLAUDE.md[/green]"
                 )
             else:
-                progress.log("  [dim]No managed section in CLAUDE.md[/dim]")
+                progress.write_log("  [dim]No managed section in CLAUDE.md[/dim]")
 
     # -- Shared callbacks --
 

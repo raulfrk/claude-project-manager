@@ -134,8 +134,13 @@ class ProgressScreen(Screen[None]):
         status = self.query_one("#progress-status", Static)
         status.update(f"{self._current}/{self._total}")
 
-    def log(self, message: str) -> None:
-        """Append a line to the log area. Safe to call before mount."""
+    def write_log(self, message: str) -> None:
+        """Append a line to the log area. Safe to call before mount.
+
+        Named ``write_log`` (not ``log``) because Textual's ``DOMNode.log``
+        is a reserved Logger descriptor; overriding it as a method breaks
+        framework internals like ``self.log.debug(...)`` during shutdown.
+        """
         if not self._mounted.is_set():
             self._log_buffer.append(message)
             return
