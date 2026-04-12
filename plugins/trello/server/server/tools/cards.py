@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import httpx
+
 from server.lib.client import JsonValue, get_client
 
 if TYPE_CHECKING:
@@ -102,7 +104,7 @@ def register(app: FastMCP) -> None:
             try:
                 client.put(f"/cards/{card_id}", params={"closed": True})
                 archived.append(card_id)
-            except Exception as exc:
+            except (RuntimeError, httpx.HTTPError) as exc:
                 failed.append({"card_id": card_id, "error": str(exc)})
         return json.dumps({"archived": archived, "failed": failed})
 
@@ -154,6 +156,6 @@ def register(app: FastMCP) -> None:
                     params["idLabels"] = labels_csv
                 created = client.post("/cards", params=params)
                 successes.append(created)
-            except Exception as exc:
+            except (RuntimeError, httpx.HTTPError) as exc:
                 failures.append({"index": idx, "name": card.get("name", ""), "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

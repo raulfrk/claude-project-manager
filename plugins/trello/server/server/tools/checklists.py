@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import httpx
+
 from server.lib.client import JsonValue, TrelloAPIError, get_client
 
 if TYPE_CHECKING:
@@ -95,7 +97,7 @@ def register(app: FastMCP) -> None:
                     params["checked"] = "true"
                 created = client.post(f"/checklists/{checklist_id}/checkItems", params=params)
                 successes.append(created)
-            except Exception as exc:
+            except (RuntimeError, httpx.HTTPError) as exc:
                 failures.append(
                     {"index": idx, "name": str(item.get("name", "")), "error": str(exc)}
                 )
@@ -176,6 +178,6 @@ def register(app: FastMCP) -> None:
                     params=params,
                 )
                 successes.append(result)
-            except Exception as exc:
+            except (RuntimeError, httpx.HTTPError) as exc:
                 failures.append({"index": idx, "item_id": it_id, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

@@ -7,6 +7,7 @@ Covers:
 - batch_create_cards: all items fail validation
 - batch_add_checklist_items: item with no 'name' key at all
 - list_boards non-list/non-dict responses
+- batch op narrowed exception handling (RuntimeError, httpx.HTTPError, propagation)
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from server.tools.boards import register as register_boards
@@ -261,3 +263,159 @@ class TestListBoardsEdgeCases:
         result = json.loads(tools["list_boards"]())
         assert len(result) == 1
         assert result[0]["id"] == "b1"
+
+
+# ========== batch_add_checklist_items: exception paths ==========
+
+
+class TestBatchAddChecklistItemsExceptionPaths:
+    def test_runtime_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
+        """RuntimeError mid-batch is captured; subsequent items still process."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.side_effect = [
+            RuntimeError("Trello API error 400: bad request"),
+            {"id": "ci2", "name": "Item 2"},
+        ]
+
+        result = json.loads(
+            tools["batch_add_checklist_items"](
+                "cl1",
+                [{"name": "Item 1"}, {"name": "Item 2"}],
+            )
+        )
+
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["index"] == 0
+        assert "400" in result["failures"][0]["error"]
+        assert len(result["successes"]) == 1
+
+    def test_httpx_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
+        """httpx.HTTPError is captured in failures."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.side_effect = httpx.ConnectError("connection refused")
+
+        result = json.loads(tools["batch_add_checklist_items"]("cl1", [{"name": "Item 1"}]))
+
+        assert len(result["failures"]) == 1
+        assert "connection refused" in result["failures"][0]["error"]
+
+
+# ========== batch_update_checklist_items: exception paths ==========
+
+
+class TestBatchUpdateChecklistItemsExceptionPaths:
+    def test_runtime_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
+        """RuntimeError mid-batch is captured; subsequent items still process."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.put.side_effect = [
+            RuntimeError("Trello API error 404: not found"),
+            {"id": "ci2", "state": "complete"},
+        ]
+
+        result = json.loads(
+            tools["batch_update_checklist_items"](
+                "c1",
+                [
+                    {"checklist_id": "cl1", "item_id": "ci1", "state": "complete"},
+                    {"checklist_id": "cl1", "item_id": "ci2", "state": "complete"},
+                ],
+            )
+        )
+
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["index"] == 0
+        assert "404" in result["failures"][0]["error"]
+        assert len(result["successes"]) == 1
+
+    def test_httpx_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
+        """httpx.HTTPError is captured in failures."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.put.side_effect = httpx.TimeoutException("request timed out")
+
+        result = json.loads(
+            tools["batch_update_checklist_items"](
+                "c1",
+                [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+            )
+        )
+
+        assert len(result["failures"]) == 1
+        assert "timed out" in result["failures"][0]["error"]
+
+
+# ========== trello_batch_archive_cards: httpx.HTTPError path ==========
+
+
+class TestBatchArchiveCardsHttpError:
+    def test_httpx_error_captured_in_failed(self, mock_trello_client: MagicMock) -> None:
+        """httpx.HTTPError is captured in failed list."""
+        tools = _collect_tools(register_cards, mock_trello_client)
+        mock_trello_client.put.side_effect = httpx.ConnectError("connection refused")
+
+        result = json.loads(tools["trello_batch_archive_cards"](["card1"]))
+
+        assert len(result["failed"]) == 1
+        assert result["failed"][0]["card_id"] == "card1"
+        assert "connection refused" in result["failed"][0]["error"]
+        assert result["archived"] == []
+
+
+# ========== batch_create_cards: httpx.HTTPError path ==========
+
+
+class TestBatchCreateCardsHttpError:
+    def test_httpx_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
+        """httpx.HTTPError is captured in failures."""
+        tools = _collect_tools(register_cards, mock_trello_client)
+        mock_trello_client.post.side_effect = httpx.ReadError("read error")
+
+        result = json.loads(tools["batch_create_cards"]([{"list_id": "l1", "name": "Card 1"}]))
+
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["index"] == 0
+        assert "read error" in result["failures"][0]["error"]
+        assert result["successes"] == []
+
+
+# ========== Programming errors propagate (not caught) ==========
+
+
+class TestBatchOpProgrammingErrorPropagates:
+    def test_type_error_propagates_from_batch_archive(self, mock_trello_client: MagicMock) -> None:
+        """TypeError from client is NOT caught — it propagates."""
+        tools = _collect_tools(register_cards, mock_trello_client)
+        mock_trello_client.put.side_effect = TypeError("unexpected type")
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            tools["trello_batch_archive_cards"](["card1"])
+
+    def test_value_error_propagates_from_batch_create(self, mock_trello_client: MagicMock) -> None:
+        """ValueError from client is NOT caught — it propagates."""
+        tools = _collect_tools(register_cards, mock_trello_client)
+        mock_trello_client.post.side_effect = ValueError("bad value")
+
+        with pytest.raises(ValueError, match="bad value"):
+            tools["batch_create_cards"]([{"list_id": "l1", "name": "Card 1"}])
+
+    def test_key_error_propagates_from_batch_add_checklist(
+        self, mock_trello_client: MagicMock
+    ) -> None:
+        """KeyError from client is NOT caught — it propagates."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.post.side_effect = KeyError("missing key")
+
+        with pytest.raises(KeyError, match="missing key"):
+            tools["batch_add_checklist_items"]("cl1", [{"name": "Item 1"}])
+
+    def test_attribute_error_propagates_from_batch_update_checklist(
+        self, mock_trello_client: MagicMock
+    ) -> None:
+        """AttributeError from client is NOT caught — it propagates."""
+        tools = _collect_tools(register_checklists, mock_trello_client)
+        mock_trello_client.put.side_effect = AttributeError("no such attr")
+
+        with pytest.raises(AttributeError, match="no such attr"):
+            tools["batch_update_checklist_items"](
+                "c1",
+                [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+            )
