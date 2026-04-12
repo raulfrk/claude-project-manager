@@ -86,6 +86,28 @@ class TestAddRepoEdgeCases:
         assert "Error" in result
 
 
+class TestAddRepoCustomDefaultBranch:
+    def test_stores_custom_default_branch(self, tmp_path: Path, empty_config: Path) -> None:
+        """add_repo() with explicit default_branch='develop' stores it in config."""
+        with patch("server.tools.repos.is_git_repo", return_value=True):
+            result = add_repo("myapp", str(tmp_path), default_branch="develop")
+        assert "Registered" in result
+        assert "develop" in result
+        config = storage.load()
+        assert config.base_repos[0].default_branch == "develop"
+
+    def test_list_repos_shows_custom_default_branch(
+        self, tmp_path: Path, empty_config: Path
+    ) -> None:
+        """list_repos() displays a non-'main' default branch."""
+        config = WorktreeConfig(
+            base_repos=[BaseRepo(label="myapp", path=str(tmp_path), default_branch="master")]
+        )
+        storage.save(config)
+        result = list_repos()
+        assert "master" in result
+
+
 class TestConfigGet:
     def test_returns_expanded_default_worktree_dir(self, empty_config: Path) -> None:
         config = WorktreeConfig(default_worktree_dir="~/worktrees")

@@ -66,6 +66,34 @@ def test_env_var_overrides_config_path(tmp_path: Path, monkeypatch: pytest.Monke
     assert loaded.default_worktree_dir == "/custom/trees"
 
 
+def test_save_and_load_roundtrip_custom_default_branch(config_path: Path) -> None:
+    """Save with default_branch='master', load back, verify it roundtrips."""
+    config = WorktreeConfig(
+        default_worktree_dir="~/my-trees",
+        base_repos=[BaseRepo(label="myapp", path="/home/user/myapp", default_branch="master")],
+    )
+    storage.save(config)
+
+    loaded = storage.load()
+    assert len(loaded.base_repos) == 1
+    assert loaded.base_repos[0].default_branch == "master"
+
+
+def test_from_dict_missing_default_branch_defaults_to_main() -> None:
+    """BaseRepo.from_dict() without default_branch key defaults to 'main'."""
+    repo = BaseRepo.from_dict({"label": "x", "path": "/x"})
+    assert repo.default_branch == "main"
+
+
+def test_baserepo_to_dict_from_dict_roundtrip_custom_branch() -> None:
+    """BaseRepo.to_dict() -> BaseRepo.from_dict() preserves custom default_branch."""
+    original = BaseRepo(label="myapp", path="/home/user/myapp", default_branch="develop")
+    restored = BaseRepo.from_dict(original.to_dict())
+    assert restored.default_branch == "develop"
+    assert restored.label == original.label
+    assert restored.path == original.path
+
+
 def test_from_dict_non_list_base_repos() -> None:
     """WorktreeConfig.from_dict handles non-list base_repos gracefully."""
     config = WorktreeConfig.from_dict({"base_repos": "not a list"})

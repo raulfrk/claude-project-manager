@@ -327,6 +327,28 @@ class TestMergeWorktree:
         assert data["branch"] == "feature/merge-ok"
         assert data["base_branch"] == "main"
 
+    def test_merge_success_non_main_base_branch(self, real_git_repo: Path) -> None:
+        """Merge with base_branch='develop' (non-main) works correctly."""
+        # Create a 'develop' branch in the base repo
+        _git(real_git_repo, "branch", "develop")
+
+        # Create a worktree off develop
+        create_result = create_worktree("myapp", "feature/dev-merge")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-dev-merge")
+
+        # Make a commit in the worktree
+        (Path(wt_path) / "devfile.txt").write_text("develop feature")
+        _git(Path(wt_path), "add", ".")
+        _git(Path(wt_path), "commit", "-m", "add devfile")
+
+        result = merge_worktree(wt_path, base_branch="develop")
+        data = json.loads(result)
+        assert data["result"] == "merged"
+        assert data["branch"] == "feature/dev-merge"
+        assert data["base_branch"] == "develop"
+
     def test_merge_conflict(self, real_git_repo: Path) -> None:
         """Rebase conflict -> result='conflict', worktree left intact."""
         # Create a worktree
