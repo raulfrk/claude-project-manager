@@ -14,6 +14,7 @@ from installer.settings_hooks import (
     SettingsDocument,
     SettingsHookDiff,
     SettingsHooksError,
+    _atomic_write_json,
     _backup_with_retention,
     _extract_cpm_id_from_command,
     _read_settings_json,
@@ -842,3 +843,63 @@ class TestVersionedSubdirFallback:
         diffs = compute_settings_hooks_diff(settings, [plugin])
         assert len(diffs) == 1
         assert diffs[0].kind == "unchanged"
+
+
+# ---------------------------------------------------------------------------
+# TestAtomicWriteJson
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicWriteJson:
+    def test_success_no_tmp_leftover(self, tmp_path: Path) -> None:
+        """Normal write leaves no .tmp file behind."""
+        target = tmp_path / "settings.json"
+        data = {"hooks": {}}
+        _atomic_write_json(target, data)
+        assert target.exists()
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        assert not tmp.exists()
+
+    def test_oserror_during_replace_cleans_up_tmp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If Path.replace raises OSError, the .tmp file is cleaned up."""
+        target = tmp_path / "settings.json"
+        tmp = target.with_suffix(target.suffix + ".tmp")
+
+        original_replace = Path.replace
+
+        def failing_replace(self: Path, target_path: object) -> Path:
+            if self == tmp:
+                raise OSError("simulated replace failure")
+            return original_replace(self, target_path)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "replace", failing_replace)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            _atomic_write_json(target, {"hooks": {}})
+
+        assert not tmp.exists()
+
+    def test_keyboard_interrupt_cleans_up_tmp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If Path.replace raises KeyboardInterrupt, the .tmp file is cleaned up."""
+        target = tmp_path / "settings.json"
+        tmp = target.with_suffix(target.suffix + ".tmp")
+
+        original_replace = Path.replace
+
+        def interrupting_replace(self: Path, target_path: object) -> Path:
+            if self == tmp:
+                raise KeyboardInterrupt
+            return original_replace(self, target_path)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "replace", interrupting_replace)
+
+        try:
+            _atomic_write_json(target, {"hooks": {}})
+        except KeyboardInterrupt:
+            pass
+
+        assert not tmp.exists()

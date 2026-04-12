@@ -496,8 +496,13 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     resolved = path.resolve() if path.exists() else path
     tmp = resolved.with_suffix(resolved.suffix + ".tmp")
     tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-    tmp.replace(resolved)
+    try:
+        tmp.write_text(
+            json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8"
+        )
+        tmp.replace(resolved)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def apply_settings_hooks_diffs(
