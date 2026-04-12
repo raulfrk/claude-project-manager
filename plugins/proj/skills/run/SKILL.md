@@ -223,7 +223,7 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER runs under `--bal
 
 **Batch sampling rule**: when the descendant list has > 5 todos, adversarial agents run only on a sampled subset — the **5 highest-complexity** todos (ranked by the same 7-dimension complexity score used in Phase C1 smart gating). Other todos get structural checks only. Users can override with `--force-preflight-all`.
 
-**Agents (spawn in parallel via `Task` tool, one Task call per agent per todo)**:
+**Agents (spawn via TeamCreate, one Agent per role per todo):**
 
 When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="preflight-adversarial-define-{todo_id}", description="Adversarial review agents (Ambiguity, Completeness, Research Validation) for todo {todo_id}")` and spawn each Agent with `team_name="preflight-adversarial-define-{todo_id}"`. After all agents return and findings are aggregated, call `TeamDelete(team_name="preflight-adversarial-define-{todo_id}")`.
 
@@ -819,7 +819,7 @@ Persist each todo's report to `todos/<id>/verification-report.md` in the trackin
 
 If any todo has failures, prompt:
 > N passed, M failed. Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with: (1) the verification report, (2) todo details + requirements.md + research.md + parent context (via `proj_get_todo_context`), (3) the approved implementation plan, and (4) instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). Update the combined report and re-prompt if still failing.
+- **Fix**: **Spawn via `TeamCreate` — never bare parallel Agent calls for 2+ agents.** If N failed todos >= 2, call `TeamCreate(name="run-verify-fix-{project}-{timestamp}", description="Verification fix agents for {N} failed todos")` before spawning, then spawn each Agent with that `team_name`, then call `TeamDelete` after all complete. If N == 1, spawn a single `general-purpose` Agent directly (no team needed). Each agent receives: (1) the verification report, (2) todo details + requirements.md + research.md + parent context (via `proj_get_todo_context`), (3) the approved implementation plan, and (4) instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). Update the combined report and re-prompt if still failing.
 - **Proceed**: continue to satisfaction check despite failures.
 - **Skip**: skip remaining verification for this session.
 
@@ -1205,7 +1205,7 @@ Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced
 
 When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning any pre-execute review agents for this batch, call `TeamCreate(name="preflight-adversarial-execute-{timestamp}", description="Pre-execute adversarial review agents (File Path Verifier, Spec-Plan Alignment, Impact Scanner)")` and spawn each Agent with that `team_name`. After findings aggregation completes, call `TeamDelete(team_name="preflight-adversarial-execute-{timestamp}")`.
 
-For each sampled todo, spawn 3 read-only agents **in parallel** via the Task tool:
+For each sampled todo, spawn 3 read-only Agents **in parallel** with that `team_name`:
 
 | Agent | Reads | Checks |
 |-------|-------|--------|
@@ -1413,7 +1413,7 @@ Persist each todo's report to `todos/<id>/verification-report.md` in the trackin
 
 If any todo has failures, prompt:
 > N passed, M failed. Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: spawn one `general-purpose` Task agent per failed todo with: (1) the verification report, (2) todo details + requirements.md + research.md + parent context (via `proj_get_todo_context`), (3) the approved implementation plan, and (4) instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). Update the combined report and re-prompt if still failing.
+- **Fix**: **Spawn via `TeamCreate` — never bare parallel Agent calls for 2+ agents.** If N failed todos >= 2, call `TeamCreate(name="run-verify-fix-batch-{project}-{timestamp}", description="Verification fix agents for {N} failed todos")` before spawning, then spawn each Agent with that `team_name`, then call `TeamDelete` after all complete. If N == 1, spawn a single `general-purpose` Agent directly (no team needed). Each agent receives: (1) the verification report, (2) todo details + requirements.md + research.md + parent context (via `proj_get_todo_context`), (3) the approved implementation plan, and (4) instructions to fix the failures. After agents complete, re-run verification on fixed todos only (max 2 retries). Update the combined report and re-prompt if still failing.
 - **Proceed**: continue to summary despite failures.
 - **Skip**: skip remaining verification for this session.
 
@@ -1488,7 +1488,7 @@ Suggested next: `1. /proj:status` -- see updated project overview
 
 Full prompt templates are in `plugins/proj/skills/run/agents/`. Load them at runtime with Read tool when spawning agents.
 
-This appendix contains the prompt templates and output schemas for all 6 preflight review agents referenced by Phase A.5b (define-phase adversarial review) and Phase C0.5b (pre-execute adversarial review). All agents are spawned via the `Task` tool as `general-purpose` agents with read-only sub-tools, 90-second timeouts, and a strict JSON output schema. Timeouts and malformed JSON output are demoted to WARNING (never BLOCKING).
+This appendix contains the prompt templates and output schemas for all 6 preflight review agents referenced by Phase A.5b (define-phase adversarial review) and Phase C0.5b (pre-execute adversarial review). All agents are spawned as `general-purpose` Agents within a TeamCreate group (see Spawning pattern), with read-only sub-tools, 90-second timeouts, and a strict JSON output schema. Timeouts and malformed JSON output are demoted to WARNING (never BLOCKING).
 
 ### Shared output schema
 
@@ -1536,16 +1536,20 @@ See: plugins/proj/skills/run/agents/impact_scanner.md
 
 ### Spawning pattern
 
-All agents are spawned in parallel via the `Task` tool. Example for Phase A.5b:
+All agents are spawned via `TeamCreate` (never bare parallel Task calls). Example for Phase A.5b:
 
 ```
-# Pseudocode — run as a single tool-call block with 3 parallel Task invocations
-Task(subagent_type="general-purpose", description="Ambiguity review — todo <id>",
-     prompt=<ambiguity_prompt>)
-Task(subagent_type="general-purpose", description="Completeness review — todo <id>",
-     prompt=<completeness_prompt>)
-Task(subagent_type="general-purpose", description="Research validation — todo <id>",
-     prompt=<research_validation_prompt>)
+# Pseudocode — TeamCreate first, then spawn Agents with team_name
+TeamCreate(name="preflight-adversarial-define-<id>",
+           description="Adversarial review agents for todo <id>")
+Agent(subagent_type="general-purpose", description="Ambiguity review — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt=<ambiguity_prompt>)
+Agent(subagent_type="general-purpose", description="Completeness review — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt=<completeness_prompt>)
+Agent(subagent_type="general-purpose", description="Research validation — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt=<research_validation_prompt>)
+# ... await all three ...
+TeamDelete(name="preflight-adversarial-define-<id>")
 ```
 
 Await all three, parse JSON, aggregate findings into the per-todo review table. Apply severity semantics (BLOCKING → prompt, WARNING → show, INFO → show). Repeat for each sampled todo in the batch.
