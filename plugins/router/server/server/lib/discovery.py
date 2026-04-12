@@ -83,11 +83,24 @@ def find_default_hooks_files(
 ) -> list[Path]:
     """Find all default-hooks.yaml files in sibling plugins.
 
+    Supports two directory layouts:
+    - Dev layout:   <project>/plugins/<name>/.claude-plugin/default-hooks.yaml
+                    (glob: plugins/*/.claude-plugin/default-hooks.yaml)
+    - Cache layout: <cache>/<name>/<version>/.claude-plugin/default-hooks.yaml
+                    (glob: */*/.claude-plugin/default-hooks.yaml)
+
+    Tries the provided glob_pattern first; if nothing is found, falls back to
+    the cache-layout glob so that installed (non-dev) deployments work correctly.
+
     Returns a list of Paths to default-hooks.yaml files found.
     """
     discovery_root = root or _default_discovery_root()
     pattern = f"{glob_pattern}/{_DEFAULT_HOOKS_FILENAME}"
     found = sorted(discovery_root.glob(pattern))
+    if not found:
+        # Fallback: installed cache layout — <name>/<version>/.claude-plugin/
+        cache_pattern = f"*/*/.claude-plugin/{_DEFAULT_HOOKS_FILENAME}"
+        found = sorted(discovery_root.glob(cache_pattern))
     return found
 
 
