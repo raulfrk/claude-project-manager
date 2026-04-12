@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from server.tools import settings as settings_mod
+
+if TYPE_CHECKING:
+    import pytest
 from server.tools.settings import (
+    _resolve_path,
     sandbox_add_domain,
     sandbox_add_mcp_allow,
     sandbox_add_skill_allow,
@@ -22,6 +29,40 @@ from server.tools.settings import (
     sandbox_set_deny,
 )
 from tests.conftest import read_settings, write_settings
+
+
+class TestResolvePath:
+    def test_symlink_logs_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real_dir)
+
+        with caplog.at_level(logging.WARNING, logger="server.tools.settings"):
+            result = _resolve_path(str(link))
+
+        assert result == str(real_dir.resolve())
+        assert any("Path resolved via symlink" in rec.message for rec in caplog.records)
+
+    def test_plain_path_no_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        real_dir = tmp_path / "plain"
+        real_dir.mkdir()
+
+        with caplog.at_level(logging.WARNING, logger="server.tools.settings"):
+            result = _resolve_path(str(real_dir))
+
+        assert result == str(real_dir.resolve())
+        warning_records = [
+            r
+            for r in caplog.records
+            if r.name == "server.tools.settings" and r.levelno >= logging.WARNING
+        ]
+        assert warning_records == []
+
+    def test_logging_imported_at_module_level(self) -> None:
+        assert hasattr(settings_mod, "logging"), (
+            "logging must be imported at module level, not inside a function"
+        )
 
 
 class TestAddWritePath:
