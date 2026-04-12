@@ -205,6 +205,7 @@ class SyncPlan:
     potential_links: list[dict[str, JsonValue]] = field(default_factory=list)
     root_only_cleanup: list[dict[str, str]] = field(default_factory=list)
     stale_ids_skipped: int = 0
+    archived_completions_pushed: int = 0
 
     def is_empty(self) -> bool:
         return not any(
@@ -248,6 +249,7 @@ class SyncPlan:
                 "ghost_close_count": len(self.ghost_close),
                 "potential_links_count": len(self.potential_links),
                 "root_only_cleanup_count": len(self.root_only_cleanup),
+                "archived_completions_pushed_count": self.archived_completions_pushed,
             },
         }
 
@@ -461,8 +463,8 @@ def compute_diff(
         elif todo.status not in TERMINAL_STATUSES:
             local_unlinked.append(todo)
 
-    # Build a set of Todoist IDs claimed by archived todos. These are used only
-    # to suppress re-pulling — we never push_complete based on archived data.
+    # Build a set of Todoist IDs claimed by archived todos. Used to suppress
+    # re-pulling and to reconcile any still-open Todoist tasks below.
     archived_todoist_ids: set[str] = {
         t.todoist_task_id
         for t in archived
@@ -693,6 +695,13 @@ def compute_diff(
             and todoist_id not in todoist_by_id
         ):
             plan.stale_ids_skipped += 1
+
+    # ── Reconcile: archived local todos whose Todoist task is still open ──
+    # Complements the pull-suppression filter above; both use archived_todoist_ids.
+    # Intersect with todoist_by_id so we only close tasks that are actually open.
+    archived_open_ids = (archived_todoist_ids & todoist_by_id.keys()) - set(plan.push_complete)
+    plan.push_complete.extend(archived_open_ids)
+    plan.archived_completions_pushed = len(archived_open_ids)
 
     # ── Parent cascade: collect descendant todoist IDs for completed parents ──
     active_todoist_ids = set(todoist_by_id.keys())
@@ -1556,6 +1565,7 @@ def _build_summary(
             "ghost_closed": ghost_closed,
             "root_only_cleaned": root_cleaned,
             "stale_ids_skipped": plan.stale_ids_skipped,
+            "archived_completions_pushed": plan.archived_completions_pushed,
         },
     }
 

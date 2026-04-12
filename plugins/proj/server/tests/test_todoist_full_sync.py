@@ -1713,3 +1713,79 @@ class TestExecutePushCompletes:
     def test_batch_size_is_20(self) -> None:
         """Batch size should be 20 to stay under 30s socket timeout."""
         assert _PUSH_COMPLETE_BATCH_SIZE == 20
+
+
+# ── Archived reconciliation tests ─────────────────────────────────────────────
+
+
+class TestArchivedReconciliation:
+    """Tests for the archived-todo reconciliation pass in compute_diff."""
+
+    def test_archived_with_open_todoist_task_added_to_push_complete(
+        self, cfg_with_project: tuple
+    ) -> None:
+        """Archived local todo whose Todoist task is still open → pushed as complete."""
+        cfg, name = cfg_with_project
+
+        # Archived todo with a linked Todoist ID (simulates previously-completed local todo)
+        archived_todo = _make_todo(cfg, name, "Archived task", todoist_task_id="t_archived")
+        storage.save_archived_todos(cfg, name, [archived_todo])
+
+        # Todoist still has the task open (hook dispatch failed silently in a prior session)
+        todoist_tasks = [_make_todoist_task("t_archived", "Archived task")]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t_archived" in plan.push_complete
+        assert plan.archived_completions_pushed == 1
+
+    def test_archived_with_already_closed_todoist_task_not_pushed(
+        self, cfg_with_project: tuple
+    ) -> None:
+        """Archived local todo whose Todoist task is already closed → not pushed again."""
+        cfg, name = cfg_with_project
+
+        # Archived todo with a linked Todoist ID
+        archived_todo = _make_todo(cfg, name, "Already closed", todoist_task_id="t_closed")
+        storage.save_archived_todos(cfg, name, [archived_todo])
+
+        # Todoist does NOT return this task (already completed → not in active fetch)
+        todoist_tasks: list[dict] = []
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert "t_closed" not in plan.push_complete
+        assert plan.archived_completions_pushed == 0
+
+    def test_archived_id_already_in_push_complete_not_duplicated(
+        self, cfg_with_project: tuple
+    ) -> None:
+        """Archived ID already queued in push_complete (e.g. via cascade) is not double-counted."""
+        cfg, name = cfg_with_project
+
+        # Active done todo that will be picked up by normal completion logic
+        active_todo = _make_todo(
+            cfg,
+            name,
+            "Active done",
+            todoist_task_id="t_dup",
+            status="done",
+            updated="2099-06-01T00:00:00",
+        )
+        storage.save_todos(cfg, name, [active_todo])
+
+        # Same Todoist ID also appears in archive (edge case: archived + active both linked)
+        archived_todo = _make_todo(cfg, name, "Archived copy", todoist_task_id="t_dup")
+        storage.save_archived_todos(cfg, name, [archived_todo])
+
+        # Todoist has the task open with an older timestamp → will be push_complete via normal path
+        todoist_tasks = [
+            _make_todoist_task("t_dup", "Active done", updated_at="2000-01-01T00:00:00Z")
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        # Should appear exactly once in push_complete
+        assert plan.push_complete.count("t_dup") == 1
+        # archived_completions_pushed is 0 because set-difference excluded the already-queued ID
+        assert plan.archived_completions_pushed == 0
