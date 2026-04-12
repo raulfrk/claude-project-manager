@@ -910,12 +910,15 @@ Define helper: `effective_quality(todo_id) = per_todo_quality.get(todo_id, quali
 For each todo in dependency order, call `mcp__proj__todo_get` and compute a suggested quality level using these signals in priority order:
 1. **Tag signals (evaluated first, highest wins)**: `security`/`breaking-change`/`migration` → `paranoid`; `needs-review` → `careful`; `auto-execute` → `fast`
 2. **Complexity score** (dimensions 3-7 only — file-count and directory-spread default to 0 since no plans exist yet): score 8-14 → `careful`; 4-7 → `balanced`; 0-3 → `fast`. Note: `paranoid` is only reachable via tag signals, not score.
-3. **Requirements floor**: absence of requirements.md → `careful` minimum
+3. **Title complexity floor** (replaces requirements floor): If requirements.md exists, skip this signal. Otherwise, parse the todo title for complexity indicators:
+   - **Low-complexity indicators** (each -1): short title (<60 chars), targeted-fix pattern (`fix\s+(line\s+\d+|off.by.one|typo|import|indent)`), single-rename (`rename\s+\S+\s+to\s+`), version-bump (`bump\s+version|update\s+version`), add-guard (`add\s+(try[/]except|try[/]finally|null check|type hint|assert)`), remove-unused (`remove\s+unused|delete\s+dead`), single-file reference (exactly 1 file-like token with `.` extension or `/` path separator, excluding URLs with `://`)
+   - **High-complexity indicators** (each +1): long title (>120 chars), multi-file reference (`\d+\s+files?` or 2+ file-like tokens), rewrite keyword (`\b(rewrite|refactor|redesign|overhaul|rearchitect)\b`), cross-cutting keyword (`\b(all\s+plugins?|across|everywhere|every\s+\w+|global)\b`), feature keyword (`\b(new\s+feature|add\s+support\s+for|implement\s+\w+)\b`), scope keyword (`\b(migrate|migration)\b`, only if not already caught by tag signal #1)
+   - **Net score**: sum(high) - sum(low). Floor: <= -2 → no floor; -1 to +1 → `balanced` minimum; >= +2 → `careful` minimum
 4. **Notes risk keyword floor**: any of `auth`, `secret`, `migration`, `breaking` in notes → `careful` minimum
 5. **Tag-immune upgrade**: if suggested level is `fast`/`balanced` but todo has `security`/`breaking-change`/`migration` tag → upgrade to `careful`
 6. **Precedence**: tag signals override score; highest tag level wins (paranoid > careful > balanced > fast)
 
-**Reason format**: `"tag:<tag>"` for tag-driven; `"score:<N>/14 (pre-plan estimate)"` for score-driven; append `"+ floor: no-requirements"` or `"+ floor: keyword:<word>"` when a floor applied.
+**Reason format**: `"tag:<tag>"` for tag-driven; `"score:<N>/14 (pre-plan estimate)"` for score-driven; append `"+ floor: title-complexity:<net-score>"` when the title complexity floor applied, or `"+ floor: keyword:<word>"` when the notes keyword floor applied.
 
 Display suggestion table:
 ```
