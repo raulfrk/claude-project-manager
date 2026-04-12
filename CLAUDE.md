@@ -45,6 +45,21 @@ After completing any implementation, always validate the result against the spec
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
 - **Worktree isolation is ON by default** for `/proj:run` at all quality levels except `--paranoid`. Pass `--no-worktree` to opt out. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
+- **`isolation: "worktree"` on Agent tool does NOT work** — agents run in the main repo, not the worktree. Always use explicit `wt_create` via the worktree MCP tool, then pass the worktree path in the agent prompt with: "ALL file edits and git operations MUST happen in this directory: `<path>`".
+
+## Team Agent Shutdown
+
+**Shutdown procedure** (after all agents complete and go idle):
+1. Send `{"type": "shutdown_request", "reason": "done"}` via `SendMessage` to each agent individually (broadcast does not support structured messages).
+2. Wait ~30s for termination confirmations.
+3. Call `TeamDelete` to clean up team/task dirs.
+4. If `TeamDelete` fails ("N active members"), restart Claude — this kills all agents.
+
+**Known limitations:**
+- ~90% of agents terminate on shutdown_request; `claude-code-guide` subagent types tend to ignore it.
+- `TaskStop` is for background bash tasks only, not team agents.
+- No force-kill mechanism exists for team agents.
+- Always persist all critical state (commits, MCP calls) BEFORE attempting shutdown — never rely on clean shutdown for workflow correctness.
 
 ## Batch Completion Enforcement
 
