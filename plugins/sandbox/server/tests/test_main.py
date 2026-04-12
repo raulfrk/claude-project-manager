@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 from mcp.server.fastmcp import FastMCP
+
+# Stub shared modules before importing server.main
+_hook_mod = ModuleType("hook_dispatch")
+_hook_mod.enable_hook_dispatch = MagicMock()  # type: ignore[attr-defined]
+sys.modules.setdefault("hook_dispatch", _hook_mod)
+
+_transport_mod = ModuleType("hook_transport")
+_transport_mod.run_dual = MagicMock()  # type: ignore[attr-defined]
+sys.modules.setdefault("hook_transport", _transport_mod)
 
 
 class TestMain:
@@ -27,8 +38,7 @@ class TestMain:
 
         with patch("server.main.run_dual") as mock_run_dual:
             main()
-            _, kwargs = mock_run_dual.call_args
-            # Also accept positional: run_dual(mcp, "sandbox", default_port=19101)
+            _args, kwargs = mock_run_dual.call_args
             if "default_port" in kwargs:
                 assert kwargs["default_port"] == 19101
             else:
@@ -38,7 +48,6 @@ class TestMain:
         from server.main import mcp
 
         tool_names = {t.name for t in mcp._tool_manager.list_tools()}
-        # Verify at least some expected sandbox tools are registered
         assert "sandbox_list" in tool_names
         assert "sandbox_check" in tool_names
         assert "sandbox_add_write_path" in tool_names
