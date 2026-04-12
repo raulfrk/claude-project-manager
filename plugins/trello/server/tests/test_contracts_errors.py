@@ -7,6 +7,8 @@ inline error tests in test_contracts_cards.py.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import respx
 from test_contracts.builders import build_error_response
@@ -140,20 +142,20 @@ class TestNotFound404:
 class TestRateLimited429:
     @respx.mock
     def test_get_card_429(self, tools: dict) -> None:
-        """GET /1/cards/{id} returns 429 with Retry-After header."""
+        """GET /1/cards/{id} returns 429 — exhausts retries then raises."""
         respx.get(f"{BASE}/cards/c1").mock(
             return_value=build_error_response(RATE_LIMITED),
         )
-        with pytest.raises(RuntimeError, match="429"):
+        with patch("server.lib.client.time.sleep"), pytest.raises(RuntimeError, match="429"):
             tools["get_card"]("c1")
 
     @respx.mock
     def test_post_card_429(self, tools: dict) -> None:
-        """POST /1/cards returns 429 with Retry-After header."""
+        """POST /1/cards returns 429 — exhausts retries then raises."""
         respx.post(f"{BASE}/cards").mock(
             return_value=build_error_response(RATE_LIMITED),
         )
-        with pytest.raises(RuntimeError, match="429"):
+        with patch("server.lib.client.time.sleep"), pytest.raises(RuntimeError, match="429"):
             tools["add_card_to_list"]("list1", "Test Card")
 
     @respx.mock
@@ -162,7 +164,10 @@ class TestRateLimited429:
         respx.get(f"{BASE}/cards/c1").mock(
             return_value=build_error_response(RATE_LIMITED),
         )
-        with pytest.raises(RuntimeError, match="Rate limit exceeded"):
+        with (
+            patch("server.lib.client.time.sleep"),
+            pytest.raises(RuntimeError, match="Rate limit exceeded"),
+        ):
             tools["get_card"]("c1")
 
 

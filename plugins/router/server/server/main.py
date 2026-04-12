@@ -53,7 +53,11 @@ def _run_startup_discovery() -> None:
             summary = run_discovery(root=root)
         logger.info(summary)
     except Exception:
-        logger.exception("Hook auto-discovery failed")
+        logger.warning(
+            "Hook auto-discovery failed — server will start with no hooks registered. "
+            "Verify HOOKS_DISCOVERY_ROOT / HOOKS_DISCOVERY_GLOB env vars.",
+            exc_info=True,
+        )
 
 
 _run_startup_discovery()

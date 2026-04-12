@@ -112,3 +112,33 @@ class TestUpdateBoard:
         board_tools["update_board"]("b1")
         _, kwargs = mock_trello_client.put.call_args
         assert kwargs["params"] == {}
+
+    def test_rejects_non_whitelisted_board(
+        self,
+        mock_trello_client: MagicMock,
+        board_tools: dict,
+    ) -> None:
+        mock_trello_client._config.allowed_board_ids = ["b1"]
+        mock_trello_client.check_board_access.side_effect = RuntimeError(
+            "Board 'b999' not in whitelist. Allowed: ['b1']"
+        )
+
+        with pytest.raises(RuntimeError, match="not in whitelist"):
+            board_tools["update_board"]("b999", name="Hacked")
+
+        mock_trello_client.put.assert_not_called()
+
+    def test_rejects_empty_whitelist(
+        self,
+        mock_trello_client: MagicMock,
+        board_tools: dict,
+    ) -> None:
+        mock_trello_client._config.allowed_board_ids = []
+        mock_trello_client.check_board_access.side_effect = RuntimeError(
+            "No boards in whitelist. Run trello_init to configure allowed boards."
+        )
+
+        with pytest.raises(RuntimeError, match="No boards in whitelist"):
+            board_tools["update_board"]("b1", name="Test")
+
+        mock_trello_client.put.assert_not_called()

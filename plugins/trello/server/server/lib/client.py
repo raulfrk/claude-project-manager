@@ -56,10 +56,42 @@ class TrelloClient:
                 time.sleep(sleep_for)
         self._request_timestamps.append(time.monotonic())
 
+    MAX_RETRIES = 3
+    DEFAULT_RETRY_AFTER = 5  # seconds
+
     def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.is_success:
             return cast("JsonValue", resp.json())
         msg = f"Trello API error {resp.status_code}: {resp.text}"
+        raise RuntimeError(msg)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, ParamValue] | None = None,
+        json: Mapping[str, JsonValue] | None = None,
+    ) -> JsonValue:
+        """Send an HTTP request with rate limiting and 429 retry."""
+        self._rate_limit()
+        merged: dict[str, ParamValue] = {
+            **self._auth_params(),
+            **(params or {}),
+        }
+
+        resp: httpx.Response | None = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            resp = self._http.request(method, path, params=merged, json=json)
+            if resp.status_code == 429 and attempt < self.MAX_RETRIES:
+                try:
+                    retry_after = int(resp.headers.get("Retry-After", self.DEFAULT_RETRY_AFTER))
+                except (ValueError, TypeError):
+                    retry_after = self.DEFAULT_RETRY_AFTER
+                time.sleep(retry_after)
+                continue
+            return self._handle_response(resp)
+        # Unreachable: range(MAX_RETRIES + 1) always has >= 1 iteration
+        msg = "Retry loop completed without returning"
         raise RuntimeError(msg)
 
     def get(
@@ -68,9 +100,7 @@ class TrelloClient:
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a GET request to the Trello API."""
-        self._rate_limit()
-        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
-        return self._handle_response(self._http.get(path, params=merged))
+        return self._request("GET", path, params=params)
 
     def post(
         self,
@@ -79,9 +109,7 @@ class TrelloClient:
         json: Mapping[str, JsonValue] | None = None,
     ) -> JsonValue:
         """Send a POST request to the Trello API."""
-        self._rate_limit()
-        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
-        return self._handle_response(self._http.post(path, params=merged, json=json))
+        return self._request("POST", path, params=params, json=json)
 
     def put(
         self,
@@ -90,9 +118,7 @@ class TrelloClient:
         json: Mapping[str, JsonValue] | None = None,
     ) -> JsonValue:
         """Send a PUT request to the Trello API."""
-        self._rate_limit()
-        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
-        return self._handle_response(self._http.put(path, params=merged, json=json))
+        return self._request("PUT", path, params=params, json=json)
 
     def delete(
         self,
@@ -100,9 +126,7 @@ class TrelloClient:
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a DELETE request to the Trello API."""
-        self._rate_limit()
-        merged: dict[str, ParamValue] = {**self._auth_params(), **(params or {})}
-        return self._handle_response(self._http.delete(path, params=merged))
+        return self._request("DELETE", path, params=params)
 
 
 _cached_client: TrelloClient | None = None

@@ -35,6 +35,7 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Update a board's name or description.")
     def update_board(board_id: str, name: str | None = None, desc: str | None = None) -> str:
         client = get_client()
+        client.check_board_access(board_id)
         params: dict[str, str] = {}
         if name is not None:
             params["name"] = name

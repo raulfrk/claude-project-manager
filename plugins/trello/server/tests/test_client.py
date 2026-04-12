@@ -31,6 +31,7 @@ def _ok_response(data: object = None) -> MagicMock:
     """Create a mock httpx.Response that looks successful."""
     resp = MagicMock(spec=httpx.Response)
     resp.is_success = True
+    resp.status_code = 200
     resp.json.return_value = data if data is not None else {}
     return resp
 
@@ -49,67 +50,67 @@ def _error_response(status: int, text: str) -> MagicMock:
 
 class TestAuthParams:
     def test_auth_params_included_in_get(self, client: TrelloClient) -> None:
-        client._http.get.return_value = _ok_response({"id": "b1"})
+        client._http.request.return_value = _ok_response({"id": "b1"})
 
         client.get("/boards/b1")
 
-        _, kwargs = client._http.get.call_args
+        _, kwargs = client._http.request.call_args
         assert kwargs["params"]["key"] == "test-key"
         assert kwargs["params"]["token"] == "test-token"
 
     def test_auth_params_included_in_post(self, client: TrelloClient) -> None:
-        client._http.post.return_value = _ok_response()
+        client._http.request.return_value = _ok_response()
 
         client.post("/cards", params={"name": "c1"})
 
-        _, kwargs = client._http.post.call_args
+        _, kwargs = client._http.request.call_args
         params = kwargs["params"]
         assert params["key"] == "test-key"
         assert params["token"] == "test-token"
         assert params["name"] == "c1"
 
     def test_auth_params_included_in_put(self, client: TrelloClient) -> None:
-        client._http.put.return_value = _ok_response()
+        client._http.request.return_value = _ok_response()
 
         client.put("/cards/c1", params={"name": "updated"})
 
-        _, kwargs = client._http.put.call_args
+        _, kwargs = client._http.request.call_args
         params = kwargs["params"]
         assert params["key"] == "test-key"
         assert params["token"] == "test-token"
         assert params["name"] == "updated"
 
     def test_auth_params_included_in_delete(self, client: TrelloClient) -> None:
-        client._http.delete.return_value = _ok_response()
+        client._http.request.return_value = _ok_response()
 
         client.delete("/cards/c1")
 
-        _, kwargs = client._http.delete.call_args
+        _, kwargs = client._http.request.call_args
         assert kwargs["params"]["key"] == "test-key"
         assert kwargs["params"]["token"] == "test-token"
 
     def test_params_none_defaults_to_empty(self, client: TrelloClient) -> None:
-        client._http.get.return_value = _ok_response([])
+        client._http.request.return_value = _ok_response([])
 
         client.get("/boards")
 
-        _, kwargs = client._http.get.call_args
+        _, kwargs = client._http.request.call_args
         assert kwargs["params"] == {"key": "test-key", "token": "test-token"}
 
     def test_post_merges_json_kwarg(self, client: TrelloClient) -> None:
-        client._http.post.return_value = _ok_response()
+        client._http.request.return_value = _ok_response()
 
         client.post("/cards", json={"name": "c1"})
 
-        _, kwargs = client._http.post.call_args
+        _, kwargs = client._http.request.call_args
         assert kwargs["json"] == {"name": "c1"}
 
     def test_put_merges_json_kwarg(self, client: TrelloClient) -> None:
-        client._http.put.return_value = _ok_response()
+        client._http.request.return_value = _ok_response()
 
         client.put("/cards/c1", json={"name": "updated"})
 
-        _, kwargs = client._http.put.call_args
+        _, kwargs = client._http.request.call_args
         assert kwargs["json"] == {"name": "updated"}
 
 
@@ -122,7 +123,7 @@ class TestRateLimiting:
         with patch("httpx.Client"):
             c = TrelloClient(config)
         c._http = MagicMock()
-        c._http.get.return_value = _ok_response()
+        c._http.request.return_value = _ok_response()
 
         with patch("server.lib.client.time.sleep") as mock_sleep:
             for _ in range(4):
@@ -134,7 +135,7 @@ class TestRateLimiting:
         with patch("httpx.Client"):
             c = TrelloClient(config)
         c._http = MagicMock()
-        c._http.get.return_value = _ok_response()
+        c._http.request.return_value = _ok_response()
 
         with patch("server.lib.client.time.sleep") as mock_sleep:
             c.get("/a")
@@ -148,7 +149,7 @@ class TestRateLimiting:
         with patch("httpx.Client"):
             c = TrelloClient(config)
         c._http = MagicMock()
-        c._http.get.return_value = _ok_response()
+        c._http.request.return_value = _ok_response()
         # Pre-populate with old timestamps (>10s ago)
         old = time.monotonic() - 15
         c._request_timestamps.append(old)
@@ -163,7 +164,7 @@ class TestRateLimiting:
         with patch("httpx.Client"):
             c = TrelloClient(config)
         c._http = MagicMock()
-        c._http.get.return_value = _ok_response()
+        c._http.request.return_value = _ok_response()
 
         assert len(c._request_timestamps) == 0
         c.get("/a")
@@ -177,46 +178,121 @@ class TestRateLimiting:
 
 class TestErrorHandling:
     def test_401_raises_runtime_error(self, client: TrelloClient) -> None:
-        client._http.get.return_value = _error_response(401, "Unauthorized")
+        client._http.request.return_value = _error_response(401, "Unauthorized")
 
         with pytest.raises(RuntimeError, match="Trello API error 401: Unauthorized"):
             client.get("/boards")
 
     def test_404_raises_runtime_error(self, client: TrelloClient) -> None:
-        client._http.get.return_value = _error_response(404, "Not Found")
+        client._http.request.return_value = _error_response(404, "Not Found")
 
         with pytest.raises(RuntimeError, match="Trello API error 404"):
             client.get("/cards/nonexistent")
 
     def test_500_raises_runtime_error(self, client: TrelloClient) -> None:
-        client._http.post.return_value = _error_response(500, "Internal Server Error")
+        client._http.request.return_value = _error_response(500, "Internal Server Error")
 
         with pytest.raises(RuntimeError, match="Trello API error 500"):
             client.post("/cards")
 
     def test_success_returns_json(self, client: TrelloClient) -> None:
-        client._http.get.return_value = _ok_response({"id": "abc", "name": "Board"})
+        client._http.request.return_value = _ok_response({"id": "abc", "name": "Board"})
 
         result = client.get("/boards/abc")
         assert result == {"id": "abc", "name": "Board"}
 
     def test_post_error_includes_body(self, client: TrelloClient) -> None:
-        client._http.post.return_value = _error_response(400, "invalid value for name")
+        client._http.request.return_value = _error_response(400, "invalid value for name")
 
         with pytest.raises(RuntimeError, match="invalid value for name"):
             client.post("/cards", params={"name": ""})
 
     def test_put_error(self, client: TrelloClient) -> None:
-        client._http.put.return_value = _error_response(403, "Forbidden")
+        client._http.request.return_value = _error_response(403, "Forbidden")
 
         with pytest.raises(RuntimeError, match="Trello API error 403"):
             client.put("/boards/b1", params={"name": "x"})
 
     def test_delete_error(self, client: TrelloClient) -> None:
-        client._http.delete.return_value = _error_response(404, "Not Found")
+        client._http.request.return_value = _error_response(404, "Not Found")
 
         with pytest.raises(RuntimeError, match="Trello API error 404"):
             client.delete("/cards/missing")
+
+
+# ---------- Reactive rate limiting (429 Retry-After) ----------
+
+
+class TestReactiveRateLimiting:
+    def test_429_retries_with_retry_after_header(self, client: TrelloClient) -> None:
+        """429 with Retry-After: 2 should sleep 2s and retry."""
+        resp_429 = _error_response(429, "Rate limit exceeded")
+        resp_429.headers = {"Retry-After": "2"}
+        resp_ok = _ok_response({"id": "b1"})
+
+        client._http.request.side_effect = [resp_429, resp_ok]
+
+        with patch("server.lib.client.time.sleep") as mock_sleep:
+            result = client.get("/boards/b1")
+
+        mock_sleep.assert_called_once_with(2)
+        assert result == {"id": "b1"}
+        assert client._http.request.call_count == 2
+
+    def test_429_retries_with_default_backoff(self, client: TrelloClient) -> None:
+        """429 without Retry-After header should sleep 5s (default)."""
+        resp_429 = _error_response(429, "Rate limit exceeded")
+        resp_429.headers = {}
+        resp_ok = _ok_response({"id": "b1"})
+
+        client._http.request.side_effect = [resp_429, resp_ok]
+
+        with patch("server.lib.client.time.sleep") as mock_sleep:
+            result = client.get("/boards/b1")
+
+        mock_sleep.assert_called_once_with(5)
+        assert result == {"id": "b1"}
+
+    def test_429_exhausts_retries(self, client: TrelloClient) -> None:
+        """3 consecutive 429s should raise RuntimeError."""
+        resp_429 = _error_response(429, "Rate limit exceeded")
+        resp_429.headers = {"Retry-After": "1"}
+
+        client._http.request.side_effect = [resp_429, resp_429, resp_429, resp_429]
+
+        with patch("server.lib.client.time.sleep"), pytest.raises(RuntimeError, match="429"):
+            client.get("/boards/b1")
+
+        # 1 initial + 3 retries = 4 attempts
+        assert client._http.request.call_count == 4
+
+    def test_non_429_error_not_retried(self, client: TrelloClient) -> None:
+        """Non-429 errors should raise immediately without retry."""
+        resp_500 = _error_response(500, "Internal Server Error")
+
+        client._http.request.side_effect = [resp_500]
+
+        with (
+            patch("server.lib.client.time.sleep") as mock_sleep,
+            pytest.raises(RuntimeError, match="500"),
+        ):
+            client.get("/boards/b1")
+
+        mock_sleep.assert_not_called()
+        assert client._http.request.call_count == 1
+
+    def test_429_invalid_retry_after_uses_default(self, client: TrelloClient) -> None:
+        """429 with non-numeric Retry-After should use default 5s."""
+        resp_429 = _error_response(429, "Rate limit exceeded")
+        resp_429.headers = {"Retry-After": "invalid"}
+        resp_ok = _ok_response({"id": "b1"})
+
+        client._http.request.side_effect = [resp_429, resp_ok]
+
+        with patch("server.lib.client.time.sleep") as mock_sleep:
+            client.get("/boards/b1")
+
+        mock_sleep.assert_called_once_with(5)
 
 
 # ---------- Singleton get_client ----------
