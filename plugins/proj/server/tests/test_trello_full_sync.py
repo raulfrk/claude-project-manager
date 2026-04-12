@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from server.tools.trello_full_sync import _call_trello_tool
+from server.tools.trello_full_sync import _call_trello_tool, _execute_push_ops, _retry_failed_ops
 
 # ── _call_trello_tool envelope unwrapping ────────────────────────────────────
 
@@ -119,3 +120,77 @@ def test_no_camel_case_params_in_source() -> None:
     for key in camel_keys:
         matches = re.findall(rf'"{key}"', content)
         assert not matches, f'Found camelCase key "{key}" in trello_full_sync.py'
+
+
+# ── Error visibility tests ────────────────────────────────────────────────────
+
+
+def test_execute_push_ops_prefetch_failure_logs_error(caplog: pytest.LogCaptureFixture) -> None:
+    """Transport error during checklist pre-fetch logs ERROR and falls back gracefully."""
+    import httpx
+
+    ops = [
+        {
+            "type": "push_create_checklist",
+            "tool": "create_checklist",
+            "params": {"card_id": "card1", "name": "Tasks"},
+            "checklist_key": "t-1",
+        }
+    ]
+
+    def _side_effect(tool_name: str, params: dict) -> object:
+        if tool_name == "get_card_checklists":
+            raise httpx.ConnectError("socket unreachable")
+        # For the actual create_checklist call succeed
+        return {"id": "new-cl", "name": "Tasks"}
+
+    with (
+        patch("server.tools.trello_full_sync._call_trello_tool", side_effect=_side_effect),
+        caplog.at_level(logging.ERROR, logger="server.tools.trello_full_sync"),
+    ):
+        succeeded, errors = _execute_push_ops(ops, card_id="card1")
+
+    # Pre-fetch failure should be logged at ERROR
+    assert any(
+        "pre-fetch" in r.message.lower()
+        or "prefetch" in r.message.lower()
+        or "fetch" in r.message.lower()
+        for r in caplog.records
+        if r.levelno == logging.ERROR
+    )
+    # The op itself should still proceed (succeeded or failed is ok, but not silently dropped)
+    assert len(succeeded) + len(errors) == 1
+
+
+def test_retry_failed_ops_checklist_fetch_failure_logs_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Transport error during retry dedup checklist fetch logs ERROR."""
+    import httpx
+
+    failed_ops = [
+        {
+            "operation_type": "push_create_checklist",
+            "error": "timeout",
+            "retryable": True,
+            "retry_payload": {
+                "type": "push_create_checklist",
+                "tool": "create_checklist",
+                "params": {"card_id": "card1", "name": "Tasks"},
+            },
+        }
+    ]
+
+    def _side_effect(tool_name: str, params: dict) -> object:
+        if tool_name == "get_card_checklists":
+            raise httpx.ConnectError("socket unreachable")
+        # create_checklist succeeds
+        return {"id": "new-cl", "name": "Tasks"}
+
+    with (
+        patch("server.tools.trello_full_sync._call_trello_tool", side_effect=_side_effect),
+        caplog.at_level(logging.ERROR, logger="server.tools.trello_full_sync"),
+    ):
+        _succeeded, _still_failed = _retry_failed_ops(failed_ops)
+
+    assert any(r.levelno == logging.ERROR for r in caplog.records)

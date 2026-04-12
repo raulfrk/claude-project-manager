@@ -252,7 +252,13 @@ def _execute_push_ops(
                 for x in (raw_checklists if isinstance(raw_checklists, list) else [])
                 if isinstance(x, dict)
             ]
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "Failed to pre-fetch checklists for dedup (card=%s): %s",
+                card_id,
+                exc,
+                exc_info=True,
+            )
             existing_checklists = None  # If fetch fails, skip dedup and proceed normally
 
     for op in ops:
@@ -371,7 +377,13 @@ def _retry_failed_ops(
                 _checklist_cache[cid] = [
                     x for x in (raw if isinstance(raw, list) else []) if isinstance(x, dict)
                 ]
-            except Exception:
+            except Exception as exc:
+                logger.error(
+                    "Failed to fetch checklists for retry dedup (card=%s): %s",
+                    cid,
+                    exc,
+                    exc_info=True,
+                )
                 _checklist_cache[cid] = []
         return _checklist_cache[cid]
 

@@ -931,6 +931,12 @@ def apply_mapping(
                             storage.save_meta(cfg, meta)
             except Exception as exc:
                 # Project creation failed — mark all issues in group as failed
+                _log.error(
+                    "Project creation failed for jira_key=%s: %s",
+                    group.get("jira_key", "<unknown>"),
+                    exc,
+                    exc_info=True,
+                )
                 group_issues = group.get("issues", [])
                 if isinstance(group_issues, list):
                     for gi in group_issues:
@@ -1103,6 +1109,12 @@ def apply_mapping(
                 result.per_issue[issue_key] = issue_status
 
             except Exception as exc:
+                _log.error(
+                    "Failed to apply jira issue %s: %s",
+                    issue_key,
+                    exc,
+                    exc_info=True,
+                )
                 result.per_issue[issue_key] = f"failed: {exc}"
                 continue
 

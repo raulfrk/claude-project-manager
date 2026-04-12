@@ -29,6 +29,8 @@ from server.tools.todoist_full_sync import (
     _collect_descendant_todoist_ids,
     _compute_todoist_depth,
     _execute_push_completes,
+    _execute_push_creates,
+    _execute_push_reopens,
     _infer_parent_link_from_children,
     _migrate_parent_links,
     apply_changes,
@@ -1789,3 +1791,47 @@ class TestArchivedReconciliation:
         assert plan.push_complete.count("t_dup") == 1
         # archived_completions_pushed is 0 because set-difference excluded the already-queued ID
         assert plan.archived_completions_pushed == 0
+
+
+# ── Error visibility tests ────────────────────────────────────────────────────
+
+
+class TestPushHelperErrorLogging:
+    """Push helpers must log ERROR when transport/auth exceptions are raised."""
+
+    def test_push_creates_transport_error_logs(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Transport error during push_create batch logs ERROR."""
+        import logging
+
+        tasks = [{"todo_id": "t-1", "content": "My task", "project_id": "p1"}]
+
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("socket unreachable")),
+        )
+
+        with caplog.at_level(logging.ERROR, logger="server.tools.todoist_full_sync"):
+            _succeeded, errors, _ = _execute_push_creates(tasks, project_todoist_id=None)
+
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+        assert len(errors) == 1
+        assert errors[0]["operation_type"] == "push_create"
+
+    def test_push_reopens_transport_error_logs(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Transport error during push_reopen logs ERROR."""
+        import logging
+
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("connection refused")),
+        )
+
+        with caplog.at_level(logging.ERROR, logger="server.tools.todoist_full_sync"):
+            _succeeded, errors = _execute_push_reopens(["task-1", "task-2"])
+
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+        assert len(errors) == 1

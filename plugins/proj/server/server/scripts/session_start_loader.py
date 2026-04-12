@@ -44,8 +44,11 @@ def _resolve_tracking_dir(override: Path | None) -> Path:
             td = cfg.get("tracking_dir")
             if isinstance(td, str) and td:
                 return Path(td).expanduser()
-    except Exception:  # noqa: S110 — never fail the session for config parse errors
-        pass
+    except Exception as exc:
+        print(
+            f"{WARNING_PREFIX} failed to read proj.yaml for tracking_dir: {exc}",
+            file=sys.stderr,
+        )
     return DEFAULT_TRACKING_DIR
 
 

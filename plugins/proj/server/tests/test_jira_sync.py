@@ -3587,3 +3587,83 @@ class TestMultiEpicSync:
         # No new projects or todos on resync
         assert r2.counts["projects_created"] == 0
         assert r2.counts["todos_created"] == 0
+
+
+# ── Error visibility tests ────────────────────────────────────────────────────
+
+
+class TestApplyMappingErrorLogging:
+    """apply_mapping must log ERROR for project-creation and issue-apply failures."""
+
+    def test_project_creation_failure_logs_error(
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When a storage write raises during project creation, ERROR is logged."""
+        import logging
+
+        cfg, _ = cfg_with_project
+
+        # Patch storage.save_meta to blow up on first call (project creation)
+        original_save_meta = storage.save_meta
+        call_count = {"n": 0}
+
+        def _failing_save_meta(c: object, m: object) -> None:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OSError("disk full")
+            return original_save_meta(c, m)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(storage, "save_meta", _failing_save_meta)
+
+        group = {
+            "jira_key": "EP-99",
+            "suggested_project": "new-project",
+            "create_project": True,
+            "project_exists": False,
+            "is_epic": True,
+            "issues": [_make_jira_issue("EP-99", "Epic title")],
+        }
+
+        with caplog.at_level(logging.ERROR, logger="server.tools.jira_sync"):
+            result = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+        # All issues in the failing group should be marked failed in per_issue
+        assert result.per_issue.get("EP-99", "").startswith("failed")
+
+    def test_issue_apply_failure_logs_error(
+        self,
+        cfg_with_project: tuple[ProjConfig, str],
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When saving todos raises during issue processing, ERROR is logged."""
+        import logging
+
+        cfg, project_name = cfg_with_project
+
+        # Project exists already; patch save_todos to fail
+        monkeypatch.setattr(
+            storage,
+            "save_todos",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        issue = _make_jira_issue("PROJ-1", "Do something")
+        group = {
+            "jira_key": None,
+            "suggested_project": project_name,
+            "create_project": False,
+            "project_exists": True,
+            "is_epic": False,
+            "issues": [issue],
+        }
+
+        with caplog.at_level(logging.ERROR, logger="server.tools.jira_sync"):
+            result = apply_mapping(JiraApplyInput(groups=[group]), cfg)
+
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+        assert result.per_issue.get("PROJ-1", "").startswith("failed")

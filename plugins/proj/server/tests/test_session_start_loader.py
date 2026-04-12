@@ -17,6 +17,7 @@ from server.lib import storage
 from server.lib.models import ProjConfig
 from server.scripts.session_start_loader import (
     WARNING_PREFIX,
+    _resolve_tracking_dir,
     detect_project_for_cwd,
 )
 from tests.conftest import setup_project
@@ -299,3 +300,28 @@ def test_cli_warning_on_orphan(cfg: ProjConfig, tmp_path: Path) -> None:
     assert result.stdout == ""
     assert WARNING_PREFIX in result.stderr
     assert "1 project(s) had unreadable meta.yaml" in result.stderr
+
+
+# ── Error visibility tests ────────────────────────────────────────────────────
+
+
+def test_resolve_tracking_dir_corrupt_yaml_prints_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A corrupt proj.yaml triggers a stderr warning instead of silently swallowing the error."""
+    from unittest.mock import patch
+
+    corrupt_yaml = tmp_path / "proj.yaml"
+    corrupt_yaml.write_text("{{invalid: yaml: [")  # intentionally malformed
+
+    with patch("server.scripts.session_start_loader.PROJ_CONFIG_PATH", corrupt_yaml):
+        result = _resolve_tracking_dir(override=None)
+
+    # Should fall back to DEFAULT_TRACKING_DIR
+    from server.scripts.session_start_loader import DEFAULT_TRACKING_DIR
+
+    assert result == DEFAULT_TRACKING_DIR
+
+    captured = capsys.readouterr()
+    assert WARNING_PREFIX in captured.err
+    assert "proj.yaml" in captured.err

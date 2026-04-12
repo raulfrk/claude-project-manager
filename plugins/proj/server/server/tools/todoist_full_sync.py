@@ -1155,6 +1155,7 @@ def _execute_push_creates(
                     )
     except Exception as e:
         # All tasks in this batch failed
+        logger.error("push_create batch failed: %s", e, exc_info=True)
         for task in tasks:
             errors.append(
                 {
@@ -1231,6 +1232,7 @@ def _execute_push_updates(
         _call_todoist_tool("todoist_update_tasks", {"tasks": tasks})
         return tasks, []
     except Exception as e:
+        logger.error("push_update failed: %s", e, exc_info=True)
         errors: list[dict[str, JsonValue]] = [
             {
                 "operation_type": "push_update",
@@ -1293,6 +1295,7 @@ def _execute_push_completes(
                     }
                 )
         except Exception as e:
+            logger.error("push_complete chunk failed: %s", e, exc_info=True)
             all_errors.append(
                 {
                     "operation_type": "push_complete",
@@ -1316,6 +1319,7 @@ def _execute_push_reopens(
         _call_todoist_tool("todoist_uncomplete_tasks", {"ids": task_ids})
         return task_ids, []
     except Exception as e:
+        logger.error("push_reopen failed: %s", e, exc_info=True)
         errors: list[dict[str, JsonValue]] = [
             {
                 "operation_type": "push_reopen",
@@ -1338,6 +1342,7 @@ def _execute_ghost_close(
         _call_todoist_tool("todoist_complete_tasks", {"ids": task_ids})
         return task_ids, []
     except Exception as e:
+        logger.error("ghost_close failed: %s", e, exc_info=True)
         errors: list[dict[str, JsonValue]] = [
             {
                 "operation_type": "ghost_close",
@@ -1365,6 +1370,9 @@ def _execute_root_only_cleanup(
             _call_todoist_tool("todoist_delete", {"id": todoist_task_id})
             succeeded.append(entry)
         except Exception as e:
+            logger.error(
+                "root_only_cleanup failed for task %s: %s", todoist_task_id, e, exc_info=True
+            )
             errors.append(
                 {
                     "operation_type": "root_only_cleanup",
@@ -1520,6 +1528,7 @@ def _retry_failed_ops(
                 still_failed.append(entry)
                 continue
         except Exception as e:
+            logger.error("retry op %s failed: %s", op_type, e, exc_info=True)
             still_failed.append(
                 {
                     "operation_type": op_type,
