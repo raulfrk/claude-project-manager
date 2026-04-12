@@ -344,6 +344,55 @@ class TestReconcile:
         data = read_settings(tmp_path)
         assert "/tmp/proj" in data["sandbox"]["filesystem"]["allowWrite"]
 
+    def test_reconcile_path_adds_edit_permission(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}},
+            },
+        )
+        sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/proj"])
+        data = read_settings(tmp_path)
+        assert "Edit(//tmp/proj/**)" in data["permissions"]["allow"]
+
+    def test_reconcile_path_added_count_includes_edit(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}},
+            },
+        )
+        result = json.loads(sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/proj"]))
+        assert result["added"] == 2
+
+    def test_reconcile_path_idempotent(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}},
+            },
+        )
+        sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/proj"])
+        result = json.loads(sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/proj"]))
+        assert result["added"] == 0
+        assert result["removed"] == 0
+
+    def test_reconcile_multiple_paths_count(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}},
+            },
+        )
+        result = json.loads(
+            sandbox_reconcile(expected_servers=[], expected_paths=["/tmp/a", "/tmp/b"])
+        )
+        assert result["added"] == 4
+
     def test_reconcile_with_skill_prefixes(self, tmp_path: Path) -> None:
         write_settings(tmp_path, {"permissions": {"allow": []}})
         result = json.loads(

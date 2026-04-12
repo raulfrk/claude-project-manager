@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,8 +20,6 @@ def _resolve_path(path: str) -> str:
     original = str(Path(path).expanduser()).rstrip("/")
     if resolved != original:
         # Symlink traversal — log but proceed
-        import logging
-
         logging.getLogger(__name__).warning("Path resolved via symlink: %s -> %s", path, resolved)
     return resolved
 
@@ -520,6 +519,7 @@ def sandbox_reconcile(
             for entry in allow_entries_for_path(abs_path):
                 if entry not in settings.permissions.allow:
                     settings.permissions.allow.append(entry)
+                    added += 1
 
     # Reconcile skill prefixes if provided
     if expected_skill_prefixes is not None:
