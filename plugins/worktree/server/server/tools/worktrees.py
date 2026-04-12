@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,17 +17,34 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+logger = logging.getLogger(__name__)
+
+
 def _find_worktree(path: str) -> tuple[str, str] | None:
     """Find a worktree by path across all repos. Returns (abs_path, repo_path) or None."""
     abs_path = str(Path(path).expanduser().resolve())
     config = storage.load()
+    if not config.base_repos:
+        logger.warning("_find_worktree: no base repos configured")
+        return None
     for repo in config.base_repos:
         try:
             entries = git.list_worktrees(repo.path)
-        except GitError:
+        except GitError as exc:
+            logger.warning(
+                "_find_worktree: git list_worktrees failed for repo %s: %s",
+                repo.label,
+                exc,
+                exc_info=True,
+            )
             continue
         if any(e.path == abs_path for e in entries):
             return abs_path, repo.path
+    logger.warning(
+        "_find_worktree: path %s not found in any repo (checked %d repos)",
+        abs_path,
+        len(config.base_repos),
+    )
     return None
 
 
