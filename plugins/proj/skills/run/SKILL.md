@@ -1,8 +1,8 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree]"
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] [1:fast,2:careful,3]"
 ---
 
 Run workflow for: $ARGUMENTS
@@ -88,14 +88,24 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3 (trust 3 skips planning)."
 - `--paranoid --worktree` → paranoid wins, worktree disabled (warn: "max_parallel=1 makes worktree isolation unnecessary").
 - `--worktree --no-interactive` → Allowed. Auto-resolve only for merge conflicts.
+- Per-todo `:level` annotation + `--no-verify` → annotation wins for that todo; `--no-verify` applies only to todos without an annotation.
+- Per-todo `:level` annotation + `--force-plan` → annotation wins for that todo; `--force-plan` applies only to todos without an annotation.
+- Per-todo `:fast` or `:balanced` on `security`/`breaking-change`/`migration`-tagged todo → silently upgraded to `:careful` at parse time with user warning (tag-immune safety rule; mirrors global `--fast` tag-immunity in Phase C1).
 
 If no todo ID, stop with: "Todo ID required. Usage: `/proj:run <id> [--steps define,execute] [--from <step>]`"
 
 Default step order: `[define, preflight, decompose, refine, execute]`.
 Apply `--steps` or `--from` to filter/slice. Error if any step name is invalid.
 
-For **single ID**: call `mcp__proj__todo_get` to confirm it exists. Continue to step 2.
-For **range or comma list**: parse into a deduplicated list. Skip to **"Batch mode"** below.
+For **single ID**: call `mcp__proj__todo_get` to confirm it exists. If the input contains a `:level` suffix (e.g., `1:fast`), stop with parse error: "Cannot use `:level` annotation in single-ID mode. Use `--fast` (or the appropriate quality flag) instead."
+For **range or comma list**: parse each token:
+- If token matches `<range>:<level>` (e.g., `2-5:fast`): stop with parse error: "Per-range annotation is not supported. Use explicit list: `2:fast,3:fast,...`"
+- If token matches `<id>:<level>`: extract `id` and `level`; if level is not one of `fast|balanced|careful|paranoid`: stop with parse error "Unknown level '<level>' — valid levels: fast, balanced, careful, paranoid"
+- If token is a bare `<id>` or `<range>`: no annotation
+After parsing all tokens: call `mcp__proj__todo_get` on each extracted ID to confirm existence; stop with parse error for any missing ID.
+Store `per_todo_quality: dict[str, str]` (mapping id → level for annotated todos only). If the entire input contains at least one annotation, `auto_suggest_mode = false`; if zero annotations, `auto_suggest_mode = true`.
+Tag-immune upgrade: for each ID in `per_todo_quality` whose todo has tags `security`, `breaking-change`, or `migration`: if the annotated level is `fast` or `balanced`, silently upgrade to `careful` and warn: "Todo N has tag X — annotation :<old> upgraded to :careful (tag-immune safety rule)"
+Skip to **"Batch mode"** below.
 
 ---
 
@@ -889,6 +899,56 @@ Suggested next: `1. /proj:status` -- see updated project overview
 **b.** Dependency order
 Call `mcp__proj__proj_identify_batches` with all todo IDs. Error on cycles.
 
+**Phase A.0 — Quality Level Resolution (batch mode only):**
+
+Define helper: `effective_quality(todo_id) = per_todo_quality.get(todo_id, quality_level)` — returns the per-todo annotated level if present, else falls back to the batch-level `quality_level`.
+
+> ⚠ **Editor note**: All quality-level gates in batch mode must use `effective_quality(todo_id)`, never bare `quality_level`. If you add a new quality-level control point to the batch phases, apply this same rule.
+
+**If `auto_suggest_mode` is true** (entire input had zero `:level` annotations):
+
+For each todo in dependency order, call `mcp__proj__todo_get` and compute a suggested quality level using these signals in priority order:
+1. **Tag signals (evaluated first, highest wins)**: `security`/`breaking-change`/`migration` → `paranoid`; `needs-review` → `careful`; `auto-execute` → `fast`
+2. **Complexity score** (dimensions 3-7 only — file-count and directory-spread default to 0 since no plans exist yet): score 8-14 → `careful`; 4-7 → `balanced`; 0-3 → `fast`. Note: `paranoid` is only reachable via tag signals, not score.
+3. **Requirements floor**: absence of requirements.md → `careful` minimum
+4. **Notes risk keyword floor**: any of `auth`, `secret`, `migration`, `breaking` in notes → `careful` minimum
+5. **Tag-immune upgrade**: if suggested level is `fast`/`balanced` but todo has `security`/`breaking-change`/`migration` tag → upgrade to `careful`
+6. **Precedence**: tag signals override score; highest tag level wins (paranoid > careful > balanced > fast)
+
+**Reason format**: `"tag:<tag>"` for tag-driven; `"score:<N>/14 (pre-plan estimate)"` for score-driven; append `"+ floor: no-requirements"` or `"+ floor: keyword:<word>"` when a floor applied.
+
+Display suggestion table:
+```
+### Auto-suggest quality levels
+
+| Todo | Title | Suggested | Reason |
+|------|-------|-----------|--------|
+| <id> | <title> | <level> | <reason> |
+```
+
+Present three options via `AskUserQuestion`:
+- **Accept all** — populate `per_todo_quality` from suggestions, proceed
+- **Tweak** — enter Tweak flow
+- **Override batch** — ask user for one level to apply to all todos
+
+**Tweak flow**:
+1. `AskUserQuestion`: "Which todo IDs do you want to change? (comma-separated, e.g. `2,4`)"
+2. For each entered ID: if not in batch, warn inline "Todo X is not in this batch — skipped" and continue. For valid IDs: `AskUserQuestion` with 4 level options + "Keep suggested" — one call per ID, in order.
+3. After all IDs processed, re-display the table with resolved levels.
+4. If user then selects **Override batch**: if any rows were individually tweaked, ask confirmation "This will discard N individual tweaks. Confirm?" before applying.
+
+**If `auto_suggest_mode` is false** (at least one annotation present):
+Skip auto-suggest. `per_todo_quality` already populated from parse step. Unspecified todos fall back to `quality_level` via `effective_quality()`.
+
+**Derive batch-level execution parameters** (after `per_todo_quality` is fully confirmed):
+- `batch_max_parallel_execute`: most conservative quality level across all `per_todo_quality` values (paranoid → 1, careful → 10, balanced/fast → 30). This replaces the table-derived `max_parallel` for **Phase C (execute) only**. Phases B (decompose) and C0 (speculative planning) use the original batch-level `quality_level`'s `max_parallel`.
+- `batch_worktree_enabled`: if any todo in `per_todo_quality` resolves to `paranoid` → `false` (disabled for whole batch; matches existing global `--paranoid → worktree off` behavior). Otherwise: use existing `worktree_enabled` derivation.
+- Display notice if conservative rule triggered: "⚠ max_parallel set to 1 because todo N resolves to paranoid"
+
+**`--no-interactive` path**: skip all AskUserQuestion prompts; auto-accept all suggestions; log via `notes_append` with tag `auto-suggest:accepted`; note body is a markdown table `| Todo | Title | Suggested | Reason |` with a header line including the run timestamp.
+
+**`--resume` checkpoint**: `per_todo_quality` map and original annotation string are included in the checkpoint YAML and restored on `--resume` before Phase A.0 is re-entered (or skipped if already populated).
+
 **Iteration loop** (repeat up to `--iter N` times, default 5):
 
 If N > 1: announce `Iteration <i>/<N>`
@@ -922,7 +982,7 @@ If Re-define: run interactive define on each flagged todo, then resume from deco
 
 **Phase A.5 — Preflight checklist:**
 
-IF quality_level == fast: skip preflight entirely, proceed to Phase B.
+IF effective_quality(todo_id) == fast: skip preflight for this todo, proceed to Phase B.
 
 For each todo in dependency order:
   Run the preflight structural checks (10 checks if `preflight_version: 2`, else legacy 5 — same table and rules as single-ID mode above, including grandfather, fix-loop cap, and `--no-interactive` demotion).
@@ -953,7 +1013,7 @@ If all pass: silent, proceed to Phase A.5b.
 
 **Phase A.5b — Adversarial Review (Define) — Batch:**
 
-Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`.
+Runs only when `effective_quality(todo_id)` in `[careful, paranoid]`. NEVER when `effective_quality(todo_id)` is `balanced` or `fast`.
 
 **Batch sampling**: if the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (ranked by the 7-dimension complexity score). Override with `--force-preflight-all`.
 
@@ -989,10 +1049,10 @@ After all batches complete: `TeamDelete(team_name="run-decompose-fallback-{proje
 
 After Phase B completes (either mode): refresh descendant lists via `mcp__proj__todo_tree`.
 
-**Phase B.75 — Refine (if (`quality_level in [careful, paranoid]`) AND `refine` in steps AND NOT `--no-interactive`):**
+**Phase B.75 — Refine (if (`effective_quality(todo_id) in [careful, paranoid]`) AND `refine` in steps AND NOT `--no-interactive`):**
 
-IF quality_level == fast: skip refine entirely, proceed to convergence check.
-IF quality_level in [careful, paranoid]: auto-enable refine regardless of --refine flag.
+IF effective_quality(todo_id) == fast: skip refine for this todo, proceed to convergence check.
+IF effective_quality(todo_id) in [careful, paranoid]: auto-enable refine regardless of --refine flag.
 
 For each todo in dependency order, call the Skill tool: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttling from quality_level.
   Present per-todo refinement reports sequentially.
@@ -1029,10 +1089,10 @@ If NOT `--no-interactive`, prompt:
 2. **Stop** — Exit (prep saved)
 ```
 
-IF quality_level == fast:
+IF all todos have effective_quality == fast:
   Display warning: "⚡ Running in --fast mode. Auto-executing low-complexity todos. Tag-immune todos (security/breaking-change/migration) will still get full review."
 
-**Phase C0 — Speculative planning (if quality_level != careful/paranoid AND trust level != 0 AND trust level != 3):**
+**Phase C0 — Speculative planning (if effective_quality(todo_id) != careful/paranoid AND trust level != 0 AND trust level != 3):**
 
 **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="run-spec-{project}-{timestamp}", description="Run: speculative planning agents for {N} todos in this batch")` and spawn each read-only Task agent below with `team_name="run-spec-{project}-{timestamp}"`. After all speculative plans are collected, call `TeamDelete(team_name="run-spec-{project}-{timestamp}")`.
 
@@ -1059,7 +1119,7 @@ For each todo in dependency order:
 2. Call `mcp__proj__proj_get_todo_context` with `include_parent=true`.
 3. Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
 
-**Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+**Smart gate scoring** (skip if effective_quality(todo_id) == fast with auto-execute, or if --force-plan):
 
 Compute complexity score (0-14) from 7 dimensions:
 
@@ -1094,15 +1154,15 @@ IF --force-plan: force FULL REVIEW on all todos regardless of complexity score.
    - LIGHT REVIEW gate: display 1-line summary + `Proceed? [Y/n]` regardless of trust level (unless trust 2+).
 6. Store approved plan.
 7. IF `pipeline_enabled` AND trust level is NOT 3:
-     Before spawning: if `len(executing_agents) >= max_parallel` (from quality_level), wait for at least one executing agent to complete before spawning another.
+     Before spawning: if `len(executing_agents) >= batch_max_parallel_execute` (from Phase A.0), wait for at least one executing agent to complete before spawning another.
      Spawn a background `general-purpose` Task agent with `team_name="run-c1-pipeline-{project}-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
 
-**Pattern detection** (skip if quality_level in [careful, paranoid]):
+**Pattern detection** (skip if effective_quality(todo_id) in [careful, paranoid]):
 
 1. Normalize each plan: strip todo-specific IDs, extract (action_type, file_pattern) tuples, replace unique path segments with *.
 2. Compute pairwise Jaccard similarity: |A∩B| / |A∪B|.
 3. Group plans with >80% similarity. Min group size: 2, max: 10.
-4. IF quality_level == fast: auto-approve all pattern groups.
+4. IF effective_quality(todo_id) == fast: auto-approve all pattern groups.
 5. ELSE: display pattern groups as collapsible sections in batch review:
 
    **Pattern Group 1** (3 todos: 1.1, 1.2, 1.3) — 85% similar
@@ -1142,11 +1202,11 @@ IF speculative_plans exist:
 **File-Overlap Detection** (after Phase C1, before Phase C2, skip if trust 3):
 1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text. For dependency-batched execution, check overlaps **within each batch** (across-batch overlaps are acceptable since batches run sequentially).
 2. Build an overlap matrix: for each pair of plans within the same batch, check if their file lists intersect.
-3. Quality-level behavior for overlaps:
-   - IF quality_level == fast: auto-proceed on overlap (no prompt).
-   - IF quality_level in [careful, paranoid]: auto-serialize conflicting todos.
-   - IF quality_level == balanced: prompt user (current behavior below).
-4. If overlaps are found (and quality_level == balanced), display:
+3. Quality-level behavior for overlaps (pairwise — resolve using `max(effective_quality(A), effective_quality(B))` with ordering paranoid > careful > balanced > fast):
+   - IF max(effective_quality(A), effective_quality(B)) == fast: auto-proceed on overlap (no prompt).
+   - IF max(effective_quality(A), effective_quality(B)) in [careful, paranoid]: auto-serialize conflicting todos.
+   - IF max(effective_quality(A), effective_quality(B)) == balanced: prompt user (current behavior below).
+4. If overlaps are found (and max(effective_quality(A), effective_quality(B)) == balanced), display:
 
 ```
 ### File Overlap Warning
@@ -1173,7 +1233,7 @@ Runs **after** Phase C1 plan approval (including after the single `ExitPlanMode`
 
 **Skipped entirely under trust 3**: trust 3 has no plan, so plan-based checks are not applicable. Log a single line: `Phase C0.5 skipped — trust 3 (no plan)`. Proceed to Phase C2.
 
-**Skipped under `quality_level == fast`**: consistent with `preflight: skip` in the quality-level table.
+**Skipped when `effective_quality(todo_id) == fast`**: consistent with `preflight: skip` in the quality-level table.
 
 For each todo in dependency order (excluding `manual_skipped_ids` and todos that fell back to AUTO-EXECUTE without a plan), run 6 structural checks:
 
@@ -1199,7 +1259,7 @@ If all pass: silent, proceed to Phase C0.5b.
 
 **Phase C0.5b — Adversarial Review (Pre-execute)**
 
-Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`. Also skipped under trust 3 (no plan to review).
+Runs only when `effective_quality(todo_id)` in `[careful, paranoid]`. NEVER when `effective_quality(todo_id)` is `balanced` or `fast`. Also skipped under trust 3 (no plan to review).
 
 **Batch sampling**: when the batch has > 5 todos, adversarial agents run only on the **5 highest-complexity todos** (same ranking as Phase A.5b). Override with `--force-preflight-all`.
 
@@ -1421,7 +1481,7 @@ If all checks pass, display the report and proceed without prompting.
 
 **Satisfaction check** (sequential, main conversation):
 
-Satisfaction mode is determined by `quality_level.satisfaction`:
+Satisfaction mode is determined by `effective_quality(todo_id).satisfaction`:
 - IF satisfaction == "per-batch": After all todos in batch complete, display summary table, prompt "Satisfied with this batch?" once for the entire batch. On yes, call `mcp__proj__todo_batch_complete` with all batch ids.
 - IF satisfaction == "per-todo": Run individual satisfaction loop per todo; collect satisfied ids and finalize with a single `todo_batch_complete` call at batch end.
 - IF satisfaction == "skip": Auto-complete all todos without prompting via one `mcp__proj__todo_batch_complete` call with the full id list.
@@ -1439,7 +1499,7 @@ For per-todo and per-todo + re-verify modes, collect satisfied ids into `satisfi
 
    When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2. Pass `--_recursion_depth N` internally (not user-facing). If depth >= 2: refuse to recurse, display "Maximum satisfaction recursion depth reached. Fix manually."
 
-IF quality_level == fast:
+IF all todos have effective_quality == fast:
   After execution completes: display post-run summary with `git diff HEAD~N` command.
 
 Clear `executing_agents = {}` before proceeding to the next batch.
