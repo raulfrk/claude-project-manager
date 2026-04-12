@@ -12,17 +12,21 @@ from server.lib.git import (
     GitConflictError,
     GitError,
     _parse_porcelain,
+    _run,
     add_all,
     add_worktree,
     clean_untracked,
     commit,
     is_git_repo,
     list_worktrees,
+    lock_worktree,
     merge_ff_only,
+    prune_worktrees,
     rebase_worktree,
     remove_worktree,
     reset_hard,
     status_porcelain,
+    unlock_worktree,
 )
 
 PORCELAIN_SAMPLE = """\
@@ -789,3 +793,134 @@ class TestMergeFFOnlySubprocess:
             pytest.raises(GitError, match="git not found"),
         ):
             merge_ff_only("/repo", "feature")
+
+
+# ---------------------------------------------------------------------------
+# GitError limited error context tests (todo 475.33)
+# ---------------------------------------------------------------------------
+
+
+class TestGitErrorLimitedContext:
+    """Document and verify the limited error context in GitError.
+
+    GitError is a bare Exception subclass with no structured fields.
+    _run() raises it with either raw stderr (losing command context) or a
+    fallback message that only includes args[0]. These tests document this
+    gap as a foundation for future enrichment (todo 475.7).
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["worktree", "list", "--porcelain"],
+            ["status", "--porcelain"],
+            ["reset", "--hard", "HEAD"],
+            ["clean", "-fd"],
+        ],
+        ids=["worktree", "status", "reset", "clean"],
+    )
+    def test_fallback_message_includes_subcommand_name(self, args: list[str]) -> None:
+        """When stderr is empty, the fallback message contains the subcommand name."""
+        failed = subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=failed), pytest.raises(GitError) as exc_info:
+            _run(args)
+        assert args[0] in str(exc_info.value)
+
+    def test_fallback_message_exact_format(self) -> None:
+        """Fallback message matches exactly 'git {args[0]} failed'."""
+        failed = subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=failed), pytest.raises(GitError) as exc_info:
+            _run(["worktree", "list", "--porcelain"])
+        assert str(exc_info.value) == "git worktree failed"
+
+    def test_fallback_message_excludes_extra_args(self) -> None:
+        """Fallback message does NOT include args beyond args[0]."""
+        failed = subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=failed), pytest.raises(GitError) as exc_info:
+            _run(["worktree", "list", "--porcelain"])
+        msg = str(exc_info.value)
+        assert "list" not in msg
+        assert "--porcelain" not in msg
+
+    def test_stderr_message_does_not_include_command_context(self) -> None:
+        """When stderr is non-empty, the error message is exactly the stderr
+        content — it does NOT include the command name, args, or exit code."""
+        stderr_text = "fatal: not a git repository"
+        failed = subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=128,
+            stdout="",
+            stderr=stderr_text,
+        )
+        with patch("subprocess.run", return_value=failed), pytest.raises(GitError) as exc_info:
+            _run(["worktree", "list", "--porcelain"])
+        msg = str(exc_info.value)
+        assert msg == stderr_text
+        # Command context is lost
+        assert "worktree" not in msg
+        assert "128" not in msg
+
+    def test_giterror_has_no_structured_command_attributes(self) -> None:
+        """GitError instances lack .cmd, .returncode, and .command attributes.
+
+        Only the base Exception .args tuple is available.
+        """
+        failed = subprocess.CompletedProcess(
+            args=["git", "status", "--porcelain"],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=failed), pytest.raises(GitError) as exc_info:
+            _run(["status", "--porcelain"])
+        err = exc_info.value
+        assert not hasattr(err, "cmd")
+        assert not hasattr(err, "returncode")
+        assert not hasattr(err, "command")
+
+
+class TestGitErrorPropagation:
+    """Verify that GitError propagates unchanged through public API functions.
+
+    Public functions do not catch or enrich GitError — the raw message from
+    _run() is what callers receive.
+    """
+
+    def test_lock_worktree_propagates_error_unchanged(self) -> None:
+        """lock_worktree does not enrich the GitError message."""
+        with (
+            patch("server.lib.git._run", side_effect=GitError("fatal: not a git repository")),
+            pytest.raises(GitError, match=r"^fatal: not a git repository$"),
+        ):
+            lock_worktree("/repo", "/repo/.trees/wt")
+
+    def test_unlock_worktree_propagates_error_unchanged(self) -> None:
+        """unlock_worktree does not enrich the GitError message."""
+        with (
+            patch("server.lib.git._run", side_effect=GitError("fatal: not a git repository")),
+            pytest.raises(GitError, match=r"^fatal: not a git repository$"),
+        ):
+            unlock_worktree("/repo", "/repo/.trees/wt")
+
+    def test_prune_worktrees_propagates_error_unchanged(self) -> None:
+        """prune_worktrees does not enrich the GitError message."""
+        with (
+            patch("server.lib.git._run", side_effect=GitError("fatal: not a git repository")),
+            pytest.raises(GitError, match=r"^fatal: not a git repository$"),
+        ):
+            prune_worktrees("/repo")
