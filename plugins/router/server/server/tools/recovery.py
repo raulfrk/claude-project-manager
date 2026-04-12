@@ -44,7 +44,11 @@ async def _retry_entry(entry: dict[str, JsonValue]) -> bool:
     registry = storage.load()
     hook = registry.find_by_id(hook_id)
 
-    params = resolve_mapping(hook.param_mapping, source) if hook is not None else {}
+    if hook is None:
+        logger.warning("Hook %s not found in registry; skipping retry", hook_id)
+        return False
+
+    params = resolve_mapping(hook.param_mapping, source)
 
     # Resolve server URL
     server_info = registry.servers.get(server, {})

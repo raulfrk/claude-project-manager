@@ -540,6 +540,9 @@ async def _fire_hooks_internal(
         raw = results_by_id.get(hook.id)
         if raw is None:
             continue
+        # Cascade check: block dispatch if the next level would reach max_depth.
+        # Invariant: depths 0…max_depth-1 execute; depth max_depth never runs.
+        # Example with max_depth=3: depth 2 cascade blocked (2+1=3 >= 3 → skip).
         if depth + 1 >= max_depth:
             continue
         try:

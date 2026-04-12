@@ -1935,3 +1935,60 @@ class TestConditionMergeEdgeCases:
 
         data = json.loads(result)
         assert data["skipped"] == 1
+
+
+# ── Depth limit correctness ─────────────────────────────────────────────────
+
+
+class TestDepthLimit:
+    """Verify that exactly max_depth cascade levels execute (no off-by-one)."""
+
+    def _make_chain_registry(self, length: int, hooks_yaml: Path) -> None:
+        """Create a hook chain: trigger_0 → hook-0 → trigger_1 → hook-1 → …"""
+        hooks = []
+        servers: dict[str, dict[str, str]] = {}
+        for i in range(length):
+            hooks.append(
+                Hook(
+                    id=f"hook-{i:03d}",
+                    trigger_tool=f"trigger_{i}",
+                    target_tool=f"trigger_{i + 1}",
+                    server="s",
+                    blocking=True,
+                )
+            )
+        servers["s"] = {"url": "http://localhost:19100/hook"}
+        save(HookRegistry(hooks=hooks, servers=servers), hooks_yaml)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_depth", [1, 2, 3])
+    async def test_depth_limit_exact_levels(
+        self, hooks_yaml: Path, proj_yaml: Path, max_depth: int
+    ):
+        """Exactly max_depth cascade levels execute; depth max_depth is blocked."""
+        # Build a chain longer than max_depth so the limit is always exercised
+        self._make_chain_registry(max_depth + 2, hooks_yaml)
+        proj_yaml.write_text("")
+
+        fired_hook_ids: list[str] = []
+
+        async def capturing_post_hook(
+            *, hook_id: str, url: str, target_tool: str, params: dict
+        ) -> FireResult:
+            fired_hook_ids.append(hook_id)
+            return FireResult(hook_id=hook_id, status_code=200, body="{}", result="{}")
+
+        mock_post = AsyncMock(side_effect=capturing_post_hook)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch("server.tools.fire._get_max_depth", return_value=max_depth),
+            patch("server.tools.fire.post_hook", mock_post),
+        ):
+            await hooks_fire("trigger_0", source_result="{}")
+
+        # Exactly max_depth hooks should have fired (depths 0 … max_depth-1)
+        assert len(fired_hook_ids) == max_depth, (
+            f"Expected {max_depth} hooks fired, got {len(fired_hook_ids)}"
+        )

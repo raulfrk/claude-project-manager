@@ -706,7 +706,7 @@ class TestHooksInvocations:
 class TestHooksRecoverEdge:
     @pytest.mark.asyncio
     async def test_retry_when_hook_not_in_registry(self, hooks_yaml: Path, failures_yaml: Path):
-        """When the hook is no longer in the registry, retry uses empty params."""
+        """Hook no longer in registry: retry returns False without calling post_hook."""
         # Save empty registry (no hooks)
         save(HookRegistry(), hooks_yaml)
         # Add a failure entry for a hook that no longer exists
@@ -720,10 +720,7 @@ class TestHooksRecoverEdge:
             path=failures_yaml,
         )
 
-        async def mock_post_hook(*, hook_id, url, target_tool, params):
-            # Params should be empty since hook not in registry
-            assert params == {}
-            return FireResult(hook_id=hook_id, status_code=200, body="ok")
+        mock_post_hook = AsyncMock()
 
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
@@ -734,7 +731,9 @@ class TestHooksRecoverEdge:
 
         data = json.loads(result)
         assert data["retried"] == 1
-        assert data["succeeded"] == 1
+        assert data["succeeded"] == 0
+        assert data["still_failed"] == 1
+        mock_post_hook.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_retry_increments_retry_count_on_failure(
@@ -776,7 +775,11 @@ class TestHooksRecoverEdge:
         self, hooks_yaml: Path, failures_yaml: Path
     ):
         """Invalid JSON in source_result falls back to empty dict for param resolution."""
-        save(HookRegistry(), hooks_yaml)
+        # Hook must exist in registry for retry to proceed
+        hook = Hook(id="hook-001", trigger_tool="t", target_tool="u", server="s")
+        save(
+            HookRegistry(hooks=[hook], servers={"s": {"url": "http://localhost/hook"}}), hooks_yaml
+        )
         # Manually write a failure with invalid source_result
         entries = [
             {
