@@ -6,13 +6,16 @@ context: fork
 agent: general-purpose
 ---
 
-Show a comprehensive status report for the active project.
 
-**1.** Call `mcp__proj__proj_status_context` to get config, project metadata, categorised todos, and git activity in one call. If no active project, stop with: "No active project. Run `/proj:load` to load one."
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** For each in-progress todo matched to recent commits in `git_activity`, call `mcp__proj__todo_update(todo_id, git={branch: <branch>, commits: [<sha>, ...]})` to record the association.
+Show comprehensive status report for active project.
 
-**3.** Present a structured status summary. Display todos as bullet points with status icons, bold ID, title, priority in italics. Show children indented 2 spaces under their parent. Include `[manual]` badge after priority for manual-tagged todos. Include `[blocked by X]` for blocked todos and `[blocks Y]` for todos that block others. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
+**1.** `mcp__proj__proj_status_context` → get config, project metadata, categorised todos, git activity. No active project → stop: "No active project. Run `/proj:load` to load one."
+
+**2.** Each in-progress todo matched to recent commits in `git_activity`: `mcp__proj__todo_update(todo_id, git={branch: <branch>, commits: [<sha>, ...]})` to record association.
+
+**3.** Present structured status summary. Todos as bullets w/ status icons, bold ID, title, priority in italics. Children indented 2 spaces under parent. `[manual]` badge after priority for manual-tagged. `[blocked by X]` for blocked; `[blocks Y]` for blockers. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
    ```
    ## <project-name>  [status] [priority]
    Target: <date>   Tracking: <tracking_dir>
@@ -32,15 +35,15 @@ Show a comprehensive status report for the active project.
 
 ## Prerequisites
 
-- An active project must be loaded.
+Active project must be loaded.
 
-## Error Handling
+## Err Handling
 
-- **No active project**: displays "No active project. Run `/proj:load` to load one." and stops.
-- **Status context error**: displays error from `proj_status_context` and stops.
+- No active project → "No active project. Run `/proj:load` to load one." Stop.
+- Status ctx err → show err from `proj_status_context`. Stop.
 
 ## Output
 
-Structured status report: project header (name, status, priority, target date, tracking dir), then sections for In Progress, Ready to Start, Blocked todos (with status icons, badges), and Recent Git Activity.
+Structured status report: project header (name, status, priority, target date, tracking dir), sections for In Progress, Ready to Start, Blocked todos (status icons, badges), Recent Git Activity.
 
-Suggested next: `1. /proj:execute 3` -- start work on a ready task | `2. /proj:todo add` -- add a new task | `3. /proj:save` -- save session and reconcile git
+Suggested next: `1. /proj:execute 3` -- start work on ready task | `2. /proj:todo add` -- add new task | `3. /proj:save` -- save session, reconcile git

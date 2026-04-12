@@ -5,21 +5,24 @@ allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_remove_repo, mcp
 argument-hint: "<label>"
 ---
 
-Remove a directory or repository from the active project by label.
 
-**Arguments:** Parse `$ARGUMENTS`:
-- The first token is the **label** (required). If empty, stop with: "Label required. Usage: `/proj:remove-repo <label>`"
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Remove dir/repo from active project by label.
+
+**Args:** Parse `$ARGUMENTS`:
+- First token = label (required). Empty → "Label required. Usage: `/proj:remove-repo <label>`"
 
 **Steps:**
 
-**1.** Call `mcp__proj__proj_session_context` to get config, project metadata, and integration settings in one call. If no active project, stop with: "No active project. Run `/proj:load` to load one."
-   - Extract `project.name` and `project.repos` from the session context.
+**1.** `mcp__proj__proj_session_context` → get config, project meta, integrations. No active project → "No active project. Run `/proj:load` to load one."
+ - Extract `project.name`, `project.repos`.
 
-**2.** Find the repo entry matching the provided label. If no repo with that label exists, stop with: "No repo with label `<label>` found in project `<name>`."
+**2.** Find repo matching label. Not found → "No repo with label `<label>` found in project `<name>`."
 
-**3.** If there is only 1 repo in the project, stop with: "Cannot remove the last repo. Run `/proj:archive` to remove the entire project instead."
+**3.** Only 1 repo → "Cannot remove last repo. Run `/proj:archive` to remove entire project instead."
 
-**4.** Display the repo details and ask the user for confirmation:
+**4.** Show repo details, ask confirmation:
    ```
    Remove repo from project '<project_name>'?
      Label: <label>
@@ -27,15 +30,15 @@ Remove a directory or repository from the active project by label.
      Type:  <"reference (read-only)" if reference else "writable">
    [yes/no]
    ```
-   If the user declines, stop with: "Cancelled."
+ Declined → "Cancelled."
 
-**5.** Call `mcp__proj__proj_remove_repo` with `label=<label>`. If the tool returns an error, display it and stop.
+**5.** `mcp__proj__proj_remove_repo(label=<label>)`. Error → show, stop.
 
-**6.** Revoke permissions for the removed repo path:
-   - Call `mcp__perms__perms_remove_allow` with `path=<repo_path>` to remove Read and Edit allow rules for that directory.
-   - If the config has `sandbox_integration: true`, call `mcp__proj__proj_setup_permissions` to refresh sandbox write paths from the remaining repos.
+**6.** Revoke perms for removed repo path:
+ - `mcp__perms__perms_remove_allow(path=<repo_path>)` — remove Read/Edit allow rules.
+ - If `sandbox_integration: true`: `mcp__proj__proj_setup_permissions` to refresh sandbox write paths.
 
-**7.** Display confirmation summary:
+**7.** Show confirmation:
    ```
    Repo removed from <project_name>:
    - Label: <label>
@@ -45,22 +48,22 @@ Remove a directory or repository from the active project by label.
    - Remaining repos: <count>
    ```
 
-**8.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Remove repo: {label}"`.
+**8.** `mcp__proj__tracking_git_flush(commit_message="Remove repo: {label}")`.
 
 ## Prerequisites
 
-- An active project must be loaded.
-- A repo label must be provided.
+- Active project loaded.
+- Repo label provided.
 
-## Error Handling
+## Err Handling
 
-- **No active project**: displays "No active project. Run `/proj:load` to load one." and stops.
-- **No label provided**: displays "Label required. Usage: `/proj:remove-repo <label>`" and stops.
-- **Label not found**: displays "No repo with label `<label>` found in project `<name>`." and stops.
-- **Last repo**: displays "Cannot remove the last repo. Run `/proj:archive` to remove the entire project instead." and stops.
-- **User declines**: displays `Cancelled.` and stops.
-- **Remove tool error**: displays error from `proj_remove_repo` and stops.
+- No active project → "No active project. Run `/proj:load` to load one."
+- No label → "Label required. Usage: `/proj:remove-repo <label>`"
+- Label not found → "No repo with label `<label>` found in project `<name>`."
+- Last repo → "Cannot remove last repo. Run `/proj:archive` to remove entire project instead."
+- User declines → "Cancelled."
+- Remove tool err → show err, stop.
 
 ## Output
 
-Confirmation summary: label, path, type (reference/writable), permissions revoked, remaining repo count. Git tracking flush confirmation.
+Confirmation: label, path, type (ref/writable), perms revoked, remaining repo count. Git tracking flush confirm.

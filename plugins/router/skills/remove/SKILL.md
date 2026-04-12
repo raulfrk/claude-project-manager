@@ -7,36 +7,39 @@ context: fork
 agent: general-purpose
 ---
 
-Remove a hook from the hooks registry.
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Remove hook from registry.
 
 **Parse $ARGUMENTS**:
-- If a hook ID is provided (e.g. `hook-001`), use it directly.
-- If two tool names are provided (e.g. `trigger_tool target_tool`), call `mcp__plugin_router_router__router_list_tool` to find the matching hook ID by trigger+target pair. If multiple matches, list them and ask the user to pick one.
-- If $ARGUMENTS is empty, output: "Hook ID required. Usage: `/router:remove <hook_id>` or `/router:remove <trigger_tool> <target_tool>`"
+- Hook ID provided (e.g. `hook-001`) → use directly
+- Two tool names provided (e.g. `trigger_tool target_tool`) → `mcp__plugin_router_router__router_list_tool` to find matching hook by trigger+target. Multiple matches → list, ask user to pick
+- Empty → output: "Hook ID required. Usage: `/router:remove <hook_id>` or `/router:remove <trigger_tool> <target_tool>`"
 
-**Remove**: Call `mcp__plugin_router_router__router_unregister_tool` with the resolved `hook_id`.
+**Remove**: `mcp__plugin_router_router__router_unregister_tool(hook_id)`
 
-**On success**, confirm:
+Success →
 ```
 Removed hook <hook_id>.
 ```
 
-**On not found**, display:
+Not found →
 ```
 Hook `<hook_id>` not found. Run `/router:list` to see available hooks.
 ```
 
 ## Prerequisites
 
-- Router plugin MCP server is running and reachable.
+Router plugin MCP server running/reachable.
 
 ## Error Handling
 
-- **No arguments**: displays "Hook ID required. Usage: `/router:remove <hook_id>`" and stops.
-- **Hook not found**: displays "Hook `<hook_id>` not found. Run `/router:list` to see available hooks."
-- **Router MCP unavailable**: displays error from tool call and stops.
+- No args → "Hook ID required. Usage: `/router:remove <hook_id>`", stop
+- Not found → "Hook `<hook_id>` not found. Run `/router:list` to see available hooks."
+- Router MCP unavailable → display err, stop
 
 ## Output
 
-- On success: `Removed hook <hook_id>.`
-- On not found: `Hook \`<hook_id>\` not found.`
+- Success: `Removed hook <hook_id>.`
+- Not found: `Hook \`<hook_id>\` not found.`

@@ -5,33 +5,33 @@ allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj
 argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
 ---
 
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
 Execute todo(s): $ARGUMENTS
 
-**Determine scope from $ARGUMENTS:**
-- Parse `--no-verify` flag from $ARGUMENTS if present (strip it before interpreting the rest).
-  When set, skip the verification step (4a) entirely.
-- Parse `--team` flag: force team mode ON for this execution (overrides config).
-- Parse `--no-team` flag: force team mode OFF for this execution (overrides config).
-- Parse `--full-context` flag: when using team mode, include CLAUDE.md and NOTES.md in each agent's context.
-- Parse `--trust N` flag (N = 0-3). If not specified, call `mcp__proj__config_load` and use `team_mode.trust_level` (default 1 if unset). Determines the approval workflow:
-  - **Trust 0 (supervised)**: per-todo approval — each plan presented individually, user approves one at a time before the next plan is created.
-  - **Trust 1 (guided)**: bulk approval + parallel execution — all plans presented sequentially, user approves each, then bulk confirmation before execution. This is the default for Pattern A.
-  - **Trust 2 (autonomous)**: auto-approve plans — plans are created but `ExitPlanMode` user review is skipped. Plans are automatically stored in `approved_plans` and execution proceeds without user confirmation.
-  - **Trust 3 (full-auto)**: no plan phase — Phase 1 is skipped entirely. Agents execute with context only (requirements + research + parent context). No plans are created.
-- Parse `--resume` flag: resume execution from the most recent checkpoint. See **Resume checkpoint** below.
-- Parse `--no-pipeline` flag: disable plan-while-executing pipeline (default: pipeline enabled).
-- Parse `--fast`/`--balanced`/`--careful`/`--paranoid` flags. Mutually exclusive, last wins, default `--careful`.
-- Parse `--force-plan` flag: force FULL REVIEW regardless of complexity score.
-- Parse `--batch-approve` flag: auto-approve all speculative plans without review.
-- Parse `--worktree` flag: enable worktree isolation for parallel execution.
-- Parse `--no-worktree` flag: disable worktree isolation.
+**Scope from $ARGUMENTS:**
+- Parse `--no-verify` → skip verification (4a).
+- Parse `--team` → force team ON. `--no-team` → force team OFF.
+- Parse `--full-context` → include CLAUDE.md/NOTES.md in agent ctx.
+- Parse `--trust N` (0-3). Unset → `mcp__proj__config_load` → `team_mode.trust_level` (default 1).
+ - Trust 0 (supervised): per-todo approval, sequential.
+ - Trust 1 (guided): sequential plan approval + bulk confirm before exec. Default Pattern A.
+ - Trust 2 (autonomous): auto-approve plans, skip `ExitPlanMode` review.
+ - Trust 3 (full-auto): skip Phase 1 entirely. Agents get ctx only, no plans.
+- Parse `--resume` → resume from checkpoint. See Resume checkpoint below.
+- Parse `--no-pipeline` → disable plan-while-executing pipeline (default: enabled).
+- Parse `--fast`/`--balanced`/`--careful`/`--paranoid` — mutually exclusive, last wins, default `--careful`.
+- Parse `--force-plan` → force FULL REVIEW despite complexity.
+- Parse `--batch-approve` → auto-approve all speculative plans.
+- Parse `--worktree` / `--no-worktree` → enable/disable worktree isolation.
 
-Derive: `worktree_enabled` from flags and config (`worktree_isolation` default).
-Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
+Derive: `worktree_enabled` from flags + config (`worktree_isolation` default).
+Derive: `quality_level` from flags.
 
-**Note**: Worktree lifecycle (Phase 1.5 setup, Phase 2.5 merge, Phase 5 cleanup) is orchestrated by `/proj:run`. When execute is called directly with `--worktree`, worktree context is passed to agents but the full lifecycle (create/merge/cleanup) must be managed by the caller. For standalone execution, use `/proj:run` instead.
+Worktree lifecycle (Phase 1.5/2.5/5 cleanup) orchestrated by `/proj:run`. Direct execute w/ `--worktree` → caller manages lifecycle. Standalone → use `/proj:run`.
 
-**Quality Level Parameter Mapping:**
+**Quality Level Param Mapping:**
 
 | Parameter | --fast | --balanced | --careful | --paranoid |
 |-----------|--------|-----------|-----------|-----------|
@@ -49,54 +49,48 @@ Derive: `quality_level` from flags (fast/balanced/careful/paranoid).
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
-**Flag compatibility check** (validate before proceeding):
+**Flag compatibility:**
 - `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
 - `--careful --batch-approve` → careful wins, batch approve disabled (warn).
 - `--paranoid --batch-approve` → paranoid wins, batch approve disabled (warn).
 - `--force-plan --batch-approve` → ERROR: "Cannot combine --force-plan with --batch-approve."
 - `--no-verify --paranoid` → ERROR: "Cannot combine --no-verify with --paranoid."
-- `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification is skipped.
-- `--fast --steps refine` → ERROR (execute doesn't have refine, but document for consistency).
+- `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification skipped.
+- `--fast --steps refine` → ERROR (execute lacks refine).
 - `--batch-approve --no-pipeline` → Allowed.
 - `--paranoid --no-pipeline` → Redundant warning.
 - `--careful --no-pipeline` → Allowed.
 - `--fast --no-pipeline` → Redundant warning.
-- `--force-plan --careful` → Redundant warning.
-- `--force-plan --paranoid` → Redundant warning.
+- `--force-plan --careful` / `--force-plan --paranoid` → Redundant warning.
 - `--no-verify --balanced` → --no-verify wins.
 - `--no-verify --fast` → Redundant.
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
 - `--paranoid --worktree` → paranoid wins, worktree disabled (warn).
-- `--worktree --no-interactive` → Allowed. Auto-resolve only for conflicts.
-- `--fast --worktree` → Allowed: worktree isolation + auto-execute coexist.
-- Empty → call `mcp__proj__todo_list` with `status="in_progress"` to find any in-progress todo;
-  if none, call `mcp__proj__todo_list` with `status="ready"`. Display the results and proceed
-  with the first (or ask the user if multiple).
+- `--worktree --no-interactive` → Allowed. Auto-resolve conflicts only.
+- `--fast --worktree` → Allowed: coexist.
+- Empty → `mcp__proj__todo_list(status="in_progress")`; if none, `todo_list(status="ready")`. Show results, proceed w/ first (or ask if multiple).
 - Single ID (e.g. `1`) → execute that todo
 - Range (e.g. `2-4`) → execute those todos
 
-**For a single todo:**
+**Single todo:**
 
-> **Note**: For worktree-isolated parallel execution, use `/proj:run <range> --from execute`. Direct execute runs on main without worktree isolation.
+> Worktree-isolated parallel exec → use `/proj:run <range> --from execute`. Direct execute runs on main.
 
-**1.** Call `mcp__proj__todo_check_executable` with the todo ID.
-   - If the result starts with "⚠️", display it as-is and **stop** — do not implement.
-   - If the result is JSON, continue normally.
-**2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
-   This returns the todo, its requirements, its research, and (if present) the parent todo in one call.
-**3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
+**1.** `mcp__proj__todo_check_executable(todo_id)` — starts w/ "⚠️" → display, **stop**.
+**2.** `mcp__proj__proj_get_todo_context(todo_id, include_parent=true)` — returns todo, reqs, research, parent.
+**3.** `mcp__proj__proj_search_knowledge(query=<todo title>, scope=all)`. Snippets → "### Related Context" section. None → skip.
 
-> **Pre-execute preflight**: when this skill is invoked via `/proj:run`, Phase C0.5 (pre-execute structural preflight) and Phase C0.5b (pre-execute adversarial review) run between plan approval and agent spawn. Direct `/proj:execute` invocations do **not** run Phase C0.5 — the preflight is a `/proj:run` orchestration step, not an execute-skill step. See `plugins/proj/skills/run/SKILL.md` Phase C0.5 for the check list and severity rules.
+> Pre-execute preflight: via `/proj:run` only (Phase C0.5/C0.5b). Direct `/proj:execute` skips preflight. See `plugins/proj/skills/run/SKILL.md` Phase C0.5.
 
-**3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+**3a. Smart gate scoring** (skip if quality_level == fast w/ auto-execute, or --force-plan):
 
-   **File-impact estimation** (for dimensions 1-2 when no speculative plan exists):
-   Spawn a lightweight read-only Task agent with: todo context, requirements, research. Tools: Read, Glob, Grep only.
-   Agent estimates: which files will be modified/created, which directories are involved.
-   Wait for agent. Use results to score dimensions 1 (file count) and 2 (directory spread).
-   If agent fails: score dimensions 1-2 as 0 (assume simple).
+ File-impact estimation (for dims 1-2 w/o speculative plan):
+ Spawn lightweight read-only Task agent w/: todo ctx, reqs, research. Tools: Read, Glob, Grep only.
+ Agent estimates: files modified/created, dirs involved.
+ Wait. Use results for dims 1 (file count), 2 (dir spread).
+ Agent fails → score dims 1-2 as 0.
 
-   Compute complexity score (0-14) from 7 dimensions:
+ Complexity score (0-14), 7 dimensions:
 
    | Dimension | 0 points | 1 point | 2 points |
    |-----------|----------|---------|----------|
@@ -108,64 +102,57 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
    | Children count | 0 (leaf) | 1-3 | 4+ |
    | Blocked-by deps | 0 | 1 | 2+ |
 
-   Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
+ Eval order: Tag overrides FIRST → complexity score → critical-path guard as FINAL FLOOR.
 
-   **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
+ Tag overrides (pre-score): `auto-execute` → force AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → force FULL REVIEW (even --fast, tag-immune). Most restrictive wins.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
+ Critical-path guard (FINAL FLOOR): planned file matches `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json` → min LIGHT REVIEW even if score 0-3.
 
-   Gate routing:
-   - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
-   - **LIGHT REVIEW (4-7)**: 1-line summary + `Proceed? [Y/n]` (default yes).
-   - **FULL REVIEW (8-14)**: Full EnterPlanMode/ExitPlanMode.
+ Gate routing:
+ - AUTO-EXECUTE (0-3): git tag `pre-auto-execute-{todo_id}`. Skip plan, exec w/ ctx.
+ - LIGHT REVIEW (4-7): 1-line summary + `Proceed? [Y/n]` (default yes).
+ - FULL REVIEW (8-14): Full `EnterPlanMode`/`ExitPlanMode`.
 
-   If `--force-plan`: always route to FULL REVIEW.
+ `--force-plan` → always FULL REVIEW.
 
-**3b.** **Plan creation** (respects trust level, skipped if gate routed to AUTO-EXECUTE):
-   - Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
-   - **Trust 0-2**: Call `EnterPlanMode`. Read all loaded context (requirements.md, research.md, notes, and any Related Context from step 3) and explore the relevant source files. Create an implementation plan covering:
-     - Files to modify/create
-     - Key changes per file
-     - Implementation order
-     - Testing approach
-   - **Trust 0-1**: Call `ExitPlanMode` to present the plan for user review. The user will approve or request changes before you proceed.
-   - **Trust 2**: Skip `ExitPlanMode` user review. The plan is automatically approved and stored. Display a brief summary: `Plan auto-approved (trust 2): <1-line summary>`.
-   - After plan approval (trust 0-2): call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
-   - **Trust 3**: Skip step 3b entirely — no plan is created. Proceed directly to step 4 with context only.
-**4.** Before implementing: call `mcp__proj__todo_update` with `status="in_progress"` to mark the todo as in_progress. Then review all context and implement the task. If the todo has a non-empty `notes` field, treat it as additional implementation context (e.g. constraints or design decisions) — it should inform your implementation approach.
-**4a.** **Verification** (skip entirely if `--no-verify` was passed in $ARGUMENTS):
+**3b. Plan creation** (respects trust, skipped if AUTO-EXECUTE):
+ - `mcp__proj__proj_decision_log(action="search", decision=<todo title>, project_name=<project>)`. Results → "### Prior Decisions" in plan ctx.
+ - Trust 0-2: `EnterPlanMode`. Read ctx (reqs, research, notes, Related Context). Explore source. Plan: files to modify/create, key changes, impl order, testing.
+ - Trust 0-1: `ExitPlanMode` for user review. Approve before proceeding.
+ - Trust 2: Skip `ExitPlanMode`. Display: `Plan auto-approved (trust 2): <1-line summary>`.
+ - After approval (trust 0-2): `proj_decision_log(action="add", decision=<approach summary>, tags="plan", todo_id)`.
+ - Trust 3: Skip 3b entirely → step 4 w/ ctx only.
 
-   Verification mode (determined by quality_level):
-   - `skip` (--fast): Skip verification entirely.
-   - `standard` (--balanced): Current behavior (automated checks + spec validation + diff review).
-   - `enhanced` (--careful): Standard + generate manual test checklist from acceptance criteria.
-   - `full` (--paranoid): Enhanced + spawn an independent review agent that reads the implementation diff, requirements.md, and the approved plan. Agent produces an assessment with a risk rating (LOW/MEDIUM/HIGH). If risk is HIGH, flag for user attention before satisfaction prompt.
+**4.** `mcp__proj__todo_update(status="in_progress")`. Review ctx, implement. Non-empty `notes` field → additional impl ctx (constraints/design decisions).
 
-   Run three check categories, then report results. If a check's prerequisites are missing, skip it gracefully with a note — never fail the whole step.
+**4a. Verification** (skip if `--no-verify`):
 
-   **A. Automated checks (Bash)**
-   Detect and run test/lint tooling in the project's content directory:
-   - **Tests**: if `pyproject.toml` exists with a `[tool.pytest]` section → `uv run pytest --tb=short -q`; elif `package.json` exists with a non-empty `"test"` field in `"scripts"` → `npm test`; else skip with "No test runner detected".
-   - **Lint** (ruff for Python, eslint for JS): if `pyproject.toml` with a `[tool.ruff]` section → `uv run ruff check` on modified files; elif `.eslintrc*` exists → `npx eslint` on modified files; else skip.
-   Record: pass/fail, summary (e.g. "14 tests passed", "2 tests failed: test_x, test_y").
+ Mode by quality_level:
+ - `skip` (--fast): Skip entirely.
+ - `standard` (--balanced): automated checks + spec validation + diff review.
+ - `enhanced` (--careful): standard + manual test checklist from acceptance criteria.
+ - `full` (--paranoid): enhanced + independent review agent reads diff, reqs, plan. Produces risk rating (LOW/MEDIUM/HIGH). HIGH → flag for user.
 
-   **B. Spec validation**
-   1. Call `mcp__proj__content_get_requirements` with the todo ID.
-      - If no requirements exist → skip with "No requirements.md found".
-   2. Extract acceptance criteria (lines matching `- [ ]` or `- [x]` pattern).
-   3. Run `git diff HEAD~1` via Bash to get the implementation diff.
-   4. For each criterion, assess whether the diff addresses it. Categorize as: **met**, **unmet**, or **unverifiable** (criterion is subjective or requires runtime testing).
+ Three check categories; missing prereqs → skip gracefully w/ note.
 
-   **C. Diff review**
-   1. From the approved plan (step 3b), extract the "Files to modify/create" list.
-      - If no plan is available (e.g. `--no-interactive` was used, or AUTO-EXECUTE gate) → skip with "No plan available for diff review".
-   2. Run `git diff --name-only HEAD~1` via Bash to get actually modified files.
-   3. Compare:
-      - Files in plan but not in diff → "planned but not touched"
-      - Files in diff but not in plan → "unplanned modification"
-      - Files in both → "matches plan"
+ **A. Automated checks (Bash)**
+ Detect test/lint tooling in content dir:
+ - Tests: `pyproject.toml` w/ `[tool.pytest]` → `uv run pytest --tb=short -q`; `package.json` w/ `"test"` script → `npm test`; else skip.
+ - Lint: `pyproject.toml` w/ `[tool.ruff]` → `uv run ruff check` on modified files; `.eslintrc*` → `npx eslint` on modified files; else skip.
+ Record: pass/fail, summary.
 
-   **Report** — Display results in this format:
+ **B. Spec validation**
+ 1. `mcp__proj__content_get_requirements(todo_id)`. None → skip.
+ 2. Extract acceptance criteria (`- [ ]`/`- [x]` lines).
+ 3. `git diff HEAD~1` for impl diff.
+ 4. Each criterion → met / unmet / unverifiable.
+
+ **C. Diff review**
+ 1. From plan (3b), extract "Files to modify/create". No plan → skip.
+ 2. `git diff --name-only HEAD~1` for modified files.
+ 3. Compare: planned but not touched / unplanned modification / matches plan.
+
+ **Report:**
    ```
    ### Verification Report — Todo <id>
 
@@ -174,74 +161,74 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
    **Diff review**: Plan matches | 1 planned file not touched, 1 unplanned file modified
    ```
 
-   **Persist** — Write the report (with timestamp) to `todos/<id>/verification-report.md` in the tracking dir using `mcp__proj__notes_append` or direct file write. Overwrite any previous report for this todo.
+ **Persist** — Write report (w/ timestamp) to `todos/<id>/verification-report.md` in tracking dir via `mcp__proj__notes_append` or direct write. Overwrite prev report.
 
-   **Prompt** — After displaying the report, ask:
-   > Fix these issues? (1) Fix (2) Proceed (3) Skip
-   - **Fix**: spawn a `general-purpose` Task agent with: (1) the verification report, (2) todo details + requirements.md + research.md + parent context (via `proj_get_todo_context`), (3) the approved implementation plan from step 3, and (4) instructions to fix the failures. After the agent completes, re-run verification on this todo (max 2 retries total). If still failing after retries, display the updated report and re-prompt.
-   - **Proceed**: continue to the satisfaction loop (step 5) despite failures.
-   - **Skip**: skip remaining verification for this session and go directly to step 5.
+ **Prompt:**
+ > Fix these issues? (1) Fix (2) Proceed (3) Skip
+ - Fix: spawn `general-purpose` Task agent w/: verification report, todo ctx + reqs + research + parent ctx (`proj_get_todo_context`), approved plan, fix instructions. After completion, re-run verification (max 2 retries). Still failing → display updated report, re-prompt.
+ - Proceed: continue to satisfaction (step 5) despite failures.
+ - Skip: skip remaining verification, go to step 5.
 
-   If all checks pass, display the report and proceed to step 5 without prompting.
+ All pass → display report, → step 5 w/o prompt.
 
-**5.** On completion — **Satisfaction loop**:
-   a. Ask: "Are you satisfied with the outcome of todo <id>?"
-      1. **Satisfied** — proceed to step 5d
-      2. **Not satisfied** — describe what needs fixing
-      3. **Redefine** — refine requirements and re-run workflow
-   b. If not satisfied:
-      - Ask what's missing, fix issues in current scope
-      - Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<feedback text>`, `tags="correction,quality"`, `context="execute:satisfaction:{todo_id}"`, `todo_id=<todo_id>`.
-      - Re-ask satisfaction (go back to step 5a)
-   c. If redefine:
-      - Call the Skill tool: `skill: "proj:define", args: "<id>"` (existing requirements/research kept as context — non-destructive)
-      - After define completes, check if todo has/needs children:
-        - If decomposable: call the Skill tool: `skill: "proj:decompose", args: "<id>"`
-      - Call the Skill tool: `skill: "proj:execute", args: "<id>"`
-      - When spawning a satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Maximum recursion depth: 2.
-      - Re-ask satisfaction on original todo (go back to step 5a)
-   d. Call `mcp__proj__todo_complete`
-      - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
-      - Append a brief progress note: `mcp__proj__notes_append`
+**5. Satisfaction loop:**
+ a. Ask: "Are you satisfied with outcome of todo <id>?"
+ 1. Satisfied → step 5d
+ 2. Not satisfied → describe fixes needed
+ 3. Redefine → refine reqs, re-run workflow
+ b. Not satisfied:
+ - Ask what's missing, fix in cur scope
+ - `proj_decision_log(action="add", decision=<feedback>, tags="correction,quality", context="execute:satisfaction:{todo_id}", todo_id)`
+ - Re-ask (→ 5a)
+ c. Redefine:
+ - `Skill("proj:define", args="<id>")` (existing reqs/research kept — non-destructive)
+ - After define: if decomposable → `Skill("proj:decompose", args="<id>")`
+ - `Skill("proj:execute", args="<id>")`
+ - Satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Max recursion depth: 2.
+ - Re-ask on orig todo (→ 5a)
+ d. `mcp__proj__todo_complete`
+ - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
+ - Append progress note: `mcp__proj__notes_append`
 
-**For a range with independent todos (no blocked_by between them):**
+**Range w/ independent todos (no blocked_by between them):**
 
-**Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine execution mode:
-- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 3+ independent (non-manual) todos in the batch: use **Pattern A (Team-based execution)** below.
-- Otherwise: use **Pattern B (Task agent execution)** below.
+**Mode selection:** `mcp__proj__config_load` → `team_mode.enabled`.
+- `--team` passed, OR (config `team_mode.enabled` true AND `--no-team` NOT passed) AND 3+ independent non-manual todos → **Pattern A**.
+- Otherwise → **Pattern B**.
 
----
 
-**Pattern A — Team-based execution (independent todos):**
+**Pattern A — Team exec (independent todos):**
 
 **Phase C0 — Speculative planning** (if quality_level != careful/paranoid AND trust != 0 AND trust != 3):
 
-**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")` and spawn each read-only Task agent with that `team_name`. After all speculative plans are collected, call `TeamDelete(team_name="exec-spec-{timestamp}")`.
+`TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")`. Each read-only Task agent gets `team_name`.
 
-For each todo in the current batch, spawn a read-only Task agent (with `team_name="exec-spec-{timestamp}"`):
-- Tools: Read, Glob, Grep, proj_get_todo_context, proj_explore_codebase, content_get_requirements, content_get_research (NO write tools)
-- Output: structured JSON plan `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
+Each todo → read-only Task agent:
+- Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research` (NO write tools)
+- Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
 
-If agent fails: exclude todo, fall back to sequential planning for that todo.
+Agent fails → exclude todo, fall back to sequential planning.
 Store in `speculative_plans[todo_id]`.
 
-If `--batch-approve`: auto-approve all speculative plans without review. Display: `Batch-approved N speculative plans.`
+`--batch-approve` → auto-approve all. Display: `Batch-approved N speculative plans.`
+
+After collection: `TeamDelete(team_name="exec-spec-{timestamp}")`.
 
 **Phase 1 — Plan (sequential, main conversation):**
 
-Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
+Skip if trust 3 → Phase 2 w/ ctx only.
 
-Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-**IF `pipeline_enabled` AND trust level is NOT 3**: before the loop begins, call `TeamCreate(name="exec-plan-{timestamp}", description="Pipeline execution agents for {N} independent todos")` so all pipeline-spawned background Task agents are wrapped in a team. The team is torn down in Phase 2 after all pipeline agents are collected via `TeamDelete(team_name="exec-plan-{timestamp}")`. **Never spawn 2+ bare parallel Task agents outside a team.**
+IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-plan-{timestamp}", description="Pipeline execution agents for {N} independent todos")`. All pipeline agents use this team. Torn down in Phase 2.
 
-For each todo in the range:
-**1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
-**2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
-**3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-**3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+Each todo in range:
+**1.** `todo_check_executable` — "⚠️" → skip: `⚠️ Todo <id> [manual] — skipped execute`.
+**2.** `proj_get_todo_context(todo_id, include_parent=true)`.
+**3.** `proj_search_knowledge(query=<todo title>, scope=all)`. Snippets → "### Related Context". None → skip.
+**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
 
-   Compute complexity score (0-14) from 7 dimensions:
+ Complexity score (0-14), 7 dimensions:
 
    | Dimension | 0 points | 1 point | 2 points |
    |-----------|----------|---------|----------|
@@ -253,44 +240,35 @@ For each todo in the range:
    | Children count | 0 (leaf) | 1-3 | 4+ |
    | Blocked-by deps | 0 | 1 | 2+ |
 
-   Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
+ Eval order: Tag overrides FIRST → score → critical-path guard FINAL FLOOR.
 
-   **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
+ Tag overrides: `auto-execute` → AUTO-EXECUTE. `security`/`breaking-change`/`migration`/`needs-review` → FULL REVIEW (tag-immune, even --fast). Most restrictive wins.
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
+ Critical-path guard: planned file matches `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json` → min LIGHT REVIEW.
 
-   Gate routing:
-   - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
-   - **LIGHT REVIEW (4-7)**: 1-line summary + `Proceed? [Y/n]` (default yes).
-   - **FULL REVIEW (8-14)**: Full EnterPlanMode/ExitPlanMode.
+ Gate: AUTO-EXECUTE (0-3) → git tag, skip plan. LIGHT REVIEW (4-7) → 1-line + `Proceed? [Y/n]`. FULL REVIEW (8-14) → `EnterPlanMode`/`ExitPlanMode`. `--force-plan` → always FULL.
 
-   If `--force-plan`: always route to FULL REVIEW.
+**3b.** `proj_decision_log(action="search", decision=<todo title>, project_name)`. Results → "### Prior Decisions".
+`EnterPlanMode`. Plan: files, changes, order, testing. Include Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
+**4.** Plan approval by trust:
+ - Trust 0: `ExitPlanMode` → user approves before next plan.
+ - Trust 1: `ExitPlanMode` → user approves, next todo. After all: bulk approval summary.
+ - Trust 2: Skip `ExitPlanMode`. Display: `Plan auto-approved (trust 2): <summary>`.
+**4a.** After approval: `proj_decision_log(action="add", decision=<approach>, tags="plan", todo_id)`.
+**5.** Store in `approved_plans[todo_id]`.
+**6.** IF `pipeline_enabled` AND trust != 3:
+ `len(executing_agents) >= max_parallel` → wait for one to complete.
+ Spawn background `general-purpose` Task agent w/ `team_name="exec-plan-{timestamp}"`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
 
-**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
-Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
-**4.** Plan approval (respects trust level):
-   - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
-   - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
-   - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
-**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
-**5.** Store the approved plan in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust level is NOT 3:
-     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with `team_name="exec-plan-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
+After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
-After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs and their plan summaries.
-
-**Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-{timestamp}")`.
-Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
-Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
-Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
-If any HIGH risk: flag for user attention before proceeding to execution.
+**Cross-review** (paranoid AND N > 1):
+`TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
-1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text.
-2. Build an overlap matrix: for each pair of plans, check if their file lists intersect.
-3. If overlaps are found, display:
+1. Extract "Files to modify/create" from each plan.
+2. Build overlap matrix: check file list intersections per pair.
+3. Overlaps found:
 
 ```
 ### File Overlap Warning
@@ -306,57 +284,46 @@ Options:
 3. **Cancel** — Stop execution
 ```
 
-4. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
-5. If user selects **Proceed**: continue as-is.
-6. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
-7. If no overlaps detected: skip silently.
+4. Serialize → remove conflicting todos from parallel batch, add sequential batch at end.
+5. Proceed → continue.
+6. Cancel → stop: "Execution cancelled. Plans are saved."
+7. No overlaps → skip.
 
-**Resume checkpoint** (applies when `--resume` is passed):
-1. Look for the most recent checkpoint file in `<tracking_dir>/<project>/.team-state/*/checkpoint.yaml`.
-2. If found and not stale (created within the last 24 hours):
-   - Read the checkpoint. Display: `Resuming from batch {batch_index}/{total_batches} — {len(completed_todos)} todos already completed`.
-   - Use the stored `approved_plans` from the checkpoint.
-   - Skip to the `batch_index` in Phase 2 (all prior batches are treated as complete).
-3. If the checkpoint is stale (older than 24 hours) or references todos that no longer exist:
-   - Display: `Checkpoint is stale (created {timestamp}). Restart from the beginning? (1) Restart (2) Use anyway`.
-   - If Restart: ignore checkpoint and start from Phase 1.
-   - If Use anyway: proceed with the stale checkpoint data.
-4. If no checkpoint found: display `No checkpoint found — starting fresh` and proceed normally.
+**Resume checkpoint** (`--resume`):
+1. Find most recent `<tracking_dir>/<project>/.team-state/*/checkpoint.yaml`.
+2. Found + fresh (< 24h):
+ - Display: `Resuming from batch {batch_index}/{total_batches} — {len(completed_todos)} todos already completed`.
+ - Use stored `approved_plans`. Skip to `batch_index` in Phase 2.
+3. Stale (> 24h) or refs nonexistent todos:
+ - Display: `Checkpoint is stale (created {timestamp}). Restart from the beginning? (1) Restart (2) Use anyway`.
+ - Restart → ignore, start Phase 1. Use anyway → proceed w/ stale data.
+4. Not found: `No checkpoint found — starting fresh`.
 
-**Phase 2 — Execute (parallel with Team):**
+**Phase 2 — Execute (parallel w/ Team):**
 
-Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
+Enforce max_parallel from quality_level mapping.
 
 **1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {id1}, {id2}, ...")`
-**1a. Task Mapping** (one-way — tasks mirror todos for coordination only):
-   For each todo in the current batch:
-   - Call `TaskCreate` with:
-     - `title`: todo title
-     - `description`: `"Implement todo {id} — {title}"`
-     - `metadata`: `{"proj_todo_id": "{todo.id}", "team_name": "{team_name}"}`
-   - If the todo has `blocked_by` relationships with other todos in the same batch, use `addBlockedBy` to map the blocking relationships (using the Task IDs returned from previous `TaskCreate` calls).
+**1a. Task Mapping** (one-way — tasks mirror todos for coordination):
+ Each todo:
+ - `TaskCreate(title=<todo title>, description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}", "team_name": "{team_name}"})`
+ - `blocked_by` rels → `addBlockedBy` w/ Task IDs from prev `TaskCreate`.
+ Agents discover tasks via `TaskList(metadata={"team_name": team_name})` (pull model).
+ One-way: Task completion ≠ proj todo completion. Satisfaction loop handles that.
 
-   Agents discover their assigned tasks via `TaskList(metadata={"team_name": team_name})` (pull model — agents are not assigned tasks directly).
-
-   **One-way only**: Task completion does NOT auto-complete the proj todo. The satisfaction loop in Phase 3 handles proj todo completion.
-
-**2.** For the single batch of independent todos:
-   IF `pipeline_enabled`:
-       Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-plan-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
-       -- batch failure short-circuit --
-       IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
-   ELSE:
-   - Display: `Executing batch: todos <id1>, <id2>, ...`
-   - When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
-   - Spawn one Agent per todo with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
-   - If `worktree_enabled` and todo has `worktree_path`:
-     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
-     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
-     Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
-   - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
-   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
-   - Wait for batch completion. Report any failures.
-   - **Write checkpoint** after batch completion to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
+**2.** Single batch of independent todos:
+ IF `pipeline_enabled`:
+ Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-plan-{timestamp}")`.
+ All failed → "All N agents in batch failed. (1) Retry (2) Skip (3) Stop." Handle choice; skip satisfaction.
+ ELSE:
+ - Display: `Executing batch: todos <id1>, <id2>, ...`
+ - N roles per target → N individual agents.
+ - Spawn one Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
+ - `worktree_enabled` + todo has `worktree_path`: include `worktree_path`, `worktree_branch` in ctx. Instruction: exec in worktree dir. Prefix commits `[todo-{id}]`.
+ - Pattern group todo → include: "Part of pattern group (N similar). Common pattern: <normalized>. Implement consistently."
+ - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → (1) detect, (2) `SendMessage` team-lead, (3) team-lead escalates via `AskUserQuestion`.
+ - Wait for batch. Report failures.
+ - Write checkpoint to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml
      team_name: execute-{project}-{timestamp}
      batch_index: 1
@@ -365,11 +332,11 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
      approved_plans:
        <todo_id>: "<plan text>"
      ```
-**3.** After all agents complete: `TeamDelete(team_name)`
-**4.** If any agents failed, log the failures to `tracking/{project}/.team-state/failed-teams.yaml` (create the directory if needed).
+**3.** All agents done: `TeamDelete(team_name)`.
+**4.** Failed agents → log to `tracking/{project}/.team-state/failed-teams.yaml`.
 
-**Phase 2a — Verification** (skip entirely if `--no-verify` was passed in $ARGUMENTS):
-After all agents complete, verify each completed todo sequentially in the main conversation. For each todo, run the verification checks from step **4a.** (Automated checks, Spec validation, Diff review). Collect all results, then display a combined batch report:
+**Phase 2a — Verification** (skip if `--no-verify`):
+Verify each completed todo sequentially. Run checks from 4a (Automated, Spec, Diff). Combined batch report:
 
 ```
 ### Verification Summary — Batch
@@ -381,108 +348,76 @@ After all agents complete, verify each completed todo sequentially in the main c
 | 2.3  | PASS (8 tests)  | 4/4 met | 1 extra file | WARN |
 ```
 
-Persist each todo's individual report to `todos/<id>/verification-report.md` in the tracking dir.
+Persist each to `todos/<id>/verification-report.md`.
 
-After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
+Summary line (e.g. "2 passed, 1 failed"):
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-indep-{timestamp}", description="Fix agents for failed verification (Pattern A indep)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-indep-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
-- **Proceed**: continue to Phase 3 despite failures.
-- **Skip**: skip remaining verification for this session and go directly to Phase 3.
+- Fix: 2+ failed → `TeamCreate(name="exec-fix-indep-{timestamp}", ...)`, one agent per failed todo. After: `TeamDelete`. 1 failed → single agent. Re-verify (max 2 retries). Still failing → display, re-prompt.
+- Proceed: continue to Phase 3.
+- Skip: go to Phase 3.
 
-If all checks pass, display the combined report and proceed to Phase 3 without prompting.
+All pass → display, proceed w/o prompt.
 
-**Phase 3 — Satisfaction check (sequential, main conversation):**
-For each completed todo (excluding manual-skipped and failed):
-**1.** Review the agent's output
-**2.** Run the satisfaction loop (same as step **5a.**–**5d.** above)
-Clear `executing_agents = {}` after satisfaction checks complete.
-Main conversation reports summary, including any skipped manual todos and any failed agent todos.
+**Phase 3 — Satisfaction (sequential, main conversation):**
+Each completed todo (excl manual-skipped + failed):
+**1.** Review agent output.
+**2.** Satisfaction loop (5a-5d).
+Clear `executing_agents = {}`. Report summary incl skipped/failed.
 
----
 
-**Pattern B — Task agent execution (independent todos, fallback):**
+**Pattern B — Task agent exec (independent, fallback):**
 
-Phase 1 — Plan (sequential, in main conversation):
+Phase 1 — Plan (sequential, main conversation):
 
-Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
+Skip if trust 3 → Phase 2 w/ ctx only.
 
-Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-**IF `pipeline_enabled` AND trust level is NOT 3**: before the loop begins, call `TeamCreate(name="exec-fallback-{timestamp}", description="Pipeline execution agents (Pattern B fallback) for {N} independent todos")` so all pipeline-spawned background Task agents are wrapped in a team. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down in Phase 2 after agent collection.
+IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-fallback-{timestamp}", description="Pipeline execution agents (Pattern B fallback) for {N} independent todos")`. Torn down in Phase 2.
 
-For each todo in the range:
-**1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
-**2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
-**3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-**3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+Each todo:
+**1.** `todo_check_executable` — "⚠️" → skip.
+**2.** `proj_get_todo_context(todo_id, include_parent=true)`.
+**3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
+**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
 
-   Compute complexity score (0-14) from 7 dimensions:
+ Complexity score (0-14), same 7-dimension table.
+ Same eval order: Tag overrides → score → critical-path guard.
+ Same tag overrides + critical-path guard rules.
+ Same gate routing: AUTO-EXECUTE (0-3) / LIGHT (4-7) / FULL (8-14). `--force-plan` → FULL.
 
-   | Dimension | 0 points | 1 point | 2 points |
-   |-----------|----------|---------|----------|
-   | File count (from plan) | 1 file | 2-4 files | 5+ files |
-   | Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
-   | Requirements quality | detailed | basic | none/vague |
-   | Research quality | detailed | basic | none |
-   | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0 (leaf) | 1-3 | 4+ |
-   | Blocked-by deps | 0 | 1 | 2+ |
+**3b.** `proj_decision_log(action="search", ...)`. Results → "### Prior Decisions".
+`EnterPlanMode`. Plan w/ Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
+**4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next. Trust 2 → auto-approve.
+**4a.** After approval: `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
+**5.** Store in `approved_plans[todo_id]`.
+**6.** IF `pipeline_enabled` AND trust != 3:
+ `len(executing_agents) >= max_parallel` → wait.
+ Spawn background agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
-   Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
-
-   **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
-
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
-
-   Gate routing:
-   - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
-   - **LIGHT REVIEW (4-7)**: 1-line summary + `Proceed? [Y/n]` (default yes).
-   - **FULL REVIEW (8-14)**: Full EnterPlanMode/ExitPlanMode.
-
-   If `--force-plan`: always route to FULL REVIEW.
-
-**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
-Call `EnterPlanMode`. Create an implementation plan for this todo covering files to modify/create, key changes, implementation order, and testing approach. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
-**4.** Plan approval (respects trust level):
-   - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
-   - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo.
-   - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
-**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
-**5.** Store the approved plan in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust level is NOT 3:
-     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with `team_name="exec-fallback-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
-
-**Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-indep-{timestamp}", description="Cross-review agents for N independent-todo plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-indep-{timestamp}")`.
-Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
-Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
-Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
-If any HIGH risk: flag for user attention before proceeding to execution.
+**Cross-review** (paranoid AND N > 1):
+`TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (parallel Task agents):
 
-Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
+Enforce max_parallel. `TeamCreate` for 2+ agents.
 
-**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** If `pipeline_enabled` was true in Phase 1, the `exec-fallback-{timestamp}` team was already created at the start of Phase 1 and will be torn down below. Otherwise, before spawning in the ELSE branch below, call `TeamCreate(name="exec-fallback-{timestamp}", description="Pattern B fallback execution agents for {N} independent todos")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="exec-fallback-{timestamp}")` before proceeding to Phase 2a.
+IF `pipeline_enabled`: team already created in Phase 1.
+ELSE: `TeamCreate(name="exec-fallback-{timestamp}", ...)` before spawning.
 
 IF `pipeline_enabled`:
-    Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-fallback-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
-    -- batch failure short-circuit --
-    IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
+ Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-fallback-{timestamp}")`.
+ All failed → "All N failed. (1) Retry (2) Skip (3) Stop."
 ELSE:
-After all plans are approved (or skipped for trust 3), spawn one `general-purpose` Task agent per todo (excluding manual-skipped ones) with `team_name="exec-fallback-{timestamp}"`.
-Each agent receives: the todo details, its requirements.md, its research.md, parent context, AND the approved implementation plan (or context only if trust 3).
-If `worktree_enabled` and todo has `worktree_path`:
-  Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
-  Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
-  Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
-IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
-Each agent implements according to its approved plan. Agents do NOT call `todo_complete`.
-After all agents return (ELSE branch), call `TeamDelete(team_name="exec-fallback-{timestamp}")` before proceeding to Phase 2a.
+After plans approved (or skipped trust 3), spawn one `general-purpose` Task agent per todo (excl manual-skipped) w/ `team_name`.
+Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
+`worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
+Pattern group → include pattern info.
+Agents impl per plan. Do NOT `todo_complete`.
+After all return (ELSE): `TeamDelete(team_name="exec-fallback-{timestamp}")`.
 
-Phase 2a — Verification (skip entirely if `--no-verify` was passed in $ARGUMENTS):
-After all agents complete, verify each completed todo sequentially in the main conversation. For each todo, run the verification checks from step **4a.** (Automated checks, Spec validation, Diff review). Collect all results, then display a combined batch report:
+Phase 2a — Verification (skip if `--no-verify`):
+Verify each sequentially. Run checks from 4a. Combined report:
 
 ```
 ### Verification Summary — Batch
@@ -494,110 +429,72 @@ After all agents complete, verify each completed todo sequentially in the main c
 | 2.3  | PASS (8 tests)  | 4/4 met | 1 extra file | WARN |
 ```
 
-Persist each todo's individual report to `todos/<id>/verification-report.md` in the tracking dir.
+Persist to `todos/<id>/verification-report.md`.
 
-After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
+Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", description="Fix agents for failed verification (Pattern B indep fallback)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-indep-fallback-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
-- **Proceed**: continue to Phase 3 despite failures.
-- **Skip**: skip remaining verification for this session and go directly to Phase 3.
+- Fix: 2+ → `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", ...)`, agents per failed. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Proceed / Skip: same as Pattern A.
 
-If all checks pass, display the combined report and proceed to Phase 3 without prompting.
+All pass → proceed w/o prompt.
 
-Phase 3 — Satisfaction check (sequential, main conversation):
-For each completed agent todo (excluding manual-skipped):
-**1.** Review the agent's output
-**2.** Run the satisfaction loop (same as step **5a.**–**5d.** above)
-Clear `executing_agents = {}` after satisfaction checks complete.
-Main conversation reports summary, including any skipped manual todos.
+Phase 3 — Satisfaction (sequential):
+Each completed todo (excl manual-skipped):
+**1.** Review agent output.
+**2.** Satisfaction loop (5a-5d).
+Clear `executing_agents = {}`. Report summary.
 
-**For a range with dependencies:**
+**Range w/ dependencies:**
 
-**Mode selection:** Call `mcp__proj__config_load` to read `team_mode.enabled`. Determine execution mode:
-- If `--team` flag was passed, OR (`config_load().team_mode.enabled` is true AND `--no-team` was NOT passed) AND there are 3+ total (non-manual) todos in the range: use **Pattern A (Team-based execution with dependencies)** below.
-- Otherwise: use **Pattern B (Sequential execution with dependencies)** below.
+**Mode selection:** `config_load` → `team_mode.enabled`.
+- `--team` OR (config enabled AND NOT `--no-team`) AND 3+ non-manual todos → **Pattern A**.
+- Otherwise → **Pattern B**.
 
----
 
-**Pattern A — Team-based execution (with dependencies):**
+**Pattern A — Team exec (w/ deps):**
 
-**Phase C0 — Speculative planning** (if quality_level != careful/paranoid AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (quality_level != careful/paranoid AND trust != 0 AND trust != 3):
 
-**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="exec-spec-deps-{timestamp}", description="Speculative planning agents for dependency-batched todos")` and spawn each read-only Task agent below with that `team_name`. After all speculative plans are collected, call `TeamDelete(team_name="exec-spec-deps-{timestamp}")`.
+`TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → read-only Task agent:
+- Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
+- Output: JSON plan `{prose, actions: [{type, file}]}`
+Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
+`--batch-approve` → auto-approve. `TeamDelete`.
 
-For each todo in the current batch, spawn a read-only Task agent (with `team_name="exec-spec-deps-{timestamp}"`):
-- Tools: Read, Glob, Grep, proj_get_todo_context, proj_explore_codebase, content_get_requirements, content_get_research (NO write tools)
-- Output: structured JSON plan `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
+**Phase 1 — Plan (sequential, dependency order):**
 
-If agent fails: exclude todo, fall back to sequential planning for that todo.
-Store in `speculative_plans[todo_id]`.
+Skip if trust 3 → Phase 2 w/ ctx only.
 
-If `--batch-approve`: auto-approve all speculative plans without review. Display: `Batch-approved N speculative plans.`
+Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-**Phase 1 — Plan (sequential, in dependency order):**
+Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-plan-deps-{timestamp}", ...)`. Torn down after Phase 2.
 
-Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
+Group todos into dependency batches (topo order). Within-batch = parallel, batches = sequential. Each todo:
+**1.** `todo_check_executable` — "⚠️" → skip.
+**2.** `proj_get_todo_context(todo_id, include_parent=true)`.
+**3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
+**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
 
-Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+ Same 7-dimension table + eval order + tag overrides + critical-path guard + gate routing.
 
-**Pipeline team setup (if `pipeline_enabled` AND trust level is NOT 3):** Before the per-todo loop starts, call `TeamCreate(name="exec-plan-deps-{timestamp}", description="Background pipeline execution agents for dependency-batched todos")`. All pipeline agents spawned in step 6 below use `team_name="exec-plan-deps-{timestamp}"`. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down after Phase 2 completion.
+**3b.** `proj_decision_log(action="search", ...)` → "### Prior Decisions".
+`EnterPlanMode`. Plan w/ Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
+**4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next; after all → bulk summary. Trust 2 → auto-approve.
+**4a.** `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
+**5.** Store in `approved_plans[todo_id]`.
+**6.** IF `pipeline_enabled` AND trust != 3:
+ `len(executing_agents) >= max_parallel` → wait.
+ Spawn background agent w/ `team_name="exec-plan-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
-Group todos into dependency batches (topological order). Todos within the same batch have no blocked_by relationships between them and can run in parallel. Batches themselves execute sequentially. For each todo across all batches:
-**1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
-**2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
-**3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-**3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
 
-   Compute complexity score (0-14) from 7 dimensions:
-
-   | Dimension | 0 points | 1 point | 2 points |
-   |-----------|----------|---------|----------|
-   | File count (from plan) | 1 file | 2-4 files | 5+ files |
-   | Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
-   | Requirements quality | detailed | basic | none/vague |
-   | Research quality | detailed | basic | none |
-   | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0 (leaf) | 1-3 | 4+ |
-   | Blocked-by deps | 0 | 1 | 2+ |
-
-   Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
-
-   **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
-
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
-
-   Gate routing:
-   - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
-   - **LIGHT REVIEW (4-7)**: 1-line summary + `Proceed? [Y/n]` (default yes).
-   - **FULL REVIEW (8-14)**: Full EnterPlanMode/ExitPlanMode.
-
-   If `--force-plan`: always route to FULL REVIEW.
-
-**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
-Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
-**4.** Plan approval (respects trust level):
-   - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
-   - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo. After all plans: present a bulk approval summary for final confirmation.
-   - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
-**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
-**5.** Store the approved plan in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust level is NOT 3:
-     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with `team_name="exec-plan-deps-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
-
-After all plans are stored (trust 0-1): present a bulk approval summary showing all todo IDs, their batch assignments, and plan summaries.
-
-**Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-deps-{timestamp}", description="Cross-review agents for N dependency-batched plans")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-deps-{timestamp}")`.
-Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
-Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
-Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
-If any HIGH risk: flag for user attention before proceeding to execution.
+**Cross-review** (paranoid AND N > 1):
+`TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
-1. For each approved plan in `approved_plans`, extract the "Files to modify/create" list from the plan text. For dependency-batched execution, check overlaps **within each batch** (across-batch overlaps are acceptable since batches run sequentially).
-2. Build an overlap matrix: for each pair of plans within the same batch, check if their file lists intersect.
-3. If overlaps are found, display:
+1. Extract file lists from plans. Deps: check overlaps **within each batch** (cross-batch OK — sequential).
+2. Build overlap matrix per pair within same batch.
+3. Overlaps:
 
 ```
 ### File Overlap Warning
@@ -613,57 +510,35 @@ Options:
 3. **Cancel** — Stop execution
 ```
 
-4. If user selects **Serialize**: remove conflicting todos from their parallel batch, add them to a new sequential batch at the end.
-5. If user selects **Proceed**: continue as-is.
-6. If user selects **Cancel**: stop, display "Execution cancelled. Plans are saved."
-7. If no overlaps detected: skip silently.
+4. Serialize → move conflicting to new sequential batch. 5. Proceed. 6. Cancel: "Execution cancelled. Plans are saved." 7. None → skip.
 
-**Resume checkpoint** (applies when `--resume` is passed):
-1. Look for the most recent checkpoint file in `<tracking_dir>/<project>/.team-state/*/checkpoint.yaml`.
-2. If found and not stale (created within the last 24 hours):
-   - Read the checkpoint. Display: `Resuming from batch {batch_index}/{total_batches} — {len(completed_todos)} todos already completed`.
-   - Use the stored `approved_plans` from the checkpoint.
-   - Skip to the `batch_index` in Phase 2 (all prior batches are treated as complete).
-3. If the checkpoint is stale (older than 24 hours) or references todos that no longer exist:
-   - Display: `Checkpoint is stale (created {timestamp}). Restart from the beginning? (1) Restart (2) Use anyway`.
-   - If Restart: ignore checkpoint and start from Phase 1.
-   - If Use anyway: proceed with the stale checkpoint data.
-4. If no checkpoint found: display `No checkpoint found — starting fresh` and proceed normally.
+**Resume checkpoint** (`--resume`):
+Same rules as independent Pattern above.
 
-**Phase 2 — Execute (batches sequential, within-batch parallel with Team):**
+**Phase 2 — Execute (batches sequential, within-batch parallel w/ Team):**
 
-Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
+Enforce max_parallel.
 
-**1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {id1}, {id2}, ... in {N} batches")`
-**1a. Task Mapping** (one-way — tasks mirror todos for coordination only):
-   For each todo across all batches:
-   - Call `TaskCreate` with:
-     - `title`: todo title
-     - `description`: `"Implement todo {id} — {title}"`
-     - `metadata`: `{"proj_todo_id": "{todo.id}", "team_name": "{team_name}"}`
-   - If the todo has `blocked_by` relationships with other todos in the range (same or different batch), use `addBlockedBy` to map the blocking relationships (using the Task IDs returned from previous `TaskCreate` calls).
+**1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {ids} in {N} batches")`
+**1a. Task Mapping** (one-way):
+ Each todo across all batches:
+ - `TaskCreate(title, description="Implement todo {id} — {title}", metadata={"proj_todo_id", "team_name"})`
+ - `blocked_by` rels (same or diff batch) → `addBlockedBy`.
+ Pull model: `TaskList(metadata={"team_name"})`. One-way: satisfaction loop handles completion.
 
-   Agents discover their assigned tasks via `TaskList(metadata={"team_name": team_name})` (pull model — agents are not assigned tasks directly).
-
-   **One-way only**: Task completion does NOT auto-complete the proj todo. The satisfaction loop in Phase 3 handles proj todo completion.
-
-**2.** For each batch in dependency order:
-   IF `pipeline_enabled`:
-       Wait for all `executing_agents` in this batch to complete. Report any failures. After all batches are collected, call `TeamDelete(team_name="exec-plan-deps-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
-       -- batch failure short-circuit --
-       IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
-   ELSE:
-   - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
-   - When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent.
-   - Spawn one Agent per todo in this batch with `team_name`. Each agent receives: the approved plan (or context only if trust 3) + requirements.md + research.md + parent context. If `--full-context` flag was passed, also include CLAUDE.md and NOTES.md content.
-   - If `worktree_enabled` and todo has `worktree_path`:
-     Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
-     Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
-     Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
-   - IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
-   - Agents execute the approved plan as-is. They do NOT call `todo_complete`. If they hit an issue not covered by the plan, they report via `SendMessage` to the team lead rather than improvising. On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion.
-   - Wait for this batch to complete before starting the next batch. Report any failures.
-   - **Write checkpoint** after each batch to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
+**2.** Each batch in dep order:
+ IF `pipeline_enabled`:
+ Wait for `executing_agents` in batch. Report failures. After all batches: `TeamDelete(team_name="exec-plan-deps-{timestamp}")`.
+ All failed → "(1) Retry (2) Skip (3) Stop."
+ ELSE:
+ - Display: `Executing batch <N>/<total>: todos <ids>`
+ - N roles → N agents.
+ - Spawn one Agent per todo w/ `team_name`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
+ - `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
+ - Pattern group → include pattern info.
+ - Agents exec as-is. No `todo_complete`. Plan gap → SendMessage team-lead → escalate via AskUserQuestion.
+ - Wait for batch before next. Report failures.
+ - Write checkpoint:
      ```yaml
      team_name: execute-{project}-{timestamp}
      batch_index: <current batch number>
@@ -672,11 +547,11 @@ Enforce max_parallel from quality_level parameter mapping. Do not spawn more age
      approved_plans:
        <todo_id>: "<plan text>"
      ```
-**3.** After all batches complete: `TeamDelete(team_name)`
-**4.** If any agents failed, log the failures to `tracking/{project}/.team-state/failed-teams.yaml` (create the directory if needed).
+**3.** All batches done: `TeamDelete(team_name)`.
+**4.** Failed → log to `tracking/{project}/.team-state/failed-teams.yaml`.
 
-**Phase 2a — Verification** (skip entirely if `--no-verify` was passed in $ARGUMENTS):
-After all batches complete, verify each completed todo sequentially. For each todo, run the verification checks from step **4a.** (Automated checks, Spec validation, Diff review). Collect all results, then display a combined batch report:
+**Phase 2a — Verification** (skip if `--no-verify`):
+Verify each sequentially. Run checks from 4a. Combined report:
 
 ```
 ### Verification Summary — Batch
@@ -688,101 +563,64 @@ After all batches complete, verify each completed todo sequentially. For each to
 | 2.3  | PASS (8 tests)  | 4/4 met | 1 extra file | WARN |
 ```
 
-Persist each todo's individual report to `todos/<id>/verification-report.md` in the tracking dir.
+Persist to `todos/<id>/verification-report.md`.
 
-After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
+Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-deps-{timestamp}", description="Fix agents for failed verification (Pattern A deps)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-deps-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
-- **Proceed**: continue to Phase 3 despite failures.
-- **Skip**: skip remaining verification for this session and go directly to Phase 3.
+- Fix: 2+ → `TeamCreate(name="exec-fix-deps-{timestamp}", ...)`. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Proceed / Skip: same.
 
-If all checks pass, display the combined report and proceed to Phase 3 without prompting.
+All pass → proceed w/o prompt.
 
-**Phase 3 — Satisfaction check (sequential, main conversation):**
-For each completed todo (excluding manual-skipped and failed), run the satisfaction loop (step 5a-5d) before calling `todo_complete`.
-Clear `executing_agents = {}` after satisfaction checks complete.
-Main conversation reports summary, including any skipped manual todos and any failed agent todos.
+**Phase 3 — Satisfaction (sequential):**
+Each completed todo (excl manual-skipped + failed): satisfaction loop (5a-5d) before `todo_complete`.
+Clear `executing_agents = {}`. Report summary.
 
----
 
-**Pattern B — Sequential execution (with dependencies, fallback):**
+**Pattern B — Sequential exec (w/ deps, fallback):**
 
-Phase 1 — Plan (sequential, in dependency order):
+Phase 1 — Plan (sequential, dep order):
 
-Skip Phase 1 entirely if **trust level is 3** — go directly to Phase 2 with context only (no plans).
+Skip if trust 3 → Phase 2 w/ ctx only.
 
-Initialize `approved_plans = {}`, `executing_agents = {}`, and `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-**Pipeline team setup (if `pipeline_enabled` AND trust level is NOT 3):** Before the per-todo loop starts, call `TeamCreate(name="exec-fallback-deps-{timestamp}", description="Background pipeline execution agents (Pattern B fallback, deps)")` so all pipeline-spawned background Task agents are wrapped in a team. **Never spawn 2+ bare parallel Task agents outside a team.** The team is torn down in Phase 2 after agent collection.
+Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-fallback-deps-{timestamp}", ...)`. Torn down Phase 2.
 
-Execute in topological order (respect blocked_by chains). For each todo:
-**1.** Call `mcp__proj__todo_check_executable` — if the result starts with "⚠️", skip with `⚠️ Todo <id> [manual] — skipped execute` and move to the next todo.
-**2.** Call `mcp__proj__proj_get_todo_context` with `todo_id=<id>` and `include_parent=true`.
-**3.** Call `mcp__proj__proj_search_knowledge` with `query=<todo title>` and `scope=all`. If snippets are returned, include them as a "### Related Context" section when creating the implementation plan below. If no snippets are returned, skip silently.
-**3a.** **Smart gate scoring** (skip if quality_level == fast with auto-execute, or if --force-plan):
+Topo order (respect blocked_by). Each todo:
+**1.** `todo_check_executable` — "⚠️" → skip.
+**2.** `proj_get_todo_context(todo_id, include_parent=true)`.
+**3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
+**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
 
-   Compute complexity score (0-14) from 7 dimensions:
+ Same 7-dimension table + eval order + tag overrides + critical-path guard + gate routing.
 
-   | Dimension | 0 points | 1 point | 2 points |
-   |-----------|----------|---------|----------|
-   | File count (from plan) | 1 file | 2-4 files | 5+ files |
-   | Directory spread | 1 dir | 2-3 dirs | 4+ dirs |
-   | Requirements quality | detailed | basic | none/vague |
-   | Research quality | detailed | basic | none |
-   | Risk tags | none | general risk | security/breaking/migration |
-   | Children count | 0 (leaf) | 1-3 | 4+ |
-   | Blocked-by deps | 0 | 1 | 2+ |
+**3b.** `proj_decision_log(action="search", ...)` → "### Prior Decisions".
+`EnterPlanMode`. Plan w/ Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
+**4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next. Trust 2 → auto-approve.
+**4a.** `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
+**5.** Store in `approved_plans[todo_id]`.
+**6.** IF `pipeline_enabled` AND trust != 3:
+ `len(executing_agents) >= max_parallel` → wait.
+ Spawn background agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
-   Evaluation order: Tag overrides FIRST → complexity score → critical-path file guard as FINAL FLOOR.
+**Cross-review** (paranoid AND N > 1):
+`TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
-   **Tag overrides** (checked before score): `auto-execute` tag → force AUTO-EXECUTE. `security`, `breaking-change`, `migration`, `needs-review` tags → force FULL REVIEW regardless of score. This applies even in `--fast` mode (tag immunity). Most restrictive wins when multiple tags apply.
+Phase 2 — Execute (sequential, dep order):
 
-   **Critical-path file guard** (FINAL FLOOR): If any planned file matches a critical path pattern (e.g., `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json`) → minimum LIGHT REVIEW, even if score is 0-3.
-
-   Gate routing:
-   - **AUTO-EXECUTE (0-3)**: Create git tag `pre-auto-execute-{todo_id}`. Skip plan, execute with context.
-   - **LIGHT REVIEW (4-7)**: 1-line summary + `Proceed? [Y/n]` (default yes).
-   - **FULL REVIEW (8-14)**: Full EnterPlanMode/ExitPlanMode.
-
-   If `--force-plan`: always route to FULL REVIEW.
-
-**3b.** Call `mcp__proj__proj_decision_log` with `action="search"`, `decision=<todo title>`, `project_name=<project>`. If results are returned, include them as a **"### Prior Decisions"** section in the plan context — these may constrain the approach or surface prior choices to reuse.
-Call `EnterPlanMode`. Create an implementation plan for this todo. Include any Related Context from step 3 and any Prior Decisions. (Skipped if gate routed to AUTO-EXECUTE.)
-**4.** Plan approval (respects trust level):
-   - **Trust 0**: Call `ExitPlanMode` for user review. User approves this plan before the next todo's plan is created.
-   - **Trust 1**: Call `ExitPlanMode` for user review. User approves this plan, then move to the next todo.
-   - **Trust 2**: Skip `ExitPlanMode` user review. Display: `Plan auto-approved (trust 2): <1-line summary>`. Store and move to the next todo.
-**4a.** After plan approval: call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the chosen implementation approach>`, `tags="plan"`, `todo_id=<todo_id>`.
-**5.** Store the approved plan in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust level is NOT 3:
-     Before spawning: if `len(executing_agents) >= max_parallel`, wait for at least one executing agent to complete.
-     Spawn a background `general-purpose` Task agent with `team_name="exec-fallback-deps-{timestamp}"` and: todo details, requirements.md, research.md, parent context, and the approved plan. Instruction: implement the approved plan, do NOT call `todo_complete`. Store handle in `executing_agents[todo_id]`.
-
-**Cross-review** (if quality_level == paranoid AND N > 1):
-After all plans are generated, each plan is cross-reviewed by an independent read-only agent. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", description="Cross-review agents for N dependency-batched plans (Pattern B fallback)")` and spawn each Agent with that `team_name`. After all agents return, call `TeamDelete(team_name="execute-cross-review-deps-fallback-{timestamp}")`.
-Agent i reviews plan (i+1) % N. For N=1, cross-review is skipped.
-Each cross-review agent receives: the plan to review + that todo's requirements + the reviewer's own todo context for perspective.
-Cross-review output: risk rating (LOW/MEDIUM/HIGH) + concerns list.
-If any HIGH risk: flag for user attention before proceeding to execution.
-
-Phase 2 — Execute (sequential, in dependency order):
-
-Enforce max_parallel from quality_level parameter mapping. Do not spawn more agents than max_parallel allows.
+Enforce max_parallel.
 
 IF `pipeline_enabled`:
-    Wait for all `executing_agents` in this batch to complete. Report any failures. After collection, call `TeamDelete(team_name="exec-fallback-deps-{timestamp}")` to tear down the pipeline team created at the start of Phase 1.
-    -- batch failure short-circuit --
-    IF all agents in this batch failed: display "All N agents in batch failed. (1) Retry batch (2) Skip to next batch (3) Stop." Handle user choice; skip individual satisfaction loops.
+ Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-fallback-deps-{timestamp}")`.
+ All failed → "(1) Retry (2) Skip (3) Stop."
 ELSE:
-Execute each todo according to its approved plan (or context only if trust 3), one at a time (respecting blocked_by chains). Each todo: mark in_progress, implement per plan.
-If `worktree_enabled` and todo has `worktree_path`:
-  Include in agent context: `worktree_path: <path>`, `worktree_branch: <branch>`.
-  Instruction: "Execute all file operations in the worktree directory at `<worktree_path>`."
-  Prefix all git commit messages with `[todo-{id}]` when working in the worktree.
-IF todo was part of a pattern group: Include in the agent prompt: "This todo is part of a pattern group (N similar todos). The common pattern is: <normalized pattern>. Implement consistently with the group."
+Exec each per plan (or ctx trust 3), one at time (respect blocked_by). Mark in_progress, impl.
+`worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
+Pattern group → include pattern info.
 
-Phase 2a — Verification (skip entirely if `--no-verify` was passed in $ARGUMENTS):
-After all todos are implemented, verify each completed todo sequentially. For each todo, run the verification checks from step **4a.** (Automated checks, Spec validation, Diff review). Collect all results, then display a combined batch report:
+Phase 2a — Verification (skip if `--no-verify`):
+Verify each sequentially. Combined report:
 
 ```
 ### Verification Summary — Batch
@@ -794,37 +632,36 @@ After all todos are implemented, verify each completed todo sequentially. For ea
 | 2.3  | PASS (8 tests)  | 4/4 met | 1 extra file | WARN |
 ```
 
-Persist each todo's individual report to `todos/<id>/verification-report.md` in the tracking dir.
+Persist to `todos/<id>/verification-report.md`.
 
-After the combined report, show a summary line (e.g. "2 passed, 1 failed") and prompt:
+Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- **Fix**: **Spawn via `TeamCreate` when 2+ failed todos — never bare parallel Task calls for 2+ agents.** If there are 2+ failed todos, call `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", description="Fix agents for failed verification (Pattern B deps fallback)")` and spawn one `general-purpose` Task agent per failed todo with that `team_name`, each receiving the verification report + implementation context + instructions to fix the failures. After agents complete, call `TeamDelete(team_name="exec-fix-deps-fallback-{timestamp}")`. If only 1 failed todo, spawn a single Task agent directly (no team needed). Re-run verification on fixed todos only (max 2 retries). If still failing after retries, display the updated report and re-prompt.
-- **Proceed**: continue to Phase 3 despite failures.
-- **Skip**: skip remaining verification for this session and go directly to Phase 3.
+- Fix: 2+ → `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", ...)`. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Proceed / Skip: same.
 
-If all checks pass, display the combined report and proceed to Phase 3 without prompting.
+All pass → proceed w/o prompt.
 
-Phase 3 — Satisfaction check (sequential, in dependency order):
-For each completed todo, run the satisfaction loop (step 5a-5d). **Batch completion rule:** collect all satisfied todo IDs into a list rather than calling `todo_complete` per-todo. If 2 or more are satisfied, make ONE `mcp__proj__todo_batch_complete` call with the full id list — this fires a single aggregated hook chain to Todoist/Trello/Jira instead of N sequential hooks. If only 1 is satisfied, fall back to `mcp__proj__todo_complete`.
-Clear `executing_agents = {}` after satisfaction checks complete.
+Phase 3 — Satisfaction (sequential, dep order):
+Each completed todo: satisfaction loop (5a-5d). Batch completion: collect satisfied IDs → 2+ → single `mcp__proj__todo_batch_complete`. 1 → `mcp__proj__todo_complete`.
+Clear `executing_agents = {}`.
 
-**Note:** Root todo execution does NOT auto-recurse into children. To execute children, specify their IDs explicitly.
+Root todo exec does NOT auto-recurse into children. Specify child IDs explicitly.
 
-**6.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Execute: {todo-id}"`.
+**6.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Execute: {todo-id}")`.
 
 ## Prerequisites
 
-- An active project must be loaded.
-- A valid todo ID or range must be provided (or an in-progress/ready todo must exist).
+- Active project loaded.
+- Valid todo ID/range (or in-progress/ready todo exists).
 
-## Error Handling
+## Err Handling
 
-- **No active project**: displays error and stops.
-- **Manual-tagged todo**: displays warning from `todo_check_executable` and stops (does not implement).
-- **Blocked todo**: displays error and stops.
-- **Verification failures**: presents combined report and offers Fix/Proceed/Skip options.
-- **Agent failures (team/task mode)**: reports failed agents per todo. Logged to `failed-teams.yaml`.
-- **Stale checkpoint (--resume)**: asks user whether to restart or use stale data.
+- No active project → err, stop.
+- Manual-tagged → warning from `todo_check_executable`, stop.
+- Blocked → err, stop.
+- Verification failures → combined report + Fix/Proceed/Skip.
+- Agent failures → report per todo. Log to `failed-teams.yaml`.
+- Stale checkpoint → ask restart or use stale.
 
 ### Worktree Failure Handling
 
@@ -840,7 +677,7 @@ Clear `executing_agents = {}` after satisfaction checks complete.
 
 ## Output
 
-- **Single todo**: Implementation result, verification report (if enabled), satisfaction loop outcome, completion confirmation.
-- **Range/batch**: Per-batch execution progress, combined verification summary table, satisfaction loop for each completed todo, overall summary.
+- Single todo: impl result, verification report (if enabled), satisfaction outcome, completion confirm.
+- Range/batch: per-batch progress, combined verification table, satisfaction per completed todo, overall summary.
 
-Suggested next: `1. /proj:save` -- save session and reconcile git | `2. /proj:status` -- see updated project overview
+Suggested next: `1. /proj:save` -- save session, reconcile git | `2. /proj:status` -- updated overview

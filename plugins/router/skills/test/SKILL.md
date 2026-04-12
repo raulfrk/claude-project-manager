@@ -7,23 +7,24 @@ context: fork
 agent: general-purpose
 ---
 
-Test a registered hook by firing its trigger.
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Test registered hook by firing its trigger.
 
 **Parse $ARGUMENTS**:
-- First arg: `hook_id` (required) — the hook to test.
-- Second arg (optional): `source_result_json` — a JSON string to use as the source result for template resolution. Defaults to `{}`.
+- First arg: `hook_id` (required)
+- Second arg (opt): `source_result_json` — JSON string for template resolution. Default `{}`.
 
-If $ARGUMENTS is empty, output: "Hook ID required. Usage: `/router:test <hook_id> [source_result_json]`"
+Empty $ARGUMENTS → "Hook ID required. Usage: `/router:test <hook_id> [source_result_json]`"
 
-**1.** Call `mcp__plugin_router_router__router_list_tool` to look up the hook by ID. Find the hook entry whose `id` matches. If not found, stop with: "Hook `<hook_id>` not found. Run `/router:list` to see available hooks."
+**1.** `mcp__plugin_router_router__router_list_tool` — find hook by ID. Not found → "Hook `<hook_id>` not found. Run `/router:list` to see available hooks."
 
-**2.** Extract the `trigger_tool` from the matched hook.
+**2.** Extract `trigger_tool` from matched hook.
 
-**3.** Call `mcp__plugin_router_router__router_fire_tool` with:
-- `trigger_tool` = the hook's trigger_tool
-- `source_result` = the provided source_result_json or `{}`
+**3.** `mcp__plugin_router_router__router_fire_tool` w/ `trigger_tool` + `source_result` (provided json or `{}`).
 
-**4.** Parse the JSON response and display results:
+**4.** Parse JSON response, display:
 
 ```
 Test fire for hook <hook_id> (<trigger_tool> -> <target_tool>):
@@ -33,30 +34,30 @@ Test fire for hook <hook_id> (<trigger_tool> -> <target_tool>):
   Errors: <count>
 ```
 
-If there are errors, list each:
+Errors → list each:
 ```
   - <hook_id>: <error>
 ```
 
-If there are blocking results, show them:
+Blocking results → show:
 ```
   Results:
   - <hook_id>: <result>
 ```
 
-If `hooks_fired` is 0 and `skipped` > 0, note: "Hook was skipped — check its condition."
+`hooks_fired` 0 + `skipped` > 0 → "Hook was skipped — check its condition."
 
 ## Prerequisites
 
-- Router plugin MCP server is running and reachable.
-- A hook ID must be provided.
+- Router plugin MCP server running/reachable.
+- Hook ID required.
 
 ## Error Handling
 
-- **No arguments**: displays "Hook ID required. Usage: `/router:test <hook_id>`" and stops.
-- **Hook not found**: displays "Hook `<hook_id>` not found. Run `/router:list` to see available hooks." and stops.
-- **Router MCP unavailable**: displays error from tool call and stops.
+- No args → "Hook ID required. Usage: `/router:test <hook_id>`", stop.
+- Hook not found → "Hook `<hook_id>` not found. Run `/router:list` to see available hooks.", stop.
+- Router MCP unavailable → display err, stop.
 
 ## Output
 
-Test fire summary: hooks fired count, skipped count, errors count. If errors, lists each with hook_id and error. If blocking results, shows them. If skipped, notes the condition.
+Test fire summary: hooks fired/skipped/errors count. Errors → list each w/ hook_id + err. Blocking → show. Skipped → note condition.

@@ -5,24 +5,27 @@ allowed-tools: mcp__proj__proj_jira_map, mcp__proj__config_load, mcp__jira__jira
 argument-hint: "<issues-json>"
 ---
 
-Compute the Jira-to-local project/todo mapping using epic-first logic. This is a sub-skill used by `/proj:jira-sync`.
 
-Accepts the issues data produced by the Jira fetch step in `/proj:jira-sync`.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Compute Jira-to-local project/todo mapping via epic-first logic. Sub-skill of `/proj:jira-sync`.
+
+Accepts issues data from Jira fetch step.
 
 **1.** Accept issues data
 
-- Receive the fetched Jira issues JSON.
+- Receive fetched Jira issues JSON.
 
 **2.** Compute mapping
 
-- Call `mcp__proj__proj_jira_map` with the fetched issues JSON.
-- The response includes a mapping plan with two sections:
-  - **Auto-mapped** (epic groups): epics matched to existing or new projects
-  - **Needs input** (standalone groups): issues with no epic that require user assignment
+- `mcp__proj__proj_jira_map` w/ fetched issues JSON.
+- Response includes mapping plan:
+ - Auto-mapped (epic groups): epics matched to existing/new projects
+ - Needs input (standalone groups): issues w/o epic requiring user assignment
 
 **3.** Display mapping
 
-Show the proposed mapping in two sections:
+Two sections:
 
 **Auto-mapped (epic-based)**
 
@@ -42,30 +45,30 @@ Show the proposed mapping in two sections:
 Issues to sync: {total} ({auto_count} auto-mapped, {needs_input_count} need input)
 ```
 
-- **Existing** -- maps to an already-tracked local project (matched by jira_issue_key or fuzzy name)
-- **Will create** -- a new local project will be created from the epic
-- **(unmapped)** -- standalone issue with no automatic match; user must assign
-- **Matched by** -- the `matched_strategy` from the JiraGroup (e.g., `tag_match`, `keyword_match`, `recent_suggestion`, `fuzzy_name`, `jira_issue_key`); shown as `—` when unmapped
+- **Existing** — maps to already-tracked local project (matched by `jira_issue_key` or fuzzy name)
+- **Will create** — new local project from epic
+- **(unmapped)** — standalone issue, no auto match; user must assign
+- **Matched by** — `matched_strategy` from JiraGroup (e.g. `tag_match`, `keyword_match`, `recent_suggestion`, `fuzzy_name`, `jira_issue_key`); `—` when unmapped
 
-Return the mapping plan for use by downstream sub-skills (jira-apply).
+Return mapping plan for downstream sub-skills (`jira-apply`).
 
 ## Prerequisites
 
-- Jira MCP server is running and reachable.
-- Issues data must be provided as input.
+- Jira MCP server running/reachable.
+- Issues data provided as input.
 
-## Error Handling
+## Err Handling
 
-- **Jira MCP unavailable**: displays error from tool call and stops.
-- **No issues provided**: displays error and stops.
-- **Mapping tool error**: displays error from `proj_jira_map` and stops.
+- Jira MCP unavailable → show err, stop.
+- No issues provided → show err, stop.
+- Mapping tool err → show `proj_jira_map` err, stop.
 
 ## Output
 
-Two-section mapping table: Auto-mapped (epic-based) showing Epic, Local Project, Issues count, Status; and Needs input (no epic) showing Issue, Summary, Suggested Project, Matched by. Summary line with total/auto/needs-input counts.
+Two-section mapping table: Auto-mapped (epic-based) w/ Epic, Local Project, Issues count, Status; Needs input (no epic) w/ Issue, Summary, Suggested Project, Matched by. Summary line w/ total/auto/needs-input counts.
 
 ## Notes
 
-- All Jira MCP tool names use the static pattern `mcp__jira__<tool_name>`.
-- Epics become projects with `jira_issue_key` set on ProjectMeta for stable re-matching.
-- Standalone issues (no epic) are NOT auto-assigned to any project. They require explicit user input.
+- All Jira MCP tool names: `mcp__jira__<tool_name>`.
+- Epics → projects w/ `jira_issue_key` on ProjectMeta for stable re-matching.
+- Standalone issues (no epic) NOT auto-assigned; require explicit user input.

@@ -5,48 +5,50 @@ allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ct
 argument-hint: "[project-name]"
 ---
 
-Load a project context for this session only (not persisted globally).
 
-**1.** If $ARGUMENTS is empty:
-   - Call `mcp__proj__proj_list` to get all tracked projects
-   - If the list is empty, stop with: "No tracked projects found. Run `/proj:init` to add one."
-   - Present a numbered list and ask the user to pick one
-   - Call `mcp__proj__proj_load_session` with the selected name
-   - If the tool returns not-found, stop with: "Project not found. Run `/proj:init` to add it."
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** If $ARGUMENTS is provided:
-   - Call `mcp__proj__proj_load_session` with the name
-   - The tool handles fuzzy matching automatically
-   - If the tool returns an "Ambiguous match" message, present the options and ask the user to confirm
-   - If the tool returns not-found, stop with: "Project `<name>` not found. Run `/proj:init` to add it."
+Load project ctx for this session only (not persisted).
 
-**3.** After successful load:
-   - Call `mcp__proj__ctx_session_start` to get the full project context
-   - Confirm: "Loaded project '<name>' for this session. This session is now working on <name>."
+**1.** No $ARGUMENTS:
+ - `mcp__proj__proj_list` → get tracked projects
+ - Empty list → stop: "No tracked projects found. Run `/proj:init` to add one."
+ - Show numbered list, ask user to pick
+ - `mcp__proj__proj_load_session` w/ selected name
+ - Not-found → stop: "Project not found. Run `/proj:init` to add it."
 
-**3a.** Display last session context (before todos):
-   - Call `mcp__proj__proj_session_context` to get `config.tracking_dir` and `project.name`.
-   - Use Bash: `ls <tracking_dir>/<name>/sessions/session-*.md 2>/dev/null | sort | tail -1`
-   - If the result is non-empty: read that file with the Read tool and display it under the heading `### Last Session` — show this **before** the ctx_session_start context block (todos, notes).
-   - If no session files exist: skip silently.
-   - Then display the ctx_session_start context (project header, todos, recent notes).
+**2.** $ARGUMENTS provided:
+ - `mcp__proj__proj_load_session` w/ name (handles fuzzy match)
+ - "Ambiguous match" → present opts, ask user to confirm
+ - Not-found → stop: "Project `<name>` not found. Run `/proj:init` to add it."
 
-**4.** Note: This only affects this session. Other parallel Claude sessions are unaffected.
+**3.** Successful load:
+ - `mcp__proj__ctx_session_start` → get full project ctx
+ - Confirm: "Loaded project '<name>' for this session. This session is now working on <name>."
+
+**3a.** Show last session ctx (before todos):
+ - `mcp__proj__proj_session_context` → get `config.tracking_dir` + `project.name`
+ - Bash: `ls <tracking_dir>/<name>/sessions/session-*.md 2>/dev/null | sort | tail -1`
+ - Non-empty → `Read` file, display under `### Last Session` **before** ctx_session_start block
+ - No session files → skip silently
+ - Then display ctx_session_start ctx (project header, todos, recent notes)
+
+**4.** Session-only. Parallel Claude sessions unaffected.
 
 ## Prerequisites
 
-- Proj plugin must be configured (`~/.claude/proj.yaml` exists).
-- At least one project must exist (run `/proj:init` first if none).
+- Proj plugin configured (`~/.claude/proj.yaml` exists)
+- ≥1 project exists (`/proj:init` first if none)
 
-## Error Handling
+## Err Handling
 
-- **No tracked projects**: displays "No tracked projects found. Run `/proj:init` to add one." and stops.
-- **Project not found**: displays "Project `<name>` not found. Run `/proj:init` to add it." and stops.
-- **Ambiguous match**: presents matching options and asks the user to confirm.
-- **Load session error**: displays error from `proj_load_session` and stops.
+- No projects → "No tracked projects found. Run `/proj:init` to add one." Stop.
+- Not found → "Project `<name>` not found. Run `/proj:init` to add it." Stop.
+- Ambiguous → present matches, ask confirm.
+- Load err → display err, stop.
 
 ## Output
 
-Confirmation message: `Loaded project '<name>' for this session.` Followed by last session notes (if any) and full project context (todos, notes, recent activity).
+Confirm msg: `Loaded project '<name>' for this session.` + last session notes (if any) + full project ctx (todos, notes, recent activity).
 
-Suggested next: `1. /proj:status` -- see full project status | `2. /proj:todo list` -- see all todos
+Suggested next: `1. /proj:status` -- full project status | `2. /proj:todo list` -- all todos

@@ -5,34 +5,37 @@ allowed-tools: mcp__proj__proj_list, mcp__proj__proj_load_session, mcp__proj__ct
 argument-hint: "[project-name]"
 ---
 
-Switch the active project to $ARGUMENTS.
 
-**1.** Call `mcp__proj__proj_list` to get all tracked projects.
-   - If the list is empty, stop with: "No tracked projects found. Run `/proj:init` to add one."
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** If $ARGUMENTS is empty, present the list and ask the user which project to switch to.
-   If $ARGUMENTS is provided:
-   - Find projects whose name matches $ARGUMENTS (case-insensitive, exact or prefix match).
-   - If no match, stop with: "Project `<name>` not found. Run `/proj:list-proj` to see available projects."
-   - If more than one match: list the matching names and ask the user to confirm which one.
+Switch active project to $ARGUMENTS.
 
-**3.** Call `mcp__proj__proj_load_session` with the confirmed project name.
+**1.** `mcp__proj__proj_list` → get tracked projects.
+ - Empty → stop: "No tracked projects found. Run `/proj:init` to add one."
 
-**4.** Call `mcp__proj__ctx_session_start` and display the returned context so the user immediately sees the new project's status.
+**2.** $ARGUMENTS empty → present list, ask user which project.
+ $ARGUMENTS provided:
+ - Match name (case-insensitive, exact/prefix).
+ - No match → stop: "Project `<name>` not found. Run `/proj:list-proj` to see available projects."
+ - Multiple matches → list names, ask user to confirm.
+
+**3.** `mcp__proj__proj_load_session` w/ confirmed project name.
+
+**4.** `mcp__proj__ctx_session_start` → display returned ctx so user sees new project status.
 
 ## Prerequisites
 
-- Proj plugin must be configured (`~/.claude/proj.yaml` exists).
-- At least one project must exist.
+- Proj plugin configured (`~/.claude/proj.yaml` exists).
+- ≥1 project exists.
 
 ## Error Handling
 
-- **No tracked projects**: displays "No tracked projects found. Run `/proj:init` to add one." and stops.
-- **Project not found**: displays "Project `<name>` not found. Run `/proj:list-proj` to see available projects." and stops.
-- **Multiple matches**: lists matching names and asks the user to confirm.
+- No tracked projects → "No tracked projects found. Run `/proj:init` to add one." Stop.
+- Not found → "Project `<name>` not found. Run `/proj:list-proj` to see available projects." Stop.
+- Multiple matches → list names, ask user to confirm.
 
 ## Output
 
-Displays the new project's context (status, todos, recent activity) via `ctx_session_start`.
+New project ctx (status, todos, recent activity) via `ctx_session_start`.
 
-Suggested next: `1. /proj:status` -- see the project status | `2. /proj:todo list` -- see all todos
+Suggested next: `1. /proj:status` -- see project status | `2. /proj:todo list` -- see all todos

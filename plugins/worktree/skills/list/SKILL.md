@@ -7,30 +7,29 @@ context: fork
 agent: general-purpose
 ---
 
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
 List git worktrees.
 
-**1.** Call `mcp__plugin_worktree_worktree__wt_list` with the optional repo label from $ARGUMENTS (or no filter to list all). Display the results clearly. For each worktree show: path, branch, HEAD SHA (short), and any status flags (locked, prunable).
+**1.** `mcp__plugin_worktree_worktree__wt_list` w/ opt repo label from $ARGUMENTS (or no filter). Each worktree: path, branch, HEAD SHA (short), status flags (locked, prunable).
 
-If `wt_list` returns an error that the repo label was not found, stop with:
-  "Repo label `<label>` not found. Run `/worktree:add-repo` to register one."
+`wt_list` err repo not found → "Repo label `<label>` not found. Run `/worktree:add-repo` to register one."
 
-If the result is an empty list, print:
-  "No worktrees found for <repo-label>." — if a label was given
-  "No worktrees found." — if no label was given
-  Stop.
+Empty list → "No worktrees found for <repo-label>." (label given) or "No worktrees found." (no label). Stop.
 
 ## Prerequisites
 
-- Worktree plugin must be configured (at least one base repo registered).
+Worktree plugin configured (≥1 base repo registered).
 
-## Error Handling
+## Err Handling
 
-- **Invalid repo label**: displays "Repo label `<label>` not found. Run `/worktree:add-repo` to register one." and stops.
-- **Empty list**: displays `No worktrees found.` and stops.
-- **Worktree MCP unavailable**: displays error from tool call and stops.
+- Invalid repo label → "Repo label `<label>` not found. Run `/worktree:add-repo` to register one." Stop.
+- Empty list → "No worktrees found." Stop.
+- Worktree MCP unavailable → show err, stop.
 
 ## Output
 
-For each worktree: path, branch, HEAD SHA (short), and status flags (locked, prunable).
+Each worktree: path, branch, HEAD SHA (short), status flags (locked, prunable).
 
-Suggested next: `1. /worktree:create` -- create a new worktree | `2. /worktree:prune` -- clean up stale worktrees
+Suggested next: `1. /worktree:create` -- create new worktree | `2. /worktree:prune` -- clean up stale worktrees

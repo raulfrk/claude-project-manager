@@ -4,41 +4,44 @@ description: Set up the worktree plugin. Run this once to configure the default 
 allowed-tools: Read, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_add_repo, Bash
 ---
 
-Set up the worktree plugin configuration.
 
-This wizard uses a **load-once pattern**: at Step 0 it reads `~/.claude/worktree.yaml` once and threads the current values into each prompt as the bracketed default. Pressing Enter keeps the loaded value; typing a new value overrides it. On first-run (no config file), prompts fall back to hardcoded defaults.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**0.** **Load existing config** — Read `~/.claude/worktree.yaml` with the `Read` tool and parse with `yaml.safe_load`. Store the result as `worktree_config`. On any error (file missing, read failure, YAML parse failure), set `worktree_config = None`. Warn once per wizard run on parse failure (not on missing file):
+Set up worktree plugin config.
+
+Wizard uses **load-once pattern**: Step 0 reads `~/.claude/worktree.yaml` once, threads cur vals into each prompt as bracketed default. Enter keeps loaded val; typing overrides. First-run (no config) → hardcoded defaults.
+
+**0.** Load existing config — `Read` `~/.claude/worktree.yaml`, parse w/ `yaml.safe_load`. Store as `worktree_config`. Any err (missing, read fail, parse fail) → `worktree_config = None`. Warn once on parse fail (not missing):
 `"Warning: ~/.claude/worktree.yaml exists but could not be parsed (<error>). Using hardcoded defaults."`
 
-**1.** Check if config already exists by calling `mcp__plugin_worktree_worktree__wt_list_repos`. If repos are already configured, ask the user if they want to reconfigure or just add more repos. If reconfiguring: re-ask the default directory question (2a) with the current value shown as default; skip repo registration unless the user explicitly requests to add new repos.
+**1.** Check existing config via `mcp__plugin_worktree_worktree__wt_list_repos`. Repos configured → ask reconfigure or add more. Reconfiguring: re-ask default dir (2a) w/ cur val as default; skip repo registration unless user requests.
 
-**2.** Ask the following questions (one at a time, with defaults shown). Defaults are computed via `(worktree_config or {}).get("<field>", <hardcoded>)`:
+**2.** Ask these questions (one at a time, defaults shown). Defaults: `(worktree_config or {}).get("<field>", <hardcoded>)`:
 
    a. `"Where should worktrees be created by default? [<worktree_config.default_worktree_dir or '~/worktrees'>]"`
-      After the user confirms the directory, persist it to worktree config as `default_worktree_dir` in `~/.claude/worktree.yaml`.
+      Confirmed → persist as `default_worktree_dir` in `~/.claude/worktree.yaml`.
    b. `"Would you like to register any base repositories now? (You can always add more later with /worktree:add-repo)"`
 
-**3.** For each base repo the user wants to add:
-   - Ask for the local path to the git repository
-   - Ask for a short label (e.g. "myapp", "backend", "docs")
-   - Ask for the default branch (default: `main`)
-   - Call `mcp__plugin_worktree_worktree__wt_add_repo` with the provided values
+**3.** Each base repo:
+   - Ask local path to git repo
+   - Ask short label (e.g. "myapp", "backend", "docs")
+   - Ask default branch (default: `main`)
+   - `mcp__plugin_worktree_worktree__wt_add_repo` w/ provided vals
 
-**4.** Confirm setup is complete and show the registered repos.
+**4.** Confirm setup complete; show registered repos.
 
 ## Prerequisites
 
-- Worktree plugin MCP server must be running and reachable.
+Worktree plugin MCP server must be running/reachable.
 
-## Error Handling
+## Err Handling
 
-- **Already configured**: asks user to reconfigure or add repos. If declined, keeps existing config.
-- **Worktree MCP unavailable**: displays error from tool call and stops.
-- **Invalid repo path**: displays error from `wt_add_repo` and asks for a different path.
+- Already configured: ask reconfigure or add. Declined → keep existing.
+- Worktree MCP unavailable: show err, stop.
+- Invalid repo path: show err from `wt_add_repo`, ask diff path.
 
 ## Output
 
-Setup confirmation and list of registered repos.
+Setup confirmation + registered repos list.
 
-Suggested next: `1. /worktree:create` -- create your first worktree | `2. /worktree:add-repo` -- register another base repository
+Suggested next: `1. /worktree:create` -- create first worktree | `2. /worktree:add-repo` -- register another base repo

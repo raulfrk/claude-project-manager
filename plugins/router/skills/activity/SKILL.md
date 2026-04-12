@@ -6,15 +6,18 @@ context: fork
 agent: general-purpose
 ---
 
-Display a summary of recent hook activity (successes and failures).
 
-**1.** Call `mcp__plugin_router_router__router_invocations_tool` with `type="all"` and `limit=50`.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** Parse the response. Separate entries by `_type`:
-- `_type="invocation"` — successful hook executions
-- `_type="failure"` — hook failures
+Show recent hook activity (successes/failures).
 
-**3.** Display the summary:
+**1.** `mcp__plugin_router_router__router_invocations_tool` w/ `type="all"`, `limit=50`.
+
+**2.** Parse response. Separate by `_type`:
+- `_type="invocation"` → successes
+- `_type="failure"` → failures
+
+**3.** Display summary:
 
 ```
 ### Hook Activity (last 50 events)
@@ -32,9 +35,9 @@ Display a summary of recent hook activity (successes and failures).
 | ...       | ...     | ...          | ...   |
 ```
 
-- Show at most 10 rows per table (most recent first). If more exist, note "... and N more."
-- If a table has 0 entries, omit it.
-- If no entries at all: output "No hook activity recorded yet."
-- Truncate long error strings to 80 chars.
+- Max 10 rows/table (most recent first). More exist → "... and N more."
+- 0 entries → omit table.
+- No entries at all → "No hook activity recorded yet."
+- Truncate long err strings to 80 chars.
 
 Suggested next: `1. /router:list` — see registered hooks | `2. /router:recover` — retry failed hooks

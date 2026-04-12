@@ -7,99 +7,99 @@ context: fork
 agent: general-purpose
 ---
 
-Pull Jira issues for a user and sync them to local projects/todos using **epic-first mapping**.
-This skill operates across all projects -- it does NOT require loading a project first.
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Pull Jira issues for user, sync to local projects/todos via **epic-first mapping**.
+Works across all projects -- no project load required.
 
 ## Sync path
 
-Call `proj_jira_full_sync` directly -- it handles fetching, mapping, and applying in one call.
+Call `proj_jira_full_sync` directly -- handles fetch, map, apply in one call.
 
-## Epic-first mapping logic
+## Epic-first mapping
 
-1. **Epics become projects** -- each Jira epic maps to one local project. The project's `jira_issue_key` is set to the epic key for instant re-matching on future runs.
-2. **Issues under an epic** -- become todos in that epic's project.
-3. **Standalone issues (no epic)** -- assigned to `project_name` if provided; otherwise warned and skipped. No interactive disambiguation.
-4. **Re-run matching** -- projects are matched by `jira_issue_key` first (instant, stable), then by fuzzy name. This makes re-runs idempotent.
-5. **Auto-create** -- new epics without a matching project get auto-created (cap: 10 per sync). Warns if >80% title similarity with existing project.
-6. **Status sync** -- Jira "Done"/"Closed"/"Resolved" completes local todos; Jira reopened + local done sets pending.
+1. **Epics → projects** -- each epic maps to one project. `jira_issue_key` set to epic key for re-matching.
+2. **Issues under epic** → todos in epic's project.
+3. **Standalone issues (no epic)** → assigned to `project_name` if provided; else warned, skipped.
+4. **Re-run matching** -- match by `jira_issue_key` first (instant, stable), then fuzzy name. Idempotent.
+5. **Auto-create** -- new epics w/o match auto-created (cap: 10/sync). Warns if >80% title similarity w/ existing.
+6. **Status sync** -- Jira Done/Closed/Resolved → complete local todos; Jira reopened + local done → pending.
 
 **1.** Setup
 
-- Call `mcp__proj__proj_session_context` -- read all config, project metadata, and integration settings in one call.
-  - From the result, extract `integrations.jira.enabled` and other config values.
-  - Note: jira-sync works across all projects, so the active project from context is informational only.
-- If `integrations.jira.enabled` is false or not set, stop with: "Jira sync not enabled. Run `/proj:init-plugin` to enable it."
-- Parse optional `--user` and `--projects` from skill arguments:
-  - `--user <username>` overrides `jira.default_user`
-  - `--projects <key1,key2>` filters to specific Jira project keys
-- If no user is resolved (neither argument nor config default), stop with: "No Jira user configured. Pass `--user <username>` or set `jira.default_user` in `~/.claude/proj.yaml`."
+- `mcp__proj__proj_session_context` -- read config, metadata, integration settings.
+ - Extract `integrations.jira.enabled` + other vals.
+ - jira-sync works across all projects; active project informational only.
+- `jira.enabled` false/unset → stop: "Jira sync not enabled. Run `/proj:init-plugin` to enable it."
+- Parse opt `--user`/`--projects` from args:
+ - `--user <username>` overrides `jira.default_user`
+ - `--projects <key1,key2>` filters to specific Jira project keys
+- No user resolved → stop: "No Jira user configured. Pass `--user <username>` or set `jira.default_user` in `~/.claude/proj.yaml`."
 
-**Failure: Jira MCP server unavailable**
-If the Jira MCP server is not reachable -- for example, a tool call raises a
-tool-not-found error, returns a connection error, or is simply not registered -- stop immediately
-with:
+**Failure: Jira MCP unavailable**
+Tool-not-found, connection err, or not registered → stop:
 
-> "Jira MCP server not available. Check your MCP server configuration and restart Claude Code."
+> "Jira MCP server not available. Check your MCP server config and restart Claude Code."
 
-Do not proceed with any further sync steps.
+No further sync steps.
 
-**2.** Pre-fetch comments (optional)
+**2.** Pre-fetch comments (opt)
 
-- Call `mcp__jira__jira_get_issue_comments` for known issue keys (if any are already available from prior context).
-- Build a `comments_by_key` dict mapping issue keys to comment lists.
-- This step is best-effort -- if comment fetching fails for an issue, skip it.
+- `mcp__jira__jira_get_issue_comments` for known issue keys (if available from prior ctx).
+- Build `comments_by_key` dict mapping keys → comment lists.
+- Best-effort -- skip on failure.
 
 **3.** Call `proj_jira_full_sync`
 
-- Call `mcp__proj__proj_jira_full_sync` with no arguments (or optionally `project_name` to scope to one project, `comments_json` from step 2).
-- Handle the response:
-  - `"success"` -- display the summary counts
-  - `"partial_success"` -- display errors table, offer one retry:
-    - Ask user: "Some issues failed. Retry failed issues?"
-    - If yes, call `proj_jira_full_sync` again with `retry_failures` set to the `retry_token`
-    - If no, continue to summary
-  - `"error"` -- display the error and stop
+- `mcp__proj__proj_jira_full_sync` w/ no args (opt `project_name` to scope, `comments_json` from step 2).
+- Handle response:
+ - `"success"` → show summary counts
+ - `"partial_success"` → show errors table, offer one retry:
+ - Ask: "Some issues failed. Retry failed issues?"
+ - Yes → `proj_jira_full_sync` w/ `retry_failures` = `retry_token`
+ - No → continue to summary
+ - `"error"` → show err, stop
 
 **4.** Git tracking flush
 
-- Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Jira"`.
+- `mcp__proj__tracking_git_flush` w/ `commit_message="Sync: Jira"`.
 
 **5.** Summary
 
-Display a final summary with counts. If nothing changed: "Jira sync complete. Everything up to date."
+Show final counts. Nothing changed: "Jira sync complete. Everything up to date."
 
-Display suggested next steps:
-- `1. /proj:status` -- review project status after sync
-- `2. /proj:trello-sync` -- if Trello is also enabled, sync there too
+Next steps:
+- `1. /proj:status` -- review project status
+- `2. /proj:trello-sync` -- if Trello enabled, sync there too
 
----
 
 ## Prerequisites
 
-- Jira sync must be enabled (`jira.enabled: true` in config).
-- A Jira username must be configured (via `--user` argument or `jira.default_user` in config).
-- Jira MCP server must be running and reachable.
+- `jira.enabled: true` in config
+- Jira username configured (`--user` arg or `jira.default_user`)
+- Jira MCP server running + reachable
 
 ## Error Handling
 
-- **Jira not enabled**: displays `Jira sync not enabled.` and stops.
-- **No user configured**: displays `No Jira user configured.` with instructions and stops.
-- **Jira MCP unavailable**: displays `Jira MCP server not available.` and stops.
-- **No issues found**: displays `No open issues found.` and stops.
-- **Partial failures**: displays failed issues in a table with issue key and error. Offers one retry.
+- Jira not enabled → `Jira sync not enabled.` stop
+- No user → `No Jira user configured.` w/ instructions, stop
+- MCP unavailable → `Jira MCP server not available.` stop
+- No issues → `No open issues found.` stop
+- Partial failures → table w/ issue key + err; offer one retry
 
 ## Output
 
-Summary with projects created, todos created, todos updated, warnings. If nothing changed: `Jira sync complete. Everything up to date.`
+Summary: projects created, todos created/updated, warnings. Nothing changed → `Jira sync complete. Everything up to date.`
 
 ## Notes
 
-- All Jira MCP tool names use the pattern `mcp__jira__<tool_name>`.
-- This skill works WITHOUT loading a project first -- it operates across all projects.
-- Epics become projects with `jira_issue_key` set on ProjectMeta for stable re-matching.
-- Standalone issues (no epic) are skipped with a warning unless a `project_name` is provided.
-- Re-running is idempotent: existing todos are updated by `jira_issue_key` lookup, no duplicates created.
-- Epics themselves are NOT synced as todos -- they define the project boundary.
-- `retry_token` expires after 30 minutes. After that, a fresh sync is required.
+- All Jira MCP tools: `mcp__jira__<tool_name>`.
+- Works WITHOUT loading project -- operates across all.
+- Epics → projects w/ `jira_issue_key` on ProjectMeta for stable re-matching.
+- Standalone issues (no epic) skipped w/ warning unless `project_name` provided.
+- Re-run idempotent: existing todos updated by `jira_issue_key`, no dupes.
+- Epics NOT synced as todos -- define project boundary only.
+- `retry_token` expires 30min. After → fresh sync required.
 
-Suggested next: `1. /proj:status` -- review project status after sync | `2. /proj:todo list` -- review todos after sync
+Next: `1. /proj:status` -- review status | `2. /proj:todo list` -- review todos

@@ -5,26 +5,29 @@ allowed-tools: mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_work
 argument-hint: "[path]"
 ---
 
-Remove a git worktree.
 
-**1.** If $ARGUMENTS provides a path, use it. Otherwise call `mcp__plugin_worktree_worktree__wt_list` and ask which worktree to remove.
-**2.** Confirm with the user before removing: "Remove worktree at <path>? This cannot be undone."
-**3.** Call `mcp__plugin_worktree_worktree__wt_remove` with the path. If it fails due to unclean state, ask the user if they want to force-remove.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Remove git worktree.
+
+**1.** $ARGUMENTS has path → use it. Else `mcp__plugin_worktree_worktree__wt_list`, ask which.
+**2.** Confirm: "Remove worktree at <path>? Cannot be undone."
+**3.** `mcp__plugin_worktree_worktree__wt_remove` w/ path. Fails unclean → ask force-remove.
 
 ## Prerequisites
 
-- Worktree plugin must be configured (at least one worktree must exist).
-- Worktree MCP server must be running and reachable.
+- Worktree plugin configured (≥1 worktree exists).
+- Worktree MCP server running/reachable.
 
-## Error Handling
+## Err Handling
 
-- **No path provided**: lists worktrees and asks the user to select one.
-- **Unclean state**: asks user to force-remove or cancel.
-- **Worktree MCP unavailable**: displays error from tool call and stops.
-- **User declines**: stops without removing.
+- No path → list worktrees, ask user to select.
+- Unclean state → ask force-remove or cancel.
+- MCP unavailable → show err, stop.
+- User declines → stop.
 
 ## Output
 
-Confirmation that the worktree was removed.
+Confirm worktree removed.
 
-Suggested next: `1. /worktree:list` -- verify the worktree was removed | `2. /worktree:prune` -- clean up any stale metadata
+Suggested next: `1. /worktree:list` -- verify removal | `2. /worktree:prune` -- clean stale metadata

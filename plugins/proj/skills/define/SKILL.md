@@ -5,118 +5,112 @@ allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirem
 argument-hint: "<todo-id> [--no-interactive] [--skip-bg-prep]"
 ---
 
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
 Define and research todo: $ARGUMENTS
 
-**1.** Parse arguments
+**1.** Parse args
 
 Extract from $ARGUMENTS:
-- `todo_id` = the first non-flag token (the todo ID)
-- `no_interactive` = `true` if `--no-interactive` is present in $ARGUMENTS
-- `skip_bg_prep` = `true` if `--skip-bg-prep` is present in $ARGUMENTS
+- `todo_id` = first non-flag token
+- `no_interactive` = `true` if `--no-interactive` present
+- `skip_bg_prep` = `true` if `--skip-bg-prep` present
 
-If `todo_id` is empty or not present, stop and output:
-"Todo ID required. Usage: `/proj:define <todo-id>`"
+Empty `todo_id` → stop: "Todo ID required. Usage: `/proj:define <todo-id>`"
 
-If `no_interactive` is true, skip directly to the **Non-interactive path** below.
+`no_interactive` true → skip to **Non-interactive path**.
 
----
 
 ## Interactive path
 
-**2.** Load context
+**2.** Load ctx
 
-Call `mcp__proj__proj_get_todo_context` with the todo ID.
+`mcp__proj__proj_get_todo_context(todo_id)`.
 
-If the result indicates the todo was not found (null todo or error), stop and output:
-"Todo <id> not found. Run `/proj:todo list` to see available todos."
+Not found → stop: "Todo <id> not found. Run `/proj:todo list` to see available todos."
 
-Review existing requirements, research, and notes. Store them for later reference.
+Review existing req/research/notes. Store for later.
 
 **2b.** Search prior decisions
 
-Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results are found, **use them as background context during the Q&A in step 5** — not just display them. Reference prior decisions when formulating questions and interpreting answers.
+`mcp__proj__proj_decision_log(action="search", decision=<todo title>)`. Results found → use as bg ctx during Q&step 5. Ref prior decisions when formulating questions/interpreting answers.
 
-**2c.** Background codebase exploration (skip if `skip_bg_prep` is true)
+**2c.** Bg codebase exploration (skip if `skip_bg_prep`)
 
-Extract keywords from the todo title and description/notes.
+Extract keywords from todo title/desc/notes.
 
-**Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning, call `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` and spawn each Agent with that `team_name`. The team is torn down at step 5.5 after `bg_explore_agents` are collected via `TeamDelete(team_name="define-bg-{todo_id}")`.
+Spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` — never bare parallel Task calls for 2+ agents. Each agent gets `team_name="define-bg-{todo_id}"`. Team torn down at step 5.5 via `TeamDelete`.
 
-Spawn two background Task agents (general-purpose, read-only tools only: `Read, Glob, Grep`) with `team_name="define-bg-{todo_id}"`:
+Two bg Task agents (general-purpose, read-only: `Read, Glob, Grep`):
 
-  **Agent A — File discovery:**
-    - Glob for files matching title keywords (*.py, *.ts, *.md, etc.)
-    - Grep for function/class/variable names related to the todo
-    - Return: list of relevant file paths with 1-line descriptions
+ **Agent A — File discovery:**
+ - Glob files matching title keywords (*.py, *.ts, *.md, etc.)
+ - Grep fn/class/var names related to todo
+ - Return: relevant file paths w/ 1-line desc
 
-  **Agent B — Test/pattern exploration:**
-    - Identify test directories related to the todo's domain
-    - Read up to 5 test files to understand existing patterns
-    - Read up to 3 source files that appear most relevant
-    - Return: summary of patterns found, key function signatures, test conventions
+ **Agent B — Test/pattern exploration:**
+ - Find test dirs related to todo domain
+ - Read up to 5 test files for existing patterns
+ - Read up to 3 most relevant source files
+ - Return: patterns found, key fn signatures, test conventions
 
-Store agent handles as `bg_explore_agents`.
-Do NOT wait for them — proceed to step 3 immediately.
+Store handles as `bg_explore_agents`. Do NOT wait — → step 3.
 
 **3.** Entry mode selection
 
-If existing requirements or research are present, display them under a "Previous context" heading so the user can see what already exists.
+Existing req/research present → display under "Previous context" heading.
 
-Call `AskUserQuestion` with a single question offering 3-4 starter options. Example options:
-- **Describe goals now** — free-form write goals, constraints, and context
-- **Use existing notes as-is** — proceed with previous context unchanged
-- **Load from similar prior todo** — pull requirements from a related completed todo
-- **Skip directly to Q&A** — jump straight to gap-driven probing without free-form input
+`AskUserQuestion` w/ single question, 3-4 options:
+- **Describe goals now** — free-form goals, constraints, ctx
+- **Use existing notes as-is** — proceed w/ prev ctx unchanged
+- **Load from similar prior todo** — pull req from related completed todo
+- **Skip directly to Q&A** — jump to gap-driven probing
 
-Record the selected value as `entry_mode`. If the user chose "Describe goals now", prompt for the free-form text and record it as the freeform input. Otherwise, set the freeform input to the existing context (or empty) and proceed.
+Record `entry_mode`. "Describe goals now" → prompt for free-form text. Otherwise set freeform input to existing ctx (or empty).
 
 **4.** Gap analysis
 
-Analyze the freeform input (plus any previous context) for:
-- Vague or untestable language (e.g., "should be fast", "handle errors properly")
+Analyze freeform input + prev ctx for:
+- Vague/untestable language ("should be fast", "handle errors properly")
 - Missing acceptance criteria
 - Unclear scope boundaries
 - Missing edge cases
 - Missing testing strategy
-- Implicit assumptions that need to be explicit
+- Implicit assumptions needing explicitness
 
-Produce a structured gap list. Classify each gap as:
-- **CRITICAL** — blocks writing a quality requirements doc (must be resolved)
-- **MINOR** — can be inferred without prompting
+Produce structured gap list. Classify each:
+- **CRITICAL** — blocks writing quality req doc (must resolve)
+- **MINOR** — can infer without prompting
 
-Anchor definition: **CRITICAL = blocks quality requirements doc; MINOR = can be inferred without prompting.** CRITICAL gaps MUST be raised to the user via `AskUserQuestion` in step 5. MINOR gaps are filled by inference and recorded silently in the transcript.
-
-Present the gap list to the user before proceeding.
+Present gap list to user before proceeding.
 
 **5.** Probing Q&A
 
-Drive questions from the gap analysis — do NOT use predefined category lists. Rules:
-- Batch all CRITICAL gaps into one `AskUserQuestion` call (up to 4 questions per call). Split into additional rounds for 5+ gaps.
-- MINOR gaps are filled by inference without prompting — do NOT include them in `AskUserQuestion` calls.
-- Every batched question MUST include a 1-2 sentence rationale in its `question` or `description` field covering **decision impact** (what this controls in the requirements doc) and **default-option reasoning** (why the pre-selected option is a safe default).
-- When the user is uncertain about a question, the multiple-choice options must themselves present 2-3 concrete tradeoffs — do not fall back to open-ended text unless truly unavoidable.
-- Continue batched rounds until all CRITICAL gaps are addressed.
-- Record every Q&A pair (including the rationale text shown) as a transcript.
+Drive questions from gap analysis — no predefined category lists. Rules:
+- Batch all CRITICAL gaps into one `AskUserQuestion` (max 4/call). 5+ gaps → additional rounds.
+- MINOR gaps filled by inference silently — never in `AskUserQuestion`.
+- Every batched question MUST include 1-2 sentence rationale: **decision impact** (what this controls in req doc) + **default-option reasoning** (why pre-selected opt is safe default).
+- User uncertain → multiple-choice opts present 2-3 concrete tradeoffs. Open-ended only if truly unavoidable.
+- Continue batched rounds until all CRITICAL gaps addressed.
+- Record every Q&pair (incl rationale) as transcript.
 
-When the user contradicts or corrects a prior assumption during Q&A, immediately call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<the correction>`, `tags="correction"`, `context="define:qa:{todo_id}"`, `todo_id={todo_id}`.
+User contradicts/corrects prior assumption → immediately `mcp__proj__proj_decision_log(action="add", decision=<correction>, tags="correction", context="define:qa:{todo_id}", todo_id={todo_id})`.
 
-When all CRITICAL gaps are resolved, route the completion branch through `AskUserQuestion` as well. Call it with one question — "All critical gaps are covered. How would you like to proceed?" — and these enumerable options:
-- **Proceed** — write requirements and research now
-- **Address minor gaps** — batch remaining MINOR gaps via `AskUserQuestion` instead of inferring
+All CRITICAL gaps resolved → route via `AskUserQuestion`: "All critical gaps covered. How proceed?"
+- **Proceed** — write req/research now
+- **Address minor gaps** — batch remaining MINOR gaps via `AskUserQuestion`
 - **Add something else** — open-ended follow-up before writing
 
-If the user picks "Address minor gaps", continue with additional batched `AskUserQuestion` rounds covering the MINOR gaps. If "Add something else", accept open-ended input, then return to this completion branch.
+"Address minor gaps" → additional batched rounds for MINOR gaps. "Add something else" → accept input, return to completion branch.
 
-**Degraded-harness fallback**: when `AskUserQuestion` is unavailable or the skill is invoked under `--no-interactive`, log a deterministic default answer for each gap with `source: "degraded-harness-default"` in the transcript and proceed. The default MUST match the pre-selected option that the batched `AskUserQuestion` call would have surfaced.
+**Degraded-harness fallback**: `AskUserQuestion` unavailable or `--no-interactive` → log deterministic default answer each gap w/ `source: "degraded-harness-default"` in transcript. Default MUST match pre-selected opt from batched call.
 
-**5.5.** Collect background exploration (if `bg_explore_agents` exist)
+**5.5.** Collect bg exploration (if `bg_explore_agents` exist)
 
-Wait for `bg_explore_agents` to complete.
-Merge results into `bg_file_discovery` (list of relevant files) and `bg_pattern_summary` (patterns and conventions observed).
-After collection, call `TeamDelete(team_name="define-bg-{todo_id}")` to tear down the background exploration team.
-If agents failed, log warning and continue — results are advisory only.
+Wait for completion. Merge into `bg_file_discovery` + `bg_pattern_summary`. Call `TeamDelete(team_name="define-bg-{todo_id}")`. Agents failed → log warning, continue — results advisory only.
 
-**6.** Write requirements and research
+**6.** Write req and research
 
 Write `requirements.md`:
 
@@ -145,7 +139,7 @@ Write `requirements.md`:
 **A:** <answer>
 ```
 
-Research the codebase (Read, Glob, Grep) and external sources (WebSearch, WebFetch) as needed. Include `bg_file_discovery` and `bg_pattern_summary` as additional input when researching — skip re-exploring files already covered by background agents. Evaluate 2-3 implementation approaches.
+Research codebase (`Read`, `Glob`, `Grep`) and external sources (`WebSearch`, `WebFetch`) as needed. Include `bg_file_discovery` + `bg_pattern_summary` — skip re-exploring files already covered by bg agents. Evaluate 2-3 impl approaches.
 
 Write `research.md`:
 
@@ -172,87 +166,82 @@ Write `research.md`:
 - <link or file path>
 ```
 
-Call `mcp__proj__content_set_requirements` with the requirements content.
-Call `mcp__proj__content_set_research` with the research content.
+`mcp__proj__content_set_requirements(requirements)`.
+`mcp__proj__content_set_research(research)`.
 
-For each major architectural or design decision made during this session (chosen approach, key constraint, scope boundary), call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<concise decision statement>`, `tags="requirements"`, `todo_id={todo_id}`. Decisions should be self-contained and referenceable in future sessions.
+Each major architectural/design decision (chosen approach, key constraint, scope boundary) → `mcp__proj__proj_decision_log(action="add", decision=<concise statement>, tags="requirements", todo_id={todo_id})`. Decisions self-contained, referenceable in future sessions.
 
 **7.** Quality gate loop (hard block)
 
-Validate the written requirements against ALL of the following criteria:
-- [ ] Every acceptance criterion is testable (specific, measurable)
-- [ ] No vague language remains ("fast", "properly", "good", "clean", etc.)
+Validate req against ALL criteria:
+- [ ] Every acceptance criterion testable (specific, measurable)
+- [ ] No vague language ("fast", "properly", "good", "clean", etc.)
 - [ ] At least 2 edge cases documented
-- [ ] Out of Scope section is present and non-empty
-- [ ] Testing strategy is present and actionable
+- [ ] Out of Scope present and non-empty
+- [ ] Testing strategy present and actionable
 
-**PASS** — all criteria met. Proceed to step 8.
+**PASS** → step 8.
 
-**FAIL** — present the failing criteria to the user and offer:
-> 1. **Fix** — iterate on the failing sections and re-run the quality gate
-> 2. **Restart** — go back to step 3 with current requirements as background context
+**FAIL** → present failing criteria, offer:
+> 1. **Fix** — iterate failing sections, re-run gate
+> 2. **Restart** — back to step 3 w/ cur req as bg ctx
 
-If the user picks Fix: revise the relevant sections, re-write via `mcp__proj__content_set_requirements`, and re-run the gate.
+Fix → revise sections, `mcp__proj__content_set_requirements`, re-run gate.
+Restart → return step 3, show cur req as "Previous context".
 
-If the user picks Restart: return to step 3, showing current requirements as "Previous context".
+3 consecutive gate iterations w/o pass → suggest Restart:
+> "3rd gate iteration. Consider restarting from free-form writing to reframe req from scratch."
 
-After 3 consecutive gate iterations without passing, suggest Restart:
-> "This is the 3rd gate iteration. Consider restarting from free-form writing to reframe the requirements from scratch."
-
-Do NOT proceed past this step until the gate passes.
+Do NOT proceed past this step until gate passes.
 
 **8.** CLAUDE.md update
 
-Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules, style conventions, standards, or implementation hints discovered during this define session.
-
-Only write rules that apply broadly to the project. Do NOT write todo-specific details — those belong in requirements.md.
+`mcp__proj__claudemd_write` — update w/ project-wide rules, style conventions, standards, impl hints discovered during define session. Only broad project rules. No todo-specific details — those belong in requirements.md.
 
 **9.** Git tracking flush
 
-Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
-Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
+`mcp__proj__tracking_git_flush(commit_message="Define: {todo-id}")`.
+`mcp__proj__todo_set_content_flag(has_requirements=True, has_research=True)`.
 
 Suggested next: `1. /proj:decompose <id>` -- break into subtasks | `2. /proj:execute <id>` -- if straightforward, execute directly
 
----
 
 ## Non-interactive path
 
-*(Reached when `--no-interactive` is present in $ARGUMENTS)*
+*(Reached when `--no-interactive` present in $ARGUMENTS)*
 
-**NI-1. Load context**
+**NI-1. Load ctx**
 
-Call `mcp__proj__proj_get_todo_context` with the todo ID.
+`mcp__proj__proj_get_todo_context(todo_id)`.
 
-If the result indicates the todo was not found (null todo or error), stop and output:
-"Todo <id> not found. Run `/proj:todo list` to see available todos."
+Not found → stop: "Todo <id> not found. Run `/proj:todo list` to see available todos."
 
 **NI-1b. Search prior decisions**
 
-Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>` to surface prior decisions. If results found, review them before exploring the codebase.
+`mcp__proj__proj_decision_log(action="search", decision=<todo title>)`. Results found → review before exploring codebase.
 
-**NI-1c.** Background codebase exploration (skip if `skip_bg_prep` is true)
+**NI-1c.** Bg codebase exploration (skip if `skip_bg_prep`)
 
-Same as step 2c: extract keywords, then **spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Call `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` and spawn two read-only background Task agents (Agent A for file discovery, Agent B for test/pattern exploration) with `team_name="define-bg-{todo_id}"`. Store handles as `bg_explore_agents`. Do NOT wait — proceed to NI-2 immediately. The team is torn down at step NI-2.5 after collection.
+Same as step 2c: extract keywords, spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")`, two read-only bg Task agents (Agent file discovery, Agent B test/pattern exploration) w/ `team_name="define-bg-{todo_id}"`. Store as `bg_explore_agents`. Do NOT wait — proceed NI-2. Team torn down at NI-2.5.
 
 **NI-2. Explore codebase**
 
-Use Read, Glob, and Grep to explore the codebase for existing patterns, relevant code, and implementation context. Be thorough — this replaces the interactive Q&A.
+Use `Read`, `Glob`, `Grep` for existing patterns, relevant code, impl ctx. Be thorough — replaces interactive Q&A.
 
-**NI-2.5.** Collect background exploration (if `bg_explore_agents` exist)
+**NI-2.5.** Collect bg exploration (if `bg_explore_agents` exist)
 
-Wait for `bg_explore_agents` to complete. Merge results into `bg_file_discovery` and `bg_pattern_summary`. After collection, call `TeamDelete(team_name="define-bg-{todo_id}")` to tear down the background exploration team. If agents failed, log warning and continue.
+Wait for completion. Merge into `bg_file_discovery` + `bg_pattern_summary`. `TeamDelete(team_name="define-bg-{todo_id}")`. Agents failed → log warning, continue.
 
-**NI-3. Write requirements and research**
+**NI-3. Write req and research**
 
-Write both `requirements.md` and `research.md` directly from the todo context and codebase exploration. Use the same formats as step 6. Include `bg_file_discovery` and `bg_pattern_summary` as additional input — skip re-exploring files already covered by background agents.
+Write both `requirements.md` and `research.md` from todo ctx + codebase exploration. Same formats as step 6. Include `bg_file_discovery` + `bg_pattern_summary` — skip re-exploring covered files.
 
-Call `mcp__proj__content_set_requirements` with the requirements content.
-Call `mcp__proj__content_set_research` with the research content.
+`mcp__proj__content_set_requirements(requirements)`.
+`mcp__proj__content_set_research(research)`.
 
 **NI-4. Self-assessment**
 
-Rate confidence for each section on a 5-point scale:
+Rate confidence each section on 5-point scale:
 
 | Section             | Score | Meaning of 1 | Meaning of 5 |
 |---------------------|-------|---------------|---------------|
@@ -262,35 +251,32 @@ Rate confidence for each section on a 5-point scale:
 | Out of Scope        | ?/5   | speculative   | certain       |
 | Testing Strategy    | ?/5   | speculative   | certain       |
 
-Output the confidence table, then list actionable gaps with suggested fixes:
+Output confidence table, then list actionable gaps w/ suggested fixes:
 > **Gaps:**
-> - <gap description> — suggested fix: <what to do>
+> - <gap desc> — suggested fix: <what to do>
 
 **NI-5. Finalize**
 
-Call `mcp__proj__proj_decision_log` with `action="add"`, `decision=<one-sentence summary of the inferred approach>`, `tags="auto"`, `todo_id={todo_id}`.
-
-Call `mcp__proj__todo_set_content_flag` with `has_requirements=True` and `has_research=True`.
-
-Call `mcp__proj__claudemd_write` to update CLAUDE.md with any project-wide rules or standards discovered. Only project-wide rules, not todo-specific details.
-
-Call `mcp__proj__tracking_git_flush` with `commit_message="Define: {todo-id}"`.
+`mcp__proj__proj_decision_log(action="add", decision=<one-sentence inferred approach summary>, tags="auto", todo_id={todo_id})`.
+`mcp__proj__todo_set_content_flag(has_requirements=True, has_research=True)`.
+`mcp__proj__claudemd_write` — project-wide rules/standards only, no todo-specific details.
+`mcp__proj__tracking_git_flush(commit_message="Define: {todo-id}")`.
 
 ## Prerequisites
 
-- An active project must be loaded.
-- A valid todo ID must be provided.
+- Active project loaded.
+- Valid todo ID provided.
 
-## Error Handling
+## Err Handling
 
-- **No todo ID**: displays "Todo ID required. Usage: `/proj:define <todo-id>`" and stops.
-- **Todo not found**: displays "Todo `<id>` not found. Run `/proj:todo list` to see available todos." and stops.
-- **Quality gate failure**: presents failing criteria and offers Fix or Restart options. Blocks progress until gate passes.
-- **Skill invocation failure**: treated as a hard stop.
+- No todo ID → "Todo ID required. Usage: `/proj:define <todo-id>`" + stop.
+- Todo not found → "Todo `<id>` not found. Run `/proj:todo list` to see available todos." + stop.
+- Quality gate fail → present failing criteria, offer Fix/Restart. Blocks until pass.
+- Skill invocation fail → hard stop.
 
 ## Output
 
-- **Interactive**: requirements.md and research.md written to the todo's content directory. Quality gate pass confirmation. CLAUDE.md updated with project-wide rules.
-- **Non-interactive**: requirements.md and research.md written, plus a confidence self-assessment table and actionable gaps list.
+- **Interactive**: requirements.md + research.md written to todo content dir. Quality gate pass confirmation. CLAUDE.md updated w/ project-wide rules.
+- **Non-interactive**: requirements.md + research.md written + confidence self-assessment table + actionable gaps list.
 
 Suggested next: `1. /proj:decompose <id>` -- break into subtasks | `2. /proj:execute <id>` -- if straightforward, execute directly

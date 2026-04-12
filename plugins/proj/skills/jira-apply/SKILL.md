@@ -5,25 +5,22 @@ allowed-tools: mcp__proj__proj_jira_apply, mcp__proj__tracking_git_flush
 argument-hint: "<confirmed-mapping-json>"
 ---
 
-Apply a confirmed Jira-to-local mapping, creating projects and todos. This is a sub-skill used by `/proj:jira-sync`.
 
-Accepts the confirmed mapping produced by `/proj:jira-map` (after user review/editing).
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**1.** Accept confirmed mapping
+Apply confirmed Jira-to-local mapping, creating projects/todos. Sub-skill of `/proj:jira-sync`.
 
-- Receive the confirmed mapping JSON (output from jira-map, after user confirmation).
+Input: confirmed mapping JSON from `/proj:jira-map`.
 
-**2.** Apply mapping
+**1.** Accept confirmed mapping JSON.
 
-- Call `mcp__proj__proj_jira_apply` with the confirmed mapping JSON.
+**2.** `mcp__proj__proj_jira_apply` w/ confirmed mapping.
 
-**3.** Git tracking flush
+**3.** `mcp__proj__tracking_git_flush` w/ `commit_message="Sync: Jira"`.
 
-- Call `mcp__proj__tracking_git_flush` with `commit_message="Sync: Jira"`.
+**4.** Results
 
-**4.** Display results
-
-If `status` is `"ok"` (no failures):
+`status` = `"ok"`:
 
 ```
 Jira sync applied.
@@ -33,9 +30,9 @@ Todos updated: {updated_todos}
 Skipped (unmapped): {skipped}
 ```
 
-If nothing changed: "Jira sync complete. Everything up to date."
+Nothing changed → "Jira sync complete. Everything up to date."
 
-If `status` is `"partial"` (some failures):
+`status` = `"partial"`:
 
 ```
 Jira sync applied (with errors).
@@ -48,23 +45,23 @@ Failed issues:
 | PROJ-456 | failed: <reason> |
 ```
 
-The `per_issue` field in the response maps each issue key to its status: `"created"`, `"updated"`, `"skipped"`, or `"failed: <reason>"`. Display only the failed issues in the table.
+`per_issue` maps each issue key → `"created"`, `"updated"`, `"skipped"`, `"failed: <reason>"`. Show only failed issues.
 
 ## Prerequisites
 
-- Confirmed mapping JSON from `/proj:jira-map` must be provided as input.
+Confirmed mapping JSON from `/proj:jira-map` required.
 
-## Error Handling
+## Err Handling
 
-- **Apply tool error**: displays error from `proj_jira_apply` and stops.
-- **Partial failures**: displays failed issues in a table with issue key and error reason.
-- **Git flush error**: displays error but does not roll back applied changes.
+- Apply tool err → show err, stop.
+- Partial failures → show failed issues table w/ key + reason.
+- Git flush err → show err, no rollback.
 
 ## Output
 
-On success: summary with projects created, todos created, todos updated, skipped counts. On partial failure: same summary plus a table of failed issues with error reasons. If nothing changed: `Jira sync complete. Everything up to date.`
+Success: summary w/ projects created, todos created/updated, skipped counts. Partial failure: same + failed issues table. Nothing changed: `Jira sync complete. Everything up to date.`
 
 ## Notes
 
-- All Jira MCP tool names use the static pattern `mcp__jira__<tool_name>`.
-- Re-running is idempotent: existing todos are updated by `jira_issue_key` lookup, no duplicates created.
+- Jira MCP tools: `mcp__jira__<tool_name>`.
+- Idempotent: existing todos updated by `jira_issue_key` lookup, no dupes.

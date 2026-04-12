@@ -5,74 +5,77 @@ allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__pr
 argument-hint: "<todo-id>"
 ---
 
+
 <!-- n-distinct-agents-rule: not applicable — decompose does not spawn review/check agents -->
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
 Decompose todo $ARGUMENTS into sub-todos.
 
-**1.** Call `mcp__proj__todo_get` to get the todo.
-**2.** Call `mcp__proj__content_get_requirements` to read requirements.md (if available).
-**3.** Call `mcp__proj__content_get_research` to read research.md (if available).
+**1.** `mcp__proj__todo_get` — get todo.
+**2.** `mcp__proj__content_get_requirements` — read requirements.md (if available).
+**3.** `mcp__proj__content_get_research` — read research.md (if available).
 
-**4.** Assess atomicity — before proposing any breakdown, evaluate whether this todo is already atomic (not meaningfully decomposable) using qualitative judgment based on:
-   - **Title and notes** — is it a single focused operation, or does it span multiple distinct concerns?
-   - **requirements.md** (if loaded) — does it specify separable phases or multiple unrelated systems?
-   - **research.md** (if loaded) — does the research outline independent sub-problems?
+**4.** Assess atomicity — before proposing breakdown, evaluate if todo already atomic:
+ - Title/notes — single focused operation or spans multiple concerns?
+ - requirements.md — separable phases or multiple unrelated systems?
+ - research.md — independent sub-problems?
 
-   A todo is **atomic** if ALL of the following hold:
-   - Single focused operation (e.g. edit one file, add one function, write one docs section)
-   - Fits in one coding session with no multi-day scope
-   - No distinct phases that are separable concerns (design + implement + test counted as one unless they touch unrelated systems)
+ Todo is **atomic** if ALL hold:
+ - Single focused operation (edit one file, add one fn, write one docs section)
+ - Fits one coding session, no multi-day scope
+ - No distinct separable phases touching unrelated systems
 
-   **When in doubt, do not auto-skip.** If borderline, proceed to step 4 and let the user decide via the normal confirmation prompt.
+ Borderline → proceed step 4, let user decide via confirmation prompt.
 
-   If atomic: print `↩ Skipping decompose for <id> — already atomic.` and stop — do not proceed to steps 5–13.
+ Atomic → print `↩ Skipping decompose for <id> — already atomic.` and stop.
 
-**4b.** Search prior decisions: Call `mcp__proj__proj_decision_log` with `action="search"` and `decision=<todo title>`. If results are found, include them as context when proposing the breakdown structure — prior decisions may constrain decomposition choices.
+**4b.** Search prior decisions: `mcp__proj__proj_decision_log(action="search", decision=<todo title>)`. Results found → include as ctx when proposing breakdown.
 
-**5.** Analyze the todo and propose a **multi-level** breakdown:
-   - Identify sub-tasks based on the natural problem structure — no hard cap on count.
-   - For each sub-task, assess if it is **large** (warrants nested children) or a **leaf** (single focused operation):
-     - **Large** — contains 3+ distinct implementation phases or touches 2+ unrelated systems/files
-     - **Leaf** — single focused operation: edit one file, add one function, write one docs section
-   - For large sub-tasks, propose nested children inline. Apply the same large/leaf assessment recursively — nest as deep as needed.
-   - Consider dependencies at all levels (which must come first?). Assign priorities to all tasks.
-   - Each leaf sub-task should be implementable in a focused coding session.
+**5.** Analyze todo, propose **multi-level** breakdown:
+ - Identify sub-tasks from natural problem structure — no hard cap.
+ - Each sub-task: assess **large** vs **leaf**:
+ - Large — 3+ distinct impl phases or 2+ unrelated systems/files
+ - Leaf — single focused operation
+ - Large sub-tasks → propose nested children inline. Recurse same assessment — nest as deep as needed.
+ - Consider deps at all levels (ordering). Assign priorities to all tasks.
+ - Each leaf implementable in focused coding session.
 
-**6.** Shared-file conflict analysis: Predict which files each subtodo will write. For any pair sharing a write target, add `blocked_by` from the dependent to the simpler/shallower subtodo. When in doubt, add the dependency — false positives are cheaper than parallel write conflicts.
+**6.** Shared-file conflict analysis: predict files each subtodo writes. Shared write target → add `blocked_by` from dependent to simpler subtodo. When in doubt, add dep — false positives cheaper than parallel write conflicts.
 
-   **Step D — Worktree-aware conflict resolution** (if worktree mode available):
+ **Step D — Worktree-aware conflict resolution** (if worktree available):
 
-   Check worktree availability: call `mcp__proj__config_load` and check if `worktree_isolation` is enabled or `--worktree` flag was passed to the parent run/execute.
+ Check: `mcp__proj__config_load` — `worktree_isolation` enabled or `--worktree` flag passed?
 
-   When a shared-file conflict is detected between two subtodos:
-   1. Assess conflict granularity (LLM judgment):
-      - **Low risk**: different functions/sections in same file, non-overlapping changes → `worktree_candidate`
-      - **High risk**: same function, overlapping lines, schema/migration changes → `blocked_by`
-   2. If low risk AND worktree available: annotate as `worktree_candidate` instead of `blocked_by`.
-      - **Mutual exclusivity**: a pair is EITHER `blocked_by` OR `worktree_candidate`, never both.
-      - Store in todo notes field: `wt-candidate: [<paired_todo_id>] (shared: <filename>)`
-   3. If high risk OR worktree not available: use `blocked_by` as before (Step C).
+ Shared-file conflict detected:
+ 1. Assess conflict granularity:
+ - Low risk: diff fns/sections, non-overlapping → `worktree_candidate`
+ - High risk: same fn, overlapping lines, schema/migration → `blocked_by`
+ 2. Low risk AND worktree available → `worktree_candidate` instead of `blocked_by`.
+ - Mutual exclusivity: pair is EITHER `blocked_by` OR `worktree_candidate`, never both.
+ - Store in todo notes: `wt-candidate: [<paired_todo_id>] (shared: <filename>)`
+ 3. High risk OR no worktree → `blocked_by` (Step C).
 
-   **Note**: `proj_identify_batches` ignores `worktree_candidate` annotations — it only uses `blocked_by`. This means worktree_candidate pairs are treated as independent and can run in parallel when worktree isolation is enabled.
+ `proj_identify_batches` ignores `worktree_candidate` — only uses `blocked_by`. wt-candidate pairs treated as independent, can run parallel w/ worktree isolation.
 
-   If worktree mode is not available, skip Step D entirely — all shared-file conflicts use `blocked_by` from Step C.
+ No worktree mode → skip Step D entirely; all shared-file conflicts use `blocked_by`.
 
-**7.** Clarity check — for EVERY proposed sub-todo, assess whether the title is clear and actionable:
-   - A title is **clear** if a developer can understand exactly what to do without further context.
-   - A title is **vague** if it uses ambiguous terms ("handle", "improve", "set up stuff"), lacks a specific target, or could mean multiple things.
-   - Flag each vague title with a brief explanation of why it is vague.
-   - Offer to run define on each vague sub-todo after creation by calling the Skill tool: `skill: "proj:define", args: "<sub-todo-id>"`.
+**7.** Clarity check — EVERY proposed sub-todo:
+ - Clear: dev understands exactly what to do w/o further ctx.
+ - Vague: ambiguous terms ("handle", "improve", "set up stuff"), no specific target, multiple interpretations.
+ - Flag vague titles w/ brief explanation.
+ - Offer `skill: "proj:define", args: "<sub-todo-id>"` for each vague sub-todo after creation.
 
-**8.** Present the proposed multi-level breakdown as **indented bullet points**:
-   - Root tasks at level 0; each nesting level adds two spaces of indentation.
-   - Format per line: `- **ID** — title _(priority)_ [manual] [blocks X, blocked by Y]`
-   - If a sub-todo is tagged `manual`, append `[manual]` after the priority.
-   - For blocks added due to shared files (step 6), append the filename: `[blocks X (shared: filename.py)]`.
-   - If a sub-todo has `worktree_candidate` annotations, append `[wt-candidate: X (shared: filename.py)]` after any existing badges.
-   - Children shown indented under their parent.
-   - Vague titles get a `[vague]` tag with the reason on the next line.
+**8.** Present breakdown as **indented bullet points**:
+ - Root tasks level 0; each nesting +2 spaces.
+ - Format: `- **ID** — title _(priority)_ [manual] [blocks X, blocked by Y]`
+ - `manual` tag → append `[manual]` after priority.
+ - Shared-file blocks (step 6) → append filename: `[blocks X (shared: filename.py)]`.
+ - `worktree_candidate` → append `[wt-candidate: X (shared: filename.py)]`.
+ - Children indented under parent.
+ - Vague titles get `[vague]` tag w/ reason on next line.
 
-   Example:
+ Example:
    ```
    Proposed sub-todos for 1:
    - **1.1** — Add rate-limit middleware to auth router _(high)_ [blocks 1.3 (shared: auth.py)]
@@ -83,30 +86,30 @@ Decompose todo $ARGUMENTS into sub-todos.
      → Vague: "handle edge cases" doesn't specify which cases or where. Consider: "Add timeout handling for upstream auth failures"
    ```
 
-**9.** Ask: "Does this breakdown look good? Any changes?" Allow the user to add, remove, rename, or restructure sub-todos at any level.
+**9.** Ask: "Does this breakdown look good? Any changes?" User can add, remove, rename, restructure at any level.
 
-**10.** Create the confirmed todos using `mcp__proj__todo_batch_add_children`:
-   - Call once per parent with `children` (list of `{title, priority, tags, notes}`) and `blocking_pairs` (list of `[blocker_index, blocked_index]` pairs).
-   - For multi-level nesting: call for root-level children first, then call again for each parent that has nested children (using the IDs returned from the first call).
+**10.** Create confirmed todos via `mcp__proj__todo_batch_add_children`:
+ - Call once per parent w/ `children` (list of `{title, priority, tags, notes}`) and `blocking_pairs` (list of `[blocker_index, blocked_index]`).
+ - Multi-level: call root-level children first, then each parent w/ nested children (via returned IDs).
 
-**11.** Show the final tree via `mcp__proj__todo_tree`.
+**11.** Show final tree via `mcp__proj__todo_tree`.
 
-**12.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Decompose: {todo-id}"`.
+**12.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Decompose: {todo-id}")`.
 
 ## Prerequisites
 
-- An active project must be loaded.
-- A valid todo ID must be provided.
+- Active project loaded.
+- Valid todo ID provided.
 
 ## Error Handling
 
-- **No todo ID**: displays usage message and stops.
-- **Todo not found**: displays error from `todo_get` and stops.
-- **Already atomic**: displays `Skipping decompose for <id> — already atomic.` and stops.
-- **Batch add failure**: displays error from `todo_batch_add_children` and stops.
+- No todo ID → show usage msg, stop.
+- Todo not found → show err from `todo_get`, stop.
+- Already atomic → `Skipping decompose for <id> — already atomic.`, stop.
+- Batch add failure → show err from `todo_batch_add_children`, stop.
 
 ## Output
 
-Proposed multi-level breakdown as indented bullet points with IDs, titles, priorities, blocking relationships, and vague-title flags. After confirmation: final todo tree. Git tracking flush confirmation.
+Proposed multi-level breakdown as indented bullets w/ IDs, titles, priorities, blocking relationships, vague-title flags. After confirmation: final todo tree. Git tracking flush confirmation.
 
-Suggested next: `1. /proj:execute X.1` -- start with the first sub-todo | `2. /proj:run X` -- run the full workflow
+Suggested next: `1. /proj:execute X.1` -- start w/ first sub-todo | `2. /proj:run X` -- run full workflow

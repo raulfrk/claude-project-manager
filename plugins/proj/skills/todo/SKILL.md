@@ -5,42 +5,43 @@ allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 ---
 
-Manage project todos. Parse $ARGUMENTS to determine the operation:
 
-**First**: Call `mcp__plugin_proj_proj__proj_session_context` to get the active project name, config, and integration settings. Extract `project.name` and pass it to all subsequent `mcp__plugin_proj_proj__todo_*` tool calls. Use `config.default_priority` for default priority.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**add** `<title>` — add a new todo
-  - **Smart parent inference**: if the title starts with a number (e.g. `3 Fix bug` or `4.2 Improve error handling`), check whether that ID is an existing todo:
-    - Extract the leading token matching `^\d+(\.\d+)*` followed by a space
-    - Call `mcp__plugin_proj_proj__todo_get` with that token as the ID
-    - If the todo exists: pass `parent=<token>` and `title=<rest of string>` to `todo_add`
-    - If the todo does not exist: use the full original string as the title, no parent
-  - Parse optional inline params from the remaining arguments after the title:
-    `priority=<high|medium|low>`, `tags=<tag1,tag2>`, `blocked_by=<id1,id2>`, `due=<date>`
-  - Defaults: priority from config (`config.default_priority` from session context), no tags, no blocks, no due date
-  - Call `mcp__plugin_proj_proj__todo_add` with parsed values. Include `due_date=<value>` if `due` param was provided.
+Manage project todos. Parse $ARGUMENTS for operation.
 
-**update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update a todo's fields
-  - Parse the key=value pairs from the arguments
-  - Call `mcp__plugin_proj_proj__todo_update` with the provided fields
-  - Show the updated todo
+**First**: `mcp__plugin_proj_proj__proj_session_context` → get active project name, config, integrations. Pass `project.name` to all `todo_*` calls. Use `config.default_priority` as default.
 
-**done** `<id>` — mark a todo complete (e.g. "done 2")
-  - Call `mcp__plugin_proj_proj__todo_complete`
+**add** `<title>` — add todo
+ - Smart parent inference: title starts w/ number (e.g. `3 Fix bug`, `4.2 Improve error handling`) → check if ID exists:
+ - Extract leading token matching `^\d+(\.\d+)*` + space
+ - `mcp__plugin_proj_proj__todo_get` w/ token as ID
+ - Exists → `parent=<token>`, `title=<rest>`
+ - Not exists → full orig string as title, no parent
+ - Parse optional inline params after title:
+ `priority=<high|medium|low>`, `tags=<tag1,tag2>`, `blocked_by=<id1,id2>`, `due=<date>`
+ - Defaults: priority from config, no tags/blocks/due
+ - `mcp__plugin_proj_proj__todo_add` w/ parsed vals. Include `due_date=<value>` if `due` provided.
 
-**list** [all|pending|ready|blocked] [--prio|--priorities] — list todos with optional filter
-  - Default (no filter): call `mcp__plugin_proj_proj__todo_tree` — shows open tasks as a hierarchy, filtering out done todos
-  - `all`: call `mcp__plugin_proj_proj__todo_tree` — shows all todos including done as a hierarchy
-  - `ready`: call `mcp__plugin_proj_proj__todo_ready` — shows todos with no blockers as a flat list
-  - `blocked`: call `mcp__plugin_proj_proj__todo_list` with `status: "pending"` then filter to those with non-empty `blocked_by`
-  - `--prio` or `--priorities` (can combine with `all`):
-    1. Call `mcp__plugin_proj_proj__todo_tree` with `include_done=False` (or `include_done=True` if `all` filter also present)
-    2. Flatten the tree to collect all todo objects and their nested `_children`
-    3. Build the open set: all todo IDs from the flattened tree
-    4. For each todo, filter its `blocked_by` list to only include IDs present in the open set (this resolves stale blockers from done/deleted todos)
-    5. Call `mcp__plugin_proj_proj__proj_identify_batches` with all IDs from the open set
-    6. If `cycles` is non-empty in the result, display a `### Circular Dependencies` warning section listing each cycle
-    7. For each batch (tier) in the result, display as a section:
+**update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update todo fields
+ - Parse key=value pairs; `mcp__plugin_proj_proj__todo_update`; show updated todo
+
+**done** `<id>` — mark complete (e.g. "done 2")
+ - `mcp__plugin_proj_proj__todo_complete`
+
+**list** [all|pending|ready|blocked] [--prio|--priorities] — list w/ optional filter
+ - Default (no filter): `mcp__plugin_proj_proj__todo_tree` — open tasks as hierarchy, done filtered out
+ - `all`: `mcp__plugin_proj_proj__todo_tree` — all todos incl done as hierarchy
+ - `ready`: `mcp__plugin_proj_proj__todo_ready` — no-blocker todos, flat list
+ - `blocked`: `mcp__plugin_proj_proj__todo_list` w/ `status: "pending"`, filter to non-empty `blocked_by`
+ - `--prio`/`--priorities` (combinable w/ `all`):
+ 1. `mcp__plugin_proj_proj__todo_tree` w/ `include_done=False` (or `True` if `all` also present)
+ 2. Flatten tree → collect all todo objects + nested `_children`
+ 3. Build open set: all IDs from flattened tree
+ 4. Each todo: filter `blocked_by` to only IDs in open set (resolves stale blockers)
+ 5. `mcp__plugin_proj_proj__proj_identify_batches` w/ all open set IDs
+ 6. Non-empty `cycles` → `### Circular Dependencies` warning listing each cycle
+ 7. Each batch (tier):
        ```
        ### Tier 0 — Start immediately
        - 🔲 **479** — Add /proj:prioritize skill *(high)* [blocks 474, 469, 471]
@@ -49,14 +50,14 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
        ### Tier 1 — After Tier 0
        - 🔲 **474** — Verify hook feedback writeback *(medium)* [blocked by 479]
        ```
-    8. Within each tier, sort todos by priority (high → medium → low), then by ID numerically
-    9. If `all` filter was also present: show done todos in a separate `### Completed` section after all tiers, using the same display format (✅ icon)
-  - Examples:
-    - `/proj:todo list --prio` — show open todos grouped by blocking tiers
-    - `/proj:todo list all --prio` — show all todos (including done) grouped by tiers, with completed todos in a separate section
-    - `/proj:todo list --priorities` — alias for --prio
-  - Display as nested bullet points with 2-space indent per level. Use status icons (✅ = done, 🔄 = in_progress, 🔲 = pending), bold ID, title, priority in italics. Always use the full, exact title from the todo — never abbreviate or summarize. If `"manual" in tags`, append `[manual]` after the priority. Blocked todos include `[blocked by X]` inline. Todos that block others include `[blocks Y]` inline. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
-  - Example:
+ 8. Within tier: sort by priority (high→medium→low), then ID numerically
+ 9. If `all` also present: done todos in separate `### Completed` section after all tiers (✅ icon)
+ - Examples:
+ - `/proj:todo list --prio` — open todos grouped by blocking tiers
+ - `/proj:todo list all --prio` — all todos incl done, grouped by tiers, completed separate
+ - `/proj:todo list --priorities` — alias for --prio
+ - Display: nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
+ - Example:
     ```
     - 🔲 **2** — Build API _(high)_
       - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2]
@@ -64,10 +65,10 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     - 🔲 **3** — Write skills _(medium)_
     ```
 
-**tree** — show todos as a hierarchy
-  - Call `mcp__plugin_proj_proj__todo_tree`
-  - Render as nested bullet points with 2-space indent per level. Apply the same status icons, bold ID, and inline metadata as `list` (including `[manual]` badge and `[blocked by X]`/`[blocks Y]` for dependency display).
-  - Example:
+**tree** — todos as hierarchy
+ - `mcp__plugin_proj_proj__todo_tree`
+ - Nested bullets, 2-space indent. Same icons/bold ID/inline metadata as `list` (incl `[manual]`, `[blocked by X]`/`[blocks Y]`).
+ - Example:
     ```
     - ✅ **1** — Implement storage layer _(medium)_
     - 🔲 **2** — Build API _(high)_
@@ -77,32 +78,31 @@ Manage project todos. Parse $ARGUMENTS to determine the operation:
     ```
 
 **block** `1 blocks 2` — set blocking relationship
-  - Call `mcp__plugin_proj_proj__todo_block`
+ - `mcp__plugin_proj_proj__todo_block`
 
-**unblock** `<id>` — remove a blocking relationship
-  - Call `mcp__plugin_proj_proj__todo_unblock`
+**unblock** `<id>` — remove blocking relationship
+ - `mcp__plugin_proj_proj__todo_unblock`
 
-**delete** `<id>` -- delete a todo
-  - Call `mcp__plugin_proj_proj__todo_delete`
+**delete** `<id>` — `mcp__plugin_proj_proj__todo_delete`
 
-If $ARGUMENTS is empty or ambiguous, output: "Operation required. Usage: `/proj:todo [add|update|done|list|tree|block|unblock|delete] [args]`"
-Always confirm the action taken and show the resulting todo.
+Empty/ambiguous $ARGUMENTS → "Operation required. Usage: `/proj:todo [add|update|done|list|tree|block|unblock|delete] [args]`"
+Always confirm action + show resulting todo.
 
-**Git tracking flush**: Call `mcp__plugin_proj_proj__tracking_git_flush` with `commit_message="Todo: update"`.
+**Git tracking flush**: `mcp__plugin_proj_proj__tracking_git_flush` w/ `commit_message="Todo: update"`.
 
 ## Prerequisites
 
-- An active project must be loaded (call `proj_session_context` first).
+Active project must be loaded (`proj_session_context` first).
 
-## Error Handling
+## Err Handling
 
-- **No active project**: displays error from `proj_session_context` and stops.
-- **Empty or ambiguous arguments**: displays usage message.
-- **Todo not found**: displays error from the relevant `todo_*` tool call.
-- **Blocked todo completion**: displays error if trying to complete a blocked todo.
+- No active project → err from `proj_session_context`, stop
+- Empty/ambiguous args → usage msg
+- Todo not found → err from relevant `todo_*` call
+- Blocked todo completion → err
 
 ## Output
 
-Confirmation of the action taken plus the resulting todo state. For list/tree operations: nested bullet points with status icons, bold IDs, titles, priority, manual/blocked badges.
+Confirmation + resulting todo state. List/tree: nested bullets w/ status icons, bold IDs, titles, priority, manual/blocked badges.
 
-Suggested next: After adding a todo: `1. /proj:define <id>` -- define requirements | After completing a todo: `1. /proj:status` -- see project overview
+Suggested next: After add → `1. /proj:define <id>` | After done → `1. /proj:status`

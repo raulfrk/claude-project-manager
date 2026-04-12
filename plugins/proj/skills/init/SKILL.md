@@ -5,73 +5,76 @@ allowed-tools: mcp__proj__proj_init, mcp__proj__proj_load_session, mcp__proj__pr
 argument-hint: "[project-name]"
 ---
 
-Initialize project tracking. $ARGUMENTS may contain a project name (optional).
 
-**1.** Load config with `mcp__proj__config_load` to check settings.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Init project tracking. $ARGUMENTS may contain project name (opt).
+
+**1.** Load config w/ `mcp__proj__config_load`.
 
 **2.** Determine project name:
-   - If $ARGUMENTS is non-empty, use that as the name
-   - Otherwise, **ask**: "What is the project name?" (do not assume from cwd)
-   - Confirm: "Project name: <name>?"
+ - $ARGUMENTS non-empty → use as name
+ - Otherwise ask: "What is project name?" (don't assume from cwd)
+ - Confirm: "Project name: <name>?"
 
-**3.** Collect project directories (multi-directory loop):
+**3.** Collect project dirs (multi-dir loop):
 
-   Initialize: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred worktree creations), `_explored_dirs = set()` (labels of directories that had repo mapping + CLAUDE.md written).
+ Init: `_dirs = []` (list of `{path, label}` dicts), `_worktree_entries = []` (deferred wt creations), `_explored_dirs = set()` (labels w/ repo mapping + CLAUDE.md written).
 
-   **Directory collection loop** — repeat until the user says done:
+ **Dir collection loop** — repeat until user says done:
 
-   a. Ask: "Add a directory to this project (path):" (or for the first iteration: "What is the first content directory for this project?")
+ a. Ask: "Add dir to project (path):" (first iteration: "First content dir for project?")
 
-   b. If `worktree_integration: true` AND `projects_base_dir` is set:
-      - Call `mcp__plugin_worktree_worktree__wt_list_repos` (once, cache the result). Extract base repo paths from each line (format: `[label] /path/to/repo (default: branch)`) and store as `_wt_base_paths`.
-      - Present mode selection for this directory:
+ b. If `worktree_integration: true` AND `projects_base_dir` set:
+ - Call `mcp__plugin_worktree_worktree__wt_list_repos` (once, cache). Extract base repo paths from each line (fmt: `[label] /path/to/repo (default: branch)`), store as `_wt_base_paths`.
+ - Present mode selection:
         ```
         How should this directory be set up?
         1. New directory — create at the given path  [default]
         2. Use existing repo — point directly to a registered repo
         3. Create worktree — new worktree from a registered repo
         ```
-        (Omit option 2/3 if no repos are registered.)
+ (Omit opt 2/3 if no repos registered.)
 
-      - **Mode 1**: Ask for path (default: `<projects_base_dir>/<name>`). Ask for label. Set `_content_mode = "new-dir"`.
-      - **Mode 2**: Display registered repos. Ask user to select by label. Set path = selected repo path. Ask for label (default: repo label). Set `_content_mode = "existing-repo"`.
-      - **Mode 3**: Display registered repos. Ask user to select. Set path = `<projects_base_dir>/worktrees/<name>`. Ask for label. Store in `_worktree_entries` for deferred creation. Set `_content_mode = "worktree"`.
+ - Mode 1: Ask path (default: `<projects_base_dir>/<name>`). Ask label. `_content_mode = "new-dir"`.
+ - Mode 2: Show registered repos. User selects by label. path = selected repo path. Ask label (default: repo label). `_content_mode = "existing-repo"`.
+ - Mode 3: Show registered repos. User selects. path = `<projects_base_dir>/worktrees/<name>`. Ask label. Store in `_worktree_entries` for deferred creation. `_content_mode = "worktree"`.
 
-   c. **Otherwise** (no worktree integration):
-      - If first directory and `projects_base_dir` is set: default path = `<projects_base_dir>/<name>`
-      - If first directory and no `projects_base_dir`: default path = current working directory
-      - Ask for path (show default). Ask for label (default: "code" for first dir, require explicit for subsequent).
+ c. Otherwise (no wt integration):
+ - First dir + `projects_base_dir` set → default path = `<projects_base_dir>/<name>`
+ - First dir + no `projects_base_dir` → default path = cwd
+ - Ask path (show default). Ask label (default: "code" first dir, explicit for subsequent).
 
-   d. Validate:
-      - Label must be unique within `_dirs`. If duplicate, stop with: "Label `<label>` already used. Run `/proj:remove-repo` to free it."
-      - Path must not be empty.
+ d. Validate:
+ - Label must be unique in `_dirs`. Duplicate → stop: "Label `<label>` already used. Run `/proj:remove-repo` to free it."
+ - Path must not be empty.
 
-   e. Add `{path: <resolved_path>, label: <label>}` to `_dirs`.
+ e. Add `{path: <resolved_path>, label: <label>}` to `_dirs`.
 
-   f. **Directory creation check** (skip for worktree mode):
-      - If path does not exist: "Directory `<path>` does not exist. Create it now? [y/n]" -> `mkdir -p`
-      - If path exists: "Found directory: `<path>`"
+ f. Dir creation check (skip for wt mode):
+ - Path missing → "Dir `<path>` doesn't exist. Create? [y/n]" → `mkdir -p`
+ - Path exists → "Found dir: `<path>`"
 
-   g. Ask: "Add another directory? (Enter to skip, or type a path):"
-      - If the user presses Enter (empty): exit loop.
-      - If the user types a path: use it as the next directory's path and loop back to (b) or (c) for mode/label selection.
+ g. Ask: "Add another dir? (Enter to skip, or type path):"
+ - Enter (empty) → exit loop
+ - Path typed → use as next dir's path, loop back to (b)/(c)
 
-   At least one directory is required. If `_dirs` is empty after the loop, error.
+ Min one dir required. `_dirs` empty after loop → err.
 
-**3a.** Repo mapping (for each directory that exists and has files):
-   - For each dir in `_dirs`:
-     - Check: `Bash: ls -A <path> | head -1`
-     - If output is **non-empty** (directory has existing content):
-       - Ask: "Directory '<label>' at `<path>` has existing content. Map the repo? [yes/no]"
-       - If **yes** — run the full exploration sequence and add to `_explored_dirs`:
-         1. Call `mcp__proj__proj_explore_codebase` with `path=<path>`. Returns JSON with `tech_stack`, `entry_points`, `key_dirs`, `config_files`, `file_types`, `file_tree`, `arch_note`.
-         2. Synthesise: primary language/framework, key directories, entry points, architecture from the returned data.
-         3. Call `mcp__proj__claudemd_read` for the path. If CLAUDE.md exists, merge findings into it (preserve all existing sections; add/update `## Architecture` and `## Key Files`). If not, create fresh CLAUDE.md with Overview, Architecture, Key Files sections.
-         4. Call `mcp__proj__claudemd_write` with the result.
-         5. Add `label` to `_explored_dirs`.
-         6. Call `mcp__proj__notes_append` with project_name=<name> and text: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
-       - If **no**: continue normally.
-     - If output is **empty**: skip.
+**3a.** Repo mapping (each dir that exists w/ files):
+ - Each dir in `_dirs`:
+ - Check: `Bash: ls -A <path> | head -1`
+ - Non-empty (has content):
+ - Ask: "Dir '<label>' at `<path>` has content. Map repo? [yes/no]"
+ - Yes → full exploration, add to `_explored_dirs`:
+ 1. `mcp__proj__proj_explore_codebase` w/ `path=<path>`. Returns JSON: `tech_stack`, `entry_points`, `key_dirs`, `config_files`, `file_types`, `file_tree`, `arch_note`.
+ 2. Synthesise: primary lang/framework, key dirs, entry points, architecture.
+ 3. `mcp__proj__claudemd_read` for path. CLAUDE.md exists → merge findings (preserve existing sections; add/update `## Architecture` + `## Key Files`). Missing → create fresh w/ Overview, Architecture, Key Files.
+ 4. `mcp__proj__claudemd_write` w/ result.
+ 5. Add `label` to `_explored_dirs`.
+ 6. `mcp__proj__notes_append` w/ project_name=<name>, text: `## Repo Exploration — <date>\n**Tech stack**: ...\n**Entry points**: ...\n**Key dirs**: ...\n**Architecture note**: ...`
+ - No → continue.
+ - Empty → skip.
 
 **4.** Ask all metadata in one prompt:
    ```
@@ -82,33 +85,32 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
    ```
 
 **4a.** Zoxide:
-   - If `zoxide_integration: True` in config: set `_zoxide = true` (inherits global, no question needed).
-   - If `zoxide_integration: False` in config: ask "Enable zoxide for this project? (boosts project dirs for faster cd) [no]"
-     - If yes: set `_zoxide = true`
-     - If no: set `_zoxide = null` (use global default)
+ - Config `zoxide_integration: True` → `_zoxide = true` (inherits global).
+ - Config `zoxide_integration: False` → ask "Enable zoxide? (boosts project dirs for faster cd) [no]"
+ - Yes → `_zoxide = true`; no → `_zoxide = null` (global default)
 
-**5.** Before calling `proj_init`, filter `_dirs` to exclude any entries whose path matches a `_worktree_entries` path. Store the excluded entries separately as `_deferred_dirs` — they will be registered via `proj_add_repo` after worktree creation in step 8.
+**5.** Before `proj_init`, filter `_dirs` excluding entries w/ path matching `_worktree_entries` path. Store excluded as `_deferred_dirs` — registered via `proj_add_repo` after wt creation in step 8.
 
-   Call `mcp__proj__proj_init` with name, dirs=<filtered _dirs (without deferred worktree entries)>, description, tags, git_enabled, zoxide_integration=_zoxide.
-   - Pass the `dirs` parameter (list of `{path, label}` dicts) — do NOT use the legacy `path` parameter.
-   - If `proj_init` returns an error: display the error message and stop (do not call `proj_load_session` or proceed further).
-   Call `mcp__proj__proj_load_session` to set as active for this session.
+ `mcp__proj__proj_init` w/ name, dirs=<filtered _dirs>, desc, tags, git_enabled, zoxide_integration=_zoxide.
+ - Pass `dirs` param (list of `{path, label}` dicts) — NOT legacy `path` param.
+ - Err → display + stop (don't call `proj_load_session`).
+ `mcp__proj__proj_load_session` to set active.
 
-**6.** Permissions (if `sandbox_integration: true` in config and project's auto_grant != false):
-   - Ask: "Allow Claude to freely access this project directory? [yes/no/use global: yes]"
-   - Ask: "Auto-allow plugin MCP tools for this project? [yes/no/use global: yes]"
-   - If either answer is yes, call `mcp__proj__proj_setup_permissions` once:
-     - `mcp_servers=[<list>]` — build list when second answer is yes:
-       always include `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
-       add `"plugin_worktree_worktree"` if worktree_integration; add `"jira"` if jira.enabled; add `"trello"` if trello.enabled
-     - (If second answer is no, pass `mcp_servers=[]`)
-   - Store the decisions in `mcp__proj__proj_set_permissions`
-   - **Note**: When `permissions.projects_root` is set in config, `proj_setup_permissions` skips per-repo sandbox path additions (root already covers all project repos). It only ensures MCP wildcards are present.
-   - If `proj_setup_permissions` returns an error (e.g. sandbox plugin not available), warn: "Permissions could not be set automatically. Install the sandbox plugin when available." and continue.
+**6.** Permissions (if `sandbox_integration: true` in config + project's auto_grant != false):
+ - Ask: "Allow Claude free access to project dir? [yes/no/use global: yes]"
+ - Ask: "Auto-allow plugin MCP tools? [yes/no/use global: yes]"
+ - Either yes → `mcp__proj__proj_setup_permissions` once:
+ - `mcp_servers=[<list>]` — build when second=yes:
+ always: `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`, `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`;
+ add `"plugin_worktree_worktree"` if wt_integration; `"jira"` if jira.enabled; `"trello"` if trello.enabled
+ - Second=no → `mcp_servers=[]`
+ - Store decisions in `mcp__proj__proj_set_permissions`
+ - When `permissions.projects_root` set in config, `proj_setup_permissions` skips per-repo sandbox path additions (root covers all). Only ensures MCP wildcards present.
+ - `proj_setup_permissions` err → warn: "Permissions not set automatically. Install sandbox plugin when available." Continue.
 
-**7.** CLAUDE.md — For each dir in `_dirs` whose label is NOT in `_explored_dirs` (those already had CLAUDE.md written during repo mapping):
-   Ask: "Create a CLAUDE.md in '<label>' (`<path>`) to help Claude understand the project context? [yes]"
-   - If yes: call `mcp__proj__claudemd_write` with initial content:
+**7.** CLAUDE.md — Each dir in `_dirs` whose label NOT in `_explored_dirs` (already had CLAUDE.md from repo mapping):
+ Ask: "Create CLAUDE.md in '<label>' (`<path>`)? [yes]"
+ - Yes → `mcp__proj__claudemd_write` w/ initial content:
      ```markdown
      # <project-name>
 
@@ -122,57 +124,57 @@ Initialize project tracking. $ARGUMENTS may contain a project name (optional).
      None yet. Use /proj:todo add to add todos.
      ```
 
-**8.** Worktrees — executes deferred worktree creations from step 3:
+**8.** Worktrees — exec deferred wt creations from step 3:
 
-   - If `_worktree_entries` is empty: skip this step silently.
+ - `_worktree_entries` empty → skip silently.
 
-   - For each entry in `_worktree_entries`:
-     1. Call `mcp__plugin_worktree_worktree__wt_create` with:
-        - `repo_label`: entry's repo label
-        - `branch`: entry's branch name
-        - `new_branch`: true
-        - `path`: entry's worktree path
-     2. **On success**: call `mcp__proj__proj_add_repo` with `repo_path=<worktree path>` and `label=<entry's label>` to register the repo path and boost zoxide (the path now exists). Then inform the user — "Worktree created at `<path>` on branch `<branch>`."
-     3. **On failure**: inform the user of the error. Offer fallback:
-        "Worktree creation failed for '<label>'. Fall back to creating a new directory? [yes/no]"
-        - If **yes**: `mkdir -p <path>`, note the fallback.
-        - If **no**: note the failure and continue.
+ - Each entry in `_worktree_entries`:
+ 1. `mcp__plugin_worktree_worktree__wt_create` w/:
+ - `repo_label`: entry's repo label
+ - `branch`: entry's branch name
+ - `new_branch`: true
+ - `path`: entry's wt path
+ 2. Success → `mcp__proj__proj_add_repo` w/ `repo_path=<wt path>`, `label=<entry's label>` to register + boost zoxide (path now exists). Inform: "Worktree created at `<path>` on branch `<branch>`."
+ 3. Failure → inform err. Offer fallback:
+ "Wt creation failed for '<label>'. Fall back to new dir? [yes/no]"
+ - Yes → `mkdir -p <path>`, note fallback.
+ - No → note failure, continue.
 
 **9.** Git tracking overrides (if `git_tracking.enabled: true` in config):
-   Ask:
+ Ask:
    ```
    Per-project git tracking configuration overrides for the shared tracking repo (Enter to use global defaults):
    - Override git tracking for this project? [use global]:
    - Override GitHub push for this project? [use global]:
    - Custom GitHub repo name format? [use global]:
    ```
-   - If any answer is not "use global" / empty, call `mcp__proj__proj_update_meta` with the corresponding `git_tracking_enabled`, `git_tracking_github_enabled`, or `git_tracking_github_repo_format` values.
-   - If all answers are empty/default: skip (None values inherit global defaults).
+ - Any answer not "use global"/empty → `mcp__proj__proj_update_meta` w/ corresponding `git_tracking_enabled`, `git_tracking_github_enabled`, or `git_tracking_github_repo_format` vals.
+ - All default/empty → skip (None vals inherit global defaults).
 
-**10.** Show summary of what was created. List all directories:
+**10.** Show summary. List all dirs:
     ```
     Directories:
       - <label>: <path> (new directory | existing repo | worktree of <repo>, branch: <branch>)
       ...
     ```
 
-**11.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Init: {name}"`.
+**11.** Git tracking flush: `mcp__proj__tracking_git_flush` w/ `commit_message="Init: {name}"`.
 
 ## Prerequisites
 
-- Proj plugin must be configured (run `/proj:init-plugin` first if `~/.claude/proj.yaml` does not exist).
+- Proj plugin configured (`/proj:init-plugin` first if `~/.claude/proj.yaml` missing).
 
-## Error Handling
+## Err Handling
 
-- **Config not found**: displays error from `config_load` and stops.
-- **Duplicate project name**: displays error from `proj_init` and stops.
-- **Invalid directory path**: displays error and stops.
-- **Duplicate label**: displays error and asks user to choose a different label.
-- **Worktree creation failure**: offers fallback to plain directory creation.
-- **Permissions setup failure**: warns and continues (non-fatal).
+- Config not found → display err from `config_load`, stop.
+- Duplicate project name → display err from `proj_init`, stop.
+- Invalid dir path → display err, stop.
+- Duplicate label → display err, ask different label.
+- Wt creation failure → fallback to plain dir.
+- Permissions setup failure → warn, continue (non-fatal).
 
 ## Output
 
-Summary of created project: project name, all directories (label, path, type), permissions status. Git tracking flush confirmation.
+Summary: project name, all dirs (label, path, type), permissions status. Git tracking flush confirmation.
 
-Suggested next: `1. /proj:todo add` -- add your first task | `2. /proj:status` -- see the project overview
+Suggested next: `1. /proj:todo add` -- add first task | `2. /proj:status` -- project overview

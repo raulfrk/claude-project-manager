@@ -7,20 +7,23 @@ context: fork
 agent: general-purpose
 ---
 
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
 Recover from hook failures by retrying or clearing entries.
 
 **Parse $ARGUMENTS**:
-- `clear` — clear all failure entries without retrying.
-- `<hook_id>` (e.g. `hook-001`) — retry all failures for that specific hook.
-- Empty — list failures and offer interactive recovery.
+- `clear` — clear all failures w/o retry
+- `<hook_id>` (e.g. `hook-001`) — retry failures for that hook
+- Empty — list failures, offer interactive recovery
 
 **Mode: clear**
-Call `mcp__plugin_router_router__router_recover_tool` with `clear=true`.
-Display: `Cleared <cleared> failure entries.`
+`mcp__plugin_router_router__router_recover_tool` w/ `clear=true`.
+Output: `Cleared <cleared> failure entries.`
 
 **Mode: retry by hook_id**
-Call `mcp__plugin_router_router__router_recover_tool` with `hook_id=<hook_id>`.
-Parse the JSON response and display:
+`mcp__plugin_router_router__router_recover_tool` w/ `hook_id=<hook_id>`.
+Parse JSON response, display:
 ```
 Recovery for hook <hook_id>:
   Retried: <retried>
@@ -28,31 +31,31 @@ Recovery for hook <hook_id>:
   Still failing: <still_failed>
 ```
 
-If `still_failed` > 0, suggest: "Failures persist — use `/router:debug` for error details, or `/router:recover clear` to discard."
+`still_failed` > 0 → suggest `/router:debug` for details or `/router:recover clear` to discard.
 
 **Mode: interactive (no args)**
-1. Call `mcp__plugin_router_router__router_recover_tool` with no arguments to list all failures.
-2. If empty, output: "No hook failures recorded. All hooks are healthy." and stop.
-3. Display failures grouped by hook_id with counts.
-4. For each hook_id with failures, ask: "Retry failures for `<hook_id>`? (yes/no/clear)"
-   - **yes**: call `mcp__plugin_router_router__router_recover_tool` with that `hook_id`
-   - **no**: skip
-   - **clear**: call `mcp__plugin_router_router__router_recover_tool` with `clear=true` and stop
+1. `mcp__plugin_router_router__router_recover_tool` w/ no args → list all failures.
+2. Empty → "No hook failures recorded. All hooks are healthy." Stop.
+3. Show failures grouped by hook_id w/ counts.
+4. Each hook_id: ask "Retry failures for `<hook_id>`? (yes/no/clear)"
+ - yes → `mcp__plugin_router_router__router_recover_tool` w/ that `hook_id`
+ - no → skip
+ - clear → `mcp__plugin_router_router__router_recover_tool` w/ `clear=true`. Stop.
 
-Display final summary of all recovery actions taken.
+Show final summary of recovery actions.
 
 ## Prerequisites
 
-- Router plugin MCP server is running and reachable.
+Router plugin MCP server running & reachable.
 
 ## Error Handling
 
-- **Router MCP unavailable**: displays error from tool call and stops.
-- **Hook ID not found**: displays error from `router_recover_tool` and stops.
+- Router MCP unavailable → show err, stop
+- Hook ID not found → show err, stop
 
 ## Output
 
-- **clear mode**: `Cleared <cleared> failure entries.`
-- **retry mode**: Recovery summary with retried/succeeded/still_failed counts.
-- **interactive mode**: Failures grouped by hook_id, with recovery actions taken.
-- **No failures**: `No hook failures recorded. All hooks are healthy.`
+- clear: `Cleared <cleared> failure entries.`
+- retry: Recovery summary w/ retried/succeeded/still_failed counts
+- interactive: Failures grouped by hook_id w/ recovery actions
+- No failures: `No hook failures recorded. All hooks are healthy.`

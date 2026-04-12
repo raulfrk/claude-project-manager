@@ -5,35 +5,38 @@ allowed-tools: mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktre
 argument-hint: "[repo-label] [branch-name]"
 ---
 
-Create a git worktree. Arguments: $ARGUMENTS (optional — repo label and/or branch name)
 
-**1.** Call `mcp__plugin_worktree_worktree__wt_list_repos` to show available base repos.
-   If the repo list is empty, stop with: "No repos configured. Run `/worktree:add-repo` to register one."
-**2.** If $ARGUMENTS provides repo label and branch, use those. Otherwise ask:
-   - "Which repo? (label from the list above)"
-   - "Branch name for the new worktree?"
-   - "Create as a new branch? [yes/no, default: yes]"
-   - "Custom path? [leave blank for default ~/worktrees/<repo>/<branch>]"
-**3.** Call `mcp__plugin_worktree_worktree__wt_create` with the provided values.
-   If it returns an error, display the error message and stop.
-**4.** Call `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` with the new worktree path to grant read/edit permissions.
-   (If the sandbox server is unavailable, skip and continue.)
-**5.** Show the created worktree path and confirm success.
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Create git worktree. Args: $ARGUMENTS (opt — repo label and/or branch name)
+
+**1.** `mcp__plugin_worktree_worktree__wt_list_repos` → show available base repos.
+ Empty list → stop: "No repos configured. Run `/worktree:add-repo` to register one."
+**2.** $ARGUMENTS has repo label + branch → use those. Otherwise ask:
+ - "Which repo? (label from list)"
+ - "Branch name?"
+ - "Create as new branch? [yes/no, default: yes]"
+ - "Custom path? [blank for default ~/worktrees/<repo>/<branch>]"
+**3.** `mcp__plugin_worktree_worktree__wt_create` w/ provided vals.
+ Error → display msg, stop.
+**4.** `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` w/ new worktree path for read/edit perms.
+ Sandbox server unavailable → skip, continue.
+**5.** Show created worktree path; confirm success.
 
 ## Prerequisites
 
-- Worktree plugin must be configured (at least one base repo registered).
-- Worktree MCP server must be running and reachable.
+- Worktree plugin configured (≥1 base repo registered)
+- Worktree MCP server running + reachable
 
 ## Error Handling
 
-- **No repos configured**: displays "No repos configured. Run `/worktree:add-repo` to register one." and stops.
-- **Create error**: displays error from `wt_create` and stops.
-- **Sandbox server unavailable**: skips permission grant and continues.
-- **Missing arguments**: asks interactively for repo, branch, new branch flag, and path.
+- No repos → "No repos configured. Run `/worktree:add-repo` to register one." Stop.
+- Create error → display `wt_create` error. Stop.
+- Sandbox unavailable → skip perm grant, continue.
+- Missing args → ask interactively for repo, branch, new branch flag, path.
 
 ## Output
 
-Created worktree path and success confirmation. Permissions grant status (if applicable).
+Created worktree path + success confirmation. Perm grant status if needed.
 
-Suggested next: `1. /worktree:list` -- see all worktrees | `2. /worktree:remove` -- remove a worktree when done
+Suggested next: `1. /worktree:list` -- see all worktrees | `2. /worktree:remove` -- remove worktree when done

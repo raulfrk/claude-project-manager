@@ -6,15 +6,16 @@ context: fork
 agent: general-purpose
 ---
 
-List recent hook failures to help debug execution issues.
 
-**1.** Call `mcp__plugin_router_router__router_recover_tool` with no arguments (lists all failures as a JSON array).
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** Parse the JSON response. If the array is empty:
-- Output: "No hook failures recorded. All hooks are healthy."
-- Stop.
+List recent hook failures for debug.
 
-**3.** Display failures as a table:
+**1.** `mcp__plugin_router_router__router_recover_tool` w/ no args (returns JSON array).
+
+**2.** Parse JSON. Empty array → output "No hook failures recorded. All hooks are healthy." Stop.
+
+**3.** Show failures table:
 
 ```
 ## Hook Failures
@@ -24,24 +25,23 @@ List recent hook failures to help debug execution issues.
 | 1 | hook-001 | trigger | target | server | error msg | 0 | 2026-03-26T... |
 ```
 
-- **Hook ID**: if the failure entry has `verification_failed: true`, append `[verification]` after the hook ID (e.g., `verify-todoist-complete [verification]`).
-- **Retries**: the `retry_count` field, default 0 if absent.
-- **Timestamp**: the `timestamp` field.
+- Hook ID: if `verification_failed: true`, append `[verification]` (e.g., `verify-todoist-complete [verification]`)
+- Retries: `retry_count` field, default 0
+- Timestamp: `timestamp` field
 
-**4.** Show a summary:
-`N failure(s) recorded.`
+**4.** Summary: `N failure(s) recorded.`
 
-**5.** Display suggested next actions.
+**5.** Show suggested next actions.
 
 ## Prerequisites
 
-- Router plugin MCP server is running and reachable.
+Router plugin MCP server running/reachable.
 
-## Error Handling
+## Err Handling
 
-- **Router MCP unavailable**: displays error from tool call and stops.
-- **No failures**: displays `No hook failures recorded. All hooks are healthy.` and stops.
+- Router MCP unavailable → show err, stop
+- No failures → "No hook failures recorded. All hooks are healthy." Stop.
 
 ## Output
 
-Failures table (Hook ID, Trigger, Target, Server, Error, Retries, Timestamp) with summary count. Verification failures marked with `[verification]` badge.
+Failures table (Hook ID, Trigger, Target, Server, Error, Retries, Timestamp) w/ summary count. Verification failures marked `[verification]`.

@@ -7,37 +7,40 @@ context: fork
 agent: general-purpose
 ---
 
-Register a new hook in the hooks registry.
 
-**Parse $ARGUMENTS** for these fields:
-- `trigger_tool` (required) — the MCP tool that fires the hook
-- `target_tool` (required) — the MCP tool to call when triggered
-- `server` (required) — the MCP server hosting the target tool
-- `param_mapping` (optional) — JSON string mapping target params to source fields using `${}` templates, default `{}`
-- `blocking` (optional) — `true` or `false`, default `false`
-- `condition` (optional) — expression to gate the hook, default `null`
-- `--verification` (optional flag) — register as a verification hook (runs after primary hooks to check expected state was achieved)
-- `feedback_mapping` (optional) — JSON string mapping result dot-paths to target param names for automatic writeback, default `{}`
-- `feedback_tool` (optional) — the tool on the trigger's server to call with the mapped results
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-If $ARGUMENTS is empty or missing required fields, run interactive Q&A:
-1. "What tool should trigger this hook?" (trigger_tool)
-2. "What tool should be called?" (target_tool)
-3. "Which MCP server hosts the target tool?" (server)
-4. "Param mapping as JSON (or leave empty for `{}`):" (param_mapping)
-5. "Should the trigger wait for the target to complete? (yes/no, default: no)" (blocking)
-6. "Condition expression to gate execution (or leave empty):" (condition)
-7. "Is this a verification hook? (yes/no, default: no)" (verification)
-8. "Do you want feedback writeback? (yes/no, default: no)" — if yes:
-   - "Feedback mapping as JSON (e.g. `{"result.id": "task_id"}`): " → feedback_mapping
-   - "Feedback tool name (the tool on the trigger's server to call with results): " → feedback_tool
-   - If blocking=false was set and verification is NOT true: auto-set blocking=true with warning "Feedback requires blocking=true — overriding your blocking setting"
-   - If feedback_mapping is {} (empty) but feedback_tool is set: warn "No params will be mapped to feedback_tool — is this intentional? (yes/no)" and proceed only on yes
-   - Both feedback_mapping and feedback_tool are required together; prompt for the missing one if only one is provided
+Register new hook in hooks registry.
 
-**Register**: Call `mcp__plugin_router_router__router_register_tool` with the collected values. If `--verification` flag is present or the user answered yes to the verification question, pass `verification=True`. If `feedback_mapping` and `feedback_tool` have been provided (non-default), include them in the register call parameters.
+**Parse $ARGUMENTS** for fields:
+- `trigger_tool` (req) — MCP tool firing hook
+- `target_tool` (req) — MCP tool called when triggered
+- `server` (req) — MCP server hosting target
+- `param_mapping` (opt) — JSON mapping target params to source fields via `${}` templates, default `{}`
+- `blocking` (opt) — `true`/`false`, default `false`
+- `condition` (opt) — expression gating hook, default `null`
+- `--verification` (opt flag) — register as verification hook (runs after primary hooks to check expected state)
+- `feedback_mapping` (opt) — JSON mapping result dot-paths to target param names for auto writeback, default `{}`
+- `feedback_tool` (opt) — tool on trigger's server called w/ mapped results
 
-**On success**, display the created hook:
+$ARGUMENTS empty/missing req fields → interactive Q&A:
+1. "What tool triggers this hook?" (trigger_tool)
+2. "What tool gets called?" (target_tool)
+3. "Which MCP server hosts target?" (server)
+4. "Param mapping as JSON (or empty for `{}`):" (param_mapping)
+5. "Should trigger wait for target? (yes/no, default: no)" (blocking)
+6. "Condition expression gating exec (or empty):" (condition)
+7. "Verification hook? (yes/no, default: no)" (verification)
+8. "Want feedback writeback? (yes/no, default: no)" — if yes:
+ - "Feedback mapping as JSON (e.g. `{"result.id": "task_id"}`): " → feedback_mapping
+ - "Feedback tool name (tool on trigger's server called w/ results): " → feedback_tool
+ - blocking=false + not verification → auto-set blocking=true w/ warning "Feedback requires blocking=true — overriding blocking setting"
+ - feedback_mapping={} but feedback_tool set → warn "No params mapped to feedback_tool — intentional? (yes/no)", proceed only on yes
+ - Both feedback_mapping + feedback_tool req together; prompt missing one if only one provided
+
+**Register**: `mcp__plugin_router_router__router_register_tool` w/ collected vals. `--verification` flag or user answered yes → pass `verification=True`. If `feedback_mapping` + `feedback_tool` non-default → include in register call.
+
+**On success**:
 ```
 Registered hook <id>:
   trigger: <trigger_tool>
@@ -50,20 +53,18 @@ Registered hook <id>:
   feedback_tool: <value>      (only when feedback was configured)
 ```
 
-**On error** (duplicate, cycle, invalid JSON), display the error message from the tool response.
+**On error** (duplicate/cycle/invalid JSON) → show err msg from tool response.
 
 ## Prerequisites
 
-- Router plugin MCP server is running and reachable.
+Router plugin MCP server running + reachable.
 
 ## Error Handling
 
-- **No arguments and not interactive**: starts interactive Q&A to collect required fields.
-- **Duplicate hook**: displays error from `router_register_tool`.
-- **Cycle detected**: displays error from `router_register_tool`.
-- **Invalid param_mapping JSON**: displays error from `router_register_tool`.
-- **Router MCP unavailable**: displays error from tool call and stops.
+- No args, not interactive → starts interactive Q&A
+- Duplicate/cycle/invalid JSON → show err from `router_register_tool`
+- Router MCP unavailable → show err, stop
 
 ## Output
 
-On success: registered hook details (ID, trigger, target, server, mapping, blocking, verification, condition). On error: error message from tool.
+Success: hook details (ID, trigger, target, server, mapping, blocking, verification, condition). Error: err msg from tool.

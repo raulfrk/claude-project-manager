@@ -6,36 +6,39 @@ context: inline
 argument-hint: "[--apply]"
 ---
 
-Analyze the blocking graph and propose an optimal execution order for all open todos.
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Analyze blocking graph, propose optimal exec order for open todos.
 
 ## Steps
 
-**1. Load project context**
+**1. Load project ctx**
 
-Call `mcp__plugin_proj_proj__proj_session_context` to get the active project name and config.
+`mcp__plugin_proj_proj__proj_session_context` → get active project name/config.
 
-**2. Analyze the dependency graph**
+**2. Analyze dependency graph**
 
-Call `mcp__plugin_proj_proj__todo_analyze_graph` with the project name. This returns:
-- `todos`: list of per-todo objects with `id`, `title`, `priority`, `blocked_by`, `blocks`, `tags`, `critical_path_depth`, `transitive_fan_out`, `is_on_critical_path`
-- `tiers`: list of lists (topological tiers)
-- `cycles`: list of cycle descriptions (strings)
-- `critical_path`: ordered list of todo IDs on the critical path
-- `orphans`: todo IDs with no blocking relationships
+`mcp__plugin_proj_proj__todo_analyze_graph` w/ project name. Returns:
+- `todos`: per-todo objects w/ `id`, `title`, `priority`, `blocked_by`, `blocks`, `tags`, `critical_path_depth`, `transitive_fan_out`, `is_on_critical_path`
+- `tiers`: topological tiers (list of lists)
+- `cycles`: cycle desc strings
+- `critical_path`: ordered todo IDs on critical path
+- `orphans`: todo IDs w/ no blocking relations
 
-If `todo_analyze_graph` fails, display the error and stop.
+Fails → show err, stop.
 
 **3. Guard: no todos**
 
-If the `todos` list is empty: respond "No open todos to prioritize." and stop.
+Empty `todos` → "No open todos to prioritize." Stop.
 
 **4. Guard: single todo**
 
-If there is exactly 1 todo: respond "Only one open todo -- nothing to reorder." and stop.
+Exactly 1 todo → "Only one open todo -- nothing to reorder." Stop.
 
 **5. Detect cycles**
 
-If `cycles` is non-empty, display:
+`cycles` non-empty →
 
 ```
 ### Circular Dependencies
@@ -45,33 +48,33 @@ The following cycles were detected and must be resolved before optimal ordering 
 - ...
 ```
 
-Continue with analysis despite cycles (the tiering will be partial).
+Continue despite cycles (tiering partial).
 
 **6. Compute hybrid scores**
 
-For each todo, compute:
+Each todo:
 
 ```
 score = (transitive_fan_out * 2) + (critical_path_depth * 3) + priority_weight
 ```
 
-Where `priority_weight` = `{high: 3, medium: 1, low: 0}`.
+`priority_weight` = `{high: 3, medium: 1, low: 0}`.
 
-Sort todos by score descending within each tier.
+Sort by score desc within each tier.
 
 **7. Propose changes**
 
-Based on the graph analysis and scores, propose three types of changes:
+Three change types:
 
-- **New blocking edges**: for todos that should be sequenced but are not currently connected (e.g., a high-score todo in Tier 0 that logically must precede a Tier 1 todo but has no edge).
-- **Removed blocking edges**: for existing edges that are redundant (transitive) or conflict with the optimal order.
-- **Priority updates**: todos on the critical path with high fan-out should be `high`; leaf todos with no dependents should be `low`; others should be `medium`.
+- New blocking edges: todos needing sequencing but unconnected (e.g., high-score Tier 0 todo logically preceding Tier 1 todo w/ no edge).
+- Removed blocking edges: redundant (transitive) or conflicting edges.
+- Priority updates: critical path + high fan-out → `high`; leaf todos w/ no dependents → `low`; others → `medium`.
 
-Only propose changes that differ from the current state.
+Only propose diffs from cur state.
 
-**8. Present the plan**
+**8. Present plan**
 
-`EnterPlanMode` -- display the proposed prioritization:
+`EnterPlanMode` — show proposed prioritization:
 
 ```
 ### Proposed Prioritization
@@ -94,12 +97,12 @@ Only propose changes that differ from the current state.
 ```
 
 Display rules:
-- Use status icons: `<pending icon>` for pending, `<in_progress icon>` for in_progress.
-- Bold the todo ID, show full exact title, priority in italics.
-- Todos with `"manual"` in `tags` get a `[manual]` badge after the priority.
-- Include `[blocks X, Y]` and `[blocked by X]` inline where applicable.
-- Within each tier, sort by hybrid score descending.
-- If no changes are needed, show the tiered display with: "No changes needed -- current ordering is already optimal."
+- Status icons: `<pending icon>` pending, `<in_progress icon>` in_progress
+- Bold todo ID, full exact title, priority in italics
+- `"manual"` in `tags` → `[manual]` badge after priority
+- Include `[blocks X, Y]` / `[blocked by X]` inline
+- Within each tier, sort by hybrid score desc
+- No changes needed → show tiered display w/ "No changes needed -- cur ordering is already optimal."
 
 **9. Await approval**
 
@@ -107,32 +110,32 @@ Display rules:
 
 **10. Apply changes (on accept)**
 
-Apply all proposed changes:
-- Call `mcp__plugin_proj_proj__todo_block` for each new blocking edge.
-- Call `mcp__plugin_proj_proj__todo_unblock` for each removed blocking edge.
-- Call `mcp__plugin_proj_proj__todo_update` with `priority=<new>` for each priority change.
+Apply all proposed:
+- `mcp__plugin_proj_proj__todo_block` each new blocking edge
+- `mcp__plugin_proj_proj__todo_unblock` each removed edge
+- `mcp__plugin_proj_proj__todo_update` w/ `priority=<new>` each priority change
 
-Do NOT call `todo_complete` -- this skill only reorders, never completes.
+Never call `todo_complete` — skill only reorders.
 
 **11. Handle rejection**
 
-If the user rejects the plan: respond "No changes made." and stop.
+Rejected → "No changes made." Stop.
 
 **12. Git flush**
 
-Call `mcp__plugin_proj_proj__tracking_git_flush` with `commit_message="Prioritize: reorder todos"`.
+`mcp__plugin_proj_proj__tracking_git_flush` w/ `commit_message="Prioritize: reorder todos"`.
 
 ## Prerequisites
 
-- An active project must be loaded (call `proj_session_context` first).
+Active project must be loaded (`proj_session_context` first).
 
-## Error Handling
+## Err Handling
 
-- **No active project**: displays error from `proj_session_context` and stops.
-- **Graph analysis failure**: displays error from `todo_analyze_graph` and stops.
-- **No open todos**: "No open todos to prioritize." and stops.
-- **Single todo**: "Only one open todo -- nothing to reorder." and stops.
+- No active project → show err from `proj_session_context`, stop
+- Graph analysis failure → show err from `todo_analyze_graph`, stop
+- No open todos → "No open todos to prioritize." Stop
+- Single todo → "Only one open todo -- nothing to reorder." Stop
 
 ## Output
 
-A tiered execution plan with proposed blocking and priority changes, applied after user approval. Confirmation of all applied changes.
+Tiered exec plan w/ proposed blocking/priority changes, applied after user approval. Confirmation of all applied changes.

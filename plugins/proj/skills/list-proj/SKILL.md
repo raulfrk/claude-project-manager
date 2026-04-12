@@ -6,22 +6,24 @@ context: fork
 agent: general-purpose
 ---
 
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
 List all non-archived tracked projects.
 
-**1.** Call `mcp__proj__proj_list` (no arguments — defaults to non-archived only).
-**2.** Display the result as-is.
+1. `mcp__proj__proj_list` (no args — defaults non-archived).
+2. Display result as-is.
 
 ## Prerequisites
 
-- Proj plugin must be configured (`~/.claude/proj.yaml` exists).
+Proj plugin configured (`~/.claude/proj.yaml` exists).
 
-## Error Handling
+## Err Handling
 
-- **No projects found**: displays an empty list or message indicating no tracked projects.
-- **Config not found**: displays error from tool call and stops.
+No projects → empty list/msg. Config not found → show err, stop.
 
 ## Output
 
-List of non-archived projects with names and status.
+Non-archived projects w/ names + status.
 
-Suggested next: `1. /proj:load <name>` -- load a project for this session
+Next: `1. /proj:load <name>` — load project for session

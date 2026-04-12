@@ -5,35 +5,38 @@ allowed-tools: mcp__proj__proj_migrate_ids, mcp__proj__proj_migrate_dirs, mcp__p
 argument-hint: "[--dry-run] [--force] [--restore <timestamp>] [project-name]"
 ---
 
-Migrate projects from legacy formats to current structure.
+
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Migrate projects from legacy formats to cur structure.
 
 **1.** Parse `$ARGUMENTS`:
-- `dry_run` = true if `--dry-run` present
-- `force` = true if `--force` present
-- `restore_ts` = value after `--restore` (if present)
-- `project_name` = first non-flag token (optional)
+- `dry_run` = true if `--dry-run`
+- `force` = true if `--force`
+- `restore_ts` = val after `--restore` (if present)
+- `project_name` = first non-flag token (opt)
 
-If no arguments and no flags: default to migrating all projects.
+No args/flags → migrate all projects.
 
-**2.** Call `mcp__proj__proj_session_context`. If no config loaded, stop with: "No config loaded. Run `/proj:init` to initialize."
+**2.** `mcp__proj__proj_session_context`. No config → stop: "No config loaded. Run `/proj:init` to init."
 
-**3.** If `restore_ts` is set:
-   - Search for `.bak-{restore_ts}` files in tracking directories:
+**3.** If `restore_ts` set:
+ - Search `.bak-{restore_ts}` files in tracking dirs:
      ```
      Bash: find <tracking_dir> -name "*.bak-{restore_ts}" -type f
      ```
-   - If no files found: stop with "No backup found for timestamp `<restore_ts>`. Run `find <tracking_dir> -name '*.bak-*'` to see available backups."
-   - For each backup file: restore by copying over the original (remove the `.bak-TIMESTAMP` suffix to get original name)
-   - Display restored files and stop.
+ - No files → stop: "No backup found for timestamp `<restore_ts>`. Run `find <tracking_dir> -name '*.bak-*'` to see available backups."
+ - Each backup: restore by copying over orig (strip `.bak-TIMESTAMP` suffix)
+ - Show restored files, stop.
 
 **4.** Pre-migration validation:
-   - Call `mcp__proj__proj_list_full` to get all projects with their details.
-   - If project list is empty: stop with "No projects in index. Nothing to migrate."
-   - For each non-archived project: verify tracking directory exists on disk via `Bash: test -d <dir>`.
-   - If not `force`: warn about any projects with external sync IDs (Todoist, Trello, Jira) — these will be preserved but the user should be aware.
-   - If any validation fails and not `force`: stop with "Pre-migration validation failed for <N> project(s). Run `/proj:migrate --force` to skip validation."
+ - `mcp__proj__proj_list_full` — get all projects w/ details.
+ - Empty list → stop: "No projects in index. Nothing to migrate."
+ - Each non-archived project: verify tracking dir exists via `Bash: test -d <dir>`.
+ - Not `force`: warn about projects w/ external sync IDs (Todoist/Trello/Jira) — preserved but user should know.
+ - Validation fails + not `force` → stop: "Pre-migration validation failed for <N> project(s). Run `/proj:migrate --force` to skip validation."
 
-**5.** Detection — display summary table:
+**5.** Detection — summary table:
    ```
    ### Migration Detection
 
@@ -43,24 +46,24 @@ If no arguments and no flags: default to migrating all projects.
    | other   | —           | —           | up to date |
    ```
 
-   If all projects are up to date: display "All projects are up to date. Nothing to migrate." and stop.
+ All up to date → "All projects are up to date. Nothing to migrate." Stop.
 
 **6.** If `dry_run`:
-   - Call `mcp__proj__proj_migrate_ids` with `dry_run=True`
-   - Call `mcp__proj__proj_migrate_dirs` with `dry_run=True` and `project_name` if specified
-   - Display preview results and stop.
+ - `mcp__proj__proj_migrate_ids(dry_run=True)`
+ - `mcp__proj__proj_migrate_dirs(dry_run=True)` + `project_name` if specified
+ - Show preview, stop.
 
 **7.** Run migrations:
-   - Call `mcp__proj__proj_migrate_ids` (migrates all projects' T-prefix IDs, archive, decisions, with auto-rollback)
-   - Call `mcp__proj__proj_migrate_dirs` with `project_name` if specified, else `all_projects=True` (migrates legacy path format, with auto-rollback)
-   - Parse JSON results from both tools.
+ - `mcp__proj__proj_migrate_ids` (migrates T-prefix IDs, archive, decisions, w/ auto-rollback)
+ - `mcp__proj__proj_migrate_dirs` w/ `project_name` if specified, else `all_projects=True` (migrates legacy path fmt, w/ auto-rollback)
+ - Parse JSON results from both.
 
 **8.** Post-migration validation:
-   - For each migrated project: call `mcp__proj__proj_list_full` to reload, verify IDs are numeric
-   - Check that no errors were reported in either tool's results
-   - Display validation results (pass/fail per project)
+ - Each migrated project: `mcp__proj__proj_list_full` to reload, verify IDs numeric
+ - Check no errors in either tool's results
+ - Show validation results (pass/fail per project)
 
-**9.** Display results:
+**9.** Results:
    ```
    ### Migration Results
 
@@ -71,25 +74,25 @@ If no arguments and no flags: default to migrating all projects.
    All backups saved with timestamp <YYYYMMDD-HHMMSS>. Use `/proj:migrate --restore <timestamp>` to rollback.
    ```
 
-**10.** Call `mcp__proj__tracking_git_flush` with `commit_message="Migrate: legacy to current format"`.
+**10.** `mcp__proj__tracking_git_flush(commit_message="Migrate: legacy to current format")`.
 
 Suggested next: `1. /proj:status` -- see updated project overview
 
 ## Prerequisites
 
-- Config must be loaded (`proj.yaml` must exist).
-- At least one project must exist in the index.
+- Config loaded (`proj.yaml` exists)
+- ≥1 project in index
 
-## Error Handling
+## Err Handling
 
-- **No config**: "No config loaded. Run `/proj:init` to initialize."
-- **No projects**: "No projects in index. Nothing to migrate."
-- **Restore timestamp not found**: "No backup found for timestamp `<ts>`. Run `find <tracking_dir> -name '*.bak-*'` to list available backups."
-- **Migration tool error**: displays error from tool result, notes auto-rollback occurred.
-- **Validation failure**: "Pre-migration validation failed for <N> project(s). Run `/proj:migrate --force` to skip validation."
+- No config → "No config loaded. Run `/proj:init` to init."
+- No projects → "No projects in index. Nothing to migrate."
+- Restore ts not found → "No backup found for timestamp `<ts>`. Run `find <tracking_dir> -name '*.bak-*'` to list available backups."
+- Migration tool err → show err from tool result, note auto-rollback occurred
+- Validation fail → "Pre-migration validation failed for <N> project(s). Run `/proj:migrate --force` to skip validation."
 
 ## Output
 
-Migration results: detection table, per-tool results (ID counts, dir counts), validation pass/fail, backup timestamp for rollback. If dry-run: preview only.
+Migration results: detection table, per-tool results (ID/dir counts), validation pass/fail, backup ts for rollback. Dry-run → preview only.
 
 Suggested next: `1. /proj:status` -- see updated project overview

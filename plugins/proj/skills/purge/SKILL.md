@@ -4,41 +4,44 @@ description: Purge archived projects older than the configured purge_after_days 
 allowed-tools: mcp__proj__proj_purge_archive, mcp__proj__proj_session_context, mcp__proj__tracking_git_flush
 ---
 
-Purge archived projects that have exceeded the retention period.
 
-**1.** Call `mcp__proj__proj_session_context` to get config and integration settings. Check if `archive.purge_after_days` is configured.
-   If not configured, stop with: "Purge not configured. Run `/proj:init-plugin` to set `archive.purge_after_days`."
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-**2.** Call `mcp__proj__proj_purge_archive` (without confirm) to get candidates.
+Purge archived projects past retention period.
 
-**3.** If no candidates: display "No projects eligible for purge." and stop.
+**1.** `mcp__proj__proj_session_context` → get config. Check `archive.purge_after_days`.
+ Not configured → stop: "Purge not configured. Run `/proj:init-plugin` to set `archive.purge_after_days`."
 
-**4.** Display candidates as a table:
+**2.** `mcp__proj__proj_purge_archive` (no confirm) → get candidates.
+
+**3.** No candidates → "No projects eligible for purge." Stop.
+
+**4.** Show candidates table:
    ```
    | Project | Archive Date | Days Since Archived |
    |---------|-------------|-------------------|
    | <name>  | <date>      | <days>            |
    ```
 
-**5.** Ask: "Purge these projects? This cannot be undone. [yes/no]"
+**5.** Ask: "Purge these projects? Cannot be undone. [yes/no]"
 
-**6.** If yes: call `mcp__proj__proj_purge_archive` with `confirm=true`.
+**6.** Yes → `mcp__proj__proj_purge_archive` w/ `confirm=true`.
 
-**7.** Display the result.
+**7.** Show result.
 
-**8.** Git tracking flush: Call `mcp__proj__tracking_git_flush` with `commit_message="Purge: archived projects"`.
+**8.** `mcp__proj__tracking_git_flush` w/ `commit_message="Purge: archived projects"`.
 
 ## Prerequisites
 
-- `archive.purge_after_days` must be configured in proj config.
+- `archive.purge_after_days` configured in proj config.
 
-## Error Handling
+## Err Handling
 
-- **Purge not configured**: displays "Purge not configured. Run `/proj:init-plugin` to set `archive.purge_after_days`." and stops.
-- **No candidates**: displays `No projects eligible for purge.` and stops.
-- **User declines**: stops without purging.
-- **Purge tool error**: displays error from `proj_purge_archive` and stops.
+- Not configured → show msg, stop.
+- No candidates → show msg, stop.
+- User declines → stop.
+- Purge tool err → show err, stop.
 
 ## Output
 
-Candidates table (Project, Archive Date, Days Since Archived). After confirmation: purge result. Git tracking flush confirmation.
+Candidates table (Project, Archive Date, Days Since Archived). After confirm: purge result + git flush confirmation.

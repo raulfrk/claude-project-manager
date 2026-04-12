@@ -7,80 +7,78 @@ context: fork
 agent: general-purpose
 ---
 
-Generate hook network visualization: $ARGUMENTS
 
-**1.** Parse arguments
+> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
+
+Gen hook network visualization: $ARGUMENTS
+
+**1.** Parse args
 
 Extract `--output <path>` from $ARGUMENTS. Default: `/tmp/hooks-map.html`.
 
 **2.** Load hook data
 
-Call `mcp__plugin_router_router__router_list_tool` (no arguments) to get all registered hooks. Each hook has: `id`, `trigger_tool`, `target_tool`, `server`, `blocking`, `verification`, `condition`, `condition_status` (one of: `always`, `active`, `inactive`, `runtime`), `param_mapping`.
+`mcp__plugin_router_router__router_list_tool` (no args) → all registered hooks. Each hook: `id`, `trigger_tool`, `target_tool`, `server`, `blocking`, `verification`, `condition`, `condition_status` (`always`/`active`/`inactive`/`runtime`), `param_mapping`.
 
-`condition_status` is pre-computed by the hooks server — do NOT recompute it. Use the value directly for color coding.
+`condition_status` pre-computed by hooks server — use directly for color coding, never recompute.
 
-**3.** Read condition context
+**3.** Read condition ctx
 
-Read `~/.claude/proj.yaml` to determine which integrations are enabled. This context is already reflected in `condition_status` from step 2, but include the config for the detail panel display.
+Read `~/.claude/proj.yaml` for enabled integrations. Already reflected in `condition_status` from step 2; include config for detail panel display.
 
-**4.** Generate HTML
+**4.** Gen HTML
 
-Produce a self-contained HTML file using vis.js Network from CDN (`https://unpkg.com/vis-network/standalone/umd/vis-network.min.js`).
+Self-contained HTML via vis.js Network from CDN (`https://unpkg.com/vis-network/standalone/umd/vis-network.min.js`).
 
 **Graph structure:**
 
-**Nodes** — one node per unique tool name appearing across all hooks (as trigger or target):
+**Nodes** — one per unique tool name across all hooks (trigger or target):
 
 | Role | Shape | Background | Text |
 |------|-------|-----------|------|
 | Trigger only | `box` | `#3498db` (blue) | white |
 | Target only | `ellipse` | `#27ae60` (green) | white |
-| Both trigger and target | `box` | `#8e44ad` (purple) | white |
+| Both | `box` | `#8e44ad` (purple) | white |
 
-- Node label: tool name with `mcp__` prefix stripped for readability
-- Node size: proportional to degree (number of hooks where the tool appears as trigger or target)
+- Label: tool name w/ `mcp__` prefix stripped
+- Size: proportional to degree (hooks where tool appears)
 
-**Edges** — one edge per hook, directed from `trigger_tool` to `target_tool`:
+**Edges** — one per hook, directed trigger → target:
 
-| `condition_status` | Edge color | Meaning |
+| `condition_status` | Color | Meaning |
 |-------------------|------------|---------|
 | `always` | `#aaaaaa` (gray) | No condition — always fires |
 | `active` | `#2ecc71` (green) | Condition currently true |
 | `inactive` | `#e74c3c` (red) | Condition currently false |
-| `runtime` | `#f39c12` (amber) | Has runtime-injected terms (`project.*`/`todo.*`), can't evaluate statically |
+| `runtime` | `#f39c12` (amber) | Runtime-injected terms (`project.*`/`todo.*`), can't evaluate statically |
 
-- Edge label: hook `id` (shown on hover; shown inline if graph is sparse, i.e. fewer than 15 edges)
-- Edge style: `blocking: true` → solid line; `blocking: false` → dashed line
+- Label: hook `id` (hover; inline if <15 edges)
+- Style: `blocking: true` → solid; `blocking: false` → dashed
 - Arrow on target end
-- Multiple hooks between the same pair produce separate parallel edges (vis.js `smooth.type: 'curvedCW'` with incrementing `roundness`)
+- Multiple hooks between same pair → separate parallel edges (`smooth.type: 'curvedCW'` w/ incrementing `roundness`)
 
-**Verification hooks**: hooks with `verification: true` get a `#9b59b6` (purple) edge color regardless of `condition_status`.
+**Verification hooks**: `verification: true` → `#9b59b6` (purple) edge color despite `condition_status`.
 
-**Node color override** — a node's background can be overridden based on the highest-severity `condition_status` among all hooks touching it. Priority order (highest wins): `inactive` (red `#e74c3c`) > `runtime` (amber `#f39c12`) > verification (purple `#9b59b6`) > `active` (green `#2ecc71`) > `always` (gray `#aaaaaa`). Apply this override as a colored border (3px) on the node, keeping the role-based fill from the table above.
+**Node border override** — colored border (3px) based on highest-severity `condition_status` among all hooks touching node. Priority: `inactive` (red `#e74c3c`) > `runtime` (amber `#f39c12`) > verification (purple `#9b59b6`) > `active` (green `#2ecc71`) > `always` (gray `#aaaaaa`). Role-based fill preserved.
 
 **Detail panel:**
-- Clicking an edge shows a sidebar panel with: Hook ID, condition string, condition_status, blocking flag, verification flag, param_mapping (formatted as YAML), server.
+Click edge → sidebar: Hook ID, condition string, condition_status, blocking, verification, param_mapping (fmt JSON), server.
 
 **Cycle detection:**
-- After building the node/edge data, run a DFS on the directed graph to detect cycles.
-- If any cycle exists, show a fixed yellow banner at the top of the page: `⚠ Cycle detected in hook graph` (no need to trace the exact cycle path).
+DFS on directed graph after building node/edge data. Cycle found → fixed yellow banner: `⚠ Cycle detected in hook graph` (no exact path needed).
 
 **Legend:**
-- Small legend box in the bottom-right corner showing:
-  - Node shapes/colors (trigger, target, dual-role)
-  - Edge colors (always, active, inactive, runtime, verification)
-  - Edge styles (solid = blocking, dashed = non-blocking)
+Bottom-right box: node shapes/colors (trigger, target, dual-role); edge colors (always, active, inactive, runtime, verification); edge styles (solid=blocking, dashed=non-blocking).
 
 **Footer:**
-- `Generated: <ISO datetime>` timestamp
+`Generated: <ISO datetime>`
 
 **Defaults:**
-- Pan, zoom, drag enabled (vis.js defaults)
-- Title: "Hook Network -- claude-project-manager"
+Pan/zoom/drag enabled (vis.js defaults). Title: "Hook Network -- claude-project-manager"
 
 ## HTML Template
 
-The generated HTML file must follow this exact structure. All CSS and JS are inline or from CDN — no external file dependencies.
+Exact structure below. All CSS/JS inline or CDN — no external file deps.
 
 ```html
 <!DOCTYPE html>
@@ -343,9 +341,9 @@ The generated HTML file must follow this exact structure. All CSS and JS are inl
 </html>
 ```
 
-### Data format
+### Data fmt
 
-The `{{HOOKS_JSON}}` placeholder is replaced at generation time with the JSON-serialized array from `router_list_tool`. Each element has this shape:
+`{{HOOKS_JSON}}` replaced w/ JSON-serialized array from `router_list_tool`. Element shape:
 
 ```json
 {
@@ -362,21 +360,21 @@ The `{{HOOKS_JSON}}` placeholder is replaced at generation time with the JSON-se
 }
 ```
 
-The `{{ISO_DATETIME}}` placeholder is replaced with the current ISO 8601 datetime string (e.g. `2026-04-02T14:30:00Z`).
+`{{ISO_DATETIME}}` replaced w/ cur ISO 8601 datetime (e.g. `2026-04-02T14:30:00Z`).
 
-### Generation notes
+### Gen notes
 
-- Embed the hooks array directly as `const hooksData = [...]` — do NOT use `JSON.parse()` on a string
-- The `hookData` property on each vis.js edge object stores the original hook for sidebar display
-- Parallel edges between the same node pair use incrementing `roundness` values on `smooth.type: 'curvedCW'`
-- The sidebar param_mapping is displayed as formatted JSON (not YAML, despite the spec note — JSON is native to the browser)
-- The cycle detection DFS runs on the directed adjacency list before network initialization
+- Embed hooks array directly as `const hooksData = [...]` — no `JSON.parse()` on string
+- `hookData` property on each vis.js edge stores orig hook for sidebar
+- Parallel edges between same pair → incrementing `roundness` on `smooth.type: 'curvedCW'`
+- Sidebar param_mapping displayed as fmt JSON (not YAML — JSON native to browser)
+- Cycle detection DFS runs on directed adjacency list before network init
 
 **5.** Write file
 
-Write the generated HTML to the output path. Use Bash to write the file.
+Write gen HTML to output path via Bash.
 
 **6.** Print result
 
-Output: `Done: Hook network visualization written to <path>`
-Open with: `open <path>` (macOS) or `xdg-open <path>` (Linux)
+`Done: Hook network visualization written to <path>`
+Open: `open <path>` (macOS) or `xdg-open <path>` (Linux)
