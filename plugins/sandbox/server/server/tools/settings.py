@@ -263,6 +263,7 @@ def sandbox_batch_setup(
 
     settings = storage.load()
     paths_added = 0
+    edit_added = 0
     mcp_added = 0
     domains_added = 0
     skills_added = 0
@@ -275,6 +276,7 @@ def sandbox_batch_setup(
         for entry in allow_entries_for_path(abs_path):
             if entry not in settings.permissions.allow:
                 settings.permissions.allow.append(entry)
+                edit_added += 1
 
     for entry in mcp_entries:
         if entry not in settings.permissions.allow:
@@ -291,7 +293,7 @@ def sandbox_batch_setup(
             settings.permissions.allow.append(entry)
             skills_added += 1
 
-    total = paths_added + mcp_added + domains_added + skills_added
+    total = paths_added + edit_added + mcp_added + domains_added + skills_added
     if total:
         storage.save(settings)
 
@@ -299,6 +301,7 @@ def sandbox_batch_setup(
         result=f"Batch setup: {total} added",
         settings_path=str(settings.path),
         paths_added=paths_added,
+        edit_added=edit_added,
         mcp_added=mcp_added,
         domains_added=domains_added,
         skills_added=skills_added,

@@ -183,6 +183,61 @@ class TestBatchOps:
         assert "Skill(proj:*)" in data["permissions"]["allow"]
         assert "Skill(worktree:*)" in data["permissions"]["allow"]
 
+    def test_batch_setup_writes_edit_entries(self, tmp_path: Path) -> None:
+        """AC-1: Edit entries ARE written to settings by batch_setup."""
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        sandbox_batch_setup(paths=["/tmp/p1"])
+        data = read_settings(tmp_path)
+        assert "Edit(//tmp/p1/**)" in data["permissions"]["allow"]
+
+    def test_batch_setup_counts_edit_entries(self, tmp_path: Path) -> None:
+        """AC-2: Summary includes edit_added count."""
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        result = json.loads(sandbox_batch_setup(paths=["/tmp/p1"]))
+        assert result["edit_added"] == 1
+
+    def test_batch_setup_edit_idempotent(self, tmp_path: Path) -> None:
+        """AC-3: Pre-existing Edit entries are not double-counted."""
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": ["Edit(//tmp/p1/**)"]},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        result = json.loads(sandbox_batch_setup(paths=["/tmp/p1"]))
+        assert result["edit_added"] == 0
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"].count("Edit(//tmp/p1/**)") == 1
+
+    def test_batch_setup_multiple_paths_edit_counts(self, tmp_path: Path) -> None:
+        """AC-4: Multiple paths produce correct Edit entry counts."""
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        result = json.loads(sandbox_batch_setup(paths=["/tmp/p1", "/tmp/p2"]))
+        assert result["edit_added"] == 2
+        assert result["paths_added"] == 2
+        data = read_settings(tmp_path)
+        assert "Edit(//tmp/p1/**)" in data["permissions"]["allow"]
+        assert "Edit(//tmp/p2/**)" in data["permissions"]["allow"]
+
     def test_batch_revoke(self, tmp_path: Path) -> None:
         write_settings(
             tmp_path,
