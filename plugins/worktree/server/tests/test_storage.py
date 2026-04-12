@@ -107,3 +107,70 @@ def test_from_dict_filters_non_dict_entries() -> None:
     )
     assert len(config.base_repos) == 1
     assert config.base_repos[0].label == "ok"
+
+
+# -- _atomic_write cleanup tests --
+
+
+class TestAtomicWriteCleanup:
+    """Tests for _atomic_write temp file cleanup on success and failure."""
+
+    def test_no_orphaned_tmp_on_success(self, config_path: Path) -> None:
+        """After a successful save, no .tmp files remain."""
+        storage.save(WorktreeConfig())
+        assert config_path.exists()
+        assert list(config_path.parent.glob("*.tmp")) == []
+
+    def test_write_failure_cleans_tmp(self, config_path: Path) -> None:
+        """OSError during write removes temp file and re-raises."""
+        # Pre-populate so we can verify original is untouched
+        config_path.write_text("original content")
+
+        import unittest.mock as mock
+
+        def failing_fdopen(fd: int, mode: str) -> object:
+            # Close the fd so it doesn't leak, then raise
+            import os as _os
+
+            _os.close(fd)
+            raise OSError("disk full")
+
+        with (
+            mock.patch.object(storage.os, "fdopen", side_effect=failing_fdopen),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            storage.save(WorktreeConfig())
+
+        # No orphaned temp files
+        assert list(config_path.parent.glob("*.tmp")) == []
+        # Original file untouched
+        assert config_path.read_text() == "original content"
+
+    def test_replace_failure_cleans_tmp(self, config_path: Path) -> None:
+        """OSError during Path.replace removes temp file and re-raises."""
+        import unittest.mock as mock
+
+        with (
+            mock.patch.object(Path, "replace", side_effect=OSError("permission denied")),
+            pytest.raises(OSError, match="permission denied"),
+        ):
+            storage.save(WorktreeConfig())
+
+        assert list(config_path.parent.glob("*.tmp")) == []
+
+    def test_cleanup_failure_still_raises_original(self, config_path: Path) -> None:
+        """If both write and cleanup fail, the original error propagates."""
+        import unittest.mock as mock
+
+        def failing_fdopen(fd: int, mode: str) -> object:
+            import os as _os
+
+            _os.close(fd)
+            raise OSError("write error")
+
+        with (
+            mock.patch.object(storage.os, "fdopen", side_effect=failing_fdopen),
+            mock.patch.object(Path, "unlink", side_effect=OSError("unlink failed")),
+            pytest.raises(OSError, match="write error"),
+        ):
+            storage.save(WorktreeConfig())
