@@ -1125,3 +1125,93 @@ class TestMergeWorktreeBareSubprocess:
         data = json.loads(result)
         assert data["result"] == "error"
         assert "git not found" in data["message"]
+
+
+    # --- Tests documenting missing post-commit cleanliness verification ---
+
+    def test_no_post_commit_status_check(self, tmp_path: Path) -> None:
+        """status_porcelain is only called once (pre-commit), never post-commit.
+
+        GAP: After a successful commit, auto_commit should call
+        status_porcelain a second time to verify the tree is actually clean.
+        Currently it does not, so dirty post-commit state goes undetected.
+        """
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        # side_effect: first call returns dirty (triggers add/commit path),
+        # second value would show leftover changes -- but it's never consumed.
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch(
+                "server.tools.worktrees.git.status_porcelain",
+                side_effect=["M file.py\n", "M leftover.py\n"],
+            ) as mock_status,
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="abc1234"),
+        ):
+            result = auto_commit(str(wt), "test commit")
+        data = json.loads(result)
+        # Current behavior: reports success even though tree would still be dirty
+        assert data["result"] == "auto-committed"
+        assert data["committed"] is True
+        # Only one status_porcelain call -- no post-commit verification
+        assert mock_status.call_count == 1
+
+    def test_race_condition_file_created_during_commit(self, tmp_path: Path) -> None:
+        """Files created between add and commit are invisible to auto_commit.
+
+        GAP: If a file appears after git add -A but before/after git commit,
+        auto_commit returns success with no indication of remaining dirty state.
+        A post-commit status_porcelain check would catch this.
+        """
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch(
+                "server.tools.worktrees.git.status_porcelain",
+                side_effect=["M file.py\n", "?? race_file.py\n"],
+            ) as mock_status,
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="def5678"),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        # Current behavior: success reported, race_file.py is silently missed
+        assert data["result"] == "auto-committed"
+        assert data["committed"] is True
+        assert data["files_committed"] == 1
+        # No second call to status_porcelain
+        assert mock_status.call_count == 1
+        # The response has no field indicating remaining uncommitted changes
+        assert "remaining_files" not in data
+
+    def test_partial_add_leaves_unstaged_changes(self, tmp_path: Path) -> None:
+        """add_all succeeds but some changes remain unstaged (e.g. gitignored).
+
+        GAP: If git add -A doesn't stage everything (gitignored files, submodule
+        dirty state), commit succeeds for the staged subset but auto_commit
+        reports the original file_count as files_committed, which may overcount.
+        A post-commit status check would reveal the discrepancy.
+        """
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        # Pre-commit status shows 3 files, but one is gitignored so add_all
+        # only stages 2.  commit succeeds for those 2.
+        status_output = "M tracked1.py\nM tracked2.py\n?? ignored.log\n"
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch(
+                "server.tools.worktrees.git.status_porcelain",
+                side_effect=[status_output, "?? ignored.log\n"],
+            ) as mock_status,
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="ccc3333"),
+        ):
+            result = auto_commit(str(wt))
+        data = json.loads(result)
+        # Current behavior: reports all 3 files as committed even though
+        # ignored.log was never staged.  No post-commit check to catch this.
+        assert data["result"] == "auto-committed"
+        assert data["files_committed"] == 3  # overcounts -- should be 2
+        assert mock_status.call_count == 1
