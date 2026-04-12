@@ -1210,7 +1210,6 @@ class TestMergeWorktreeBareSubprocess:
         assert data["result"] == "error"
         assert "git not found" in data["message"]
 
-
     # --- Tests documenting missing post-commit cleanliness verification ---
 
     def test_no_post_commit_status_check(self, tmp_path: Path) -> None:
