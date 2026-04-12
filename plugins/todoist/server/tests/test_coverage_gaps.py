@@ -476,6 +476,36 @@ class TestTodoistInit:
         assert "error" in result
         assert "500" in result["error"]
 
+    def test_token_not_exposed_in_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raw API token must not appear in error response; masked form present."""
+
+        def mock_get(*args: Any, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(401, text="Unauthorized")
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+
+        tool = self._get_tool()
+        raw_token = "secret-api-token-1234"
+        result_str = tool.fn(api_token=raw_token)
+
+        assert raw_token not in result_str
+        result = json.loads(result_str)
+        assert result.get("token") == "***1234"
+
+    def test_non_json_response_returns_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-JSON success response returns error JSON instead of raising."""
+
+        def mock_get(*args: Any, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(200, content=b"not-json", headers={"content-type": "text/plain"})
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+
+        tool = self._get_tool()
+        result = json.loads(tool.fn(api_token="tok-test"))
+
+        assert "error" in result
+        assert result.get("status_code") == 200
+
 
 # -- TodoistTask.from_api: more edge cases -----------------------------------
 

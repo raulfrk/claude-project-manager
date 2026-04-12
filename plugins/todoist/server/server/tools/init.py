@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+def _mask_token(token: str) -> str:
+    """Return masked token for safe display in error messages."""
+    if len(token) <= 4:
+        return "***"
+    return f"***{token[-4:]}"
+
+
 def register(app: FastMCP) -> None:
     @app.tool(description="Initialize Todoist configuration: validate API token and save config.")
     def todoist_init(
@@ -32,7 +39,24 @@ def register(app: FastMCP) -> None:
         )
         if not resp.is_success:
             return json.dumps(
-                {"error": f"Credential validation failed: {resp.status_code} {resp.text}"}
+                {
+                    "error": f"Credential validation failed: {resp.status_code} {resp.text}",
+                    "token": _mask_token(api_token),
+                }
+            )
+
+        # Parse the response safely
+        try:
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError("unexpected response type")
+            project_count = len(data.get("results", []))
+        except (json.JSONDecodeError, ValueError):
+            return json.dumps(
+                {
+                    "error": "todoist_init succeeded but response was not valid JSON",
+                    "status_code": resp.status_code,
+                }
             )
 
         # Build YAML config
@@ -55,7 +79,7 @@ def register(app: FastMCP) -> None:
         return json.dumps(
             {
                 "ok": True,
-                "project_count": len(resp.json().get("results", [])),
+                "project_count": project_count,
                 "config_path": str(config_path),
             }
         )
