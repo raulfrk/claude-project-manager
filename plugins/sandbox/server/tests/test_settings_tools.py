@@ -543,11 +543,44 @@ class TestValueErrorHandling:
         result = json.loads(sandbox_check(server="bad__name"))
         assert "error" in result
 
+    def test_sandbox_check_empty_server(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_check(server=""))
+        assert "error" in result
+
+    def test_sandbox_check_server_with_star(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_check(server="has*star"))
+        assert "error" in result
+
     def test_sandbox_check_invalid_skill(self, tmp_path: Path) -> None:
         write_settings(tmp_path, {"permissions": {"allow": []}})
         # skill prefix with '*' triggers ValueError in skill_allow_entry
         result = json.loads(sandbox_check(skill="bad*skill"))
         assert "error" in result
+
+    def test_sandbox_check_empty_skill(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_check(skill=""))
+        assert "error" in result
+
+    def test_sandbox_check_skill_with_paren(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_check(skill="has(paren)"))
+        assert "error" in result
+
+    def test_sandbox_check_invalid_server_short_circuits_path(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "sandbox": {"filesystem": {"allowWrite": ["/tmp/x"]}},
+                "permissions": {"allow": []},
+            },
+        )
+        # Invalid server should short-circuit before path result is returned
+        result = json.loads(sandbox_check(path="/tmp/x", server="bad__name"))
+        assert "error" in result
+        assert "results" not in result
 
     def test_sandbox_batch_setup_invalid_mcp_server(self, tmp_path: Path) -> None:
         write_settings(
@@ -603,3 +636,24 @@ class TestValueErrorHandling:
         assert "error" in result
         data = read_settings(tmp_path)
         assert data["permissions"]["allow"] == []
+
+
+class TestCorruptSettings:
+    """Tests that sandbox_check handles corrupt or missing settings.json gracefully."""
+
+    def test_sandbox_check_corrupt_json(self, tmp_path: Path) -> None:
+        # Write invalid JSON to the settings file
+        settings_path = tmp_path / "settings.json"
+        settings_path.write_text("{{not valid json!!")
+        result = json.loads(sandbox_check(path="/tmp/x"))
+        # storage.load() returns defaults on corrupt file, so check returns valid result
+        assert "results" in result
+        assert result["results"][0]["type"] == "path"
+        assert result["results"][0]["status"] == "missing"
+
+    def test_sandbox_check_missing_settings(self, tmp_path: Path) -> None:
+        # Do NOT write any settings file — autouse fixture points to nonexistent tmp file
+        result = json.loads(sandbox_check(path="/tmp/x"))
+        assert "results" in result
+        assert result["results"][0]["type"] == "path"
+        assert result["results"][0]["status"] == "missing"
