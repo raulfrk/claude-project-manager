@@ -91,12 +91,16 @@ def sandbox_add_mcp_allow(servers: str | list[str]) -> str:
     if isinstance(servers, str):
         servers = [servers]
 
+    try:
+        entries = [mcp_allow_entry(name) for name in servers]
+    except ValueError as exc:
+        return _json_result(error=str(exc))
+
     settings = storage.load()
     added = 0
     skipped = 0
 
-    for name in servers:
-        entry = mcp_allow_entry(name)
+    for entry in entries:
         if entry not in settings.permissions.allow:
             settings.permissions.allow.append(entry)
             added += 1
@@ -119,11 +123,15 @@ def sandbox_remove_mcp_allow(servers: str | list[str]) -> str:
     if isinstance(servers, str):
         servers = [servers]
 
+    try:
+        entries = [mcp_allow_entry(name) for name in servers]
+    except ValueError as exc:
+        return _json_result(error=str(exc))
+
     settings = storage.load()
     removed = 0
 
-    for name in servers:
-        entry = mcp_allow_entry(name)
+    for entry in entries:
         if entry in settings.permissions.allow:
             settings.permissions.allow.remove(entry)
             removed += 1
@@ -247,6 +255,13 @@ def sandbox_batch_setup(
     skill_prefixes: list[str] | None = None,
 ) -> str:
     """Add write paths, MCP allow rules, domains, and Skill rules in one atomic write."""
+    # Validate all entries before any mutation to prevent partial writes
+    try:
+        mcp_entries = [mcp_allow_entry(name) for name in mcp_servers or []]
+        skill_entries = [skill_allow_entry(prefix) for prefix in skill_prefixes or []]
+    except ValueError as exc:
+        return _json_result(error=str(exc))
+
     settings = storage.load()
     paths_added = 0
     mcp_added = 0
@@ -262,8 +277,7 @@ def sandbox_batch_setup(
             if entry not in settings.permissions.allow:
                 settings.permissions.allow.append(entry)
 
-    for name in mcp_servers or []:
-        entry = mcp_allow_entry(name)
+    for entry in mcp_entries:
         if entry not in settings.permissions.allow:
             settings.permissions.allow.append(entry)
             mcp_added += 1
@@ -273,8 +287,7 @@ def sandbox_batch_setup(
             settings.sandbox.network.allowed_domains.append(d)
             domains_added += 1
 
-    for prefix in skill_prefixes or []:
-        entry = skill_allow_entry(prefix)
+    for entry in skill_entries:
         if entry not in settings.permissions.allow:
             settings.permissions.allow.append(entry)
             skills_added += 1
@@ -301,6 +314,13 @@ def sandbox_batch_revoke(
     skill_prefixes: list[str] | None = None,
 ) -> str:
     """Remove write paths, MCP allow rules, domains, and Skill rules in one atomic write."""
+    # Validate all entries before any mutation to prevent partial writes
+    try:
+        mcp_entries = [mcp_allow_entry(name) for name in mcp_servers or []]
+        skill_entries = [skill_allow_entry(prefix) for prefix in skill_prefixes or []]
+    except ValueError as exc:
+        return _json_result(error=str(exc))
+
     settings = storage.load()
     paths_removed = 0
     mcp_removed = 0
@@ -316,8 +336,7 @@ def sandbox_batch_revoke(
             if entry in settings.permissions.allow:
                 settings.permissions.allow.remove(entry)
 
-    for name in mcp_servers or []:
-        entry = mcp_allow_entry(name)
+    for entry in mcp_entries:
         if entry in settings.permissions.allow:
             settings.permissions.allow.remove(entry)
             mcp_removed += 1
@@ -327,8 +346,7 @@ def sandbox_batch_revoke(
             settings.sandbox.network.allowed_domains.remove(d)
             domains_removed += 1
 
-    for prefix in skill_prefixes or []:
-        entry = skill_allow_entry(prefix)
+    for entry in skill_entries:
         if entry in settings.permissions.allow:
             settings.permissions.allow.remove(entry)
             skills_removed += 1
@@ -419,7 +437,10 @@ def sandbox_check(
         )
 
     if server:
-        entry = mcp_allow_entry(server)
+        try:
+            entry = mcp_allow_entry(server)
+        except ValueError as exc:
+            return _json_result(error=str(exc))
         present = entry in settings.permissions.allow
         results.append(
             {"type": "server", "value": server, "status": "present" if present else "missing"}
@@ -432,7 +453,10 @@ def sandbox_check(
         )
 
     if skill:
-        entry = skill_allow_entry(skill)
+        try:
+            entry = skill_allow_entry(skill)
+        except ValueError as exc:
+            return _json_result(error=str(exc))
         present = entry in settings.permissions.allow
         results.append(
             {"type": "skill", "value": skill, "status": "present" if present else "missing"}
@@ -449,6 +473,13 @@ def sandbox_reconcile(
 ) -> str:
     """Sync expected vs actual MCP servers, paths, and skill
     prefixes. Removes stale, adds missing."""
+    # Validate all server names before loading settings to prevent partial mutations
+    try:
+        expected_entries = [mcp_allow_entry(name) for name in expected_servers]
+        skill_entries = [skill_allow_entry(prefix) for prefix in expected_skill_prefixes or []]
+    except ValueError as exc:
+        return _json_result(error=str(exc))
+
     settings = storage.load()
     added = 0
     removed = 0
@@ -465,14 +496,16 @@ def sandbox_reconcile(
         stale = [s for s in current_servers if s not in expected_servers]
 
     for name in stale:
-        entry = mcp_allow_entry(name)
-        if entry in settings.permissions.allow:
-            settings.permissions.allow.remove(entry)
+        try:
+            stale_entry = mcp_allow_entry(name)
+        except ValueError:
+            continue
+        if stale_entry in settings.permissions.allow:
+            settings.permissions.allow.remove(stale_entry)
             removed += 1
 
     # Add missing servers
-    for name in expected_servers:
-        entry = mcp_allow_entry(name)
+    for entry in expected_entries:
         if entry not in settings.permissions.allow:
             settings.permissions.allow.append(entry)
             added += 1
@@ -490,8 +523,7 @@ def sandbox_reconcile(
 
     # Reconcile skill prefixes if provided
     if expected_skill_prefixes is not None:
-        for prefix in expected_skill_prefixes:
-            entry = skill_allow_entry(prefix)
+        for entry in skill_entries:
             if entry not in settings.permissions.allow:
                 settings.permissions.allow.append(entry)
                 added += 1

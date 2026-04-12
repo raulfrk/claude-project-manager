@@ -365,3 +365,96 @@ class TestSetDeny:
         assert result["count"] == 2
         data = read_settings(tmp_path)
         assert "Bash(git push *)" in data["permissions"]["deny"]
+
+
+class TestValueErrorHandling:
+    """Tests that invalid mcp_allow_entry / skill_allow_entry inputs return error JSON."""
+
+    def test_sandbox_add_mcp_allow_invalid_entry(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        # server_name with '__' triggers ValueError in mcp_allow_entry
+        result = json.loads(sandbox_add_mcp_allow("bad__name"))
+        assert "error" in result
+        # Settings must not have been modified
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"] == []
+
+    def test_sandbox_add_mcp_allow_empty_name(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_add_mcp_allow(""))
+        assert "error" in result
+
+    def test_sandbox_remove_mcp_allow_invalid_entry(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": ["mcp__proj__*"]}})
+        result = json.loads(sandbox_remove_mcp_allow("bad__name"))
+        assert "error" in result
+        # Settings must not have been modified
+        data = read_settings(tmp_path)
+        assert "mcp__proj__*" in data["permissions"]["allow"]
+
+    def test_sandbox_check_invalid_entry(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        # server_name with '__' triggers ValueError (original line 422 bug)
+        result = json.loads(sandbox_check(server="bad__name"))
+        assert "error" in result
+
+    def test_sandbox_check_invalid_skill(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        # skill prefix with '*' triggers ValueError in skill_allow_entry
+        result = json.loads(sandbox_check(skill="bad*skill"))
+        assert "error" in result
+
+    def test_sandbox_batch_setup_invalid_mcp_server(self, tmp_path: Path) -> None:
+        write_settings(
+            tmp_path,
+            {
+                "permissions": {"allow": []},
+                "sandbox": {"filesystem": {"allowWrite": []}, "network": {"allowedDomains": []}},
+            },
+        )
+        result = json.loads(sandbox_batch_setup(mcp_servers=["bad__name"]))
+        assert "error" in result
+        # No partial write: settings unchanged
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"] == []
+
+    def test_sandbox_batch_setup_invalid_skill_prefix(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_batch_setup(skill_prefixes=["bad*prefix"]))
+        assert "error" in result
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"] == []
+
+    def test_sandbox_batch_revoke_invalid_mcp_server(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": ["mcp__good__*"]}})
+        result = json.loads(sandbox_batch_revoke(mcp_servers=["bad__name"]))
+        assert "error" in result
+        # No partial write: settings unchanged
+        data = read_settings(tmp_path)
+        assert "mcp__good__*" in data["permissions"]["allow"]
+
+    def test_sandbox_batch_revoke_invalid_skill_prefix(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": ["Skill(proj:*)"]}})
+        result = json.loads(sandbox_batch_revoke(skill_prefixes=["bad*prefix"]))
+        assert "error" in result
+        data = read_settings(tmp_path)
+        assert "Skill(proj:*)" in data["permissions"]["allow"]
+
+    def test_sandbox_reconcile_invalid_expected_server(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(sandbox_reconcile(expected_servers=["bad__name"]))
+        assert "error" in result
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"] == []
+
+    def test_sandbox_reconcile_invalid_skill_prefix(self, tmp_path: Path) -> None:
+        write_settings(tmp_path, {"permissions": {"allow": []}})
+        result = json.loads(
+            sandbox_reconcile(
+                expected_servers=[],
+                expected_skill_prefixes=["bad*prefix"],
+            )
+        )
+        assert "error" in result
+        data = read_settings(tmp_path)
+        assert data["permissions"]["allow"] == []
