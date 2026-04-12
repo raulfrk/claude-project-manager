@@ -39,3 +39,12 @@ class TestJiraSearchUsers:
 
         params = mock_jira_client.get.call_args[1]["params"]
         assert params["maxResults"] == 10
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, user_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = user_tools["jira_search_users"](query="alice")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

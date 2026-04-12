@@ -30,11 +30,14 @@ class TestJiraAddComment:
         )
         assert json.loads(result) == {"id": "100", "body": "Hello"}
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.post.side_effect = RuntimeError("Jira API error 403: forbidden")
 
-        with pytest.raises(RuntimeError, match="403"):
-            comment_tools["jira_add_comment"](issue_key="PROJ-1", body="Hello")
+        result = comment_tools["jira_add_comment"](issue_key="PROJ-1", body="Hello")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "403" in parsed["error"]
 
 
 class TestJiraUpdateComment:
@@ -50,13 +53,16 @@ class TestJiraUpdateComment:
         )
         assert json.loads(result) == {"id": "100", "body": "Updated"}
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.put.side_effect = RuntimeError("Jira API error 404: not found")
 
-        with pytest.raises(RuntimeError, match="404"):
-            comment_tools["jira_update_comment"](
-                issue_key="PROJ-1", comment_id="999", body="Updated"
-            )
+        result = comment_tools["jira_update_comment"](
+            issue_key="PROJ-1", comment_id="999", body="Updated"
+        )
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "404" in parsed["error"]
 
 
 class TestJiraDeleteComment:
@@ -74,8 +80,11 @@ class TestJiraDeleteComment:
             "comment_id": "100",
         }
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, comment_tools: dict) -> None:
         mock_jira_client.delete.side_effect = RuntimeError("Jira API error 404: not found")
 
-        with pytest.raises(RuntimeError, match="404"):
-            comment_tools["jira_delete_comment"](issue_key="PROJ-1", comment_id="999")
+        result = comment_tools["jira_delete_comment"](issue_key="PROJ-1", comment_id="999")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "404" in parsed["error"]

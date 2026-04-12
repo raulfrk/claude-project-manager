@@ -20,16 +20,22 @@ def register(app: FastMCP) -> None:
     def jira_get_sprints(board_id: str, state: str = "") -> str:
         client = get_client()
         params: dict[str, str] | None = {"state": state} if state else None
-        data = client.get(f"/rest/agile/1.0/board/{board_id}/sprint", params=params)
-        return json.dumps(data)
+        try:
+            data = client.get(f"/rest/agile/1.0/board/{board_id}/sprint", params=params)
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(description="Move issues to a sprint.")
     def jira_move_to_sprint(sprint_id: str, issue_keys: list[str]) -> str:
         client = get_client()
         issues: list[JsonValue] = list(issue_keys)
         body: dict[str, JsonValue] = {"issues": issues}
-        client.post(
-            f"/rest/agile/1.0/sprint/{sprint_id}/issue",
-            json_body=body,
-        )
-        return json.dumps({"ok": True, "sprint_id": sprint_id, "issues": issue_keys})
+        try:
+            client.post(
+                f"/rest/agile/1.0/sprint/{sprint_id}/issue",
+                json_body=body,
+            )
+            return json.dumps({"ok": True, "sprint_id": sprint_id, "issues": issue_keys})
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})

@@ -43,13 +43,16 @@ class TestJiraLinkIssues:
             "link_type": "Blocks",
         }
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
         mock_jira_client.post.side_effect = RuntimeError("Jira API error 404: issue not found")
 
-        with pytest.raises(RuntimeError, match="404"):
-            link_tools["jira_link_issues"](
-                inward_key="NOPE-1", outward_key="PROJ-2", link_type="Blocks"
-            )
+        result = link_tools["jira_link_issues"](
+            inward_key="NOPE-1", outward_key="PROJ-2", link_type="Blocks"
+        )
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "404" in parsed["error"]
 
 
 class TestJiraGetLinkTypes:
@@ -61,3 +64,12 @@ class TestJiraGetLinkTypes:
 
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issueLinkType")
         assert json.loads(result) == data
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, link_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = link_tools["jira_get_link_types"]()
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

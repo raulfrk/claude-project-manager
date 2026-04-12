@@ -51,11 +51,14 @@ class TestJiraSearch:
         assert kwargs["params"]["maxResults"] == 50
         assert kwargs["params"]["startAt"] == 0
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.side_effect = RuntimeError("Jira API error 500: server error")
 
-        with pytest.raises(RuntimeError, match="500"):
-            issue_tools["jira_search"](jql="project = PROJ")
+        result = issue_tools["jira_search"](jql="project = PROJ")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraGetIssue:
@@ -67,6 +70,15 @@ class TestJiraGetIssue:
 
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issue/PROJ-42")
         assert json.loads(result) == issue_data
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = issue_tools["jira_get_issue"](issue_key="PROJ-42")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraGetIssueComments:
@@ -80,6 +92,15 @@ class TestJiraGetIssueComments:
 
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issue/PROJ-42/comment")
         assert json.loads(result) == comments_data
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = issue_tools["jira_get_issue_comments"](issue_key="PROJ-42")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraGetEpicIssues:
@@ -103,6 +124,15 @@ class TestJiraGetEpicIssues:
 
         params = mock_jira_client.get.call_args[1]["params"]
         assert params["maxResults"] == 50
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraGetUserIssues:
@@ -178,7 +208,7 @@ class TestJiraGetUserIssues:
         jql = params["jql"]
         assert "project in" not in jql
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client._config = JiraConfig(
             personal_access_token="pat",
             base_url="https://jira.example.com",
@@ -187,8 +217,11 @@ class TestJiraGetUserIssues:
         )
         mock_jira_client.get.side_effect = RuntimeError("Jira API error 403: forbidden")
 
-        with pytest.raises(RuntimeError, match="403"):
-            issue_tools["jira_get_user_issues"](username="alice")
+        result = issue_tools["jira_get_user_issues"](username="alice")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "403" in parsed["error"]
 
 
 class TestJiraCreateIssue:
@@ -346,7 +379,7 @@ class TestJiraBulkCreateIssues:
         assert "error" in parsed
         assert "issueUpdates" in parsed["error"]
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.post.side_effect = RuntimeError("Jira API error 500: server error")
 
         payload = json.dumps(
@@ -363,8 +396,11 @@ class TestJiraBulkCreateIssues:
             }
         )
 
-        with pytest.raises(RuntimeError, match="500"):
-            issue_tools["jira_bulk_create_issues"](issues_json=payload)
+        result = issue_tools["jira_bulk_create_issues"](issues_json=payload)
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraBulkUpdateIssues:

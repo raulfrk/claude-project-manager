@@ -29,6 +29,15 @@ class TestJiraGetWatchers:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issue/PROJ-42/watchers")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = watcher_tools["jira_get_watchers"](issue_key="PROJ-42")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraAddWatcher:
     def test_adds_watcher(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
@@ -40,6 +49,15 @@ class TestJiraAddWatcher:
             "/rest/api/2/issue/PROJ-42/watchers", json_body="alice"
         )
         assert json.loads(result) == {"ok": True, "issue_key": "PROJ-42", "username": "alice"}
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error: 500")
+
+        result = watcher_tools["jira_add_watcher"](issue_key="PROJ-42", username="alice")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraRemoveWatcher:
@@ -53,8 +71,11 @@ class TestJiraRemoveWatcher:
         )
         assert json.loads(result) == {"deleted": True, "issue_key": "PROJ-42", "username": "alice"}
 
-    def test_api_error_propagates(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
+    def test_api_error_json(self, mock_jira_client: MagicMock, watcher_tools: dict) -> None:
         mock_jira_client.delete.side_effect = RuntimeError("Jira API error 403: forbidden")
 
-        with pytest.raises(RuntimeError, match="403"):
-            watcher_tools["jira_remove_watcher"](issue_key="PROJ-42", username="alice")
+        result = watcher_tools["jira_remove_watcher"](issue_key="PROJ-42", username="alice")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "403" in parsed["error"]

@@ -29,6 +29,15 @@ class TestJiraGetWorklogs:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issue/PROJ-42/worklog")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = worklog_tools["jira_get_worklogs"](issue_key="PROJ-42")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraAddWorklog:
     def test_adds_worklog_without_comment(
@@ -63,6 +72,15 @@ class TestJiraAddWorklog:
         )
         assert json.loads(result)["comment"] == "Code review"
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error: 500")
+
+        result = worklog_tools["jira_add_worklog"](issue_key="PROJ-42", time_spent="2h")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraDeleteWorklog:
     def test_deletes_worklog(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
@@ -72,3 +90,12 @@ class TestJiraDeleteWorklog:
 
         mock_jira_client.delete.assert_called_once_with("/rest/api/2/issue/PROJ-42/worklog/100")
         assert json.loads(result) == {"deleted": True, "issue_key": "PROJ-42", "worklog_id": "100"}
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, worklog_tools: dict) -> None:
+        mock_jira_client.delete.side_effect = RuntimeError("Jira API error: 500")
+
+        result = worklog_tools["jira_delete_worklog"](issue_key="PROJ-42", worklog_id="100")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

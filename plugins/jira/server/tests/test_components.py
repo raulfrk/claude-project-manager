@@ -29,6 +29,15 @@ class TestJiraGetComponents:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/project/PROJ/components")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, component_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = component_tools["jira_get_components"](project_key="PROJ")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraCreateComponent:
     def test_creates_component_without_description(
@@ -59,3 +68,12 @@ class TestJiraCreateComponent:
 
         call_body = mock_jira_client.post.call_args[1]["json_body"]
         assert call_body["description"] == "Auth module"
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, component_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error: 500")
+
+        result = component_tools["jira_create_component"](project_key="PROJ", name="API")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

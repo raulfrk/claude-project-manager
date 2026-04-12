@@ -15,8 +15,11 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Get available transitions for a Jira issue.")
     def jira_get_transitions(issue_key: str) -> str:
         client = get_client()
-        data = client.get(f"/rest/api/2/issue/{issue_key}/transitions")
-        return json.dumps(data)
+        try:
+            data = client.get(f"/rest/api/2/issue/{issue_key}/transitions")
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(
         description=(
@@ -31,8 +34,11 @@ def register(app: FastMCP) -> None:
         except json.JSONDecodeError as exc:
             return json.dumps({"error": f"Invalid fields JSON: {exc}"})
 
-        client.post(
-            f"/rest/api/2/issue/{issue_key}/transitions",
-            json_body={"transition": {"id": transition_id}, "fields": fields},
-        )
-        return json.dumps({"ok": True, "issue_key": issue_key, "transition_id": transition_id})
+        try:
+            client.post(
+                f"/rest/api/2/issue/{issue_key}/transitions",
+                json_body={"transition": {"id": transition_id}, "fields": fields},
+            )
+            return json.dumps({"ok": True, "issue_key": issue_key, "transition_id": transition_id})
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})

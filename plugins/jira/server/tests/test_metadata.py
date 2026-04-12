@@ -29,6 +29,15 @@ class TestJiraGetIssueTypes:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/issuetype")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = metadata_tools["jira_get_issue_types"]()
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraGetFields:
     def test_fetches_fields(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
@@ -39,6 +48,15 @@ class TestJiraGetFields:
 
         mock_jira_client.get.assert_called_once_with("/rest/api/2/field")
         assert json.loads(result) == data
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = metadata_tools["jira_get_fields"]()
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 class TestJiraGetPriorities:
@@ -51,6 +69,15 @@ class TestJiraGetPriorities:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/priority")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = metadata_tools["jira_get_priorities"]()
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraGetStatuses:
     def test_fetches_statuses(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
@@ -61,3 +88,12 @@ class TestJiraGetStatuses:
 
         mock_jira_client.get.assert_called_once_with("/rest/api/2/status")
         assert json.loads(result) == data
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, metadata_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = metadata_tools["jira_get_statuses"]()
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

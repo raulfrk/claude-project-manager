@@ -29,6 +29,15 @@ class TestJiraGetVersions:
         mock_jira_client.get.assert_called_once_with("/rest/api/2/project/PROJ/versions")
         assert json.loads(result) == data
 
+    def test_api_error_json(self, mock_jira_client: MagicMock, version_tools: dict) -> None:
+        mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
+
+        result = version_tools["jira_get_versions"](project_key="PROJ")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
+
 
 class TestJiraCreateVersion:
     def test_creates_version_with_required_fields(
@@ -56,3 +65,12 @@ class TestJiraCreateVersion:
         call_body = mock_jira_client.post.call_args[1]["json_body"]
         assert call_body["description"] == "Major release"
         assert call_body["releaseDate"] == "2026-06-01"
+
+    def test_api_error_json(self, mock_jira_client: MagicMock, version_tools: dict) -> None:
+        mock_jira_client.post.side_effect = RuntimeError("Jira API error: 500")
+
+        result = version_tools["jira_create_version"](project_key="PROJ", name="3.0")
+
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]

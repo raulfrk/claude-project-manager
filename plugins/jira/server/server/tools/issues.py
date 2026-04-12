@@ -19,42 +19,54 @@ def register(app: FastMCP) -> None:
     @app.tool(description="Search Jira issues using JQL.")
     def jira_search(jql: str, max_results: int = 50, start_at: int = 0) -> str:
         client = get_client()
-        data = client.get(
-            "/rest/api/2/search",
-            params={
-                "jql": jql,
-                "maxResults": max_results,
-                "startAt": start_at,
-                "fields": _ISSUE_FIELDS,
-            },
-        )
-        return json.dumps(data)
+        try:
+            data = client.get(
+                "/rest/api/2/search",
+                params={
+                    "jql": jql,
+                    "maxResults": max_results,
+                    "startAt": start_at,
+                    "fields": _ISSUE_FIELDS,
+                },
+            )
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(description="Get a single Jira issue by key.")
     def jira_get_issue(issue_key: str) -> str:
         client = get_client()
-        data = client.get(f"/rest/api/2/issue/{issue_key}")
-        return json.dumps(data)
+        try:
+            data = client.get(f"/rest/api/2/issue/{issue_key}")
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(description="Get comments on a Jira issue.")
     def jira_get_issue_comments(issue_key: str) -> str:
         client = get_client()
-        data = client.get(f"/rest/api/2/issue/{issue_key}/comment")
-        return json.dumps(data)
+        try:
+            data = client.get(f"/rest/api/2/issue/{issue_key}/comment")
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(description="Get all issues under a Jira epic.")
     def jira_get_epic_issues(epic_key: str, max_results: int = 50) -> str:
         client = get_client()
         jql = f"parent = {epic_key} ORDER BY priority DESC"
-        data = client.get(
-            "/rest/api/2/search",
-            params={
-                "jql": jql,
-                "maxResults": max_results,
-                "fields": _ISSUE_FIELDS,
-            },
-        )
-        return json.dumps(data)
+        try:
+            data = client.get(
+                "/rest/api/2/search",
+                params={
+                    "jql": jql,
+                    "maxResults": max_results,
+                    "fields": _ISSUE_FIELDS,
+                },
+            )
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(
         description=(
@@ -85,15 +97,18 @@ def register(app: FastMCP) -> None:
             jql_parts.append(f"project in ({joined})")
 
         jql = " AND ".join(jql_parts) + " ORDER BY priority DESC"
-        data = client.get(
-            "/rest/api/2/search",
-            params={
-                "jql": jql,
-                "maxResults": max_results,
-                "fields": _ISSUE_FIELDS,
-            },
-        )
-        return json.dumps(data)
+        try:
+            data = client.get(
+                "/rest/api/2/search",
+                params={
+                    "jql": jql,
+                    "maxResults": max_results,
+                    "fields": _ISSUE_FIELDS,
+                },
+            )
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(
         description=(
@@ -159,8 +174,11 @@ def register(app: FastMCP) -> None:
         if "issueUpdates" not in payload:
             return json.dumps({"error": "Missing 'issueUpdates' key in payload"})
 
-        data = client.post("/rest/api/2/issue/bulk", json_body=payload)
-        return json.dumps(data)
+        try:
+            data = client.post("/rest/api/2/issue/bulk", json_body=payload)
+            return json.dumps(data)
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
 
     @app.tool(
         description=(
