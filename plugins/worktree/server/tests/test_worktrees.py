@@ -162,6 +162,42 @@ class TestCreateWorktree:
         assert "git clean -fd failed: clean fail" in data["result"]
         assert data["worktree_path"] is not None
 
+    def test_add_worktree_failure_triggers_cleanup(self, config_with_repo: Path) -> None:
+        """add_worktree GitError -> remove_worktree called for cleanup, error JSON returned."""
+        with (
+            patch(
+                "server.tools.worktrees.git.add_worktree",
+                side_effect=GitError("branch already exists"),
+            ) as mock_add,
+            patch("server.tools.worktrees.git.remove_worktree") as mock_remove,
+        ):
+            result = create_worktree("myapp", "feature/conflict")
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
+        mock_add.assert_called_once()
+        mock_remove.assert_called_once()
+        # force=True must be passed for cleanup
+        _, kwargs = mock_remove.call_args
+        assert kwargs.get("force") is True
+
+    def test_add_worktree_failure_cleanup_error_suppressed(self, config_with_repo: Path) -> None:
+        """add_worktree fails AND remove_worktree raises -> secondary error silenced."""
+        with (
+            patch(
+                "server.tools.worktrees.git.add_worktree",
+                side_effect=GitError("conflict"),
+            ),
+            patch(
+                "server.tools.worktrees.git.remove_worktree",
+                side_effect=GitError("cleanup failed"),
+            ),
+        ):
+            result = create_worktree("myapp", "feature/conflict2")
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
+
 
 class TestListWorktrees:
     def test_lists_for_all_repos(self, real_git_repo: Path) -> None:
@@ -486,6 +522,79 @@ class TestLockUnlockEdgeCases:
         data = json.loads(result)
         assert "error" in data
         assert "not locked" in data["error"]
+
+    def test_lock_race_condition_not_a_worktree(self, config_with_repo: Path) -> None:
+        """lock_worktree: git raises 'not a worktree' -> structured error JSON returned."""
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.lock_worktree",
+                side_effect=GitError("fatal: '/repo/main' is not a worktree"),
+            ),
+        ):
+            result = lock_worktree("/repo/main", reason="test")
+        data = json.loads(result)
+        assert "error" in data
+        assert "may have been removed" in data["error"]
+        assert "/repo/main" in data["error"]
+
+    def test_lock_race_condition_no_such_file(self, config_with_repo: Path) -> None:
+        """lock_worktree: git raises 'no such file' -> structured error JSON returned."""
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.lock_worktree",
+                side_effect=GitError("error: no such file or directory"),
+            ),
+        ):
+            result = lock_worktree("/repo/main")
+        data = json.loads(result)
+        assert "error" in data
+        assert "may have been removed" in data["error"]
+
+    def test_unlock_race_condition_not_a_worktree(self, config_with_repo: Path) -> None:
+        """unlock_worktree: git raises 'not a working tree' -> structured error JSON returned."""
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.unlock_worktree",
+                side_effect=GitError("fatal: '/repo/main' is not a working tree"),
+            ),
+        ):
+            result = unlock_worktree("/repo/main")
+        data = json.loads(result)
+        assert "error" in data
+        assert "may have been removed" in data["error"]
+        assert "/repo/main" in data["error"]
+
+    def test_unlock_race_condition_no_such_file(self, config_with_repo: Path) -> None:
+        """unlock_worktree: git raises 'no such file' -> structured error JSON returned."""
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.unlock_worktree",
+                side_effect=GitError("no such file or directory"),
+            ),
+        ):
+            result = unlock_worktree("/repo/main")
+        data = json.loads(result)
+        assert "error" in data
+        assert "may have been removed" in data["error"]
+
+    def test_lock_non_race_git_error_preserved(self, config_with_repo: Path) -> None:
+        """lock_worktree: unrecognised GitError re-raised (not swallowed as race condition)."""
+        with (
+            patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES),
+            patch(
+                "server.tools.worktrees.git.lock_worktree",
+                side_effect=GitError("permission denied"),
+            ),
+        ):
+            result = lock_worktree("/repo/main")
+        data = json.loads(result)
+        assert "error" in data
+        assert "permission denied" in data["error"]
+        assert "may have been removed" not in data["error"]
 
 
 class TestRemoveWorktreeEdgeCases:

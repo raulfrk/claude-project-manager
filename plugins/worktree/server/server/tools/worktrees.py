@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -66,8 +67,10 @@ def create_worktree(
 
     try:
         git.add_worktree(repo.path, worktree_path, branch, new_branch=new_branch)
-    except GitError as e:
-        return json.dumps({"result": f"Error: {e}", "worktree_path": None})
+    except GitError as exc:
+        with contextlib.suppress(Exception):
+            git.remove_worktree(repo.path, worktree_path, force=True)
+        return json.dumps({"result": f"Error: {exc}", "worktree_path": None})
 
     # Clean the new worktree so it matches HEAD exactly
     warnings: list[str] = []
@@ -177,8 +180,16 @@ def lock_worktree(path: str, reason: str = "") -> str:
     try:
         git.lock_worktree(repo_path, abs_path, reason=reason)
         return json.dumps({"result": f"Locked worktree at {abs_path}.", "path": abs_path})
-    except GitError as e:
-        return json.dumps({"error": f"Error: {e}", "path": abs_path})
+    except GitError as exc:
+        msg = str(exc).lower()
+        if any(s in msg for s in ("not a worktree", "not a working tree", "no such file")):
+            return json.dumps(
+                {
+                    "error": f"Worktree not found (may have been removed): {abs_path}",
+                    "path": abs_path,
+                }
+            )
+        return json.dumps({"error": f"Error: {exc}", "path": abs_path})
 
 
 def unlock_worktree(path: str) -> str:
@@ -190,8 +201,16 @@ def unlock_worktree(path: str) -> str:
     try:
         git.unlock_worktree(repo_path, abs_path)
         return json.dumps({"result": f"Unlocked worktree at {abs_path}.", "path": abs_path})
-    except GitError as e:
-        return json.dumps({"error": f"Error: {e}", "path": abs_path})
+    except GitError as exc:
+        msg = str(exc).lower()
+        if any(s in msg for s in ("not a worktree", "not a working tree", "no such file")):
+            return json.dumps(
+                {
+                    "error": f"Worktree not found (may have been removed): {abs_path}",
+                    "path": abs_path,
+                }
+            )
+        return json.dumps({"error": f"Error: {exc}", "path": abs_path})
 
 
 def merge_worktree(path: str, base_branch: str | None = None) -> str:
