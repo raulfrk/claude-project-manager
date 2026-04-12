@@ -125,8 +125,10 @@ class TestGetIssueContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="404"):
-                issue_tools["jira_get_issue"](issue_key="NOPE-1")
+            result = issue_tools["jira_get_issue"](issue_key="NOPE-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "404" in parsed["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +325,10 @@ class TestBulkCreateContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="500"):
-                issue_tools["jira_bulk_create_issues"](issues_json=payload)
+            result = issue_tools["jira_bulk_create_issues"](issues_json=payload)
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
 
 # ---------------------------------------------------------------------------

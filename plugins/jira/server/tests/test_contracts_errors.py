@@ -69,8 +69,10 @@ class TestUnauthorized401:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="401"):
-                issue_tools["jira_get_issue"](issue_key="PROJ-1")
+            result = issue_tools["jira_get_issue"](issue_key="PROJ-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "401" in parsed["error"]
 
     @respx.mock
     def test_post_issue_401(self, issue_tools: dict, client: JiraClient) -> None:
@@ -100,8 +102,10 @@ class TestForbidden403:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="403"):
-                issue_tools["jira_get_issue"](issue_key="PROJ-1")
+            result = issue_tools["jira_get_issue"](issue_key="PROJ-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "403" in parsed["error"]
 
     @respx.mock
     def test_post_issue_403(self, issue_tools: dict, client: JiraClient) -> None:
@@ -131,8 +135,10 @@ class TestNotFound404:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="404"):
-                issue_tools["jira_get_issue"](issue_key="NOPE-1")
+            result = issue_tools["jira_get_issue"](issue_key="NOPE-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "404" in parsed["error"]
 
     @respx.mock
     def test_post_issue_404(self, issue_tools: dict, client: JiraClient) -> None:
@@ -162,8 +168,10 @@ class TestRateLimited429:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="429"):
-                issue_tools["jira_get_issue"](issue_key="PROJ-1")
+            result = issue_tools["jira_get_issue"](issue_key="PROJ-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "429" in parsed["error"]
 
     @respx.mock
     def test_post_issue_429(self, issue_tools: dict, client: JiraClient) -> None:
@@ -202,8 +210,10 @@ class TestServerError500:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            with pytest.raises(RuntimeError, match="500"):
-                issue_tools["jira_get_issue"](issue_key="PROJ-1")
+            result = issue_tools["jira_get_issue"](issue_key="PROJ-1")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "500" in parsed["error"]
 
     @respx.mock
     def test_post_issue_500(self, issue_tools: dict, client: JiraClient) -> None:
