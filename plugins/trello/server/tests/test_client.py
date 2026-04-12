@@ -362,3 +362,40 @@ class TestGetClient:
             assert c1 is c2
         finally:
             client_mod._cached_client = None
+
+
+# ---------- HTTP timeout ----------
+
+
+class TestHttpTimeout:
+    def test_client_passes_config_timeout_to_httpx(self) -> None:
+        cfg = TrelloConfig(api_key="k", token="t")
+        with patch("httpx.Client") as mock_httpx:
+            TrelloClient(cfg)
+        mock_httpx.assert_called_once()
+        _, kwargs = mock_httpx.call_args
+        assert kwargs["timeout"] == 30
+
+    def test_client_passes_custom_timeout_to_httpx(self) -> None:
+        cfg = TrelloConfig(api_key="k", token="t", http_timeout=60)
+        with patch("httpx.Client") as mock_httpx:
+            TrelloClient(cfg)
+        mock_httpx.assert_called_once()
+        _, kwargs = mock_httpx.call_args
+        assert kwargs["timeout"] == 60
+
+    def test_get_client_uses_configured_timeout(self, mocker: pytest.MockerFixture) -> None:
+        import server.lib.client as client_mod
+
+        client_mod._cached_client = None
+        mocker.patch(
+            "server.lib.client.load_config",
+            return_value=TrelloConfig(api_key="k", token="t", http_timeout=45),
+        )
+        mock_httpx = mocker.patch("httpx.Client")
+        try:
+            get_client()
+            _, kwargs = mock_httpx.call_args
+            assert kwargs["timeout"] == 45
+        finally:
+            client_mod._cached_client = None

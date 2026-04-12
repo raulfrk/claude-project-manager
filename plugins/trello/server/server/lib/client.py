@@ -37,7 +37,7 @@ class TrelloClient:
 
     def __init__(self, config: TrelloConfig) -> None:
         self._config = config
-        self._http = httpx.Client(base_url=BASE_URL, timeout=30)
+        self._http = httpx.Client(base_url=BASE_URL, timeout=config.http_timeout)
         self._request_timestamps: deque[float] = deque()
 
     def check_board_access(self, board_id: str) -> None:

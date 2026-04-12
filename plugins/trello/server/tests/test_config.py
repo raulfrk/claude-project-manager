@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import server.lib.config as config_mod
-from server.lib.config import load_config
+from server.lib.config import TrelloConfig, load_config
 
 
 @pytest.fixture(autouse=True)
@@ -117,5 +117,31 @@ class TestConfigCaching:
             c1 = load_config()
             c2 = load_config()
             assert c1 is c2
+        finally:
+            del os.environ["TRELLO_CONFIG"]
+
+
+class TestHttpTimeoutConfig:
+    def test_http_timeout_default(self) -> None:
+        cfg = TrelloConfig(api_key="k", token="t")
+        assert cfg.http_timeout == 30
+
+    def test_http_timeout_from_yaml(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "trello.yaml"
+        cfg_file.write_text("api_key: k\ntoken: t\nhttp_timeout: 60\n")
+        os.environ["TRELLO_CONFIG"] = str(cfg_file)
+        try:
+            cfg = load_config()
+            assert cfg.http_timeout == 60
+        finally:
+            del os.environ["TRELLO_CONFIG"]
+
+    def test_http_timeout_missing_from_yaml_uses_default(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "trello.yaml"
+        cfg_file.write_text("api_key: k\ntoken: t\n")
+        os.environ["TRELLO_CONFIG"] = str(cfg_file)
+        try:
+            cfg = load_config()
+            assert cfg.http_timeout == 30
         finally:
             del os.environ["TRELLO_CONFIG"]
