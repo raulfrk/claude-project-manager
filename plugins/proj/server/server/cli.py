@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import json
 import logging
+import os
 import socket
 import sys
 from datetime import date
@@ -77,6 +80,102 @@ def _call_proj_socket(tool: str, params: dict) -> None:  # type: ignore[type-arg
         logger.debug("proj socket call failed (%s): %s", type(exc).__name__, exc)
 
 
+_HEALTH_BANNER = (
+    "\u26a0 Hook router unreachable \u2014 todo/sync hooks will not fire this session"
+    " (see: {detail}; set HOOKS_HEALTH_CHECK=0 to silence)"
+)
+
+
+def _check_router_health() -> None:
+    """Probe router MCP socket; emit stderr banner if unreachable."""
+    if os.environ.get("HOOKS_HEALTH_CHECK") == "0":
+        return
+    with contextlib.suppress(Exception):
+        from server.lib.router_health import check_router_reachable
+
+        ok, detail = asyncio.run(check_router_reachable())
+        if not ok:
+            msg = _HEALTH_BANNER.format(detail=detail)
+            if sys.stderr.isatty():
+                sys.stderr.write(f"\033[31m{msg}\033[0m\n")
+            else:
+                sys.stderr.write(f"{msg}\n")
+
+
+def _cleanup_legacy_injected_hooks() -> None:
+    """Remove cpm-injected hooks from ~/.claude/settings.json (one-time migration).
+
+    Prior versions injected SessionStart hooks with ``# cpm:`` sentinel lines
+    into settings.json. Now that hooks live in the plugin's hooks/hooks.json,
+    those entries are redundant and should be cleaned up.
+    """
+    cfg = storage.load_config()
+    if getattr(cfg, "settings_hooks_migrated", False):
+        return
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return
+
+    try:
+        raw = settings_path.read_text()
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return
+
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+
+    import re
+
+    sentinel_re = re.compile(r"^\s*#\s*cpm:[A-Za-z0-9_.-]+\s*$", re.MULTILINE)
+    changed = False
+
+    for event, matchers in list(hooks.items()):
+        if not isinstance(matchers, list):
+            continue
+        cleaned = []
+        for matcher in matchers:
+            keep = True
+            for hook in matcher.get("hooks", []):
+                cmd = hook.get("command", "")
+                if sentinel_re.search(cmd):
+                    keep = False
+                    break
+            if keep:
+                cleaned.append(matcher)
+            else:
+                changed = True
+        hooks[event] = cleaned
+        if not cleaned:
+            del hooks[event]
+
+    if not changed:
+        return
+
+    if not hooks:
+        del data["hooks"]
+
+    try:
+        tmp = settings_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2) + "\n")
+        tmp.replace(settings_path)
+    except OSError:
+        return
+
+    # Mark migration done in proj.yaml
+    try:
+        proj_yaml = Path.home() / ".claude" / "proj.yaml"
+        import yaml
+
+        cfg_data = yaml.safe_load(proj_yaml.read_text()) or {}
+        cfg_data["settings_hooks_migrated"] = True
+        proj_yaml.write_text(yaml.dump(cfg_data, default_flow_style=False))
+    except Exception:  # noqa: S110
+        pass  # best-effort flag
+
+
 def cmd_session_start(cwd: str | None, compact: bool) -> None:
     """Print project context to stdout for SessionStart hook injection.
 
@@ -86,6 +185,9 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
     """
     if not storage.config_exists():
         return
+
+    # One-time: remove legacy injected hooks from settings.json
+    _cleanup_legacy_injected_hooks()
 
     cfg = storage.load_config()
 
@@ -136,6 +238,9 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
     # was missing at MCP startup (Layer 1), so all subsequent MCP tool calls
     # resolve the correct project without requiring Claude to call proj_load_session.
     _call_proj_socket("proj_load_session", {"name": detected})
+
+    # Router health probe (replaces standalone session_start_router_health.py).
+    _check_router_health()
 
 
 def cmd_session_end(cwd: str | None) -> None:

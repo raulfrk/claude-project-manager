@@ -273,6 +273,11 @@ class TestLoadMetaCorruption:
 class TestCmdSessionStartCorruption:
     """cmd_session_start edge cases with various forms of data corruption."""
 
+    @pytest.fixture(autouse=True)
+    def _disable_router_health(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Suppress router health probe — no router socket in unit tests."""
+        monkeypatch.setenv("HOOKS_HEALTH_CHECK", "0")
+
     def test_corrupted_index_returns_empty_output(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

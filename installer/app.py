@@ -380,10 +380,10 @@ class InstallerApp(App):
                 callback=self._on_hooks_diff_done,
             )
         else:
-            self._check_settings_hooks_diff()
+            self._start_status_install()
 
     def _on_hooks_diff_done(self, result: dict[str, set[str]] | None) -> None:
-        """Handle yaml_hooks diff result, apply selections, proceed to settings_hooks."""
+        """Handle yaml_hooks diff result, apply selections, proceed to install."""
         if result is not None:
             from installer.hooks_diff import apply_diffs
 
@@ -392,63 +392,6 @@ class InstallerApp(App):
             remove_ids = result.get("remove", set())
             if apply_ids or remove_ids:
                 apply_diffs(hooks_path, self._hooks_diffs, apply_ids, remove_ids)
-
-        self._check_settings_hooks_diff()
-
-    def _check_settings_hooks_diff(self) -> None:
-        """Compute settings.json hooks diff and show review screen if changes exist."""
-        plugin_dirs = getattr(self, "_plugin_dirs", [])
-        if not plugin_dirs:
-            self._start_status_install()
-            return
-
-        from installer.settings_hooks import (
-            SettingsHooksError,
-            compute_settings_hooks_diff,
-        )
-
-        settings_path = Path.home() / ".claude" / "settings.json"
-        try:
-            diffs = compute_settings_hooks_diff(settings_path, plugin_dirs)
-        except SettingsHooksError as exc:
-            self._show_error(f"Failed to compute settings.json hooks diff: {exc}")
-            self._start_status_install()
-            return
-
-        actionable = [d for d in diffs if d.kind in ("new", "changed", "removed")]
-        if not actionable:
-            self._start_status_install()
-            return
-
-        self._settings_hooks_diffs = diffs
-        from installer.screens.hooks_diff import HooksDiffScreen
-
-        self.push_screen(
-            HooksDiffScreen(plugin_dirs, mode="settings_hooks", diffs=diffs),
-            callback=self._on_settings_hooks_diff_done,
-        )
-
-    def _on_settings_hooks_diff_done(self, result: dict[str, set[str]] | None) -> None:
-        """Handle settings_hooks diff result, apply selections, proceed to install."""
-        if result is not None:
-            from installer.settings_hooks import (
-                SettingsHooksError,
-                apply_settings_hooks_diffs,
-            )
-
-            settings_path = Path.home() / ".claude" / "settings.json"
-            apply_ids = result.get("apply", set())
-            remove_ids = result.get("remove", set())
-            if apply_ids or remove_ids:
-                try:
-                    apply_settings_hooks_diffs(
-                        settings_path,
-                        self._settings_hooks_diffs,
-                        apply_ids,
-                        remove_ids,
-                    )
-                except SettingsHooksError as exc:
-                    self._show_error(f"Failed to apply settings.json hooks: {exc}")
 
         self._start_status_install()
 

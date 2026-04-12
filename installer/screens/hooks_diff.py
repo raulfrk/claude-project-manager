@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import difflib
 from pathlib import Path
-from typing import Any, Literal
 
-import yaml
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -14,7 +11,6 @@ from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Footer, Static
 
 from installer.hooks_diff import HookDiff
-from installer.settings_hooks import SettingsHookDiff
 
 # Status badge labels
 _STATUS_BADGES: dict[str, str] = {
@@ -24,49 +20,12 @@ _STATUS_BADGES: dict[str, str] = {
     "unchanged": "[dim]UNCHANGED[/]",
 }
 
-HooksDiffMode = Literal["yaml_hooks", "settings_hooks"]
 
-
-def _settings_diff_text(diff: SettingsHookDiff) -> str:
-    """Synthesize a unified diff for a SettingsHookDiff."""
-
-    def _dump(block: dict[str, Any] | None) -> list[str]:
-        if not block:
-            return []
-        return yaml.safe_dump(
-            block, sort_keys=False, default_flow_style=False
-        ).splitlines(keepends=True)
-
-    a = _dump(diff.actual)
-    b = _dump(diff.desired)
-    lines = list(
-        difflib.unified_diff(
-            a,
-            b,
-            fromfile=f"a/{diff.cpm_id}",
-            tofile=f"b/{diff.cpm_id}",
-            lineterm="",
-        )
-    )
-    return "".join(lines)
-
-
-def _normalize_diff(
-    diff: HookDiff | SettingsHookDiff, mode: HooksDiffMode
-) -> dict[str, str]:
-    """Map either diff shape to a uniform dict used for rendering.
+def _normalize_diff(diff: HookDiff) -> dict[str, str]:
+    """Map a HookDiff to a uniform dict used for rendering.
 
     Returned keys: id, status, unified_diff, label.
     """
-    if mode == "settings_hooks":
-        assert isinstance(diff, SettingsHookDiff)
-        return {
-            "id": diff.cpm_id,
-            "status": diff.kind,
-            "unified_diff": _settings_diff_text(diff),
-            "label": f"{diff.cpm_id} ({diff.event})",
-        }
-    assert isinstance(diff, HookDiff)
     return {
         "id": diff.hook_id,
         "status": diff.status,
@@ -197,29 +156,20 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
         self,
         plugin_dirs: list[Path] | None = None,
         *,
-        mode: HooksDiffMode = "yaml_hooks",
-        diffs: list[HookDiff] | list[SettingsHookDiff] | None = None,
+        diffs: list[HookDiff] | None = None,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
-        self._mode: HooksDiffMode = mode
         self._plugin_dirs: list[Path] = list(plugin_dirs or [])
         if diffs is None:
             diffs = self._compute_diffs()
-        self._diffs: list[HookDiff] | list[SettingsHookDiff] = diffs
-        self._normalized: list[dict[str, str]] = [
-            _normalize_diff(d, mode) for d in diffs
-        ]
+        self._diffs: list[HookDiff] = diffs
+        self._normalized: list[dict[str, str]] = [_normalize_diff(d) for d in diffs]
 
-    def _compute_diffs(self) -> list:
-        """Load diffs from disk based on ``self._mode`` and ``self._plugin_dirs``."""
-        if self._mode == "settings_hooks":
-            from installer.settings_hooks import compute_settings_hooks_diff
-
-            settings_path = Path.home() / ".claude" / "settings.json"
-            return compute_settings_hooks_diff(settings_path, self._plugin_dirs)
+    def _compute_diffs(self) -> list[HookDiff]:
+        """Load diffs from disk."""
         from installer.hooks_diff import compute_hooks_diff
 
         hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
@@ -228,27 +178,15 @@ class HooksDiffScreen(Screen[dict[str, set[str]] | None]):
     def _apply_selected(
         self, apply_ids: set[str], remove_ids: set[str] | None = None
     ) -> None:
-        """Dispatch Apply to the mode-appropriate apply function."""
+        """Apply selected diffs."""
         remove_ids = remove_ids or set()
-        if self._mode == "settings_hooks":
-            from installer.settings_hooks import apply_settings_hooks_diffs
-
-            settings_path = Path.home() / ".claude" / "settings.json"
-            apply_settings_hooks_diffs(
-                settings_path, self._diffs, apply_ids, remove_ids
-            )
-            return
         from installer.hooks_diff import apply_diffs
 
         hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
         apply_diffs(hooks_yaml, self._diffs, apply_ids, remove_ids)
 
     def compose(self) -> ComposeResult:
-        empty_message = (
-            "settings.json hooks are up to date — no changes needed."
-            if self._mode == "settings_hooks"
-            else "hooks.yaml is up to date — no changes needed."
-        )
+        empty_message = "hooks.yaml is up to date — no changes needed."
         with Vertical(id="hooks-diff-dialog"):
             yield Static("Hook Configuration Updates", id="hooks-diff-title")
 
