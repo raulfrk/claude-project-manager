@@ -19,6 +19,14 @@ from typing import Any, Iterable, Literal
 
 import yaml
 
+try:
+    from packaging.version import InvalidVersion as _InvalidVersion
+    from packaging.version import Version as _PkgVersion
+
+    _HAS_PACKAGING = True
+except ImportError:
+    _HAS_PACKAGING = False
+
 
 class SettingsHooksError(Exception):
     """Raised when settings.json hooks cannot be read, parsed, or written."""
@@ -110,19 +118,43 @@ class SettingsDocument:
 DEFAULT_SETTINGS_HOOKS_FILENAME = "default-settings-hooks.yaml"
 
 
-def _load_plugin_default(plugin_dir: Path) -> dict[str, Any]:
-    """Load plugins/<name>/.claude-plugin/default-settings-hooks.yaml. Empty dict on missing."""
+def _load_plugin_default(plugin_dir: Path) -> tuple[dict[str, Any], Path]:
+    """Load .claude-plugin/default-settings-hooks.yaml. Handles versioned cache layout.
+
+    Returns (data, resolved_plugin_dir). resolved_plugin_dir is the versioned subdir
+    (e.g. proj/4.0.0) when the fallback glob is used, or plugin_dir when found directly.
+    Returns ({}, plugin_dir) on missing/empty file.
+    Raises SettingsHooksError on YAML parse failure.
+    """
     candidate = plugin_dir / ".claude-plugin" / DEFAULT_SETTINGS_HOOKS_FILENAME
+    resolved_dir = plugin_dir  # default: plugin_dir is already the correct dir
     if not candidate.exists():
-        return {}
+        # Cache layout: plugin_dir/<version>/.claude-plugin/default-settings-hooks.yaml
+        versioned: list[Path] = []
+        for p in plugin_dir.glob(f"*/.claude-plugin/{DEFAULT_SETTINGS_HOOKS_FILENAME}"):
+            if _HAS_PACKAGING:
+                try:
+                    _PkgVersion(p.parent.parent.name)
+                    versioned.append(p)
+                except _InvalidVersion:
+                    continue  # skip non-semver dirs (_shared, _backup, etc.)
+            else:
+                versioned.append(p)
+        if not versioned:
+            return {}, plugin_dir
+        if _HAS_PACKAGING:
+            candidate = max(versioned, key=lambda p: _PkgVersion(p.parent.parent.name))
+        else:
+            candidate = max(versioned, key=lambda p: p.parent.parent.name)
+        resolved_dir = candidate.parent.parent
     try:
         raw = candidate.read_text(encoding="utf-8")
         data = yaml.safe_load(raw)
     except Exception as exc:
         raise SettingsHooksError(f"Failed to parse {candidate}: {exc}") from exc
     if not isinstance(data, dict):
-        return {}
-    return data
+        return {}, resolved_dir
+    return data, resolved_dir
 
 
 def merge_settings_defaults(plugin_dirs: Iterable[Path]) -> dict[str, dict[str, Any]]:
@@ -134,7 +166,7 @@ def merge_settings_defaults(plugin_dirs: Iterable[Path]) -> dict[str, dict[str, 
     merged: dict[str, dict[str, Any]] = {}
     seen_source: dict[str, Path] = {}
     for plugin_dir in plugin_dirs:
-        data = _load_plugin_default(plugin_dir)
+        data, resolved_dir = _load_plugin_default(plugin_dir)
         entries = data.get("hooks")
         if not isinstance(entries, list):
             continue
@@ -150,7 +182,9 @@ def merge_settings_defaults(plugin_dirs: Iterable[Path]) -> dict[str, dict[str, 
                     f"Duplicate default-settings-hooks id '{cpm_id}' from "
                     f"{plugin_dir} (already defined by {prior})"
                 )
-            merged[cpm_id] = dict(entry)
+            entry_copy = dict(entry)
+            entry_copy["_source_plugin_dir"] = str(resolved_dir)
+            merged[cpm_id] = entry_copy
             seen_source[cpm_id] = plugin_dir
     return merged
 
@@ -370,7 +404,8 @@ def compute_settings_hooks_diff(
         key = (event, cpm_id)
         actual_matcher = actual_by_event_id.get(key)
         if actual_matcher is not None:
-            desired_resolved = resolve_command_template(entry, Path())
+            source_dir = Path(entry.get("_source_plugin_dir") or ".")
+            desired_resolved = resolve_command_template(entry, source_dir)
             actual_cmds: list[str] = []
             actual_hooks = actual_matcher.get("hooks")
             if isinstance(actual_hooks, list):
@@ -517,7 +552,8 @@ def apply_settings_hooks_diffs(
         if diff.desired is None:
             continue
         for matcher_name in diff.matchers:
-            resolved_cmd = resolve_command_template(diff.desired, Path())
+            source_dir = Path(diff.desired.get("_source_plugin_dir") or ".")
+            resolved_cmd = resolve_command_template(diff.desired, source_dir)
             new_block = {
                 "matcher": matcher_name,
                 "__cpm_id": diff.cpm_id,

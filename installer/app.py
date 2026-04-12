@@ -360,11 +360,13 @@ class InstallerApp(App):
         cache_dir = (
             Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
         )
-        self._plugin_dirs: list[Path] = [
-            cache_dir / name
-            for name in self.selected_plugins
-            if (cache_dir / name).is_dir()
-        ]
+        from installer.wizard import _resolve_plugin_dir
+
+        self._plugin_dirs: list[Path] = []
+        for name in self.selected_plugins:
+            resolved = _resolve_plugin_dir(cache_dir, name)
+            if resolved is not None:
+                self._plugin_dirs.append(resolved)
 
         hooks_path = Path.home() / ".claude" / "hooks.yaml"
         diffs = compute_hooks_diff(hooks_path, self._plugin_dirs)

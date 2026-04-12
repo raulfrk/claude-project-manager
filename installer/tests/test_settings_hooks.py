@@ -173,7 +173,9 @@ class TestComputeSettingsHooksDiff:
         plugin = tmp_path / "p"
         entry = _sample_entry("id-1", matchers=["startup"])
         _write_plugin_default(plugin, [entry])
-        resolved_cmd = resolve_command_template(entry, Path())
+        # Use plugin dir (not Path()) — after fix, merge_settings_defaults stores
+        # _source_plugin_dir=plugin and resolve_command_template uses it for comparison.
+        resolved_cmd = resolve_command_template(entry, plugin)
         settings_data = {
             "hooks": {
                 "SessionStart": [
@@ -225,7 +227,8 @@ class TestComputeSettingsHooksDiff:
         # PLUS an orphan id-gone that has no corresponding plugin default.
         entry = _sample_entry("id-a", matchers=["startup"])
         _write_plugin_default(plugin, [entry])
-        resolved_cmd = resolve_command_template(entry, Path())
+        # Use plugin dir — after fix, _source_plugin_dir=plugin is used for comparison.
+        resolved_cmd = resolve_command_template(entry, plugin)
         settings_data = {
             "hooks": {
                 "SessionStart": [
@@ -453,7 +456,8 @@ class TestDiscoverManagedIds:
         plugin = tmp_path / "p"
         entry = _sample_entry("foo", event="SessionStart", matchers=["startup"])
         _write_plugin_default(plugin, [entry])
-        resolved_cmd = resolve_command_template(entry, Path())
+        # Use plugin dir so stored command matches what compute_settings_hooks_diff expects.
+        resolved_cmd = resolve_command_template(entry, plugin)
         settings_data = {
             "hooks": {
                 "SessionStart": [
@@ -617,7 +621,7 @@ class TestOrphanEndToEnd:
                             {
                                 "command": resolve_command_template(
                                     _sample_entry("kept", matchers=["startup"]),
-                                    Path(),
+                                    plugin,
                                 ),
                                 "type": "command",
                             }
@@ -727,3 +731,114 @@ class TestPluginIdConflict:
         with pytest.raises(SettingsHooksError) as excinfo:
             merge_settings_defaults([p1, p2])
         assert "collision-id" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# TestVersionedSubdirFallback — tests for the versioned cache layout
+# (plugin_dir/<version>/.claude-plugin/default-settings-hooks.yaml).
+# ---------------------------------------------------------------------------
+
+
+class TestVersionedSubdirFallback:
+    def test_versioned_subdir_found_when_direct_lookup_misses(
+        self, tmp_path: Path
+    ) -> None:
+        """Unversioned plugin_dir has no direct .claude-plugin/; file lives in 4.0.0/."""
+        plugin = tmp_path / "proj"
+        versioned = plugin / "4.0.0"
+        _write_plugin_default(versioned, [_sample_entry("id-a")])
+        merged = merge_settings_defaults([plugin])
+        assert "id-a" in merged
+        assert merged["id-a"]["_source_plugin_dir"] == str(versioned)
+
+    def test_highest_semver_version_selected(self, tmp_path: Path) -> None:
+        """With 3.0.1 and 4.0.0, 4.0.0 wins."""
+        plugin = tmp_path / "proj"
+        _write_plugin_default(plugin / "3.0.1", [_sample_entry("old-id")])
+        _write_plugin_default(plugin / "4.0.0", [_sample_entry("new-id")])
+        merged = merge_settings_defaults([plugin])
+        assert "new-id" in merged
+        assert "old-id" not in merged
+        assert merged["new-id"]["_source_plugin_dir"] == str(plugin / "4.0.0")
+
+    def test_nonversion_subdir_ignored_no_crash(self, tmp_path: Path) -> None:
+        """_shared/ alongside 4.0.0/ is silently ignored; no InvalidVersion crash."""
+        plugin = tmp_path / "proj"
+        (plugin / "_shared" / ".claude-plugin").mkdir(parents=True)
+        (
+            plugin / "_shared" / ".claude-plugin" / "default-settings-hooks.yaml"
+        ).write_text(yaml.safe_dump({"hooks": [_sample_entry("shared-id")]}))
+        _write_plugin_default(plugin / "4.0.0", [_sample_entry("real-id")])
+        merged = merge_settings_defaults([plugin])
+        assert "real-id" in merged
+        assert "shared-id" not in merged
+
+    def test_no_versioned_subdir_returns_empty(self, tmp_path: Path) -> None:
+        """plugin_dir with no versioned subdirs → empty merged dict (no crash)."""
+        plugin = tmp_path / "proj"
+        plugin.mkdir()
+        merged = merge_settings_defaults([plugin])
+        assert merged == {}
+
+    def test_source_plugin_dir_present_in_direct_layout(self, tmp_path: Path) -> None:
+        """Direct .claude-plugin/ layout also gets _source_plugin_dir set."""
+        plugin = tmp_path / "p"
+        _write_plugin_default(plugin, [_sample_entry("id-x")])
+        merged = merge_settings_defaults([plugin])
+        assert "_source_plugin_dir" in merged["id-x"]
+        assert merged["id-x"]["_source_plugin_dir"] == str(plugin)
+
+    def test_plugin_cache_dir_resolved_in_applied_command(self, tmp_path: Path) -> None:
+        """{plugin_cache_dir} in command must resolve to the actual versioned dir."""
+        plugin = tmp_path / "proj"
+        versioned = plugin / "4.0.0"
+        entry = _sample_entry(
+            "session-hook",
+            command="{python} {script} --cache {plugin_cache_dir}",
+        )
+        _write_plugin_default(versioned, [entry])
+
+        settings = tmp_path / "settings.json"
+        settings.write_text("{}")
+        diffs = compute_settings_hooks_diff(settings, [plugin])
+        assert len(diffs) == 1
+        assert diffs[0].kind == "new"
+
+        apply_settings_hooks_diffs(settings, diffs, apply_ids={"session-hook"})
+        data = json.loads(settings.read_text())
+        cmd = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        # {plugin_cache_dir} must resolve to the versioned dir, not "."
+        assert str(versioned) in cmd
+        assert "{plugin_cache_dir}" not in cmd
+
+    def test_unchanged_detection_with_versioned_subdir(self, tmp_path: Path) -> None:
+        """If settings.json already has the hook with correct versioned path,
+        compute reports 'unchanged' (not 'changed')."""
+        plugin = tmp_path / "proj"
+        versioned = plugin / "4.0.0"
+        entry = _sample_entry(
+            "v-hook",
+            command="{python} {script} --cache {plugin_cache_dir}",
+            matchers=["startup"],
+        )
+        _write_plugin_default(versioned, [entry])
+
+        # Simulate already-applied state: command uses versioned dir
+        resolved_cmd = resolve_command_template(entry, versioned)
+        settings_data = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "__cpm_id": "v-hook",
+                        "hooks": [{"command": resolved_cmd, "type": "command"}],
+                    }
+                ]
+            }
+        }
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps(settings_data))
+
+        diffs = compute_settings_hooks_diff(settings, [plugin])
+        assert len(diffs) == 1
+        assert diffs[0].kind == "unchanged"
