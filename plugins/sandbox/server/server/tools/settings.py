@@ -293,19 +293,23 @@ def sandbox_batch_setup(
             settings.permissions.allow.append(entry)
             skills_added += 1
 
-    total = paths_added + edit_added + mcp_added + domains_added + skills_added
-    if total:
+    total_added = paths_added + edit_added + mcp_added + domains_added + skills_added
+    total_requested = (
+        len(paths or []) + len(mcp_servers or []) + len(domains or []) + len(skill_prefixes or [])
+    )
+    skipped = total_requested - total_added
+    if total_added:
         storage.save(settings)
 
     return _json_result(
-        result=f"Batch setup: {total} added",
+        result=f"Batch setup: {total_added} added, {skipped} skipped",
         settings_path=str(settings.path),
         paths_added=paths_added,
         edit_added=edit_added,
         mcp_added=mcp_added,
         domains_added=domains_added,
         skills_added=skills_added,
-        skipped=0,
+        skipped=skipped,
     )
 
 
