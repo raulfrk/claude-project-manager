@@ -171,14 +171,33 @@ Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.aut
 
 New skills go in `plugins/<name>/skills/<skill-name>/SKILL.md`. Add new skills to the README skill reference table and the "Skills by category" list.
 
+### SKILL.md Compression (Caveman Ultra)
+
+All SKILL.md files are written in **caveman ultra** format to minimize token usage. When creating or editing SKILL.md files, follow these rules:
+
+**Drop**: articles (a/an/the), filler (just/really/basically/actually/simply), hedging, conjunctions when meaning clear, "you should"/"make sure to"/"remember to"/"note that" — state action directly.
+
+**Abbreviate**: fn/impl/config/req/res/DB/auth/msg/param/arg/deps/env/dir/repo/cmd/exec/init/sync/info/orig/desc/prev/cur/num/val/err/ctx/ref/opt/spec/max/min/avg/diff/fmt/ver
+
+**Syntax**: fragments > sentences. Arrows for causality (X → Y). Semicolons merge short items. "If X: do Y" not "If the user does X, then you should do Y". Conditional chains: "A → X; B → Y; C → Z".
+
+**Preserve exactly**: inline code, URLs, file paths, MCP tool names, heading structure, table structure, code blocks.
+
+**Dedup**: repeated patterns (e.g. "After presenting:" + prompt) → define once, ref later. review/SKILL.md refs explore/SKILL.md Steps 1-5 instead of duplicating.
+
+**Output directive**: every SKILL.md starts with (after frontmatter):
+`> **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.`
+
+**Batch compression tool**: `/caveman:compress <filepath>` — uses Claude to compress + deterministic regex post-processing. Protected block extraction keeps frontmatter/code blocks byte-identical. Script at `~/.claude/plugins/cache/caveman/caveman/92f892f2b97/caveman-compress/`.
+
 ### context/agent Frontmatter Criteria
 
 Add `context: fork` and `agent: general-purpose` to skills that can run autonomously without user interaction during execution. Criteria:
-- Skill performs a self-contained operation (list, sync, status display)
-- Skill does NOT require interactive Q&A during execution
-- Skill does NOT need plan mode approval mid-execution
+- Self-contained op (list, sync, status display)
+- No interactive Q&A during exec
+- No plan mode approval mid-exec
 - Examples: hooks-*, status, todo, todoist-sync, trello-sync, jira-sync, jira-sync-trello
-- Do NOT add to: interactive skills (define, init, load), sub-skills, or skills needing plan approval (execute, run, quick)
+- NOT for: interactive skills (define, init, load), sub-skills, or plan-approval skills (execute, run, quick)
 
 <!-- claude-project-manager:start -->
 ## Claude Project Manager Rules
