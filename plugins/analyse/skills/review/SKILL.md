@@ -15,7 +15,7 @@ Walk through a codebase feature or section with the user in guided chapters. Exp
 
 Extract from `$ARGUMENTS`:
 - **Todo IDs**: tokens matching `^\d+(\.\d+)*$` (e.g. `42`, `3.1`, `397.2`)
-- **Paths**: tokens starting with `/`, `./`, `~/`, or containing a `/` followed by a file extension (e.g. `src/auth/`, `./plugins/hooks/`)
+- **Paths**: tokens starting with `/`, `./`, `~/`, or containing a `/` followed by a file extension (e.g. `src/auth/`, `./plugins/router/`)
 - **Description**: all remaining tokens joined as free-form text
 
 If `$ARGUMENTS` is empty: ask the user "What would you like to review? You can provide a file path, directory, description, or a proj todo ID."

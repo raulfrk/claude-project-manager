@@ -72,7 +72,7 @@ If a tool call fails (tool not found, connection error), that plugin is not inst
 
 Report the detection results:
 ```
-Detected plugins: sandbox, worktree, hooks, todoist, zoxide
+Detected plugins: sandbox, worktree, router, todoist, zoxide
 Not found: trello, jira
 ```
 
@@ -207,7 +207,7 @@ Configuration summary:
   Core:
     tracking_dir: ~/projects/tracking
     projects_base_dir: ~/projects
-  Detected plugins: sandbox, worktree, hooks, todoist, zoxide
+  Detected plugins: sandbox, worktree, router, todoist, zoxide
   Permissions:
     auto_grant: yes
     auto_allow_mcps: yes
@@ -319,7 +319,7 @@ Inspect the `condition` field of each registered hook. Known fixes:
 
 If mismatches found, list them and offer to fix by editing `~/.claude/hooks.yaml`.
 
-If hooks plugin is not detected, skip all of step 8 with: "Hooks plugin not detected — skipping hook registration. Hooks enable automatic sync between plugins."
+If router plugin is not detected, skip all of step 8 with: "Router plugin not detected — skipping hook registration. The router plugin enables automatic sync between plugins."
 
 ## Step 9: Confirmation
 
@@ -329,7 +329,7 @@ Show a summary of what was set up:
 ```
 Setup complete:
   Config: ~/.claude/proj.yaml
-  Plugins: sandbox, worktree, hooks, todoist, zoxide
+  Plugins: sandbox, worktree, router, todoist, zoxide
   MCP rules: 7 servers auto-allowed
   Sandbox: initialized (3 paths)
   Hooks: 12 registered

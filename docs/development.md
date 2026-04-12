@@ -232,15 +232,15 @@ All three must match. Forgetting one will cause inconsistencies.
 
 | Plugin | Version |
 |--------|---------|
-| sandbox | 0.2.0 |
-| worktree | 2.6.0 |
-| proj | 3.0.1 |
-| hooks | 1.10.1 |
-| todoist | 1.4.5 |
-| trello | 2.4.3 |
-| jira | 2.1.4 |
-| zoxide | 1.3.1 |
-| analyse | 1.0.0 |
+| sandbox | 1.0.0 |
+| worktree | 3.0.0 |
+| proj | 4.0.0 |
+| router | 2.1.0 |
+| todoist | 2.0.0 |
+| trello | 3.0.0 |
+| jira | 3.0.0 |
+| zoxide | 2.0.0 |
+| analyse | 2.0.0 |
 | _shared | 0.3.3 |
 
 ---

@@ -10,15 +10,15 @@ The marketplace contains 9 plugins that work independently or together:
 
 | Plugin | Version | Category | Type | Description |
 |--------|---------|----------|------|-------------|
-| **sandbox** | 0.2.0 | utilities | MCP server | Manage sandbox-mode `settings.json` (write paths, MCP/Skill allow rules, network domains, deny rules) |
-| **worktree** | 2.6.0 | utilities | MCP server + skills | Git worktree management from registered base repositories |
-| **proj** | 3.0.1 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) |
-| **hooks** | 1.10.1 | utilities | MCP server + skills | Central MCP-to-MCP hook registry with condition evaluation, auto-registration, and recovery |
-| **todoist** | 1.4.5 | integrations | MCP server | Todoist task and project management via REST API |
-| **trello** | 2.4.3 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
-| **jira** | 2.1.4 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
-| **zoxide** | 1.3.1 | utilities | MCP server | Zoxide frecency database integration (boost, remove, query paths) |
-| **analyse** | 1.0.0 | utilities | Skills only | Guided code review that walks through features and creates improvement todos |
+| **sandbox** | 1.0.0 | utilities | MCP server | Manage sandbox-mode `settings.json` (write paths, MCP/Skill allow rules, network domains, deny rules) |
+| **worktree** | 3.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories |
+| **proj** | 4.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) |
+| **router** | 2.1.0 | utilities | MCP server + skills | Central MCP-to-MCP router with condition evaluation, auto-registration, and recovery |
+| **todoist** | 2.0.0 | integrations | MCP server | Todoist task and project management via REST API |
+| **trello** | 3.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
+| **jira** | 3.0.0 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
+| **zoxide** | 2.0.0 | utilities | MCP server | Zoxide frecency database integration (boost, remove, query paths) |
+| **analyse** | 2.0.0 | utilities | Skills only | Guided code review that walks through features and creates improvement todos |
 
 ### Marketplace Structure
 
@@ -184,7 +184,7 @@ Set `HOOK_TRANSPORT=tcp` to fall back to TCP on `127.0.0.1` with the following p
 
 | Plugin | Port |
 |--------|-------|
-| hooks | 19100 |
+| router | 19100 |
 | sandbox | 19101 |
 | proj | 19102 |
 | worktree | 19103 |
@@ -218,7 +218,7 @@ Git flush messages follow the `"Action: subject"` pattern:
 
 ### Skill Invocation
 
-Skills are namespaced by plugin: `/proj:<skill-name>`, `/worktree:<skill-name>`, `/hooks:<skill-name>`.
+Skills are namespaced by plugin: `/proj:<skill-name>`, `/worktree:<skill-name>`, `/router:<skill-name>`.
 
 Skill files live at `plugins/<name>/skills/<skill-name>/SKILL.md`.
 

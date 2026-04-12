@@ -16,7 +16,7 @@ Project management plugins for Claude Code -- track todos, manage permissions, a
 # Install the core plugins
 /plugin install raulfrk/claude-project-manager:proj
 /plugin install raulfrk/claude-project-manager:sandbox
-/plugin install raulfrk/claude-project-manager:hooks
+/plugin install raulfrk/claude-project-manager:router
 
 # First-time setup (creates ~/.claude/proj.yaml)
 /proj:init-plugin
@@ -40,15 +40,15 @@ The installer wizard now prompts for an advanced tier after the basic questions 
 <!-- AUTO:plugins-start -->
 | Plugin | Version | Category | Description |
 |--------|---------|----------|-------------|
-| [sandbox](plugins/sandbox/) | 0.2.0 | utilities | Manage Claude Code sandbox-mode settings.json -- write paths, MCP allow rules, network domains, deny rules |
-| [worktree](plugins/worktree/) | 2.6.0 | utilities | Git worktree management -- create, list, and remove worktrees from configured base repositories |
-| [proj](plugins/proj/) | 3.0.1 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
-| [trello](plugins/trello/) | 2.4.3 | integrations | Trello board, card, and list management via REST API |
-| [jira](plugins/jira/) | 2.1.4 | integrations | Read-only Jira Server issue and project access via REST API |
-| [router](plugins/router/) | 1.10.1 | utilities | Central MCP-to-MCP router (formerly `hooks`) with schema-based param mapping, auto-registration, and recovery |
-| [zoxide](plugins/zoxide/) | 1.3.1 | utilities | Zoxide frecency database integration -- boost, remove, and query paths |
-| [todoist](plugins/todoist/) | 1.4.5 | integrations | Todoist task and project management via REST API |
-| [analyse](plugins/analyse/) | 1.0.0 | utilities | Guided code review that walks through features, explains code, and creates todos |
+| [sandbox](plugins/sandbox/) | 1.0.0 | utilities | Manage Claude Code sandbox-mode settings.json -- write paths, MCP allow rules, network domains, deny rules |
+| [worktree](plugins/worktree/) | 3.0.0 | utilities | Git worktree management -- create, list, and remove worktrees from configured base repositories |
+| [proj](plugins/proj/) | 4.0.0 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
+| [trello](plugins/trello/) | 3.0.0 | integrations | Trello board, card, and list management via REST API |
+| [jira](plugins/jira/) | 3.0.0 | integrations | Read-only Jira Server issue and project access via REST API |
+| [router](plugins/router/) | 2.1.0 | utilities | Central MCP-to-MCP router (formerly `hooks`) with schema-based param mapping, auto-registration, and recovery |
+| [zoxide](plugins/zoxide/) | 2.0.0 | utilities | Zoxide frecency database integration -- boost, remove, and query paths |
+| [todoist](plugins/todoist/) | 2.0.0 | integrations | Todoist task and project management via REST API |
+| [analyse](plugins/analyse/) | 2.0.0 | utilities | Guided code review that walks through features, explains code, and creates todos |
 <!-- AUTO:plugins-end -->
 
 ---
