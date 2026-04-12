@@ -13,6 +13,7 @@ from server.lib import storage
 from server.lib.git import GitError
 from server.lib.models import BaseRepo, WorktreeConfig, WorktreeEntry
 from server.tools.worktrees import (
+    _resolve_worktree_path,
     auto_commit,
     create_worktree,
     get_worktree,
@@ -628,6 +629,67 @@ class TestMergeWorktree:
         # Worktree should be clean after abort
         status_porcelain = _git(wt_path, "status", "--porcelain")
         assert status_porcelain == ""
+
+
+# ---------------------------------------------------------------------------
+# _resolve_worktree_path: slash-to-dash substitution tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveWorktreePath:
+    """Unit tests for the `/` → `-` branch name substitution in _resolve_worktree_path."""
+
+    def test_single_slash_replaced(self, config_with_repo: Path, tmp_path: Path) -> None:
+        """AC-1.1: branch with single `/` gets slash replaced with dash."""
+        result = _resolve_worktree_path("myapp", "feature/foo", None)
+        expected = str(tmp_path / "worktrees" / "myapp" / "feature-foo")
+        assert result == expected
+
+    def test_multiple_slashes_all_replaced(self, config_with_repo: Path, tmp_path: Path) -> None:
+        """AC-1.2: branch with multiple `/` has ALL slashes replaced."""
+        result = _resolve_worktree_path("myapp", "user/feature/deep", None)
+        expected = str(tmp_path / "worktrees" / "myapp" / "user-feature-deep")
+        assert result == expected
+
+    def test_no_slash_unchanged(self, config_with_repo: Path, tmp_path: Path) -> None:
+        """AC-1.3: branch with no `/` is returned unchanged in the path."""
+        result = _resolve_worktree_path("myapp", "main", None)
+        expected = str(tmp_path / "worktrees" / "myapp" / "main")
+        assert result == expected
+
+    def test_custom_path_bypasses_substitution(
+        self, config_with_repo: Path, tmp_path: Path
+    ) -> None:
+        """AC-1.4: custom_path is used as-is, no slash substitution applied."""
+        custom = str(tmp_path / "my/custom/path")
+        result = _resolve_worktree_path("myapp", "feature/x", custom)
+        # custom_path is resolved, so compare resolved form
+        assert result == str(Path(custom).resolve())
+        # The branch slash should NOT appear in the result
+        assert "feature-x" not in result
+
+
+class TestCreateWorktreePathResolution:
+    """Integration tests verifying path resolution through create_worktree."""
+
+    def test_multi_segment_branch_path(self, real_git_repo: Path) -> None:
+        """AC-2.1: create_worktree with multi-segment branch uses substituted path."""
+        result = create_worktree("myapp", "user/feature/deep")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert data["worktree_path"] is not None
+        worktree_path = real_git_repo.parent / "worktrees" / "myapp" / "user-feature-deep"
+        assert worktree_path.exists()
+        assert str(worktree_path) == data["worktree_path"]
+
+    def test_custom_path_ignores_substitution(self, real_git_repo: Path, tmp_path: Path) -> None:
+        """AC-2.2: create_worktree with custom_path ignores slash substitution."""
+        custom = str(tmp_path / "custom-wt")
+        result = create_worktree("myapp", "user/feature/deep", path=custom)
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert data["worktree_path"] == custom
+        assert Path(custom).exists()
 
 
 # ---------------------------------------------------------------------------
