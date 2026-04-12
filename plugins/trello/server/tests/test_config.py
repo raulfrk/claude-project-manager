@@ -49,8 +49,9 @@ class TestLoadConfigFromYaml:
         cfg_file.write_text("token: t\n")
         os.environ["TRELLO_CONFIG"] = str(cfg_file)
         try:
-            with pytest.raises(ValueError, match="missing api_key or token"):
+            with pytest.raises(ValueError, match="missing api_key or token") as exc_info:
                 load_config()
+            assert str(tmp_path) not in str(exc_info.value)
         finally:
             del os.environ["TRELLO_CONFIG"]
 
@@ -59,8 +60,9 @@ class TestLoadConfigFromYaml:
         cfg_file.write_text("api_key: k\n")
         os.environ["TRELLO_CONFIG"] = str(cfg_file)
         try:
-            with pytest.raises(ValueError, match="missing api_key or token"):
+            with pytest.raises(ValueError, match="missing api_key or token") as exc_info:
                 load_config()
+            assert str(tmp_path) not in str(exc_info.value)
         finally:
             del os.environ["TRELLO_CONFIG"]
 
@@ -69,8 +71,20 @@ class TestLoadConfigFromYaml:
         cfg_file.write_text("")
         os.environ["TRELLO_CONFIG"] = str(cfg_file)
         try:
-            with pytest.raises(ValueError, match="missing api_key or token"):
+            with pytest.raises(ValueError, match="missing api_key or token") as exc_info:
                 load_config()
+            assert str(tmp_path) not in str(exc_info.value)
+        finally:
+            del os.environ["TRELLO_CONFIG"]
+
+    def test_yaml_empty_string_values_no_path_leak(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "trello.yaml"
+        cfg_file.write_text('api_key: ""\ntoken: ""\n')
+        os.environ["TRELLO_CONFIG"] = str(cfg_file)
+        try:
+            with pytest.raises(ValueError, match="missing api_key or token") as exc_info:
+                load_config()
+            assert str(tmp_path) not in str(exc_info.value)
         finally:
             del os.environ["TRELLO_CONFIG"]
 

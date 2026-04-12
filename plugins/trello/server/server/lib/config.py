@@ -51,7 +51,7 @@ def load_config() -> TrelloConfig:
             allowed_board_ids=data.get("allowed_board_ids", []),
         )
         if not _cached_config.api_key or not _cached_config.token:
-            msg = f"Trello YAML config at {config_path} is missing api_key or token."
+            msg = "Trello YAML config at ~/.claude/trello.yaml is missing api_key or token."
             raise ValueError(msg)
         return _cached_config
 
