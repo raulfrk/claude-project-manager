@@ -546,7 +546,7 @@ ELSE:
 
 2. Each batch in dep order (excl `manual_skipped_ids`):
  - Display: `Executing batch <N>/<total>: todos <id1>, <id2>, ...`
- - One Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + requirements.md + research.md + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md. Agents do NOT `todo_complete`. Plan gap → (1) detect, (2) SendMessage team-lead, (3) team-lead escalates via AskUserQuestion.
+ - One Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + requirements.md + research.md + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md. Agents do NOT `todo_complete`. Plan gap → use ASK_USER protocol (see Agent Delegation Protocols appendix): send `ASK_USER: <issue>` via SendMessage to team-lead, wait for `ASK_USER_RESPONSE`. Do NOT improvise.
  - `worktree_enabled` + todo has `worktree_path` → include `worktree_path: <path>`, `worktree_branch: <branch>`. Instruction: "Execute all file ops in `<worktree_path>`. Prefix git commit msgs with `[todo-{id}]`."
  - Wait for batch. Report failures: `Agent for todo <id> failed: <error>`.
  - **Write checkpoint** after each batch:
@@ -871,7 +871,7 @@ After return: aggregate into combined table. Same BLOCKING prompt flow. Timeouts
 
 **Team mode:**
 1. `TeamCreate(name="run-decompose-{project}-{timestamp}", ...)`
-2. Each batch in dep order: one Agent per todo w/ `team_name`. Each runs `agent_steps` autonomously. `--full-context` → include CLAUDE.md + NOTES.md. Plan gap → SendMessage team-lead → escalate via AskUserQuestion. Wait per batch. Report failures.
+2. Each batch in dep order: one Agent per todo w/ `team_name`. Each runs `agent_steps` autonomously. `--full-context` → include CLAUDE.md + NOTES.md. Plan gap → use ASK_USER protocol (see Agent Delegation Protocols appendix). Wait per batch. Report failures.
 3. All done → `TeamDelete`.
 4. Failures → log to `failed-teams.yaml`.
 
@@ -1098,7 +1098,7 @@ ELSE:
 2. Each batch in dep order (excl `manual_skipped_ids`):
  - Display batch. One Agent per todo w/ `team_name`. Gets: plan (or ctx/exec instructions) + requirements.md + research.md + parent ctx. `--full-context` → CLAUDE.md + NOTES.md.
  - Worktree → same instruction.
- - Agents exec plan, no `todo_complete`. Plan gap → escalate.
+ - Agents exec plan, no `todo_complete`. Plan gap → use ASK_USER protocol (see Agent Delegation Protocols appendix).
  - Wait per batch. Report failures.
  - Write checkpoint:
      ```yaml
@@ -1285,3 +1285,74 @@ TeamDelete(name="preflight-adversarial-define-<id>")
 ```
 
 Await all three, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show). Repeat per sampled todo.
+
+
+## Agent Delegation Protocols
+
+Spawned agents lack user-facing tools. These protocols bridge gap via SendMessage to lead.
+
+### Tool Availability (spawned agents)
+
+| Tool | Available? |
+|------|-----------|
+| AskUserQuestion | NO |
+| EnterPlanMode / ExitPlanMode | NO |
+| SendMessage | YES |
+| Read / Edit / Write / Bash / Glob / Grep | YES |
+| Task tools (TaskCreate, TaskUpdate, etc.) | YES |
+| MCP tools (proj, worktree, sandbox, router, etc.) | YES |
+
+### ASK_USER Protocol
+
+Agent needs user input → SendMessage to lead:
+
+```
+ASK_USER: <question or decision needed>
+Context: <why this matters>
+Options: <if enumerable, list them>
+```
+
+Lead receives → calls `AskUserQuestion` w/ options → relays answer:
+
+```
+ASK_USER_RESPONSE: <user's answer>
+```
+
+Use for: plan gaps, ambiguous requirements, architectural decisions, scope clarifications.
+
+### PLAN_ESCALATION Protocol
+
+Agent researched + drafted impl plan → SendMessage to lead:
+
+```
+PLAN_ESCALATION:
+<full plan content — Context, Files, Changes, Verification>
+```
+
+Lead receives → `EnterPlanMode` → writes plan file → `ExitPlanMode` → relays:
+
+```
+PLAN_APPROVED
+```
+or
+```
+PLAN_REJECTED: <user feedback>
+```
+
+Agent continues impl (approved) or revises plan + re-escalates (rejected).
+
+Use for: execution agents needing plan approval, speculative planners needing user sign-off.
+
+### Agent Prompt Inclusion
+
+All agent spawn instructions MUST include:
+
+```
+If you encounter work outside approved plan or need user input:
+send "ASK_USER: <description>" via SendMessage to team-lead.
+Do NOT improvise or auto-fix. Wait for ASK_USER_RESPONSE.
+
+If you need plan approval:
+send "PLAN_ESCALATION:\n<plan>" via SendMessage to team-lead.
+Wait for PLAN_APPROVED or PLAN_REJECTED before proceeding.
+```

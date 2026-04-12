@@ -321,7 +321,7 @@ Enforce max_parallel from quality_level mapping.
  - Spawn one Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
  - `worktree_enabled` + todo has `worktree_path`: include `worktree_path`, `worktree_branch` in ctx. Instruction: exec in worktree dir. Prefix commits `[todo-{id}]`.
  - Pattern group todo → include: "Part of pattern group (N similar). Common pattern: <normalized>. Implement consistently."
- - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → (1) detect, (2) `SendMessage` team-lead, (3) team-lead escalates via `AskUserQuestion`.
+ - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead, wait for `ASK_USER_RESPONSE`. Do NOT improvise. (See run/SKILL.md Agent Delegation Protocols appendix.)
  - Wait for batch. Report failures.
  - Write checkpoint to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
      ```yaml
@@ -536,7 +536,7 @@ Enforce max_parallel.
  - Spawn one Agent per todo w/ `team_name`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
  - `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
  - Pattern group → include pattern info.
- - Agents exec as-is. No `todo_complete`. Plan gap → SendMessage team-lead → escalate via AskUserQuestion.
+ - Agents exec as-is. No `todo_complete`. Plan gap → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
  - Wait for batch before next. Report failures.
  - Write checkpoint:
      ```yaml

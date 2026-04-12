@@ -29,6 +29,8 @@ Refine todo: $ARGUMENTS
 
 N roles = N agents — never combine. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning: `TeamCreate(name="refine-review-{todo_id}", description="Refine review agents for todo {todo_id}")`, each Agent w/ `team_name="refine-review-{todo_id}"`. After all return (step 4): `TeamDelete(team_name="refine-review-{todo_id}")`.
 
+Review agents identifying issue requiring architectural decision or user input → use ASK_USER protocol: send `ASK_USER: <finding>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
+
 Load todo `tags`. Select agents per logic below. Spawn all selected parallel:
 
 **Agent 1 — Skeptic:**

@@ -57,6 +57,8 @@ Two bg Task agents (general-purpose, read-only: `Read, Glob, Grep`):
 
 Store handles as `bg_explore_agents`. Do NOT wait — → step 3.
 
+Bg agents discovering critical finding requiring user decision → use ASK_USER protocol: send `ASK_USER: <finding>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
+
 **3.** Entry mode selection
 
 Existing req/research present → display under "Previous context" heading.
