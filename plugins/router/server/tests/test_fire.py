@@ -37,6 +37,7 @@ def _hook(
     *,
     blocking: bool = False,
     condition: str | None = None,
+    result_condition: dict | None = None,
     param_mapping: dict | None = None,
     verification: bool = False,
 ) -> Hook:
@@ -47,6 +48,7 @@ def _hook(
         server=server,
         blocking=blocking,
         condition=condition,
+        result_condition=result_condition,
         param_mapping=param_mapping or {},
         verification=verification,
     )
@@ -1992,3 +1994,181 @@ class TestDepthLimit:
         assert len(fired_hook_ids) == max_depth, (
             f"Expected {max_depth} hooks fired, got {len(fired_hook_ids)}"
         )
+
+
+# ── result_condition tests ──────────────────────────────────────────────────
+
+
+class TestResultCondition:
+    @pytest.mark.asyncio
+    async def test_result_condition_blocks_when_not_met(self, hooks_yaml: Path):
+        """Hook with result_condition={result: merged} skipped when source has result=error."""
+        reg = _make_registry(
+            [
+                _hook(
+                    "hook-001",
+                    "wt_merge",
+                    "wt_remove",
+                    blocking=True,
+                    result_condition={"result": "merged"},
+                ),
+            ]
+        )
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            result = await hooks_fire(
+                "wt_merge", source_result='{"result": "error", "message": "not found"}'
+            )
+
+        mock_fire.assert_not_called()
+        data = json.loads(result)
+        assert data["hooks_fired"] == 0
+        assert data["skipped"] == 1
+        assert "result_condition" in data["skipped_hooks"][0]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_result_condition_passes_when_met(self, hooks_yaml: Path):
+        """Hook fires when source result matches result_condition."""
+        reg = _make_registry(
+            [
+                _hook(
+                    "hook-001",
+                    "wt_merge",
+                    "wt_remove",
+                    blocking=True,
+                    result_condition={"result": "merged"},
+                ),
+            ]
+        )
+        save(reg, hooks_yaml)
+        mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result
+            ),
+        ):
+            result = await hooks_fire(
+                "wt_merge",
+                source_result='{"result": "merged", "worktree_path": "/tmp/wt"}',
+            )
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+        assert data["skipped"] == 0
+
+    @pytest.mark.asyncio
+    async def test_result_condition_none_always_fires(self, hooks_yaml: Path):
+        """Hook without result_condition fires regardless of source content."""
+        reg = _make_registry(
+            [
+                _hook("hook-001", "wt_merge", "wt_remove", blocking=True),
+            ]
+        )
+        save(reg, hooks_yaml)
+        mock_result = FireResult(hook_id="hook-001", status_code=200, body="ok")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch(
+                "server.tools.fire._fire_single", new_callable=AsyncMock, return_value=mock_result
+            ),
+        ):
+            result = await hooks_fire(
+                "wt_merge", source_result='{"result": "error", "message": "boom"}'
+            )
+
+        data = json.loads(result)
+        assert data["hooks_fired"] == 1
+
+    @pytest.mark.asyncio
+    async def test_result_condition_multiple_keys(self, hooks_yaml: Path):
+        """All key==value pairs must match for result_condition to pass."""
+        reg = _make_registry(
+            [
+                _hook(
+                    "hook-001",
+                    "trigger_a",
+                    "target_b",
+                    blocking=True,
+                    result_condition={"result": "merged", "status": "ok"},
+                ),
+            ]
+        )
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            # Only one key matches — should skip
+            result = await hooks_fire(
+                "trigger_a", source_result='{"result": "merged", "status": "partial"}'
+            )
+
+        mock_fire.assert_not_called()
+        data = json.loads(result)
+        assert data["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_result_condition_blocks_conflict(self, hooks_yaml: Path):
+        """Hook with result_condition={result: merged} blocks on conflict result."""
+        reg = _make_registry(
+            [
+                _hook(
+                    "hook-001",
+                    "wt_merge",
+                    "wt_remove",
+                    blocking=True,
+                    result_condition={"result": "merged"},
+                ),
+            ]
+        )
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            result = await hooks_fire(
+                "wt_merge",
+                source_result='{"result": "conflict", "worktree_path": "/tmp/wt"}',
+            )
+
+        mock_fire.assert_not_called()
+        data = json.loads(result)
+        assert data["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_result_condition_blocks_ff_only_failed(self, hooks_yaml: Path):
+        """Hook with result_condition={result: merged} blocks on ff_only_failed."""
+        reg = _make_registry(
+            [
+                _hook(
+                    "hook-001",
+                    "wt_merge",
+                    "wt_remove",
+                    blocking=True,
+                    result_condition={"result": "merged"},
+                ),
+            ]
+        )
+        save(reg, hooks_yaml)
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.tools.fire._fire_single", new_callable=AsyncMock) as mock_fire,
+        ):
+            result = await hooks_fire(
+                "wt_merge",
+                source_result='{"result": "ff_only_failed", "worktree_path": "/tmp/wt"}',
+            )
+
+        mock_fire.assert_not_called()
+        data = json.loads(result)
+        assert data["skipped"] == 1

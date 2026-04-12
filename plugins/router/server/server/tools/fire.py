@@ -89,6 +89,16 @@ def _get_max_depth() -> int:
     return DEFAULT_MAX_DEPTH
 
 
+def _evaluate_result_condition(hook: Hook, source: dict[str, JsonValue]) -> bool:
+    """Check hook's result_condition against the source result dict.
+
+    Returns True if no result_condition is set, or if all key==value pairs match.
+    """
+    if hook.result_condition is None:
+        return True
+    return all(source.get(k) == v for k, v in hook.result_condition.items())
+
+
 # ── Core fire logic ──────────────────────────────────────────────────────────
 
 
@@ -286,6 +296,20 @@ async def _fire_hooks_internal(
                     "hook_id": hook.id,
                     "target_tool": hook.target_tool,
                     "reason": f"condition '{hook.condition}' evaluated false",
+                }
+            )
+            continue
+        if not _evaluate_result_condition(hook, source):
+            logger.debug(
+                "Skipping hook %s: result_condition not met (source.result=%s)",
+                hook.id,
+                source.get("result"),
+            )
+            skipped_hooks.append(
+                {
+                    "hook_id": hook.id,
+                    "target_tool": hook.target_tool,
+                    "reason": f"result_condition {hook.result_condition} not met",
                 }
             )
             continue

@@ -20,6 +20,7 @@ class Hook:
     param_mapping: dict[str, JsonValue] = field(default_factory=dict)
     blocking: bool = False
     condition: str | None = None
+    result_condition: dict[str, JsonValue] | None = None
     source: str | None = None
     verification: bool = False
     feedback_mapping: dict[str, JsonValue] = field(default_factory=dict)
@@ -40,6 +41,8 @@ class Hook:
         }
         if self.condition is not None:
             result["condition"] = self.condition
+        if self.result_condition is not None:
+            result["result_condition"] = self.result_condition
         if self.source is not None:
             result["source"] = self.source
         if self.verification:
@@ -60,6 +63,10 @@ class Hook:
         feedback_mapping: dict[str, JsonValue] = {}
         if isinstance(fm_raw, dict):
             feedback_mapping = {str(k): v for k, v in fm_raw.items()}
+        rc_raw = data.get("result_condition")
+        result_condition: dict[str, JsonValue] | None = (
+            {str(k): v for k, v in rc_raw.items()} if isinstance(rc_raw, dict) else None
+        )
         return cls(
             id=str(data.get("id", "")),
             trigger_tool=str(data.get("trigger_tool", "")),
@@ -68,6 +75,7 @@ class Hook:
             param_mapping=param_mapping,
             blocking=bool(data.get("blocking", False)),
             condition=str(data["condition"]) if data.get("condition") is not None else None,
+            result_condition=result_condition,
             source=str(data["source"]) if data.get("source") is not None else None,
             verification=bool(data.get("verification", False)),
             feedback_mapping=feedback_mapping,
@@ -85,6 +93,11 @@ class Hook:
             self.blocking = bool(new_def["blocking"])
         if "condition" in new_def:
             self.condition = str(new_def["condition"]) if new_def["condition"] is not None else None
+        if "result_condition" in new_def:
+            rc = new_def["result_condition"]
+            self.result_condition = (
+                {str(k): v for k, v in rc.items()} if isinstance(rc, dict) else None
+            )
         if "param_mapping" in new_def:
             pm = new_def["param_mapping"]
             self.param_mapping = {str(k): v for k, v in pm.items()} if isinstance(pm, dict) else {}

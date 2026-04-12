@@ -107,7 +107,7 @@
       "name": "router",
       "source": "./plugins/router",
       "description": "MCP-to-MCP dispatch registry for cpm plugins. Chain tool execution across plugins via post-execution hooks on a shared socket registry. Not to be confused with Claude Code's native hooks feature in settings.json.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "author": {
         "name": "raulfrk"
       },

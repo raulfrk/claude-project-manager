@@ -267,6 +267,90 @@ class TestHook:
         h.update_from({"param_mapping": "not-a-dict"})
         assert h.param_mapping == {}
 
+    # ── result_condition ─────────────────────────────────────────────────────
+
+    def test_result_condition_defaults_none(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        assert h.result_condition is None
+
+    def test_to_dict_includes_result_condition(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            result_condition={"result": "merged"},
+        )
+        d = h.to_dict()
+        assert d["result_condition"] == {"result": "merged"}
+
+    def test_to_dict_omits_result_condition_when_none(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        d = h.to_dict()
+        assert "result_condition" not in d
+
+    def test_from_dict_with_result_condition(self):
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "result_condition": {"result": "merged"},
+            }
+        )
+        assert h.result_condition == {"result": "merged"}
+
+    def test_from_dict_without_result_condition(self):
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+            }
+        )
+        assert h.result_condition is None
+
+    def test_from_dict_ignores_non_dict_result_condition(self):
+        h = Hook.from_dict(
+            {
+                "id": "hook-001",
+                "trigger_tool": "a",
+                "target_tool": "b",
+                "server": "s",
+                "result_condition": "not-a-dict",
+            }
+        )
+        assert h.result_condition is None
+
+    def test_result_condition_round_trip(self):
+        original = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            result_condition={"result": "merged", "status": "ok"},
+        )
+        restored = Hook.from_dict(original.to_dict())
+        assert restored.result_condition == {"result": "merged", "status": "ok"}
+
+    def test_update_from_result_condition(self):
+        h = Hook(id="hook-001", trigger_tool="a", target_tool="b", server="s")
+        h.update_from({"result_condition": {"result": "merged"}})
+        assert h.result_condition == {"result": "merged"}
+
+    def test_update_from_result_condition_clear(self):
+        h = Hook(
+            id="hook-001",
+            trigger_tool="a",
+            target_tool="b",
+            server="s",
+            result_condition={"result": "merged"},
+        )
+        h.update_from({"result_condition": None})
+        assert h.result_condition is None
+
     def test_from_dict_coerces_non_string_condition(self):
         h = Hook.from_dict(
             {

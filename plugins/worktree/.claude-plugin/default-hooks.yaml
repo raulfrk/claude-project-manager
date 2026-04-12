@@ -42,3 +42,5 @@ hooks:
     param_mapping:
       path: "${worktree_path}"
     blocking: true
+    result_condition:
+      result: "merged"
