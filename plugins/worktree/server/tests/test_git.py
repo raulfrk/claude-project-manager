@@ -548,3 +548,144 @@ class TestCommit:
             pytest.raises(GitError, match="nothing to commit"),
         ):
             commit(Path("/some/path"), "test")
+
+
+# ---------------------------------------------------------------------------
+# Bare subprocess.run tests for rebase_worktree
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseWorktreeSubprocess:
+    """Tests for bare subprocess.run calls in rebase_worktree() that bypass _run().
+
+    These tests mock subprocess.run at the git module level to capture
+    current behavior before the refactor in todo 475.7.
+    """
+
+    def test_rebase_success(self) -> None:
+        """Site 4 (git.py:170): subprocess.run returns 0 → {"status": "rebased", ...}."""
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "rebase", "main"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ):
+            result = rebase_worktree("/repo", "/worktree", "main")
+        assert result == {"status": "rebased", "base_branch": "main"}
+
+    def test_rebase_conflict_raises_and_aborts(self) -> None:
+        """Site 4+5 (git.py:170-183): rebase returns non-zero → abort called → GitConflictError."""
+        calls = []
+
+        def side_effect(cmd, *args, **kwargs):
+            calls.append(cmd)
+            if "rebase" in cmd and "--abort" not in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict"
+                )
+            # abort call
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitConflictError, match="Rebase conflict"),
+        ):
+            rebase_worktree("/repo", "/worktree", "main")
+
+        # Verify abort was called
+        assert any("--abort" in cmd for cmd in calls), "rebase --abort should have been called"
+
+    def test_rebase_file_not_found(self) -> None:
+        """Site 4 (git.py:185): subprocess.run raises FileNotFoundError → GitError."""
+        with (
+            patch(
+                "server.lib.git.subprocess.run",
+                side_effect=FileNotFoundError("No such file or directory: 'git'"),
+            ),
+            pytest.raises(GitError, match="git not found"),
+        ):
+            rebase_worktree("/repo", "/worktree", "main")
+
+    def test_rebase_abort_failure_is_silent(self) -> None:
+        """Site 5 (git.py:178): abort fails but error is swallowed
+        -- only GitConflictError raised."""
+        calls = []
+
+        def side_effect(cmd, *args, **kwargs):
+            calls.append(cmd)
+            if "rebase" in cmd and "--abort" not in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="CONFLICT"
+                )
+            if "--abort" in cmd:
+                # abort also fails
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="abort failed"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitConflictError, match="Rebase conflict"),
+        ):
+            rebase_worktree("/repo", "/worktree", "main")
+
+        # Verify abort was attempted even though it failed
+        assert any("--abort" in cmd for cmd in calls)
+
+
+# ---------------------------------------------------------------------------
+# Bare subprocess.run tests for merge_ff_only
+# ---------------------------------------------------------------------------
+
+
+class TestMergeFFOnlySubprocess:
+    """Tests for bare subprocess.run calls in merge_ff_only() that bypass _run().
+
+    These tests mock subprocess.run at the git module level to capture
+    current behavior before the refactor in todo 475.7.
+    """
+
+    def test_merge_success(self) -> None:
+        """Site 6 (git.py:193): subprocess.run returns 0 → {"status": "merged", ...}."""
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "merge", "--ff-only", "feature"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ):
+            result = merge_ff_only("/repo", "feature")
+        assert result == {"status": "merged", "branch": "feature"}
+
+    def test_merge_failure_raises_git_error(self) -> None:
+        """Site 6 (git.py:199): subprocess.run returns non-zero → GitError with stderr."""
+        with (
+            patch(
+                "server.lib.git.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["git", "merge", "--ff-only", "feature"],
+                    returncode=1,
+                    stdout="",
+                    stderr="fatal: Not possible to fast-forward, aborting.",
+                ),
+            ),
+            pytest.raises(GitError, match="Fast-forward merge failed"),
+        ):
+            merge_ff_only("/repo", "feature")
+
+    def test_merge_file_not_found(self) -> None:
+        """Site 6 (git.py:202): subprocess.run raises FileNotFoundError → GitError."""
+        with (
+            patch(
+                "server.lib.git.subprocess.run",
+                side_effect=FileNotFoundError("No such file or directory: 'git'"),
+            ),
+            pytest.raises(GitError, match="git not found"),
+        ):
+            merge_ff_only("/repo", "feature")

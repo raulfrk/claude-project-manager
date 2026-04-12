@@ -929,3 +929,199 @@ class TestAutoCommit:
         data = json.loads(result)
         assert data["result"] == "error"
         assert "status failed" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Bare subprocess.run call tests for merge_worktree
+# ---------------------------------------------------------------------------
+
+
+class TestMergeWorktreeBareSubprocess:
+    """Tests for bare subprocess.run calls in merge_worktree() that bypass git.py.
+
+    These tests mock subprocess.run at the worktrees module level to capture
+    current behavior before the refactor in todo 475.7.
+    """
+
+    def test_detached_head_detection(self, config_with_repo: Path) -> None:
+        """Site 1 (worktrees.py:248): symbolic-ref HEAD non-zero
+        -> error JSON with 'detached HEAD'."""
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch(
+                "server.tools.worktrees.git.list_worktrees",
+                return_value=[],
+            ),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["git", "-C", "/worktree/path", "symbolic-ref", "HEAD"],
+                    returncode=1,
+                    stdout="",
+                    stderr="fatal: ref HEAD is not a symbolic ref",
+                ),
+            ),
+        ):
+            result = merge_worktree("/worktree/path", base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "detached HEAD" in data["message"]
+
+    def test_detached_head_file_not_found(self, config_with_repo: Path) -> None:
+        """Site 1 (worktrees.py:258): FileNotFoundError
+        -> error JSON with 'git not found'."""
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch(
+                "server.tools.worktrees.git.list_worktrees",
+                return_value=[],
+            ),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                side_effect=FileNotFoundError("No such file or directory: 'git'"),
+            ),
+        ):
+            result = merge_worktree("/worktree/path", base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "git not found" in data["message"]
+
+    def test_origin_head_resolution_success(self, config_with_repo: Path) -> None:
+        """Site 2 (worktrees.py:266): origin/HEAD succeeds
+        -> base_branch set from output."""
+
+        def side_effect(cmd, *args, **kwargs):
+            if "symbolic-ref" in cmd and "HEAD" in cmd and "origin" not in str(cmd):
+                # symbolic-ref HEAD → success (not detached)
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="refs/heads/feature\n", stderr=""
+                )
+            if "symbolic-ref" in cmd and "refs/remotes/origin/HEAD" in cmd:
+                # origin HEAD → success
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="refs/remotes/origin/main\n", stderr=""
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.list_worktrees", return_value=[]),
+            patch("server.tools.worktrees.subprocess.run", side_effect=side_effect),
+            patch(
+                "server.tools.worktrees.git.rebase_worktree",
+                return_value={"status": "rebased", "base_branch": "main"},
+            ),
+            patch(
+                "server.tools.worktrees.git.merge_ff_only",
+                return_value={"status": "merged", "branch": "feature"},
+            ),
+            patch("server.tools.worktrees.git.remove_worktree"),
+        ):
+            result = merge_worktree("/worktree/path")  # no base_branch
+        data = json.loads(result)
+        # Should succeed — base_branch resolved from origin/HEAD
+        assert data["result"] != "error"
+
+    def test_origin_head_fallback_to_init_default_branch(self, config_with_repo: Path) -> None:
+        """Site 3 (worktrees.py:274): origin/HEAD fails,
+        init.defaultBranch succeeds -> base_branch from config."""
+
+        def side_effect(cmd, *args, **kwargs):
+            if "symbolic-ref" in cmd and "refs/remotes/origin/HEAD" in cmd:
+                return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
+            if "symbolic-ref" in cmd and "HEAD" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="refs/heads/feature\n", stderr=""
+                )
+            if "config" in cmd and "init.defaultBranch" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="develop\n", stderr=""
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.list_worktrees", return_value=[]),
+            patch("server.tools.worktrees.subprocess.run", side_effect=side_effect),
+            patch(
+                "server.tools.worktrees.git.rebase_worktree",
+                return_value={"status": "rebased", "base_branch": "develop"},
+            ),
+            patch(
+                "server.tools.worktrees.git.merge_ff_only",
+                return_value={"status": "merged", "branch": "feature"},
+            ),
+            patch("server.tools.worktrees.git.remove_worktree"),
+        ):
+            result = merge_worktree("/worktree/path")  # no base_branch
+        data = json.loads(result)
+        assert data["result"] != "error"
+
+    def test_both_resolution_methods_fail(self, config_with_repo: Path) -> None:
+        """Sites 2+3 (worktrees.py:266-289): both origin/HEAD and
+        init.defaultBranch fail -> error JSON."""
+
+        def side_effect(cmd, *args, **kwargs):
+            if "symbolic-ref" in cmd and "refs/remotes/origin/HEAD" in cmd:
+                return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
+            if "symbolic-ref" in cmd and "HEAD" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="refs/heads/feature\n", stderr=""
+                )
+            if "config" in cmd and "init.defaultBranch" in cmd:
+                return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.list_worktrees", return_value=[]),
+            patch("server.tools.worktrees.subprocess.run", side_effect=side_effect),
+        ):
+            result = merge_worktree("/worktree/path")  # no base_branch
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "Cannot determine default branch" in data["message"]
+
+    def test_base_branch_resolution_file_not_found(self, config_with_repo: Path) -> None:
+        """Site 2 (worktrees.py:290): FileNotFoundError during
+        resolution -> error JSON with 'git not found'."""
+        call_count = 0
+
+        def side_effect(cmd, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: symbolic-ref HEAD → success
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="refs/heads/feature\n", stderr=""
+                )
+            # Second call: origin HEAD resolution → FileNotFoundError
+            raise FileNotFoundError("No such file or directory: 'git'")
+
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.list_worktrees", return_value=[]),
+            patch("server.tools.worktrees.subprocess.run", side_effect=side_effect),
+        ):
+            result = merge_worktree("/worktree/path")  # no base_branch
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "git not found" in data["message"]
