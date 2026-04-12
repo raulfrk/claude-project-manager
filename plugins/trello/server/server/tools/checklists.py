@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from server.lib.client import JsonValue, get_client
+from server.lib.client import JsonValue, TrelloAPIError, get_client
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -44,8 +44,8 @@ def register(app: FastMCP) -> None:
         client = get_client()
         try:
             client.delete(f"/checklists/{checklist_id}")
-        except Exception as exc:
-            if "404" in str(exc):
+        except TrelloAPIError as exc:
+            if exc.status_code == 404:
                 return json.dumps(
                     {
                         "warning": "checklist not found or already deleted",

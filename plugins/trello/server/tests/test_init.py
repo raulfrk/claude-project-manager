@@ -72,6 +72,27 @@ class TestTrelloInitSuccess:
         assert client_mod._cached_client is None
 
 
+class TestTrelloInitFilePermissions:
+    def test_config_file_written_with_600_permissions(
+        self, init_tools: dict, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / "trello.yaml"
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"username": "alice"}
+
+        config_mod._cached_config = None
+        client_mod._cached_client = None
+
+        with (
+            patch("server.tools.init.httpx.get", return_value=mock_resp),
+            patch("server.tools.init.Path.expanduser", return_value=config_path),
+        ):
+            init_tools["trello_init"](api_key="k", token="t")
+
+        assert config_path.stat().st_mode & 0o777 == 0o600
+
+
 class TestTrelloInitFailure:
     def test_invalid_credentials_returns_error(self, init_tools: dict) -> None:
         mock_resp = MagicMock()

@@ -208,7 +208,9 @@ class TestDeleteChecklist:
 class TestDeleteChecklistNotFound:
     def test_404_returns_warning(self, mock_trello_client: MagicMock) -> None:
         tools = _collect_tools(register_checklists, mock_trello_client)
-        mock_trello_client.delete.side_effect = RuntimeError("Trello API error 404: not found")
+        from server.lib.client import TrelloAPIError
+
+        mock_trello_client.delete.side_effect = TrelloAPIError(404, "not found")
 
         result = tools["delete_checklist"]("cl_gone")
 

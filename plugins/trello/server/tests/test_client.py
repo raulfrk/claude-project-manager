@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from server.lib.client import TrelloClient, get_client
+from server.lib.client import TrelloAPIError, TrelloClient, get_client
 from server.lib.config import TrelloConfig
 
 
@@ -49,6 +49,10 @@ def _error_response(status: int, text: str) -> MagicMock:
 
 
 class TestAuthParams:
+    def test_auth_params_returns_key_token_dict(self, client: TrelloClient) -> None:
+        result = client._auth_params()
+        assert result == {"key": "test-key", "token": "test-token"}
+
     def test_auth_params_included_in_get(self, client: TrelloClient) -> None:
         client._http.request.return_value = _ok_response({"id": "b1"})
 
@@ -173,27 +177,49 @@ class TestRateLimiting:
         assert len(c._request_timestamps) == 2
 
 
+# ---------- TrelloAPIError ----------
+
+
+class TestTrelloAPIError:
+    def test_is_runtime_error(self) -> None:
+        err = TrelloAPIError(404, "Not Found")
+        assert isinstance(err, RuntimeError)
+
+    def test_has_status_code_and_text(self) -> None:
+        err = TrelloAPIError(500, "Internal Server Error")
+        assert err.status_code == 500
+        assert err.text == "Internal Server Error"
+
+    def test_message_format(self) -> None:
+        err = TrelloAPIError(401, "Unauthorized")
+        assert str(err) == "Trello API error 401: Unauthorized"
+
+
 # ---------- Error handling ----------
 
 
 class TestErrorHandling:
-    def test_401_raises_runtime_error(self, client: TrelloClient) -> None:
+    def test_401_raises_trello_api_error(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(401, "Unauthorized")
 
-        with pytest.raises(RuntimeError, match="Trello API error 401: Unauthorized"):
+        with pytest.raises(TrelloAPIError, match="Trello API error 401: Unauthorized") as exc_info:
             client.get("/boards")
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.text == "Unauthorized"
 
-    def test_404_raises_runtime_error(self, client: TrelloClient) -> None:
+    def test_404_raises_trello_api_error(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(404, "Not Found")
 
-        with pytest.raises(RuntimeError, match="Trello API error 404"):
+        with pytest.raises(TrelloAPIError) as exc_info:
             client.get("/cards/nonexistent")
+        assert exc_info.value.status_code == 404
 
-    def test_500_raises_runtime_error(self, client: TrelloClient) -> None:
+    def test_500_raises_trello_api_error(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(500, "Internal Server Error")
 
-        with pytest.raises(RuntimeError, match="Trello API error 500"):
+        with pytest.raises(TrelloAPIError) as exc_info:
             client.post("/cards")
+        assert exc_info.value.status_code == 500
 
     def test_success_returns_json(self, client: TrelloClient) -> None:
         client._http.request.return_value = _ok_response({"id": "abc", "name": "Board"})
@@ -204,20 +230,27 @@ class TestErrorHandling:
     def test_post_error_includes_body(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(400, "invalid value for name")
 
-        with pytest.raises(RuntimeError, match="invalid value for name"):
+        with pytest.raises(TrelloAPIError, match="invalid value for name"):
             client.post("/cards", params={"name": ""})
 
     def test_put_error(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(403, "Forbidden")
 
-        with pytest.raises(RuntimeError, match="Trello API error 403"):
+        with pytest.raises(TrelloAPIError, match="Trello API error 403"):
             client.put("/boards/b1", params={"name": "x"})
 
     def test_delete_error(self, client: TrelloClient) -> None:
         client._http.request.return_value = _error_response(404, "Not Found")
 
-        with pytest.raises(RuntimeError, match="Trello API error 404"):
+        with pytest.raises(TrelloAPIError):
             client.delete("/cards/missing")
+
+    def test_error_still_caught_as_runtime_error(self, client: TrelloClient) -> None:
+        """Backward compat: existing code catching RuntimeError still works."""
+        client._http.request.return_value = _error_response(500, "Server Error")
+
+        with pytest.raises(RuntimeError, match="Trello API error 500"):
+            client.get("/boards")
 
 
 # ---------- Reactive rate limiting (429 Retry-After) ----------

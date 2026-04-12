@@ -15,6 +15,16 @@ if TYPE_CHECKING:
 
 BASE_URL = "https://api.trello.com/1"
 
+
+class TrelloAPIError(RuntimeError):
+    """Raised when the Trello API returns a non-success HTTP response."""
+
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+        super().__init__(f"Trello API error {status_code}: {text}")
+
+
 # Recursive JSON value type — no Any needed.
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
 
@@ -42,6 +52,8 @@ class TrelloClient:
             )
 
     def _auth_params(self) -> dict[str, str]:
+        # Trello's REST API requires key/token as query parameters; there is no
+        # header-based alternative.  This is a Trello API design constraint.
         return {"key": self._config.api_key, "token": self._config.token}
 
     def _rate_limit(self) -> None:
@@ -62,8 +74,7 @@ class TrelloClient:
     def _handle_response(self, resp: httpx.Response) -> JsonValue:
         if resp.is_success:
             return cast("JsonValue", resp.json())
-        msg = f"Trello API error {resp.status_code}: {resp.text}"
-        raise RuntimeError(msg)
+        raise TrelloAPIError(resp.status_code, resp.text)
 
     def _request(
         self,
