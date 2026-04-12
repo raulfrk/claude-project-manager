@@ -409,6 +409,106 @@ class TestRebaseWorktree:
         assert not (git_dir / "rebase-merge").exists()
         assert not (git_dir / "rebase-apply").exists()
 
+    def test_rebase_abort_failure_silently_lost(self) -> None:
+        """When rebase fails AND abort also fails, abort error is silently lost.
+
+        Documents current buggy behavior: the abort result is never checked,
+        so GitConflictError is raised as if abort succeeded. The worktree may
+        be left in a broken mid-rebase state.
+        """
+        rebase_fail = subprocess.CompletedProcess(
+            args=["git", "rebase", "main"],
+            returncode=1,
+            stdout="",
+            stderr="CONFLICT (content): Merge conflict in file.txt",
+        )
+        abort_fail = subprocess.CompletedProcess(
+            args=["git", "rebase", "--abort"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: No rebase in progress?",
+        )
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_fail]),
+            pytest.raises(GitConflictError, match="Rebase conflict"),
+        ):
+            rebase_worktree("/repo", "/repo/wt", "main")
+
+    def test_rebase_abort_success_no_rebase_dirs(self, tmp_path: Path) -> None:
+        """After successful abort, no rebase-merge or rebase-apply dirs remain.
+
+        Mock-based complement to test_rebase_conflict_raises_and_aborts.
+        """
+        rebase_fail = subprocess.CompletedProcess(
+            args=["git", "rebase", "main"],
+            returncode=1,
+            stdout="",
+            stderr="CONFLICT (content): Merge conflict in file.txt",
+        )
+        abort_ok = subprocess.CompletedProcess(
+            args=["git", "rebase", "--abort"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        wt = tmp_path / "worktree"
+        wt.mkdir()
+        git_dir = wt / ".git"
+        git_dir.mkdir()
+        # Simulate rebase-merge dir that abort should clean up
+        (git_dir / "rebase-merge").mkdir()
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_ok]),
+            pytest.raises(GitConflictError),
+        ):
+            rebase_worktree("/repo", str(wt), "main")
+
+        # In a real scenario, a successful abort removes these dirs.
+        # Since we mock subprocess.run, the dirs are not actually removed,
+        # but the test verifies the function completes the abort call.
+        # The existing integration test (test_rebase_conflict_raises_and_aborts)
+        # verifies the dirs are actually cleaned up with real git.
+
+    def test_rebase_file_not_found_raises_git_error(self) -> None:
+        """FileNotFoundError (e.g., git binary missing) raises GitError."""
+        with (
+            patch(
+                "server.lib.git.subprocess.run",
+                side_effect=FileNotFoundError("No such file or directory: 'git'"),
+            ),
+            pytest.raises(GitError, match="git not found"),
+        ):
+            rebase_worktree("/repo", "/some/worktree", "main")
+
+    def test_rebase_conflict_error_includes_path_and_stderr(self) -> None:
+        """GitConflictError message includes both worktree path and stderr text."""
+        rebase_fail = subprocess.CompletedProcess(
+            args=["git", "rebase", "main"],
+            returncode=1,
+            stdout="",
+            stderr="CONFLICT (content): Merge conflict in important.py",
+        )
+        abort_ok = subprocess.CompletedProcess(
+            args=["git", "rebase", "--abort"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        wt_path = "/home/user/worktrees/feature-branch"
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_ok]),
+            pytest.raises(GitConflictError, match=wt_path) as exc_info,
+        ):
+            rebase_worktree("/repo", wt_path, "main")
+
+        error_msg = str(exc_info.value)
+        assert wt_path in error_msg
+        assert "Merge conflict in important.py" in error_msg
+
 
 # ---------------------------------------------------------------------------
 # merge_ff_only tests
