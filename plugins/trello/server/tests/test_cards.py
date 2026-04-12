@@ -102,6 +102,41 @@ class TestAddCardToList:
         _, kwargs = mock_trello_client.post.call_args
         assert "due" not in kwargs["params"]
 
+    def test_valid_label_ids(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
+        """Valid label_ids are joined into CSV idLabels param."""
+        mock_trello_client.post.return_value = {"id": "c3"}
+        card_tools["add_card_to_list"]("list1", "Card", label_ids=["lbl1", "lbl2"])
+        _, kwargs = mock_trello_client.post.call_args
+        assert kwargs["params"]["idLabels"] == "lbl1,lbl2"
+
+    def test_empty_string_in_label_ids(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        """Documents current behavior: empty string produces double comma in CSV."""
+        mock_trello_client.post.return_value = {"id": "c3"}
+        card_tools["add_card_to_list"]("list1", "Card", label_ids=["lbl1", "", "lbl2"])
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: empty string passes through, producing "lbl1,,lbl2"
+        assert kwargs["params"]["idLabels"] == "lbl1,,lbl2"
+
+    def test_whitespace_label_id(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
+        """Documents current behavior: whitespace-only ID passes through unvalidated."""
+        mock_trello_client.post.return_value = {"id": "c3"}
+        card_tools["add_card_to_list"]("list1", "Card", label_ids=["lbl1", "   ", "lbl2"])
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: whitespace passes through
+        assert kwargs["params"]["idLabels"] == "lbl1,   ,lbl2"
+
+    def test_label_id_containing_comma(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        """Documents current behavior: embedded comma in ID looks like two IDs."""
+        mock_trello_client.post.return_value = {"id": "c3"}
+        card_tools["add_card_to_list"]("list1", "Card", label_ids=["lbl1,lbl2"])
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: single element with comma becomes indistinguishable from two IDs
+        assert kwargs["params"]["idLabels"] == "lbl1,lbl2"
+
 
 class TestUpdateCardDetails:
     def test_updates_name(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
@@ -333,3 +368,50 @@ class TestBatchCreateCards:
 
         _, kwargs = mock_trello_client.post.call_args
         assert "desc" not in kwargs["params"]
+
+    def test_valid_label_ids(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
+        """Valid label_ids are applied as idLabels to each card."""
+        mock_trello_client.post.return_value = {"id": "c10"}
+        card_tools["batch_create_cards"](
+            [{"list_id": "list1", "name": "Card A"}],
+            label_ids=["lbl1"],
+        )
+        _, kwargs = mock_trello_client.post.call_args
+        assert kwargs["params"]["idLabels"] == "lbl1"
+
+    def test_empty_string_in_label_ids(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        """Documents current behavior: empty string produces double comma in CSV."""
+        mock_trello_client.post.return_value = {"id": "c10"}
+        card_tools["batch_create_cards"](
+            [{"list_id": "list1", "name": "Card A"}],
+            label_ids=["lbl1", "", "lbl2"],
+        )
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: empty string passes through, producing "lbl1,,lbl2"
+        assert kwargs["params"]["idLabels"] == "lbl1,,lbl2"
+
+    def test_whitespace_label_id(self, mock_trello_client: MagicMock, card_tools: dict) -> None:
+        """Documents current behavior: whitespace-only ID passes through unvalidated."""
+        mock_trello_client.post.return_value = {"id": "c10"}
+        card_tools["batch_create_cards"](
+            [{"list_id": "list1", "name": "Card A"}],
+            label_ids=["lbl1", "   ", "lbl2"],
+        )
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: whitespace passes through
+        assert kwargs["params"]["idLabels"] == "lbl1,   ,lbl2"
+
+    def test_label_id_containing_comma(
+        self, mock_trello_client: MagicMock, card_tools: dict
+    ) -> None:
+        """Documents current behavior: embedded comma in ID looks like two IDs."""
+        mock_trello_client.post.return_value = {"id": "c10"}
+        card_tools["batch_create_cards"](
+            [{"list_id": "list1", "name": "Card A"}],
+            label_ids=["lbl1,lbl2"],
+        )
+        _, kwargs = mock_trello_client.post.call_args
+        # No validation: single element with comma becomes indistinguishable from two IDs
+        assert kwargs["params"]["idLabels"] == "lbl1,lbl2"
