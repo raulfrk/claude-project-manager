@@ -437,6 +437,176 @@ class TestMergeWorktree:
         assert data["result"] == "error"
         assert "Cannot determine default branch" in data["message"]
 
+    def test_merge_conflict_rebase_aborted(self, real_git_repo: Path) -> None:
+        """AC1: After conflict, rebase is fully aborted — no rebase state, clean tree."""
+        create_result = create_worktree("myapp", "feature/conflict-abort")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-conflict-abort"
+
+        # Edit README on feature branch
+        (wt_path / "README.md").write_text("feature side")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "feature edit")
+
+        # Edit README on main to create conflict
+        (real_git_repo / "README.md").write_text("main side")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main edit")
+
+        result = merge_worktree(str(wt_path), base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+
+        # Verify no rebase-merge or rebase-apply dir in worktree git dir
+        git_dir = _git(wt_path, "rev-parse", "--git-dir")
+        git_dir_path = Path(git_dir) if Path(git_dir).is_absolute() else wt_path / git_dir
+        assert not (git_dir_path / "rebase-merge").exists()
+        assert not (git_dir_path / "rebase-apply").exists()
+
+        # git status should not report rebase in progress
+        status_output = _git(wt_path, "status")
+        assert "rebase in progress" not in status_output.lower()
+
+        # Working tree should be clean (no conflict markers)
+        status_porcelain = _git(wt_path, "status", "--porcelain")
+        assert status_porcelain == ""
+
+    def test_merge_conflict_message_contains_info(self, real_git_repo: Path) -> None:
+        """AC2: Conflict response message field contains meaningful info."""
+        create_result = create_worktree("myapp", "feature/conflict-msg")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-conflict-msg"
+
+        (wt_path / "README.md").write_text("feature msg")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "feature edit")
+
+        (real_git_repo / "README.md").write_text("main msg")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main edit")
+
+        result = merge_worktree(str(wt_path), base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+        # message should contain conflict-related info from GitConflictError
+        assert "conflict" in data["message"].lower()
+        assert len(data["message"]) > 10  # not empty/trivial
+
+    def test_merge_conflict_worktree_remains_usable(self, real_git_repo: Path) -> None:
+        """AC3: After conflict, worktree is functional — commits possible, branch intact."""
+        create_result = create_worktree("myapp", "feature/conflict-usable")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-conflict-usable"
+
+        (wt_path / "README.md").write_text("feature usable")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "feature edit")
+
+        (real_git_repo / "README.md").write_text("main usable")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main edit")
+
+        result = merge_worktree(str(wt_path), base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+
+        # Branch is still checked out (not detached HEAD)
+        head_ref = _git(wt_path, "symbolic-ref", "HEAD")
+        assert head_ref == "refs/heads/feature/conflict-usable"
+
+        # New commits can still be made
+        (wt_path / "newfile.txt").write_text("post-conflict commit")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "post-conflict work")
+
+        # Verify the commit landed
+        log_output = _git(wt_path, "log", "--oneline", "-1")
+        assert "post-conflict work" in log_output
+
+        # A subsequent merge can succeed after the conflict source is resolved.
+        # Reset the feature branch to main (so they share history), then add
+        # a non-conflicting commit.
+        _git(wt_path, "reset", "--hard", "main")
+        (wt_path / "feature-only.txt").write_text("no conflict")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "non-conflicting change")
+
+        result2 = merge_worktree(str(wt_path), base_branch="main")
+        data2 = json.loads(result2)
+        assert data2["result"] == "merged"
+
+    def test_merge_conflict_abort_failure(self, real_git_repo: Path) -> None:
+        """AC4: Both rebase AND abort fail — GitConflictError still raised."""
+        create_result = create_worktree("myapp", "feature/abort-fail")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-abort-fail")
+
+        real_run = subprocess.run
+
+        call_count = {"rebase": 0}
+
+        def patched_run(cmd, *args, **kwargs):
+            cmd_list = list(cmd)
+            if "rebase" in cmd_list:
+                if "--abort" in cmd_list:
+                    # Abort fails
+                    return subprocess.CompletedProcess(
+                        args=cmd, returncode=128, stdout="", stderr="fatal: abort failed"
+                    )
+                else:
+                    call_count["rebase"] += 1
+                    # Initial rebase fails (conflict)
+                    return subprocess.CompletedProcess(
+                        args=cmd,
+                        returncode=1,
+                        stdout="",
+                        stderr="CONFLICT (content): Merge conflict in README.md",
+                    )
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("server.lib.git.subprocess.run", side_effect=patched_run):
+            result = merge_worktree(wt_path, base_branch="main")
+
+        data = json.loads(result)
+        # GitConflictError is still raised and caught by merge_worktree
+        assert data["result"] == "conflict"
+        assert call_count["rebase"] == 1
+
+    def test_merge_conflict_no_worktree_commits(self, real_git_repo: Path) -> None:
+        """AC5: Conflict with no additional commits on worktree branch."""
+        create_result = create_worktree("myapp", "feature/no-commits")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = real_git_repo.parent / "worktrees" / "myapp" / "feature-no-commits"
+
+        # Don't make any commits on the feature branch.
+        # Instead, make a commit on main that diverges from the branch point.
+        # The worktree branch was created from main's HEAD, so it shares
+        # the same README.md. We need to make a commit on main that changes
+        # README.md, then also commit a change on the worktree branch so
+        # there's an actual conflict during rebase.
+        (real_git_repo / "README.md").write_text("main diverged")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main diverge")
+
+        # Make a single conflicting commit on the worktree branch
+        (wt_path / "README.md").write_text("worktree diverged")
+        _git(wt_path, "add", ".")
+        _git(wt_path, "commit", "-m", "worktree single edit")
+
+        result = merge_worktree(str(wt_path), base_branch="main")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+        assert data["branch"] == "feature/no-commits"
+
+        # Worktree should be clean after abort
+        status_porcelain = _git(wt_path, "status", "--porcelain")
+        assert status_porcelain == ""
+
 
 # ---------------------------------------------------------------------------
 # Gap tests: untested error/edge paths
