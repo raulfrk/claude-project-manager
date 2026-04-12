@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def _atomic_write(path: Path, content: str) -> None:
             f.write(content)
         tmp.replace(real_path)
         if original_mode is not None:
-            real_path.chmod(original_mode & 0o7777)
+            real_path.chmod(stat.S_IMODE(original_mode))
     except Exception:
         with contextlib.suppress(OSError):
             tmp.unlink()
