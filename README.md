@@ -72,6 +72,7 @@ The installer wizard now prompts for an advanced tier after the basic questions 
 /proj:decompose <id>    # Break a todo into sub-todos with dependencies
 /proj:execute <id>      # Implement a todo (reads requirements, spawns agents)
 /proj:run <id>          # Full workflow: define -> decompose -> execute
+/proj:run-batch <ids>   # Batch/range execution for multiple todos
 /proj:explore           # Walk through codebase in guided chapters
 ```
 

@@ -276,6 +276,7 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `/proj:decompose` | Break todo into sub-todos with dependencies | `<todo-id>` |
 | `/proj:execute` | Execute a todo (implement changes) | `<todo-id>` |
 | `/proj:run` | Full workflow: define, decompose, execute | `<id \| range>` `[--steps]` `[--from]` `[--iter N]` |
+| `/proj:run-batch` | Batch/range execution workflow for multiple todos | `<id-range\|comma-list>` `[--steps]` `[--fast\|--careful]` `[--trust N]` |
 | `/proj:save` | Save session notes and reconcile git | -- |
 | `/proj:load` | Load project for session (cross-directory) | `[project-name]` |
 | `/proj:switch` | Switch active project context | `[project-name]` |
