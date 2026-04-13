@@ -2,7 +2,7 @@
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--worktree] [--no-worktree]"
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--careful] [--force-plan] [--worktree] [--no-worktree] [--max-parallel N]"
 ---
 
 
@@ -25,11 +25,10 @@ Extract from $ARGUMENTS:
  - Trust 3 (full-auto): no plan phase — agents exec w/ ctx only (requirements + research + parent ctx)
 - `--resume`: resume from most recent checkpoint. See Resume checkpoint sections.
 - `--no-pipeline`: disable plan-while-executing pipeline (default: pipeline enabled)
-- `--refine`: enable requirement refinement w/ review agents (default: off for `--balanced`, auto-enabled for `--careful`/`--paranoid`)
+- `--refine`: enable requirement refinement w/ review agents (default: off for `--fast`, auto-enabled for `--careful`)
 - `--fast`: minimize review gates, auto-exec low-complexity todos, skip verification. Tag immunity: `security`/`breaking-change`/`migration` still get FULL REVIEW.
-- `--balanced`: smart-gate scoring determines review level.
-- `--careful`: default. Full review all plans, auto-enable refine, enhanced verification.
-- `--paranoid`: sequential exec (max_parallel=1), cross-review agents, full verification w/ independent review agent.
+- `--careful`: default. Full review all plans, auto-enable refine, enhanced verification. For sequential exec, combine w/ `--max-parallel 1`.
+- `--max-parallel N`: override max_parallel (e.g. `--careful --max-parallel 1` for former `--paranoid` behavior).
 - Quality levels mutually exclusive (last wins, default: `--careful`).
 - `--force-plan`: force FULL REVIEW on all todos despite complexity score.
 - `--batch-approve`: (batch mode only — passed through to `/proj:run-batch`).
@@ -38,50 +37,48 @@ Extract from $ARGUMENTS:
 
 Derive `worktree_enabled` — **default: on**:
  1. `--no-worktree` explicitly passed → off.
- 2. `quality_level == paranoid` → off (max_parallel=1 makes worktree unnecessary).
+ 2. `max_parallel == 1` → off (sequential exec makes worktree unnecessary).
  3. Else → on (despite `config.worktree_isolation`; config flag retained for legacy callers, force-off via `--no-worktree`).
 
 Derive `quality_level` from flags. If no quality flag, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--careful` if unset/unrecognized.
 
 **Quality Level Parameter Mapping:**
 
-| Parameter | --fast | --balanced | --careful | --paranoid |
-|-----------|--------|-----------|-----------|-----------|
-| gate_override | auto-execute (tag-immune) | smart-gate | full-review | full-review |
-| batch_approve | auto | smart-gate | disabled | disabled |
-| speculative_planning | enabled | enabled | disabled | disabled |
-| pattern_detection | auto-approve | enabled | disabled | disabled |
-| verification_mode | skip | standard | enhanced | full |
-| max_parallel | 30 | 30 | 10 | 1 |
-| satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
-| preflight | skip | enabled | enabled | enabled |
-| preflight_structural | skip | enabled | enabled | enabled |
-| preflight_adversarial_agents | skip | skip | enabled | enabled |
-| pre_execute_preflight | skip | enabled | enabled | enabled |
-| refine | skip | if --refine set | auto-enabled (per iteration) | auto-enabled (per iteration) |
-| worktree | on (unless `--no-worktree`) | on (unless `--no-worktree`) | on (unless `--no-worktree`) | off (max_parallel=1) |
-| overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
+| Parameter | --fast | --careful (default) |
+|-----------|--------|---------------------|
+| gate_override | auto-execute (tag-immune) | full-review |
+| batch_approve | auto | disabled |
+| speculative_planning | enabled | disabled |
+| pattern_detection | auto-approve | disabled |
+| verification_mode | skip | enhanced |
+| max_parallel | 30 | 10 |
+| satisfaction | skip (auto-complete) | per-todo |
+| preflight | skip | enabled |
+| preflight_structural | skip | enabled |
+| preflight_adversarial_agents | skip | enabled |
+| pre_execute_preflight | skip | enabled |
+| refine | skip | auto-enabled (per iteration) |
+| worktree | on (unless `--no-worktree`) | on (unless `--no-worktree` or max_parallel=1) |
+| overlap_action | auto-proceed | auto-serialize |
 
-**Recommended cap**: 10 for CPU-bound/API-rate-limited workloads (heavy test suites, rate-limited LLM calls, DB migrations). Raw `--fast`/`--balanced` ceiling of 30 tuned for I/O-bound work w/ isolated worktrees; override via `--max-parallel` or `config.team_mode.max_agents` when agent saturates shared resource.
+**Former `--paranoid` behavior**: `--careful --max-parallel 1` (sequential exec, worktree auto-off).
+
+**Recommended cap**: 10 for CPU-bound/API-rate-limited workloads (heavy test suites, rate-limited LLM calls, DB migrations). `--fast` ceiling of 30 tuned for I/O-bound work w/ isolated worktrees; override via `--max-parallel` or `config.team_mode.max_agents` when agent saturates shared resource.
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **Flag compatibility check** (validate before proceeding):
 - `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
 - `--fast --refine` → fast wins, refine skipped (warn).
-- `--no-verify --paranoid` → ERROR: "Cannot combine --no-verify with --paranoid."
 - `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification skipped.
 - `--fast --steps refine` → ERROR: "Cannot use --fast with --steps refine (fast skips refine)."
-- `--paranoid --no-pipeline` → Redundant warn: "--paranoid already enforces max_parallel=1."
 - `--careful --no-pipeline` → Allowed.
 - `--fast --no-pipeline` → Redundant warn: "--fast with auto-execute makes pipeline moot."
 - `--force-plan --careful` → Redundant warn: "--careful already forces full review."
-- `--force-plan --paranoid` → Redundant warn: "--paranoid already forces full review."
-- `--no-verify --balanced` → --no-verify wins, verification skipped.
 - `--no-verify --fast` → Redundant: --fast already skips verification.
 - `--refine --from execute` → Refine skipped (--from execute skips refine per step-order slicing).
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3 (trust 3 skips planning)."
-- `--paranoid --worktree` → paranoid wins, worktree disabled (warn: "max_parallel=1 makes worktree isolation unnecessary").
+- `--max-parallel 1 --worktree` → max_parallel wins, worktree disabled (warn: "max_parallel=1 makes worktree isolation unnecessary").
 - `--worktree --no-interactive` → Allowed. Auto-resolve only for merge conflicts.
 
 No todo ID → stop: "Todo ID required. Usage: `/proj:run <id> [--steps define,execute] [--from <step>]`"
@@ -207,7 +204,7 @@ Each todo in descendant list:
 
 **Phase A.5b — Adversarial Review (Define)**
 
-Runs only when `quality_level` in `[careful, paranoid]`. NEVER under `--balanced`/`--fast`. Runs after structural checks pass, in parallel across 3 read-only agents.
+Runs only when `quality_level == careful`. NEVER under `--fast`. Runs after structural checks pass, in parallel across 3 read-only agents.
 
 **Batch sampling**: descendant list > 5 → agents run on **5 highest-complexity** todos (ranked by 7-dimension complexity score from Phase C1 smart gating). Others get structural checks only. Override: `--force-preflight-all`.
 
@@ -253,7 +250,7 @@ See **Preflight Agents Reference** appendix for prompt templates.
 
 **Severity semantics**:
 - BLOCKING — triggers Fix / Continue / Stop. Subject to `--no-interactive` demotion + fix-loop cap.
-- WARNING — shown, non-blocking, single OK. Under `--paranoid`, WARNINGs need explicit ack; "Acknowledge all WARNINGs" shortcut when >= 3.
+- WARNING — shown, non-blocking, single OK. Under `--careful --max-parallel 1`, WARNINGs need explicit ack; "Acknowledge all WARNINGs" shortcut when >= 3.
 - INFO — shown, non-blocking, no ack.
 
 **Degraded mode**: agent timeouts/malformed JSON → demoted to WARNING (never BLOCKING). Raw output shown under finding.
@@ -267,9 +264,9 @@ Each batch in dep order:
  - Wait for batch. Report failures.
 After: refresh descendant list via `mcp__proj__todo_tree`. `TeamDelete`.
 
-**If `refine`** — after decompose, within iteration (if `quality_level in [careful, paranoid]` AND `refine` in steps AND NOT `--no-interactive`):
+**If `refine`** — after decompose, within iteration (if `quality_level == careful` AND `refine` in steps AND NOT `--no-interactive`):
 
-fast → skip refine. careful/paranoid → auto-enable despite --refine flag.
+fast → skip refine. careful → auto-enable despite --refine flag.
 
 Each todo: `skill: "proj:refine", args: "<id>"`.
  Apply → requirements/research updated, preflight re-runs automatically.

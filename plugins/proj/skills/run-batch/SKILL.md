@@ -2,7 +2,7 @@
 name: run-batch
 description: Batch/range execution workflow for multiple todos. Extension of run skill.
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--trust N]"
+argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--trust N] [--max-parallel N]"
 ---
 
 
@@ -14,14 +14,14 @@ Batch/range execution workflow. Extension of `run/SKILL.md` — all flag parsing
 
 Parse each token from $ARGUMENTS:
 - `<range>:<level>` (e.g. `2-5:fast`) → parse error: "Per-range annotation not supported. Use explicit list: `2:fast,3:fast,...`"
-- `<id>:<level>` → extract id + level; if level not `fast|balanced|careful|paranoid` → parse error "Unknown level '<level>' — valid: fast, balanced, careful, paranoid"
+- `<id>:<level>` → extract id + level; if level not `fast|careful` → parse error "Unknown level '<level>' — valid: fast, careful"
 - Bare `<id>`/`<range>` → no annotation
 
 After parsing: `mcp__proj__todo_get` on each ID to confirm existence; parse error for missing.
 Store `per_todo_quality: dict[str, str]` (id → level for annotated only). If ≥1 annotation → `auto_suggest_mode = false`; zero → `auto_suggest_mode = true`.
-Tag-immune upgrade: each ID in `per_todo_quality` w/ tags `security`/`breaking-change`/`migration`: if annotated `fast`/`balanced`, silently upgrade to `careful` + warn: "Todo N has tag X — annotation :<old> upgraded to :careful (tag-immune safety rule)"
+Tag-immune upgrade: each ID in `per_todo_quality` w/ tags `security`/`breaking-change`/`migration`: if annotated `fast`, silently upgrade to `careful` + warn: "Todo N has tag X — annotation :fast upgraded to :careful (tag-immune safety rule)"
 
-All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--team`, `--no-team`, `--full-context`, `--trust`, `--resume`, `--no-pipeline`, `--refine`, `--fast`/`--balanced`/`--careful`/`--paranoid`, `--force-plan`, `--batch-approve`, `--worktree`/`--no-worktree`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
+All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--team`, `--no-team`, `--full-context`, `--trust`, `--resume`, `--no-pipeline`, `--refine`, `--fast`/`--careful`, `--force-plan`, `--batch-approve`, `--worktree`/`--no-worktree`, `--max-parallel`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
 
 ## Batch mode
 
@@ -45,17 +45,17 @@ Helper: `effective_quality(todo_id) = per_todo_quality.get(todo_id, quality_leve
 **If `auto_suggest_mode` is true** (zero `:level` annotations):
 
 Each todo in dep order, `mcp__proj__todo_get` + compute suggested quality:
-1. **Tag signals (first, highest wins)**: `security`/`breaking-change`/`migration` → `paranoid`; `needs-review` → `careful`; `auto-execute` → `fast`
-2. **Complexity score** (dims 3-7 only — file-count + dir-spread default 0, no plans yet): 8-14 → `careful`; 4-7 → `balanced`; 0-3 → `fast`. `paranoid` only via tag signals.
+1. **Tag signals (first, highest wins)**: `security`/`breaking-change`/`migration` → `careful`; `needs-review` → `careful`; `auto-execute` → `fast`
+2. **Complexity score** (dims 3-7 only — file-count + dir-spread default 0, no plans yet): 4-14 → `careful`; 0-3 → `fast`.
 3. **Title complexity floor** (replaces requirements floor): If requirements.md exists, skip. Else parse title:
  - Low-complexity (-1 each): short (<60 chars), targeted-fix (`fix\s+(line\s+\d+|off.by.one|typo|import|indent)`), single-rename (`rename\s+\S+\s+to\s+`), version-bump (`bump\s+version|update\s+version`), add-guard (`add\s+(try[/]except|try[/]finally|null check|type hint|assert)`), remove-unused (`remove\s+unused|delete\s+dead`), single-file ref (1 file-like token w/ `.` ext or `/` sep, excl URLs w/ `://`)
  - High-complexity (+1 each): long (>120 chars), multi-file (`\d+\s+files?` or 2+ file tokens), rewrite (`\b(rewrite|refactor|redesign|overhaul|rearchitect)\b`), cross-cutting (`\b(all\s+plugins?|across|everywhere|every\s+\w+|global)\b`), feature (`\b(new\s+feature|add\s+support\s+for|implement\s+\w+)\b`), scope (`\b(migrate|migration)\b`, only if not caught by tag #1)
- - Net: sum(high) - sum(low). <= -2 → no floor; -1 to +1 → `balanced` min; >= +2 → `careful` min
+ - Net: sum(high) - sum(low). <= -2 → no floor; -1 to +1 → `fast` min; >= +2 → `careful` min
 4. **Notes risk keyword floor**: any of `auth`, `secret`, `migration`, `breaking` in notes → `careful` min
-5. **Tag-immune upgrade**: suggested fast/balanced + `security`/`breaking-change`/`migration` tag → `careful`
-6. **Precedence**: tags override score; highest tag level wins (paranoid > careful > balanced > fast)
+5. **Tag-immune upgrade**: suggested `fast` + `security`/`breaking-change`/`migration` tag → `careful`
+6. **Precedence**: tags override score; highest tag level wins (careful > fast)
 
-**Reason fmt**: `"tag:<tag>"` for tag-driven; `"score:<N>/14 (pre-plan estimate)"` for score; append `"+ floor: title-complexity:<net>"` or `"+ floor: keyword:<word>"` when applied.
+**Reason fmt**: `"tag:<tag>"` for tag-driven; `"score:<N>/14 (pre-plan estimate)"` for score; append `"+ floor: title-complexity:<net>"` or `"+ floor: keyword:<word>"` when applied. Only 2 levels: fast, careful.
 
 ```
 ### Auto-suggest quality levels
@@ -72,7 +72,7 @@ Each todo in dep order, `mcp__proj__todo_get` + compute suggested quality:
 
 **Tweak flow**:
 1. `AskUserQuestion`: "Which todo IDs to change? (comma-separated)"
-2. Each ID: not in batch → warn inline, skip. Valid → `AskUserQuestion` w/ 4 levels + "Keep suggested" — one call per ID.
+2. Each ID: not in batch → warn inline, skip. Valid → `AskUserQuestion` w/ 2 levels (fast/careful) + "Keep suggested" — one call per ID.
 3. Re-display table w/ resolved levels.
 4. Override batch after tweaks → confirm "This will discard N individual tweaks. Confirm?"
 
@@ -80,9 +80,8 @@ Each todo in dep order, `mcp__proj__todo_get` + compute suggested quality:
 Skip auto-suggest. `per_todo_quality` populated from parse. Unspecified → fallback via `effective_quality()`.
 
 **Derive batch-level exec params** (after `per_todo_quality` confirmed):
-- `batch_max_parallel_execute`: most conservative quality across `per_todo_quality` (paranoid→1, careful→10, balanced/fast→30). Replaces table `max_parallel` for **Phase C exec only**. Phases B + C0 use orig batch-level `max_parallel`.
-- `batch_worktree_enabled`: any `paranoid` → false (whole batch). Else: use existing `worktree_enabled` derivation.
-- Notice if conservative rule triggered: "⚠ max_parallel set to 1 because todo N resolves to paranoid"
+- `batch_max_parallel_execute`: most conservative quality across `per_todo_quality` (careful→10, fast→30). Override via `--max-parallel`. Replaces table `max_parallel` for **Phase C exec only**. Phases B + C0 use orig batch-level `max_parallel`.
+- `batch_worktree_enabled`: `max_parallel == 1` → false (whole batch). Else: use existing `worktree_enabled` derivation.
 
 `--no-interactive`: skip AskUserQuestion; auto-accept all; log via `notes_append` tag `auto-suggest:accepted`; body = markdown table `| Todo | Title | Suggested | Reason |` w/ timestamp.
 
@@ -148,7 +147,7 @@ All pass → silent, Phase A.5b.
 
 **Phase A.5b — Adversarial Review (Define) — Batch:**
 
-Only when `effective_quality(todo_id)` in `[careful, paranoid]`. NEVER `balanced`/`fast`.
+Only when `effective_quality(todo_id) == careful`. NEVER `fast`.
 
 **Batch sampling**: > 5 todos → only **5 highest-complexity** (7-dim score). Override: `--force-preflight-all`.
 
@@ -175,9 +174,9 @@ After return: aggregate into combined table. Same BLOCKING prompt flow. Timeouts
 
 After Phase B: refresh descendants via `mcp__proj__todo_tree`.
 
-**Phase B.75 — Refine (if `effective_quality(todo_id)` in `[careful, paranoid]` AND `refine` in steps AND NOT `--no-interactive`):**
+**Phase B.75 — Refine (if `effective_quality(todo_id) == careful` AND `refine` in steps AND NOT `--no-interactive`):**
 
-fast → skip. careful/paranoid → auto-enable despite --refine.
+fast → skip. careful → auto-enable despite --refine.
 
 Each todo in dep order: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttle.
  Present reports sequentially. Apply → requirements/research updated, preflight re-runs.
@@ -215,7 +214,7 @@ NOT `--no-interactive`:
 
 All fast → display: "⚡ --fast mode. Auto-executing low-complexity. Tag-immune get full review."
 
-**Phase C0 — Speculative planning** (if effective_quality != careful/paranoid AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (if effective_quality == fast AND trust != 0 AND trust != 3):
 
 `TeamCreate(name="run-spec-{project}-{timestamp}", ...)`. One read-only Task per todo w/ `team_name`. Each:
 - Gets: todo ctx, requirements.md, research.md, parent ctx
@@ -250,7 +249,7 @@ Same 7-dimension complexity score (0-14), same eval order (tags → score → cr
 6. Store.
 7. Pipeline spawn (if enabled, trust != 3): respect `batch_max_parallel_execute` from Phase A.0. Spawn w/ `team_name="run-c1-pipeline-{project}-{timestamp}"`.
 
-**Pattern detection** (skip if effective_quality in [careful, paranoid]):
+**Pattern detection** (skip if effective_quality == careful):
 
 1. Normalize each plan: strip todo IDs, extract (action_type, file_pattern), replace unique segments w/ *.
 2. Pairwise Jaccard: |A∩B| / |A∪B|.
@@ -295,9 +294,8 @@ IF speculative_plans exist:
 1-2: Same as run/SKILL.md Section 5ii-T file-overlap (extract file lists, build within-batch overlap matrix).
 3. Quality behavior (pairwise — `max(effective_quality(A), effective_quality(B))`):
  - fast → auto-proceed.
- - careful/paranoid → auto-serialize.
- - balanced → prompt.
-4. Overlaps found (balanced):
+ - careful → auto-serialize.
+4. Overlaps found (when prompted via `--max-parallel` override):
 
 ```
 ### File Overlap Warning
@@ -333,7 +331,7 @@ All pass → silent, Phase C0.5b.
 
 **Phase C0.5b — Adversarial Review (Pre-execute)**
 
-Only `effective_quality(todo_id)` in `[careful, paranoid]`. Never balanced/fast. Skip under trust 3.
+Only `effective_quality(todo_id) == careful`. Never fast. Skip under trust 3.
 
 **Batch sampling**: > 5 → 5 highest-complexity (same ranking as A.5b). Override: `--force-preflight-all`.
 
@@ -459,7 +457,7 @@ Per-todo/re-verify: `satisfied_ids = []`. Each completed todo (excl `manual_skip
 
  After: `len >= 2` → `todo_batch_complete`. `== 1` → `todo_complete`.
 
- Recursive → `--no-pipeline --balanced --no-worktree`. Max depth 2. Depth >= 2 → refuse.
+ Recursive → `--no-pipeline --careful --no-worktree`. Max depth 2. Depth >= 2 → refuse.
 
 All fast → post-run summary w/ `git diff HEAD~N`.
 
