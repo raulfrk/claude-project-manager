@@ -107,6 +107,7 @@ Build descendant list: `mcp__proj__todo_tree`, flatten depth-first.
 **Each prep step:**
 
 **If `define`** — sequential, interactive:
+`TaskCreate(title="Phase A: Define — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "A"})` → `TaskUpdate(status="in_progress")`
 Each todo in descendant list (dependency order via `mcp__proj__proj_identify_batches`):
  - Announce: `Define: <id> — <title>`
  - `skill: "proj:define", args: "<id>"` (iteration > 1 → append `--skip-bg-prep`).
@@ -130,9 +131,13 @@ If flagged_todos non-empty:
 
 Re-define → run interactive define on each flagged, resume from decompose.
 
+After define complete (or skipped): `TaskUpdate(status="completed")`.
+
 **If `preflight`** — inline, main conversation:
 
-fast quality → skip preflight entirely.
+fast quality → skip preflight entirely. (No TaskCreate for skipped phases.)
+
+`TaskCreate(title="Phase A.5: Preflight — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "A.5"})` → `TaskUpdate(status="in_progress")`
 
 **Preflight versioning & grandfather rule**: each todo carries `preflight_version` meta. Unset (existing todos) → **legacy mode** w/ 5 checks (1-5). `preflight_version: 2` → expanded 10-check v2. New todos default v2. Manual upgrade: `todo update <id> preflight_version=2`. Bulk migration tracked separately.
 
@@ -202,9 +207,13 @@ Each todo in descendant list:
 
 6. Any fail AND `--no-interactive` → demote BLOCKING to WARNING, log via `notes_append` tag `preflight:auto-demoted`, decision log per demotion, auto-continue.
 
+After preflight complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+
 **Phase A.5b — Adversarial Review (Define)**
 
-Runs only when `quality_level == careful`. NEVER under `--fast`. Runs after structural checks pass, in parallel across 3 read-only agents.
+Runs only when `quality_level == careful`. NEVER under `--fast`. (No TaskCreate when skipped.) Runs after structural checks pass, in parallel across 3 read-only agents.
+
+`TaskCreate(title="Phase A.5b: Adversarial Review (Define) — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "A.5b"})` → `TaskUpdate(status="in_progress")`
 
 **Batch sampling**: descendant list > 5 → agents run on **5 highest-complexity** todos (ranked by 7-dimension complexity score from Phase C1 smart gating). Others get structural checks only. Override: `--force-preflight-all`.
 
@@ -255,7 +264,10 @@ See **Preflight Agents Reference** appendix for prompt templates.
 
 **Degraded mode**: agent timeouts/malformed JSON → demoted to WARNING (never BLOCKING). Raw output shown under finding.
 
+After adversarial review complete: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
+
 **If `decompose`** — parallel Task agents:
+`TaskCreate(title="Phase B: Decompose — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "B"})` → `TaskUpdate(status="in_progress")`
 
 Spawn via `TeamCreate` before per-batch loop: `TeamCreate(name="run-decompose-single-{timestamp}", description="Run: decomposing descendants of root todo")`. Each Task agent uses that `team_name`. After all batches → `TeamDelete`.
 
@@ -263,13 +275,17 @@ Each batch in dep order:
  - One `subagent_type="decomposer"` Task per todo w/ `team_name`. Each runs decompose autonomously.
  - Wait for batch. Report failures.
 After: refresh descendant list via `mcp__proj__todo_tree`. `TeamDelete`.
+After decompose complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **If `refine`** — after decompose, within iteration (if `quality_level == careful` AND `refine` in steps AND NOT `--no-interactive`):
 
-fast → skip refine. careful → auto-enable despite --refine flag.
+fast → skip refine. careful → auto-enable despite --refine flag. (No TaskCreate when skipped.)
+
+`TaskCreate(title="Phase B.75: Refine — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "B.75"})` → `TaskUpdate(status="in_progress")`
 
 Each todo: `skill: "proj:refine", args: "<id>"`.
  Apply → requirements/research updated, preflight re-runs automatically.
+After refine complete: `TaskUpdate(status="completed")`.
 
 **3a.** Capture iteration snapshots (only when N > 1)
 
@@ -320,6 +336,8 @@ Option 3 → prompt for todo IDs, interactive define on each, resume from decomp
 
 **5.** Execute (only if `has_execute`)
 
+`TaskCreate(title="Phase C: Execute — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C"})` → `TaskUpdate(status="in_progress")`
+
 Refresh todo via `mcp__proj__todo_get`. `has_children = len(children) > 0`.
 
 NOT `--no-interactive` → prompt:
@@ -348,6 +366,8 @@ fast → display: "⚡ --fast mode. Auto-executing low-complexity. Tag-immune (s
 2. `skill: "proj:execute", args: "<id>"`.
 
 fast → after exec: display post-run summary w/ `git diff HEAD~N`.
+
+After execute complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **6.** Complete
 

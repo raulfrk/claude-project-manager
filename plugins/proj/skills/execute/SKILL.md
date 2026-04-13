@@ -113,6 +113,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  `--force-plan` → always FULL REVIEW.
 
 **3b. Plan creation** (respects trust, skipped if AUTO-EXECUTE):
+`TaskCreate(title="Phase C1: Plan — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C1"})` → `TaskUpdate(status="in_progress")`
  - `mcp__proj__proj_decision_log(action="search", decision=<todo title>, project_name=<project>)`. Results → "### Prior Decisions" in plan ctx.
  - Trust 0-2: `EnterPlanMode`. Read ctx (reqs, research, notes, Related Context). Explore source. Plan: files to modify/create, key changes, impl order, testing.
  - Trust 0-1: `ExitPlanMode` for user review. Approve before proceeding.
@@ -120,9 +121,17 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  - After approval (trust 0-2): `proj_decision_log(action="add", decision=<approach summary>, tags="plan", todo_id)`.
  - Trust 3: Skip 3b entirely → step 4 w/ ctx only.
 
+After plan approved/skipped: `TaskUpdate(status="completed")`.
+
+`TaskCreate(title="Phase C2: Execute — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2"})` → `TaskUpdate(status="in_progress")`
+
 **4.** `mcp__proj__todo_update(status="in_progress")`. Review ctx, implement. Non-empty `notes` field → additional impl ctx (constraints/design decisions).
 
-**4a. Verification** (skip if `--no-verify`):
+After impl complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+
+**4a. Verification** (skip if `--no-verify`; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C2a: Verification — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2a"})` → `TaskUpdate(status="in_progress")`
 
  Mode by quality_level:
  - `skip` (--fast): Skip entirely.
@@ -166,6 +175,10 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
  All pass → display report, → step 5 w/o prompt.
 
+After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+
+`TaskCreate(title="Phase SAT: Satisfaction — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+
 **5. Satisfaction loop:**
  a. Ask: "Are you satisfied with outcome of todo <id>?"
  1. Satisfied → step 5d
@@ -184,6 +197,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  d. `mcp__proj__todo_complete`
  - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
  - Append progress note: `mcp__proj__notes_append`
+ After satisfaction: `TaskUpdate(status="completed")`.
 
 **Range w/ independent todos (no blocked_by between them):**
 
@@ -194,7 +208,9 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **Pattern A — Team exec (independent todos):**
 
-**Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
 
 `TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")`. Each read-only Task agent gets `team_name`.
 
@@ -208,6 +224,7 @@ Store in `speculative_plans[todo_id]`.
 `--batch-approve` → auto-approve all. Display: `Batch-approved N speculative plans.`
 
 After collection: `TeamDelete(team_name="exec-spec-{timestamp}")`.
+After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 1 — Plan (sequential, main conversation):**
 
@@ -216,6 +233,8 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
 IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-plan-{timestamp}", description="Pipeline execution agents for {N} independent todos")`. All pipeline agents use this team. Torn down in Phase 2.
+
+`TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
 Each todo in range:
 **1.** `todo_check_executable` — "⚠️" → skip: `⚠️ Todo <id> [manual] — skipped execute`.
@@ -257,6 +276,8 @@ Each todo in range:
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
+After plan phase: `TaskUpdate(status="completed")`.
+
 **Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
 
@@ -296,6 +317,8 @@ Options:
 
 **Phase 2 — Execute (parallel w/ Team):**
 
+`TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
+
 Enforce max_parallel from quality_level mapping.
 
 **1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {id1}, {id2}, ...")`
@@ -328,9 +351,13 @@ Enforce max_parallel from quality_level mapping.
        <todo_id>: "<plan text>"
      ```
 **3.** All agents done: `TeamDelete(team_name)`.
-**4.** Failed agents → log to `tracking/{project}/.team-state/failed-teams.yaml`.
+**4.** Failed → log to `tracking/{project}/.team-state/failed-teams.yaml`.
+After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
-**Phase 2a — Verification** (skip if `--no-verify`):
+**Phase 2a — Verification** (skip if `--no-verify`; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C2a: Verification — batch", metadata={"phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+
 Verify each completed todo sequentially. Run checks from 4a (Automated, Spec, Diff). Combined batch report:
 
 ```
@@ -352,12 +379,17 @@ Summary line (e.g. "2 passed, 1 failed"):
 - Skip: go to Phase 3.
 
 All pass → display, proceed w/o prompt.
+After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 3 — Satisfaction (sequential, main conversation):**
+
+`TaskCreate(title="Phase SAT: Satisfaction — batch", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+
 Each completed todo (excl manual-skipped + failed):
 **1.** Review agent output.
 **2.** Satisfaction loop (5a-5d).
 Clear `executing_agents = {}`. Report summary incl skipped/failed.
+After satisfaction: `TaskUpdate(status="completed")`.
 
 
 **Pattern B — Task agent exec (independent, fallback):**
@@ -369,6 +401,8 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
 IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-fallback-{timestamp}", description="Pipeline execution agents (Pattern B fallback) for {N} independent todos")`. Torn down in Phase 2.
+
+`TaskCreate(title="Phase C1: Plan — batch (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
 Each todo:
 **1.** `todo_check_executable` — "⚠️" → skip.
@@ -390,10 +424,14 @@ Each todo:
  `len(executing_agents) >= max_parallel` → wait.
  Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
+After plan phase: `TaskUpdate(status="completed")`.
+
 **Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (parallel Task agents):
+
+`TaskCreate(title="Phase C2: Execute — batch (fallback)", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
 Enforce max_parallel. `TeamCreate` for 2+ agents.
 
@@ -410,8 +448,12 @@ Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
 Pattern group → include pattern info.
 Agents impl per plan. Do NOT `todo_complete`.
 After all return (ELSE): `TeamDelete(team_name="exec-fallback-{timestamp}")`.
+After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
-Phase 2a — Verification (skip if `--no-verify`):
+Phase 2a — Verification (skip if `--no-verify`; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C2a: Verification — batch (fallback)", metadata={"phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+
 Verify each sequentially. Run checks from 4a. Combined report:
 
 ```
@@ -432,12 +474,17 @@ Summary + prompt:
 - Proceed / Skip: same as Pattern A.
 
 All pass → proceed w/o prompt.
+After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 Phase 3 — Satisfaction (sequential):
+
+`TaskCreate(title="Phase SAT: Satisfaction — batch (fallback)", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+
 Each completed todo (excl manual-skipped):
 **1.** Review agent output.
 **2.** Satisfaction loop (5a-5d).
 Clear `executing_agents = {}`. Report summary.
+After satisfaction: `TaskUpdate(status="completed")`.
 
 **Range w/ dependencies:**
 
@@ -448,13 +495,16 @@ Clear `executing_agents = {}`. Report summary.
 
 **Pattern A — Team exec (w/ deps):**
 
-**Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C0: Speculative Planning — deps batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
 
 `TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → `subagent_type="speculative-planner"` read-only Task agent:
 - Output: JSON plan `{prose, actions: [{type, file}]}`
 - PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
 `--batch-approve` → auto-approve. `TeamDelete`.
+After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 1 — Plan (sequential, dependency order):**
 
@@ -463,6 +513,8 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
 Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-plan-deps-{timestamp}", ...)`. Torn down after Phase 2.
+
+`TaskCreate(title="Phase C1: Plan — deps batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
 Group todos into dependency batches (topo order). Within-batch = parallel, batches = sequential. Each todo:
 **1.** `todo_check_executable` — "⚠️" → skip.
@@ -482,6 +534,7 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
  Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-plan-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
+After plan phase: `TaskUpdate(status="completed")`.
 
 **Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
@@ -511,6 +564,8 @@ Options:
 Same rules as independent Pattern above.
 
 **Phase 2 — Execute (batches sequential, within-batch parallel w/ Team):**
+
+`TaskCreate(title="Phase C2: Execute — deps batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
 Enforce max_parallel.
 
@@ -544,8 +599,12 @@ Enforce max_parallel.
      ```
 **3.** All batches done: `TeamDelete(team_name)`.
 **4.** Failed → log to `tracking/{project}/.team-state/failed-teams.yaml`.
+After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
-**Phase 2a — Verification** (skip if `--no-verify`):
+**Phase 2a — Verification** (skip if `--no-verify`; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C2a: Verification — deps batch", metadata={"phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+
 Verify each sequentially. Run checks from 4a. Combined report:
 
 ```
@@ -566,10 +625,15 @@ Summary + prompt:
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.
+After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 3 — Satisfaction (sequential):**
+
+`TaskCreate(title="Phase SAT: Satisfaction — deps batch", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+
 Each completed todo (excl manual-skipped + failed): satisfaction loop (5a-5d) before `todo_complete`.
 Clear `executing_agents = {}`. Report summary.
+After satisfaction: `TaskUpdate(status="completed")`.
 
 
 **Pattern B — Sequential exec (w/ deps, fallback):**
@@ -581,6 +645,8 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
 Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-fallback-deps-{timestamp}", ...)`. Torn down Phase 2.
+
+`TaskCreate(title="Phase C1: Plan — deps (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
 Topo order (respect blocked_by). Each todo:
 **1.** `todo_check_executable` — "⚠️" → skip.
@@ -599,10 +665,14 @@ Topo order (respect blocked_by). Each todo:
  `len(executing_agents) >= max_parallel` → wait.
  Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
+After plan phase: `TaskUpdate(status="completed")`.
+
 **Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (sequential, dep order):
+
+`TaskCreate(title="Phase C2: Execute — deps (fallback)", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
 Enforce max_parallel.
 
@@ -614,7 +684,12 @@ Exec each per plan (or ctx trust 3), one at time (respect blocked_by). Mark in_p
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
 Pattern group → include pattern info.
 
-Phase 2a — Verification (skip if `--no-verify`):
+After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+
+Phase 2a — Verification (skip if `--no-verify`; no TaskCreate when skipped):
+
+`TaskCreate(title="Phase C2a: Verification — deps (fallback)", metadata={"phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+
 Verify each sequentially. Combined report:
 
 ```
@@ -635,10 +710,15 @@ Summary + prompt:
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.
+After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 Phase 3 — Satisfaction (sequential, dep order):
+
+`TaskCreate(title="Phase SAT: Satisfaction — deps (fallback)", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+
 Each completed todo: satisfaction loop (5a-5d). Batch completion: collect satisfied IDs → 2+ → single `mcp__proj__todo_batch_complete`. 1 → `mcp__proj__todo_complete`.
 Clear `executing_agents = {}`.
+After satisfaction: `TaskUpdate(status="completed")`.
 
 Root todo exec does NOT auto-recurse into children. Specify child IDs explicitly.
 
