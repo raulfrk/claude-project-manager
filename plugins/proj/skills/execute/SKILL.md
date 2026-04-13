@@ -698,4 +698,15 @@ See run/SKILL.md Agent Delegation Protocols appendix for full protocol spec incl
 - Single todo: impl result, verification report (if enabled), satisfaction outcome, completion confirm.
 - Range/batch: per-batch progress, combined verification table, satisfaction per completed todo, overall summary.
 
+## Agent Fallback
+
+If `subagent_type="<name>"` not found (agent .md file missing/renamed):
+1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
+2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
+3. Fallback prompts (one-line per agent):
+   - `speculative-planner`: "Read todo ctx + reqs + research. Draft impl plan as JSON {prose, actions: [{type, file}]}. Read-only — no writes."
+   - `drift-reviewer`: "Review plan against reqs. Flag scope drift, missing criteria, unplanned changes. Return risk rating (LOW/MEDIUM/HIGH) + concerns."
+   - `implementer`: "Implement approved plan. Read requirements + research, follow plan steps, write code + tests, commit w/ [todo-{id}] prefix."
+   - `verification-fixer`: "Fix verification failures. Read report + todo ctx + reqs + plan. Apply targeted fixes, re-run tests."
+
 Suggested next: `1. /proj:save` -- save session, reconcile git | `2. /proj:status` -- updated overview

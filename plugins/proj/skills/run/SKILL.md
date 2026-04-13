@@ -435,6 +435,20 @@ TeamDelete(name="preflight-adversarial-define-<id>")
 Await all three, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show). Repeat per sampled todo.
 
 
+## Agent Fallback
+
+If `subagent_type="<name>"` not found (agent .md file missing/renamed):
+1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
+2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
+3. Fallback prompts (one-line per agent):
+   - `ambiguity-reviewer`: "Review requirements.md + research.md for undefined terms, handwavey claims, unmeasurable goals. Return JSON {agent, findings}."
+   - `completeness-reviewer`: "Review requirements.md + research.md for missing failure modes, auth/security gaps, scope holes. Return JSON {agent, findings}."
+   - `research-validator`: "Validate research.md file refs exist, option distinctness, risk realism. Return JSON {agent, findings}."
+   - `file-path-verifier`: "Verify all file paths in plan resolve to existing files. Return JSON {agent, findings}."
+   - `spec-plan-alignment`: "Compare plan against requirements.md acceptance criteria. Flag unaddressed criteria. Return JSON {agent, findings}."
+   - `impact-scanner`: "Scan codebase for callers/consumers of files in plan. Flag potential breakage. Return JSON {agent, findings}."
+
+
 ## Agent Delegation Protocols
 
 Spawned agents lack user-facing tools. These protocols bridge gap via SendMessage to lead.

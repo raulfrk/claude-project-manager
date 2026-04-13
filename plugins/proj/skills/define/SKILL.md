@@ -293,3 +293,12 @@ Output confidence table, then list actionable gaps w/ suggested fixes:
 - **Non-interactive**: requirements.md + research.md written + confidence self-assessment table + actionable gaps list.
 
 Suggested next: `1. /proj:decompose <id>` -- break into subtasks | `2. /proj:execute <id>` -- if straightforward, execute directly
+
+## Agent Fallback
+
+If `subagent_type="<name>"` not found (agent .md file missing/renamed):
+1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
+2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
+3. Fallback prompts (one-line per agent):
+   - `file-discovery`: "Explore codebase for files relevant to this todo. Glob + Grep keywords from title/desc. Return file list w/ relevance notes."
+   - `pattern-explorer`: "Find test dirs + source files related to todo domain. Read up to 5 test files + 3 source files. Return patterns, fn signatures, test conventions."

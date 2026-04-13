@@ -246,3 +246,17 @@ Pass refinement report summary (agent counts, criticals, amendments) as question
  - `Stop` — Halt edit flow; apply only decisions so far
  Pass amendment text + source agent as question ctx. One `AskUserQuestion` per amendment — no batching, no inline list.
 2. Apply edited subset via same Apply flow (step 8).
+
+## Agent Fallback
+
+If `subagent_type="<name>"` not found (agent .md file missing/renamed):
+1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
+2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
+3. Fallback prompts (one-line per agent):
+   - `skeptic-reviewer`: "Challenge requirements/research. Find assumptions stated as facts, contradictions, untestable criteria, scope creep. Report new findings only."
+   - `edge-case-finder`: "Identify scenarios requirements miss: boundary conditions, null/empty inputs, concurrency, backwards compat, err propagation. Report new findings only."
+   - `architecture-reviewer`: "Check proposed approach against codebase patterns. Flag deviations, missed reuse opportunities, coupling concerns. Report new findings only."
+   - `security-reviewer`: "Audit requirements/approach for auth gaps, injection vectors, secrets handling, access control bypasses. Report new findings only."
+   - `performance-reviewer`: "Identify perf risks: algorithmic complexity, memory leaks, N+1 queries, missing pagination, lock contention. Report new findings only."
+   - `api-contract-reviewer`: "Evaluate interface design + backwards compat. Flag breaking changes, param naming issues, missing versioning. Report new findings only."
+   - `complexity-reviewer`: "Assess long-term code health: DRY violations, high cyclomatic complexity, SRP violations, tight coupling, test coverage gaps. Report new findings only."

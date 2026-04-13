@@ -112,4 +112,14 @@ Decompose todo $ARGUMENTS into sub-todos.
 
 Proposed multi-level breakdown as indented bullets w/ IDs, titles, priorities, blocking relationships, vague-title flags. After confirmation: final todo tree. Git tracking flush confirmation.
 
+## Agent Fallback
+
+Decompose currently runs inline (no agent spawns). Agent def exists at `plugins/proj/agents/decomposer.md` for future use.
+
+If `subagent_type="decomposer"` wired in future + .md file missing/renamed:
+1. Log warning via `notes_append`: "Agent definition 'decomposer' not found, falling back to general-purpose"
+2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
+3. Fallback prompt:
+   - `decomposer`: "Break todo into sub-todos. Read requirements + research, propose multi-level breakdown w/ deps + priorities. Return structured breakdown."
+
 Suggested next: `1. /proj:execute X.1` -- start w/ first sub-todo | `2. /proj:run X` -- run full workflow
