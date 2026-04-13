@@ -388,41 +388,31 @@ Suggested next: `1. /proj:status`
 
 ## Preflight Agents Reference
 
-Full prompt templates in `plugins/proj/skills/run/agents/`. Load at runtime via `Read` when spawning.
+Agent defs in `plugins/proj/agents/`. Each agent file includes frontmatter (name, tools, model) + output schema inline. Load at runtime via `Read` when spawning.
 
 All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned as `general-purpose` Agents in TeamCreate group, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
 
-### Shared output schema
-
-See: plugins/proj/skills/run/agents/shared_schema.md
-
 ### Phase A.5b — Define-phase agents
 
-#### 1. Ambiguity Agent
-Tools: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`
-See: plugins/proj/skills/run/agents/ambiguity_agent.md
+#### 1. Ambiguity Reviewer
+See: plugins/proj/agents/ambiguity-reviewer.md
 
-#### 2. Completeness Agent
-Tools: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`
-See: plugins/proj/skills/run/agents/completeness_agent.md
+#### 2. Completeness Reviewer
+See: plugins/proj/agents/completeness-reviewer.md
 
-#### 3. Research Validation Agent
-Tools: `Read`, `Glob`, `Grep`, `mcp__proj__content_get_research`, `mcp__proj__proj_explore_codebase`
-See: plugins/proj/skills/run/agents/research_validation_agent.md
+#### 3. Research Validator
+See: plugins/proj/agents/research-validator.md
 
 ### Phase C0.5b — Pre-execute agents
 
 #### 4. File Path Verifier
-Tools: `Read`, `Glob`, `Grep`
-See: plugins/proj/skills/run/agents/file_path_verifier.md
+See: plugins/proj/agents/file-path-verifier.md
 
-#### 5. Spec-Plan Alignment Agent
-Tools: `Read`, `mcp__proj__content_get_requirements`
-See: plugins/proj/skills/run/agents/spec_plan_alignment_agent.md
+#### 5. Spec-Plan Alignment
+See: plugins/proj/agents/spec-plan-alignment.md
 
 #### 6. Impact Scanner
-Tools: `Read`, `Glob`, `Grep`
-See: plugins/proj/skills/run/agents/impact_scanner.md
+See: plugins/proj/agents/impact-scanner.md
 
 ### Spawning pattern
 
