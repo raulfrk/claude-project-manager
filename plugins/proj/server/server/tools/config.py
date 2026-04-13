@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from server.lib import storage
 from server.lib.enums import Priority
 from server.lib.models import (
+    _REMOVED_QUALITY_LEVELS,
     ContextInjectionConfig,
     ContextInjectionSectionsConfig,
     ProjConfig,
@@ -227,6 +228,8 @@ def register(app: FastMCP) -> None:
             failure_threshold=resilience_failure_threshold,
             recovery_timeout=resilience_recovery_timeout,
         )
+        if quality_level in _REMOVED_QUALITY_LEVELS:
+            return _REMOVED_QUALITY_LEVELS[quality_level]
         _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level not in _valid_quality:
             return (
@@ -376,6 +379,8 @@ def register(app: FastMCP) -> None:
         ):
             return "Invalid resilience_recovery_timeout: must be a positive integer."
 
+        if quality_level is not None and quality_level in _REMOVED_QUALITY_LEVELS:
+            return _REMOVED_QUALITY_LEVELS[quality_level]
         _valid_quality = tuple(q.value for q in QualityLevel)
         if quality_level is not None and quality_level not in _valid_quality:
             return (

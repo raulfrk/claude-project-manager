@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from server.lib.models import (
+    _REMOVED_QUALITY_LEVELS,
     ArchiveConfig,
     GitTracking,
     ProjConfig,
     ProjectGitTrackingConfig,
     ProjectMeta,
+    QualityLevel,
     TeamModeConfig,
     Todo,
     TodoistSync,
@@ -254,3 +258,35 @@ class TestProjConfigTeamModeBackwardCompat:
         d = cfg.to_dict()
         assert "team_mode" in d
         assert d["team_mode"] == {"enabled": True, "max_agents": 30, "trust_level": 1}
+
+
+class TestQualityLevel:
+    def test_valid_levels(self) -> None:
+        assert QualityLevel.FAST == "fast"
+        assert QualityLevel.CAREFUL == "careful"
+
+    def test_no_balanced_member(self) -> None:
+        assert not hasattr(QualityLevel, "BALANCED")
+
+    def test_no_paranoid_member(self) -> None:
+        assert not hasattr(QualityLevel, "PARANOID")
+
+    def test_from_dict_rejects_balanced(self) -> None:
+        with pytest.raises(ValueError, match=r"'balanced' removed.*Use 'careful'"):
+            ProjConfig.from_dict({"quality_level": "balanced"})
+
+    def test_from_dict_rejects_paranoid(self) -> None:
+        with pytest.raises(ValueError, match=r"'paranoid' removed.*max_parallel=1"):
+            ProjConfig.from_dict({"quality_level": "paranoid"})
+
+    def test_from_dict_accepts_fast(self) -> None:
+        cfg = ProjConfig.from_dict({"quality_level": "fast"})
+        assert cfg.quality_level == "fast"
+
+    def test_from_dict_accepts_careful(self) -> None:
+        cfg = ProjConfig.from_dict({"quality_level": "careful"})
+        assert cfg.quality_level == "careful"
+
+    def test_removed_levels_dict_has_migration_messages(self) -> None:
+        assert "balanced" in _REMOVED_QUALITY_LEVELS
+        assert "paranoid" in _REMOVED_QUALITY_LEVELS

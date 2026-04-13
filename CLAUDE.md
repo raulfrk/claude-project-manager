@@ -44,7 +44,7 @@ After completing any implementation, always validate the result against the spec
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
-- **Worktree isolation is ON by default** for `/proj:run` at all quality levels except `--paranoid`. Pass `--no-worktree` to opt out. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
+- **Worktree isolation is ON by default** for `/proj:run`. Pass `--no-worktree` to opt out. Use `--max-parallel 1` for sequential execution. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
 - **`isolation: "worktree"` on Agent tool does NOT work** — agents run in the main repo, not the worktree. Always use explicit `wt_create` via the worktree MCP tool, then pass the worktree path in the agent prompt with: "ALL file edits and git operations MUST happen in this directory: `<path>`".
 
 ## Team Agent Shutdown

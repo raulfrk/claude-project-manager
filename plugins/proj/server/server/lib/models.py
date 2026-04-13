@@ -40,9 +40,21 @@ class QualityLevel(StrEnum):
     """Quality level presets for run/execute workflows."""
 
     FAST = "fast"
-    BALANCED = "balanced"
     CAREFUL = "careful"
-    PARANOID = "paranoid"
+
+
+# Migration messages for removed quality levels.
+_REMOVED_QUALITY_LEVELS: dict[str, str] = {
+    "balanced": "quality_level 'balanced' removed. Use 'careful' instead.",
+    "paranoid": "quality_level 'paranoid' removed. Use 'careful' with max_parallel=1 instead.",
+}
+
+
+def _validated_quality_level(value: str) -> str:
+    """Validate quality level, raising ValueError for removed levels."""
+    if value in _REMOVED_QUALITY_LEVELS:
+        raise ValueError(_REMOVED_QUALITY_LEVELS[value])
+    return value
 
 
 @dataclass
@@ -533,7 +545,7 @@ class ProjConfig:
             team_mode=TeamModeConfig.from_dict(team_mode_raw),
             resilience=ResilienceConfig.from_dict(resilience_raw),
             smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
-            quality_level=str(data.get("quality_level", "careful")),
+            quality_level=_validated_quality_level(str(data.get("quality_level", "careful"))),
             worktree_isolation=bool(data.get("worktree_isolation", True)),
             context_injection=ContextInjectionConfig.from_dict(ctx_injection_raw),
         )
