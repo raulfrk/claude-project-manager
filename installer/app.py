@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -673,13 +674,43 @@ class InstallerApp(App):
         progress: ProgressScreen,
         reset_configs: bool,
     ) -> None:
-        """Execute plugin reinstalls, advancing the progress bar."""
+        """Execute plugin reinstalls, advancing the progress bar.
+
+        Phases: uninstall all → delete marketplace+cache dirs → install all.
+        Deleting the dirs ensures stale artifacts don't survive reinstall.
+        """
         await progress.wait_ready()
-        reinstalled: set[str] = set()
+
+        # Phase 1: uninstall all plugins
         for plugin_name in plugins:
             try:
                 progress.write_log(f"  Uninstalling {plugin_name}...")
                 await asyncio.to_thread(uninstall_plugin, plugin_name)
+            except InstallerError as exc:
+                progress.write_log(
+                    f"  [yellow]⚠ {plugin_name} uninstall warning: {exc}[/yellow]"
+                )
+
+        # Phase 2: delete marketplace and cache dirs for a clean slate
+        state = self._state
+        if state is not None:
+            for dir_path, label in [
+                (state.marketplace_dir, "marketplace"),
+                (state.cache_dir, "cache"),
+            ]:
+                if dir_path is not None and dir_path.exists():
+                    try:
+                        shutil.rmtree(dir_path)
+                        progress.write_log(f"  Removed {label} directory")
+                    except OSError as exc:
+                        progress.write_log(
+                            f"  [yellow]⚠ Failed to remove {label} dir: {exc}[/yellow]"
+                        )
+
+        # Phase 3: install all plugins
+        reinstalled: set[str] = set()
+        for plugin_name in plugins:
+            try:
                 progress.write_log(f"  Installing {plugin_name}...")
                 await asyncio.to_thread(install_plugin, plugin_name)
                 reinstalled.add(plugin_name)

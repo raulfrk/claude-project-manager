@@ -106,6 +106,59 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             mock_uninstall.assert_not_called()
             assert any("Nothing to reinstall" in msg for msg in logs)
 
+    @pytest.mark.asyncio
+    async def test_reinstall_deletes_marketplace_and_cache_dirs(self, tmp_path):
+        """Reinstall must delete marketplace and cache dirs between phases."""
+        from installer.app import InstallerApp
+        from installer.detect import InstallState
+
+        marketplace_dir = tmp_path / "marketplaces" / "claude-project-manager"
+        cache_dir = tmp_path / "cache" / "claude-project-manager"
+        marketplace_dir.mkdir(parents=True)
+        cache_dir.mkdir(parents=True)
+        # Add stale files to prove rmtree, not just rmdir
+        (marketplace_dir / "stale.json").write_text("{}")
+        (cache_dir / "stale-plugin" / "v1").mkdir(parents=True)
+
+        plugins = ["proj@claude-project-manager"]
+
+        with (
+            patch("installer.app.uninstall_plugin") as mock_uninstall,
+            patch("installer.app.install_plugin") as mock_install,
+        ):
+            app = InstallerApp()
+            app._state = InstallState(
+                installed_plugins=["proj"],
+                marketplace_dir=marketplace_dir,
+                cache_dir=cache_dir,
+            )
+
+            class _FakeProgress:
+                def __init__(self):
+                    self.logs: list[str] = []
+
+                async def wait_ready(self):
+                    return None
+
+                def write_log(self, msg: str) -> None:
+                    self.logs.append(msg)
+
+                def advance(self, steps: int = 1, detail: str = "") -> None:
+                    return None
+
+            progress = _FakeProgress()
+            await app._run_reinstall_worker(plugins, progress, reset_configs=False)
+
+            # Dirs should be gone
+            assert not marketplace_dir.exists(), "marketplace dir should be deleted"
+            assert not cache_dir.exists(), "cache dir should be deleted"
+            # Install still called (after deletion)
+            mock_uninstall.assert_called_once()
+            mock_install.assert_called_once()
+            # Logs mention removal
+            assert any("marketplace" in log for log in progress.logs)
+            assert any("cache" in log for log in progress.logs)
+
 
 class _StubProgress:
     """Minimal progress-screen stand-in used by the status install worker tests."""
