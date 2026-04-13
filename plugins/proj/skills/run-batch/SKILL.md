@@ -221,6 +221,7 @@ All fast → display: "⚡ --fast mode. Auto-executing low-complexity. Tag-immun
 - Gets: todo ctx, requirements.md, research.md, parent ctx
 - Read-only tools: `Read`, `Glob`, `Grep`, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
 - Produces: `{prose: "<plan text>", actions: [{type: "create"|"modify"|"delete"|"test", file: "<path>"}]}`
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 
 Wait all. Failure → exclude, fall back to sequential planning. Store in `speculative_plans[todo_id]`. `TeamDelete`.
 

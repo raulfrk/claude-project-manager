@@ -206,6 +206,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 Each todo → read-only Task agent:
 - Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research` (NO write tools)
 - Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 
 Agent fails → exclude todo, fall back to sequential planning.
 Store in `speculative_plans[todo_id]`.
@@ -458,6 +459,7 @@ Clear `executing_agents = {}`. Report summary.
 `TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → read-only Task agent:
 - Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
 - Output: JSON plan `{prose, actions: [{type, file}]}`
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
 `--batch-approve` → auto-approve. `TeamDelete`.
 
