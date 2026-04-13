@@ -42,18 +42,11 @@ Extract keywords from todo title/desc/notes.
 
 Spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` — never bare parallel Task calls for 2+ agents. Each agent gets `team_name="define-bg-{todo_id}"`. Team torn down at step 5.5 via `TeamDelete`.
 
-Two bg Task agents (general-purpose, read-only: `Read, Glob, Grep`):
+Two bg Task agents (read-only: `Read, Glob, Grep`):
 
- **Agent A — File discovery:**
- - Glob files matching title keywords (*.py, *.ts, *.md, etc.)
- - Grep fn/class/var names related to todo
- - Return: relevant file paths w/ 1-line desc
+ **Agent A** — `Agent(subagent_type="file-discovery", prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: relevant file paths w/ 1-line desc")`
 
- **Agent B — Test/pattern exploration:**
- - Find test dirs related to todo domain
- - Read up to 5 test files for existing patterns
- - Read up to 3 most relevant source files
- - Return: patterns found, key fn signatures, test conventions
+ **Agent B** — `Agent(subagent_type="pattern-explorer", prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: patterns found, key fn signatures, test conventions")`
 
 Store handles as `bg_explore_agents`. Do NOT wait — → step 3.
 
@@ -235,7 +228,7 @@ Not found → stop: "Todo <id> not found. Run `/proj:todo list` to see available
 
 **NI-1c.** Bg codebase exploration (skip if `skip_bg_prep`)
 
-Same as step 2c: extract keywords, spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")`, two read-only bg Task agents (Agent file discovery, Agent B test/pattern exploration) w/ `team_name="define-bg-{todo_id}"`. Store as `bg_explore_agents`. Do NOT wait — proceed NI-2. Team torn down at NI-2.5.
+Same as step 2c: extract keywords, spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")`, two read-only bg Task agents (`subagent_type="file-discovery"` + `subagent_type="pattern-explorer"`, same prompts as step 2c) w/ `team_name="define-bg-{todo_id}"`. Store as `bg_explore_agents`. Do NOT wait — proceed NI-2. Team torn down at NI-2.5.
 
 **NI-2. Explore codebase**
 

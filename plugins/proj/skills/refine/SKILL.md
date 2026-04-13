@@ -25,7 +25,7 @@ Refine todo: $ARGUMENTS
 - No requirements → note critical gap, continue (agents flag it).
 - No research → note for Architecture Reviewer.
 
-**3.** Determine agent set, spawn parallel (general-purpose, read-only: `Read, Glob, Grep`):
+**3.** Determine agent set, spawn parallel (read-only: `Read, Glob, Grep`):
 
 N roles = N agents — never combine. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning: `TeamCreate(name="refine-review-{todo_id}", description="Refine review agents for todo {todo_id}")`, each Agent w/ `team_name="refine-review-{todo_id}"`. After all return (step 4): `TeamDelete(team_name="refine-review-{todo_id}")`.
 
@@ -42,86 +42,28 @@ Review agents CANNOT call `AskUserQuestion` directly. Protocol:
 
 Agents must NOT auto-demote blocking findings or guess architectural intent. Non-blocking suggestions → include in Suggestions section, no escalation.
 
-Load todo `tags`. Select agents per logic below. Spawn all selected parallel:
+Load todo `tags`. Select agents per logic below. Spawn all selected parallel. Each agent receives todo-specific ctx only (role/expertise defined in agent .md file):
 
-**Agent 1 — Skeptic:**
-> Skeptic reviewer. Challenge requirements/research. Look for:
-> - Assumptions stated as facts w/o evidence
-> - Contradictions between requirements sections
-> - Acceptance criteria not objectively testable
-> - Scope creep beyond stated goal
-> - Missing failure modes/rollback strategies
->
-> Report ONLY new info. Do NOT restate existing requirements.
+**Agent 1 — Skeptic** (core):
+`Agent(subagent_type="skeptic-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
-**Agent 2 — Edge-Case Finder:**
-> Edge-Case Finder. Identify scenarios requirements miss:
-> - Boundary conditions (zero, one, max, overflow)
-> - Empty/null/missing input handling
-> - Concurrency/race conditions
-> - Backwards compat w/ existing data
-> - Err propagation chains
-> - State corruption scenarios
->
-> Report ONLY new info. Do NOT restate existing edge cases.
+**Agent 2 — Edge-Case Finder** (core):
+`Agent(subagent_type="edge-case-finder", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
-**Agent 3 — Architecture Reviewer:**
-> Architecture Reviewer. Check proposed approach against codebase:
-> - Deviations from codebase patterns/conventions
-> - Testability of proposed approach
-> - Existing utils/patterns reusable
-> - Better alternatives based on codebase
-> - Coupling/abstraction concerns
->
-> Report ONLY new info. Do NOT restate existing architecture decisions.
+**Agent 3 — Architecture Reviewer** (core):
+`Agent(subagent_type="architecture-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
 **Agent 4 — Security Reviewer** (tags: `security` or `breaking-change`):
-> Security Reviewer. Audit requirements/approach for security risks:
-> - Auth/authz gaps
-> - Data privacy, sensitive data exposure
-> - Injection vectors (SQL, cmd, template, etc.)
-> - Secrets mgmt, credential handling
-> - Input validation/sanitization weaknesses
-> - Access control bypasses
-> - Compliance implications
->
-> Report ONLY new info. Do NOT restate existing security considerations.
+`Agent(subagent_type="security-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
-**Agent 5 — Performance & Scalability Reviewer** (tag: `performance`):
-> Perf & Scalability Reviewer. Identify perf risks:
-> - Algorithmic complexity (O(n²) where O(n) possible)
-> - Excessive memory/leaks
-> - Concurrency bottlenecks, lock contention
-> - Missing pagination/batching for large datasets
-> - DB query patterns (N+1, missing indexes, full scans)
-> - Caching opportunities, cache invalidation risks
-> - Resource cleanup, connection pool exhaustion
->
-> Report ONLY new info. Do NOT restate existing perf considerations.
+**Agent 5 — Performance Reviewer** (tag: `performance`):
+`Agent(subagent_type="performance-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
 **Agent 6 — API & Contract Reviewer** (tag: `api`):
-> API & Contract Reviewer. Evaluate interface design, backwards compat:
-> - Public API changes breaking consumers
-> - Param naming inconsistencies
-> - Response fmt changes, missing fields
-> - Missing versioning/deprecation strategy
-> - Err response semantics (status codes, err shapes)
-> - Missing/incorrect type annotations on public interfaces
-> - Doc gaps for consumer-facing changes
->
-> Report ONLY new info. Do NOT restate existing API decisions.
+`Agent(subagent_type="api-contract-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
-**Agent 7 — Complexity & Maintainability Reviewer** (tags: `complexity` or `architecture`, or always under `--careful`):
-> Complexity & Maintainability Reviewer. Assess long-term code health:
-> - DRY violations, code duplication
-> - High cyclomatic complexity
-> - Abstraction level mismatches
-> - SRP violations
-> - Tight coupling between independent modules
-> - Test coverage gaps in critical paths
-> - Tech debt introduced w/o acknowledgment
->
-> Report ONLY new info. Do NOT restate existing maintainability concerns.
+**Agent 7 — Complexity Reviewer** (tags: `complexity` or `architecture`, or always under `--careful`):
+`Agent(subagent_type="complexity-reviewer", prompt="Todo {todo_id}: {title}\nRequirements:\n{requirements}\nResearch:\n{research}")`
 
 **Agent selection:**
 - Core (1-3): ALWAYS run.
