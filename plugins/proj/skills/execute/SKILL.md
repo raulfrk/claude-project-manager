@@ -649,6 +649,27 @@ Root todo exec does NOT auto-recurse into children. Specify child IDs explicitly
 
 **6.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Execute: {todo-id}")`.
 
+## ASK_USER Escalation (execution agents)
+
+Spawned execution agents CANNOT call `AskUserQuestion` directly. Protocol:
+
+1. Agent detects need for user input
+2. Agent → `SendMessage` to team-lead: `"ASK_USER: <question details, options if applicable>"`
+3. Lead calls `AskUserQuestion` w/ agent's question + options
+4. User answers
+5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
+6. Agent continues w/ answer
+
+**When to escalate:**
+- **Plan gaps** — impl discovers work outside approved plan (new file needed, unexpected dep, missing API)
+- **Scope clarifications** — requirements ambiguous for specific impl decision
+- **Architectural blockers** — existing code structure conflicts w/ planned approach, multiple valid resolutions
+- **Edge cases** — discovered during impl, not covered by requirements, affects correctness
+
+Agents must NOT improvise, guess, or auto-resolve when user input needed. Wait for `ASK_USER_RESPONSE` before proceeding.
+
+See run/SKILL.md Agent Delegation Protocols appendix for full protocol spec incl PLAN_ESCALATION.
+
 ## Prerequisites
 
 - Active project loaded.

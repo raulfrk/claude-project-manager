@@ -57,7 +57,18 @@ Two bg Task agents (general-purpose, read-only: `Read, Glob, Grep`):
 
 Store handles as `bg_explore_agents`. Do NOT wait — → step 3.
 
-Bg agents discovering critical finding requiring user decision → use ASK_USER protocol: send `ASK_USER: <finding>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
+### ASK_USER Escalation (bg agents)
+
+Bg agents CANNOT call `AskUserQuestion` directly. Protocol:
+
+1. Agent detects critical finding requiring user decision (e.g. scope conflict, missing dep, architectural blocker)
+2. Agent → `SendMessage` to team-lead: `"ASK_USER: <finding details, options if applicable>"`
+3. Lead calls `AskUserQuestion` w/ agent's question + options
+4. User answers
+5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
+6. Agent continues w/ answer
+
+Agents must NOT improvise, guess, or silently continue when user input needed. Non-critical findings → include in return results, no escalation.
 
 **3.** Entry mode selection
 

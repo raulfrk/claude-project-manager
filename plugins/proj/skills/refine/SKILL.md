@@ -29,7 +29,18 @@ Refine todo: $ARGUMENTS
 
 N roles = N agents — never combine. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning: `TeamCreate(name="refine-review-{todo_id}", description="Refine review agents for todo {todo_id}")`, each Agent w/ `team_name="refine-review-{todo_id}"`. After all return (step 4): `TeamDelete(team_name="refine-review-{todo_id}")`.
 
-Review agents identifying issue requiring architectural decision or user input → use ASK_USER protocol: send `ASK_USER: <finding>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
+### ASK_USER Escalation (review agents)
+
+Review agents CANNOT call `AskUserQuestion` directly. Protocol:
+
+1. Agent finds BLOCKING issue requiring user/architectural decision (not just a suggestion)
+2. Agent → `SendMessage` to team-lead: `"ASK_USER: <issue details, decision needed, options if applicable>"`
+3. Lead calls `AskUserQuestion` w/ agent's question + options
+4. User answers
+5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
+6. Agent incorporates answer into findings report
+
+Agents must NOT auto-demote blocking findings or guess architectural intent. Non-blocking suggestions → include in Suggestions section, no escalation.
 
 Load todo `tags`. Select agents per logic below. Spawn all selected parallel:
 
