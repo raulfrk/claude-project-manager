@@ -82,7 +82,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 **3a. Smart gate scoring** (skip if quality_level == fast w/ auto-execute, or --force-plan):
 
  File-impact estimation (for dims 1-2 w/o speculative plan):
- Spawn lightweight read-only Task agent w/: todo ctx, reqs, research. Tools: Read, Glob, Grep only.
+ Spawn `subagent_type="file-discovery"` read-only Task agent w/: todo ctx, reqs, research.
  Agent estimates: files modified/created, dirs involved.
  Wait. Use results for dims 1 (file count), 2 (dir spread).
  Agent fails → score dims 1-2 as 0.
@@ -160,7 +160,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
  **Prompt:**
  > Fix these issues? (1) Fix (2) Proceed (3) Skip
- - Fix: spawn `general-purpose` Task agent w/: verification report, todo ctx + reqs + research + parent ctx (`proj_get_todo_context`), approved plan, fix instructions. After completion, re-run verification (max 2 retries). Still failing → display updated report, re-prompt.
+ - Fix: spawn `subagent_type="verification-fixer"` Task agent w/: verification report, todo ctx + reqs + research + parent ctx (`proj_get_todo_context`), approved plan, fix instructions. After completion, re-run verification (max 2 retries). Still failing → display updated report, re-prompt.
  - Proceed: continue to satisfaction (step 5) despite failures.
  - Skip: skip remaining verification, go to step 5.
 
@@ -198,8 +198,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 `TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")`. Each read-only Task agent gets `team_name`.
 
-Each todo → read-only Task agent:
-- Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research` (NO write tools)
+Each todo → `subagent_type="speculative-planner"` read-only Task agent:
 - Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
 - PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 
@@ -254,12 +253,12 @@ Each todo in range:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait for one to complete.
- Spawn background `general-purpose` Task agent w/ `team_name="exec-plan-{timestamp}"`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` Task agent w/ `team_name="exec-plan-{timestamp}"`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
+`TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract "Files to modify/create" from each plan.
@@ -314,7 +313,7 @@ Enforce max_parallel from quality_level mapping.
  ELSE:
  - Display: `Executing batch: todos <id1>, <id2>, ...`
  - N roles per target → N individual agents.
- - Spawn one Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
  - `worktree_enabled` + todo has `worktree_path`: include `worktree_path`, `worktree_branch` in ctx. Instruction: exec in worktree dir. Prefix commits `[todo-{id}]`.
  - Pattern group todo → include: "Part of pattern group (N similar). Common pattern: <normalized>. Implement consistently."
  - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead, wait for `ASK_USER_RESPONSE`. Do NOT improvise. (See run/SKILL.md Agent Delegation Protocols appendix.)
@@ -348,7 +347,7 @@ Persist each to `todos/<id>/verification-report.md`.
 
 Summary line (e.g. "2 passed, 1 failed"):
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ failed → `TeamCreate(name="exec-fix-indep-{timestamp}", ...)`, one agent per failed todo. After: `TeamDelete`. 1 failed → single agent. Re-verify (max 2 retries). Still failing → display, re-prompt.
+- Fix: 2+ failed → `TeamCreate(name="exec-fix-indep-{timestamp}", ...)`, one `subagent_type="verification-fixer"` agent per failed todo. After: `TeamDelete`. 1 failed → single agent. Re-verify (max 2 retries). Still failing → display, re-prompt.
 - Proceed: continue to Phase 3.
 - Skip: go to Phase 3.
 
@@ -389,10 +388,10 @@ Each todo:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
+`TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (parallel Task agents):
 
@@ -405,7 +404,7 @@ IF `pipeline_enabled`:
  Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-fallback-{timestamp}")`.
  All failed → "All N failed. (1) Retry (2) Skip (3) Stop."
 ELSE:
-After plans approved (or skipped trust 3), spawn one `general-purpose` Task agent per todo (excl manual-skipped) w/ `team_name`.
+After plans approved (or skipped trust 3), spawn one `subagent_type="implementer"` Task agent per todo (excl manual-skipped) w/ `team_name`.
 Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
 Pattern group → include pattern info.
@@ -429,7 +428,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", ...)`, agents per failed. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents per failed. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same as Pattern A.
 
 All pass → proceed w/o prompt.
@@ -451,8 +450,7 @@ Clear `executing_agents = {}`. Report summary.
 
 **Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3):
 
-`TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → read-only Task agent:
-- Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
+`TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → `subagent_type="speculative-planner"` read-only Task agent:
 - Output: JSON plan `{prose, actions: [{type, file}]}`
 - PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
 Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
@@ -481,12 +479,12 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background agent w/ `team_name="exec-plan-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-plan-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
+`TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract file lists from plans. Deps: check overlaps **within each batch** (cross-batch OK — sequential).
@@ -530,7 +528,7 @@ Enforce max_parallel.
  ELSE:
  - Display: `Executing batch <N>/<total>: todos <ids>`
  - N roles → N agents.
- - Spawn one Agent per todo w/ `team_name`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `team_name`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
  - `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
  - Pattern group → include pattern info.
  - Agents exec as-is. No `todo_complete`. Plan gap → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
@@ -564,7 +562,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-deps-{timestamp}", ...)`. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → `TeamCreate(name="exec-fix-deps-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.
@@ -599,10 +597,10 @@ Topo order (respect blocked_by). Each todo:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
+`TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (sequential, dep order):
 
@@ -633,7 +631,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", ...)`. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.

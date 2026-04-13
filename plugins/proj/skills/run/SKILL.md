@@ -216,7 +216,7 @@ Runs only when `quality_level == careful`. NEVER under `--fast`. Runs after stru
 | Completeness | requirements.md + research.md | missing failure modes, missing auth/security concerns, scope gaps |
 | Research Validation | research.md + repo filesystem | each ref'd file exists, option distinctness, risk realism |
 
-Each spawned as `general-purpose` Task:
+Each spawned via named `subagent_type` (see `plugins/proj/agents/`):
 - Tools (read-only): `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`, `mcp__proj__proj_explore_codebase`
 - Timeout: 90s
 - Output schema (strict JSON):
@@ -260,7 +260,7 @@ See **Preflight Agents Reference** appendix for prompt templates.
 Spawn via `TeamCreate` before per-batch loop: `TeamCreate(name="run-decompose-single-{timestamp}", description="Run: decomposing descendants of root todo")`. Each Task agent uses that `team_name`. After all batches → `TeamDelete`.
 
 Each batch in dep order:
- - One `general-purpose` Task per todo w/ `team_name`. Each runs decompose autonomously.
+ - One `subagent_type="decomposer"` Task per todo w/ `team_name`. Each runs decompose autonomously.
  - Wait for batch. Report failures.
 After: refresh descendant list via `mcp__proj__todo_tree`. `TeamDelete`.
 
@@ -390,7 +390,7 @@ Suggested next: `1. /proj:status`
 
 Agent defs in `plugins/proj/agents/`. Each agent file includes frontmatter (name, tools, model) + output schema inline. Load at runtime via `Read` when spawning.
 
-All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned as `general-purpose` Agents in TeamCreate group, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
+All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned via named `subagent_type` in TeamCreate group, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
 
 ### Phase A.5b — Define-phase agents
 
@@ -422,12 +422,12 @@ All agents via `TeamCreate` (never bare parallel Task calls). Example for A.5b:
 # Pseudocode — TeamCreate first, then spawn Agents with team_name
 TeamCreate(name="preflight-adversarial-define-<id>",
            description="Adversarial review agents for todo <id>")
-Agent(subagent_type="general-purpose", description="Ambiguity review — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt=<ambiguity_prompt>)
-Agent(subagent_type="general-purpose", description="Completeness review — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt=<completeness_prompt>)
-Agent(subagent_type="general-purpose", description="Research validation — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt=<research_validation_prompt>)
+Agent(subagent_type="ambiguity-reviewer", description="Ambiguity review — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
+Agent(subagent_type="completeness-reviewer", description="Completeness review — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
+Agent(subagent_type="research-validator", description="Research validation — todo <id>",
+      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
 # ... await all three ...
 TeamDelete(name="preflight-adversarial-define-<id>")
 ```
