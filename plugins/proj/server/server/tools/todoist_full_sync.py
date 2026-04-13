@@ -11,6 +11,7 @@ import base64
 import difflib
 import json
 import logging
+import re
 import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -131,6 +132,138 @@ def _ghost_check(title: str, archived: list[Todo], threshold: float = 0.7) -> bo
     if any(t.lower() == lower_title for t in titles):
         return True
     return bool(difflib.get_close_matches(title, titles, n=1, cutoff=threshold))
+
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize a title for dedup comparison: lowercase, collapse whitespace, strip."""
+    return _WHITESPACE_RE.sub(" ", title.strip()).lower()
+
+
+def _reconcile_unlinked_todos(
+    todos: list[Todo],
+    todoist_tasks: list[dict[str, JsonValue]],
+    cfg: ProjConfig,
+    name: str,
+) -> int:
+    """Pre-sync reconciliation: link local todos with null todoist_task_id to
+    existing Todoist tasks by normalized title match.
+
+    Only auto-links when the match is unambiguous: exactly one unlinked local
+    todo matches exactly one unclaimed Todoist task on the same normalized title.
+    Ambiguous matches (multiple candidates) are left for the potential_links
+    confirmation flow in compute_diff.
+
+    Returns the number of todos that were reconciled (linked).
+    """
+    # Collect unlinked local todos (open, no todoist_task_id)
+    unlinked = [t for t in todos if not t.todoist_task_id and t.status not in TERMINAL_STATUSES]
+    if not unlinked or not todoist_tasks:
+        return 0
+
+    # Build index: normalized title -> list of Todoist tasks
+    todoist_by_norm_title: dict[str, list[dict[str, JsonValue]]] = {}
+    # Track which Todoist task IDs are already claimed by local todos
+    claimed_todoist_ids: set[str] = {t.todoist_task_id for t in todos if t.todoist_task_id}
+    for task in todoist_tasks:
+        tid = str(task.get("id", ""))
+        if not tid or tid in claimed_todoist_ids:
+            continue
+        norm = _normalize_title(str(task.get("content", "")))
+        if norm:
+            todoist_by_norm_title.setdefault(norm, []).append(task)
+
+    if not todoist_by_norm_title:
+        return 0
+
+    # Build index: normalized title -> list of unlinked local todos
+    local_by_norm_title: dict[str, list[Todo]] = {}
+    for todo in unlinked:
+        norm = _normalize_title(todo.title)
+        if norm:
+            local_by_norm_title.setdefault(norm, []).append(todo)
+
+    # Build parent todoist_task_id lookup for context matching
+    local_by_id: dict[str, Todo] = {t.id: t for t in todos}
+
+    link_ops: list[dict[str, str]] = []
+    matched_todoist_ids: set[str] = set()
+    matched_local_ids: set[str] = set()
+
+    for norm_title, local_group in local_by_norm_title.items():
+        todoist_group = todoist_by_norm_title.get(norm_title)
+        if not todoist_group:
+            continue
+
+        # Filter already-matched from both sides
+        avail_local = [t for t in local_group if t.id not in matched_local_ids]
+        avail_todoist = [
+            c for c in todoist_group if str(c.get("id", "")) not in matched_todoist_ids
+        ]
+
+        if not avail_local or not avail_todoist:
+            continue
+
+        # Unambiguous case: 1 local <-> 1 Todoist with parent-context evidence.
+        # Only auto-link when parent context confirms the match. Without parent
+        # context, 1:1 matches go through the potential_links confirmation flow
+        # in compute_diff (could be a coincidental title match).
+        if len(avail_local) == 1 and len(avail_todoist) == 1:
+            todo = avail_local[0]
+            candidate = avail_todoist[0]
+            todoist_id = str(candidate.get("id", ""))
+            # Require parent-context confirmation for auto-link
+            if todoist_id and todo.parent:
+                parent_todo = local_by_id.get(todo.parent)
+                parent_todoist_id = parent_todo.todoist_task_id if parent_todo else None
+                cand_parent = str(candidate.get("parent_id", "") or "")
+                if parent_todoist_id and cand_parent == parent_todoist_id:
+                    link_ops.append({"todo_id": todo.id, "todoist_task_id": todoist_id})
+                    matched_todoist_ids.add(todoist_id)
+                    matched_local_ids.add(todo.id)
+                    logger.info(
+                        "Reconciled todo %s (%r) -> Todoist task %s",
+                        todo.id,
+                        todo.title,
+                        todoist_id,
+                    )
+            continue
+
+        # Ambiguous case: try parent-context disambiguation
+        for todo in avail_local:
+            if todo.id in matched_local_ids:
+                continue
+            if not todo.parent:
+                continue
+            parent_todo = local_by_id.get(todo.parent)
+            parent_todoist_id = parent_todo.todoist_task_id if parent_todo else None
+            if not parent_todoist_id:
+                continue
+            for candidate in avail_todoist:
+                cid = str(candidate.get("id", ""))
+                if cid in matched_todoist_ids:
+                    continue
+                if str(candidate.get("parent_id", "") or "") == parent_todoist_id:
+                    link_ops.append({"todo_id": todo.id, "todoist_task_id": cid})
+                    matched_todoist_ids.add(cid)
+                    matched_local_ids.add(todo.id)
+                    logger.info(
+                        "Reconciled (parent-ctx) todo %s (%r) -> Todoist task %s",
+                        todo.id,
+                        todo.title,
+                        cid,
+                    )
+                    break
+
+    # Persist links
+    if link_ops:
+        link_data = ApplyInput(link_todoist_ids=link_ops)
+        apply_changes(link_data, cfg, name, push_confirmed=True)
+        logger.info("Pre-sync reconciliation linked %d todos", len(link_ops))
+
+    return len(link_ops)
 
 
 def _apply_description_sync(
@@ -1015,6 +1148,32 @@ def _resolve_todoist_socket() -> str:
     return "/tmp/claude-cpm-todoist.sock"  # noqa: S108
 
 
+def _check_hook_errors(tool_name: str, result: dict[str, JsonValue]) -> None:
+    """Log warnings if the result contains hook dispatch errors.
+
+    The hook dispatch wrapper injects a ``_hooks`` field with ``errors`` and
+    ``structured_errors`` when downstream hooks fail. These were previously
+    silently discarded by callers of ``_call_todoist_tool``.
+    """
+    hooks_meta = result.get("_hooks")
+    if not isinstance(hooks_meta, dict):
+        return
+    errors = hooks_meta.get("errors")
+    structured = hooks_meta.get("structured_errors")
+    if errors:
+        logger.warning(
+            "Hook errors after %s: %s",
+            tool_name,
+            errors,
+        )
+    if structured:
+        logger.warning(
+            "Hook structured_errors after %s: %s",
+            tool_name,
+            structured,
+        )
+
+
 def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
     """Call a Todoist MCP tool via inter-plugin Unix domain socket.
 
@@ -1042,9 +1201,17 @@ def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValu
             # Tools return json.dumps(...) strings — parse them
             if isinstance(result, str):
                 try:
-                    return cast("JsonValue", json.loads(result))
+                    parsed = cast("JsonValue", json.loads(result))
                 except (json.JSONDecodeError, ValueError):
                     return result
+                else:
+                    # Check for hook errors in parsed result
+                    if isinstance(parsed, dict):
+                        _check_hook_errors(tool_name, parsed)
+                    return parsed
+            # Check for hook errors in dict results
+            if isinstance(result, dict):
+                _check_hook_errors(tool_name, result)
             return cast("JsonValue", result)
         return cast("JsonValue", data)
 
@@ -1393,16 +1560,24 @@ def _find_existing_todoist_task(
     content: str,
     parent_id: str | None = None,
 ) -> str | None:
-    """Return the Todoist task ID of an exact content match in *project_id*, or None.
+    """Return the Todoist task ID of a content match in *project_id*, or None.
 
     Used as a dedup guard before retrying a push_create: if the first attempt
     created the task but the response was truncated, retrying without this check
     would create a duplicate.
 
-    When *parent_id* is provided, only tasks with that parent_id are considered.
-    This prevents false positives when multiple tasks share the same title.
+    Matching uses normalized titles (case-insensitive, collapsed whitespace).
+    When *parent_id* is provided, tasks with that parent are preferred. If no
+    parent-constrained match is found, falls back to matching without parent.
     """
-    if not project_id or not content:
+    if not project_id:
+        logger.warning(
+            "Dedup lookup skipped: no project_id for content=%r parent=%s",
+            content,
+            parent_id,
+        )
+        return None
+    if not content:
         return None
     try:
         raw = _call_todoist_tool("todoist_find_tasks", {"project_id": project_id})
@@ -1412,19 +1587,35 @@ def _find_existing_todoist_task(
             tasks = raw
         else:
             tasks = []
-        needle = content.strip()
+        needle = _normalize_title(content)
+        # First pass: match with parent_id constraint (if provided)
+        fallback_match: str | None = None
         for t in tasks:
             if not isinstance(t, dict):
                 continue
-            if str(t.get("content", "")).strip() != needle:
+            if _normalize_title(str(t.get("content", ""))) != needle:
                 continue
-            # Narrow by parent_id when available
+            task_id = str(t.get("id", ""))
+            if not task_id:
+                continue
+            # Check parent constraint
             if parent_id:
                 task_parent = str(t.get("parent_id", "") or "")
-                if task_parent != parent_id:
-                    continue
-            task_id = str(t.get("id", ""))
-            return task_id if task_id else None
+                if task_parent == parent_id:
+                    return task_id
+                # Remember first title match as fallback (no parent constraint)
+                if fallback_match is None:
+                    fallback_match = task_id
+            else:
+                return task_id
+        # Fall back to title-only match when parent constraint didn't match
+        if fallback_match:
+            logger.info(
+                "Dedup fallback: parent_id %s not matched, using title-only match %s",
+                parent_id,
+                fallback_match,
+            )
+            return fallback_match
     except Exception as exc:
         logger.warning(
             "Dedup lookup failed for project=%s content=%r parent=%s: %s",
@@ -1748,6 +1939,16 @@ def register(app: FastMCP) -> None:
                     }
                 )
 
+        # 4b. Pre-sync reconciliation: link unlinked local todos to existing
+        # Todoist tasks by normalized title before diffing. Prevents duplicates
+        # caused by prior hook failures leaving todoist_task_id null.
+        reconciled_count = 0
+        if todoist_tasks and has_local_todos:
+            reconciled_count = _reconcile_unlinked_todos(todos, todoist_tasks, cfg, name)
+            if reconciled_count:
+                # Reload todos after reconciliation so compute_diff sees the new links
+                todos = storage.load_todos(cfg, name)
+
         # 5. Compute diff
         plan = compute_diff(todoist_tasks, cfg, name)
 
@@ -1947,6 +2148,9 @@ def register(app: FastMCP) -> None:
             total_ghost_closed,
             total_root_cleaned,
         )
+
+        if reconciled_count:
+            summary["reconciled"] = reconciled_count
 
         if migrate_result:
             summary["migration"] = migrate_result
