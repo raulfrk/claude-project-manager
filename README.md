@@ -31,7 +31,21 @@ Project management plugins for Claude Code -- track todos, manage permissions, a
 
 Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`, `zoxide`, `analyse`.
 
-The installer wizard now prompts for an advanced tier after the basic questions — press Enter (Rich path) or toggle the Advanced button (Textual path) to drill into team_mode, smart_gate, context_injection, archive, and other fine-grained settings. Leave the toggle off to accept all defaults on fresh installs.
+### Installer Wizard (recommended)
+
+Run the TUI installer directly from the repo with `uv`:
+
+```console
+# Install and run (one command)
+uvx --from git+https://github.com/raulfrk/claude-project-manager cpm-install
+
+# Or clone first, then run locally
+git clone https://github.com/raulfrk/claude-project-manager.git
+cd claude-project-manager
+uv run cpm-install
+```
+
+The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`), integration setup (Todoist/Trello/Jira), and advanced settings (smart-gate, context-injection, archive, etc.).
 
 ---
 
