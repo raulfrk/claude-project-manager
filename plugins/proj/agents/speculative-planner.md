@@ -29,10 +29,8 @@ Role: read-only exploration + plan drafting. No file writes.
 
 When plan ready for approval:
 
-1. Agent sends `SendMessage` to team lead: `"PLAN_ESCALATION: <JSON plan below>"`
-2. Lead calls `EnterPlanMode` w/ plan
-3. User approves/modifies/rejects
-4. Lead relays decision via `SendMessage`
+Return `{status: "plan_escalation", plan: "<JSON plan below>"}`.
+Parent reads result → `EnterPlanMode` → user approves/rejects → spawns new Agent w/ decision.
 
 ## Output Format
 

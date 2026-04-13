@@ -17,28 +17,23 @@ Role: execute approved plan, implement changes, commit results.
 3. Run tests/lints if available
 4. Commit changes w/ descriptive msg
 
-## Delegation Protocols
+## Escalation Protocols
 
 ### ASK_USER Protocol
 
 When need user input during impl:
 
-1. Agent sends `SendMessage` to team lead: `"ASK_USER: <question with full context>"`
-2. Lead calls `AskUserQuestion` w/ agent's question
-3. Lead relays answer back via `SendMessage`
-4. Agent continues w/ answer
+Return `{status: "escalation_needed", issue: "<question with full context>", options: [...]}`.
+Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx + user's answer.
 
-Never guess when uncertain — escalate via ASK_USER.
+Never guess when uncertain — escalate via structured return.
 
 ### PLAN_ESCALATION Protocol
 
 When impl reveals need for plan changes (new files, scope shift, architectural decision):
 
-1. Agent sends `SendMessage` to team lead: `"PLAN_ESCALATION: <proposed plan change with rationale>"`
-2. Lead calls `EnterPlanMode` w/ proposed changes
-3. User approves/modifies/rejects
-4. Lead relays decision via `SendMessage`
-5. Agent adjusts impl accordingly
+Return `{status: "plan_escalation", plan: "<proposed plan change with rationale>"}`.
+Parent reads result → `EnterPlanMode` → user approves/rejects → spawns new Agent w/ decision.
 
 Never deviate from approved plan without escalation.
 

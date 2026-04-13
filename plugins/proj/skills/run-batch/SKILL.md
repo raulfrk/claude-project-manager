@@ -1,8 +1,8 @@
 ---
 name: run-batch
 description: Batch/range execution workflow for multiple todos. Extension of run skill.
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--trust N] [--max-parallel N]"
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
+argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--trust N] [--max-parallel N] [--no-worktree] [--no-verify] [--no-interactive]"
 ---
 
 
@@ -21,7 +21,7 @@ After parsing: `mcp__proj__todo_get` on each ID to confirm existence; parse erro
 Store `per_todo_quality: dict[str, str]` (id → level for annotated only). If ≥1 annotation → `auto_suggest_mode = false`; zero → `auto_suggest_mode = true`.
 Tag-immune upgrade: each ID in `per_todo_quality` w/ tags `security`/`breaking-change`/`migration`: if annotated `fast`, silently upgrade to `careful` + warn: "Todo N has tag X — annotation :fast upgraded to :careful (tag-immune safety rule)"
 
-All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--team`, `--no-team`, `--full-context`, `--trust`, `--resume`, `--no-pipeline`, `--refine`, `--fast`/`--careful`, `--force-plan`, `--batch-approve`, `--worktree`/`--no-worktree`, `--max-parallel`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
+All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--full-context`, `--trust`, `--resume`, `--no-pipeline`, `--refine`, `--fast`/`--careful`, `--force-plan`, `--batch-approve`, `--worktree`/`--no-worktree`, `--max-parallel`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
 
 ## Batch mode
 
@@ -161,28 +161,19 @@ Only when `effective_quality(todo_id) == careful`. NEVER `fast`. (No TaskCreate 
 
 `TaskCreate(title="Phase A.5b: Adversarial Review (Define) — batch", metadata={"phase": "A.5b"})` → `TaskUpdate(status="in_progress")`
 
-Spawn via `TeamCreate(name="preflight-adversarial-define-batch-{timestamp}", ...)`. One Agent per role per todo (never combine roles). After findings aggregated → `TeamDelete`.
+One Agent per role per todo w/ `run_in_background=true` (never combine roles).
 
 Each sampled todo: 3 agents (Ambiguity, Completeness, Research Validation) in parallel. Same tools, timeout, JSON schema, severity as run/SKILL.md Phase A.5b. See run/SKILL.md Preflight Agents Reference appendix for prompts.
 
-After return: aggregate into combined table. Same BLOCKING prompt flow. Timeouts/malformed JSON → WARNING. `TeamDelete`.
+Wait for all agents (auto-notified on completion). Aggregate into combined table. Same BLOCKING prompt flow. Timeouts/malformed JSON → WARNING.
 After adversarial review: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
 
 **Phase B — Remaining steps (parallel agents):**
 
-**Mode selection:** `config_load()` → `team_mode.enabled`.
-- `--team` OR (config enabled AND `--no-team` NOT passed) AND 2+ non-manual → **Team mode**.
-- Else → **Task agent mode**.
-
-**Team mode:**
+**Parallel agent mode:**
 `TaskCreate(title="Phase B: Decompose — batch", metadata={"phase": "B"})` → `TaskUpdate(status="in_progress")`
-1. `TeamCreate(name="run-decompose-{project}-{timestamp}", ...)`
-2. Each batch in dep order: one Agent per todo w/ `team_name`. Each runs `agent_steps` autonomously. `--full-context` → include CLAUDE.md + NOTES.md. Plan gap → use ASK_USER protocol (see run/SKILL.md Agent Delegation Protocols appendix). Wait per batch. Report failures.
-3. All done → `TeamDelete`.
-4. Failures → log to `failed-teams.yaml`.
-
-**Task agent mode (fallback):**
-`TeamCreate(name="run-decompose-fallback-{project}-{timestamp}", ...)`. Each batch: one `general-purpose` Task per todo w/ `team_name`. Wait per batch. Report failures. All done → `TeamDelete`.
+Each batch in dep order: one Agent per todo w/ `run_in_background=true`. Each runs `agent_steps` autonomously. `--full-context` → include CLAUDE.md + NOTES.md. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx. Wait per batch (auto-notified on completion). Report failures.
+Failures → log to `failed-agents.yaml`.
 
 After Phase B: refresh descendants via `mcp__proj__todo_tree`.
 After decompose: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
@@ -237,13 +228,13 @@ All fast → display: "⚡ --fast mode. Auto-executing low-complexity. Tag-immun
 
 `TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
 
-`TeamCreate(name="run-spec-{project}-{timestamp}", ...)`. One read-only Task per todo w/ `team_name`. Each:
+One read-only Agent per todo w/ `run_in_background=true`. Each:
 - Gets: todo ctx, requirements.md, research.md, parent ctx
 - Read-only tools: `Read`, `Glob`, `Grep`, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
 - Produces: `{prose: "<plan text>", actions: [{type: "create"|"modify"|"delete"|"test", file: "<path>"}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
 
-Wait all. Failure → exclude, fall back to sequential planning. Store in `speculative_plans[todo_id]`. `TeamDelete`.
+Wait for all agents (auto-notified on completion). Failure → exclude, fall back to sequential planning. Store in `speculative_plans[todo_id]`.
 After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase C1 — Plan (sequential, main):**
@@ -252,8 +243,6 @@ Trust 3 → skip to C2 w/ ctx only.
 `--no-interactive` → skip to C2 w/ exec instructions.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
-
-**Pipeline team setup** (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="run-c1-pipeline-{project}-{timestamp}", ...)`. Torn down in C2.
 
 `TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -271,7 +260,7 @@ Same 7-dimension complexity score (0-14), same eval order (tags → score → cr
 4. Plan creation (per gate level). Include Related Context.
 5. Approval (per trust + gate).
 6. Store.
-7. Pipeline spawn (if enabled, trust != 3): respect `batch_max_parallel_execute` from Phase A.0. Spawn w/ `team_name="run-c1-pipeline-{project}-{timestamp}"`.
+7. Pipeline spawn (if enabled, trust != 3): respect `batch_max_parallel_execute` from Phase A.0. Spawn Agent w/ `run_in_background=true`.
 
 **Pattern detection** (skip if effective_quality == careful):
 
@@ -366,11 +355,11 @@ Only `effective_quality(todo_id) == careful`. Never fast. Skip under trust 3. (N
 
 `TaskCreate(title="Phase C0.5b: Adversarial Review (Pre-execute) — batch", metadata={"phase": "C0.5b"})` → `TaskUpdate(status="in_progress")`
 
-`TeamCreate(name="preflight-adversarial-execute-{timestamp}", ...)`. One Agent per role per todo. After aggregation → `TeamDelete`.
+One Agent per role per todo w/ `run_in_background=true`.
 
 Each sampled todo, 3 read-only Agents in parallel (File Path Verifier, Spec-Plan Alignment, Impact Scanner). Same tools, timeout, JSON schema as run/SKILL.md Phase C0.5b. See run/SKILL.md Preflight Agents Reference appendix for prompts.
 
-**Findings aggregation**: merge across 3 agents, combined table (same fmt as A.5b). Same severity semantics. Timeouts/malformed JSON → WARNING.
+Wait for all agents (auto-notified on completion). **Findings aggregation**: merge across 3 agents, combined table (same fmt as A.5b). Same severity semantics. Timeouts/malformed JSON → WARNING.
 
 `worktree_enabled` → File Path Verifier checks worktree tree for todo's branch.
 After adversarial review: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
@@ -388,47 +377,31 @@ After worktree setup: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(
 
 `TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
-**Mode selection:** `config_load()` → `team_mode.enabled`. Same rules as Phase B mode selection.
-
 **Resume checkpoint** (`--resume`): same 4-step logic as run/SKILL.md Section 5ii-T (find checkpoint, fresh/stale check, skip to batch_index or restart).
 
-**Team mode:**
+**Parallel agent mode:**
 
 IF `pipeline_enabled`:
- Wait for agents. Report. `TeamDelete(team_name="run-c1-pipeline-{project}-{timestamp}")`.
+ Wait for all pipeline agents (auto-notified on completion). Report.
  All failed → batch failure short-circuit.
 ELSE:
 
-1. `TeamCreate(name="run-exec-{project}-{timestamp}", ...)`
-1a. Task Mapping (one-way): same as run/SKILL.md Section 5ii-T Phase 2 (TaskCreate per todo, addBlockedBy, pull model, one-way only).
+1a. Task Mapping (one-way): same as run/SKILL.md Section 5ii-T Phase 2 (TaskCreate per todo, addBlockedBy, one-way only).
 
 2. Each batch in dep order (excl `manual_skipped_ids`):
- - Display batch. One Agent per todo w/ `team_name`. Gets: plan (or ctx/exec instructions) + requirements.md + research.md + parent ctx. `--full-context` → CLAUDE.md + NOTES.md.
+ - Display batch. One Agent per todo w/ `run_in_background=true`. Gets: plan (or ctx/exec instructions) + requirements.md + research.md + parent ctx. `--full-context` → CLAUDE.md + NOTES.md.
  - Worktree → same instruction.
- - Agents exec plan, no `todo_complete`. Plan gap → use ASK_USER protocol (see run/SKILL.md Agent Delegation Protocols appendix).
- - Wait per batch. Report failures.
+ - Agents exec plan, no `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
+ - Wait per batch (auto-notified on completion). Report failures.
  - Write checkpoint:
      ```yaml
-     team_name: run-exec-{project}-{timestamp}
      batch_index: <current batch number>
      total_batches: <total>
      completed_todos: [<all completed todo IDs so far>]
      approved_plans:
        <todo_id>: "<plan text>"
      ```
-3. All done → `TeamDelete`.
-4. Failures → `failed-teams.yaml`.
-
-**Task agent mode (fallback):**
-
-IF `pipeline_enabled`: same wait/teardown/short-circuit.
-ELSE:
-
-`TeamCreate(name="run-fallback-{project}-{timestamp}", ...)`.
-
-Each batch: one `general-purpose` Task per todo w/ `team_name`. Gets: todo details, requirements.md, research.md, parent ctx, plan (or ctx/exec instructions). No `todo_complete`. Worktree → same instruction. Wait. Report.
-
-All done → `TeamDelete`.
+3. Failures → `failed-agents.yaml`.
 
 Dirty main → warn merge conflicts.
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
@@ -482,7 +455,7 @@ Verify ALL first, combined report:
 Persist to `todos/<id>/verification-report.md` (timestamped, overwrite prev).
 
 Failures → `N passed, M failed. Fix? (1) Fix (2) Proceed (3) Skip`
-- Fix: N >= 2 → `TeamCreate(name="run-verify-fix-batch-{project}-{timestamp}", ...)`, spawn, `TeamDelete`. N == 1 → single Agent. Each gets: report + ctx + plan + fix instructions. Re-verify (max 2 retries). Re-prompt if still failing.
+- Fix: N >= 2 → one `subagent_type="verification-fixer"` Agent per failed todo w/ `run_in_background=true`. Wait for all. N == 1 → single Agent. Each gets: report + ctx + plan + fix instructions. Re-verify (max 2 retries). Re-prompt if still failing.
 - Proceed/Skip: same as run/SKILL.md.
 
 All pass → display, proceed.

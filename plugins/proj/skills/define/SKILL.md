@@ -40,26 +40,17 @@ Review existing req/research/notes. Store for later.
 
 Extract keywords from todo title/desc/notes.
 
-Spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")` — never bare parallel Task calls for 2+ agents. Each agent gets `team_name="define-bg-{todo_id}"`. Team torn down at step 5.5 via `TeamDelete`.
+Two bg Agents (read-only: `Read, Glob, Grep`) w/ `run_in_background=true`:
 
-Two bg Task agents (read-only: `Read, Glob, Grep`):
+ **Agent A** — `Agent(subagent_type="file-discovery", run_in_background=true, prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: relevant file paths w/ 1-line desc")`
 
- **Agent A** — `Agent(subagent_type="file-discovery", prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: relevant file paths w/ 1-line desc")`
-
- **Agent B** — `Agent(subagent_type="pattern-explorer", prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: patterns found, key fn signatures, test conventions")`
+ **Agent B** — `Agent(subagent_type="pattern-explorer", run_in_background=true, prompt="Todo {todo_id}: {title}\nKeywords: {keywords}\nReturn: patterns found, key fn signatures, test conventions")`
 
 Store handles as `bg_explore_agents`. Do NOT wait — → step 3.
 
-### ASK_USER Escalation (bg agents)
+### Escalation (bg agents)
 
-Bg agents CANNOT call `AskUserQuestion` directly. Protocol:
-
-1. Agent detects critical finding requiring user decision (e.g. scope conflict, missing dep, architectural blocker)
-2. Agent → `SendMessage` to team-lead: `"ASK_USER: <finding details, options if applicable>"`
-3. Lead calls `AskUserQuestion` w/ agent's question + options
-4. User answers
-5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
-6. Agent continues w/ answer
+Bg agents CANNOT call `AskUserQuestion` directly. Agent returns `{status: "escalation_needed", issue: "<finding details>", options: [...]}` if critical finding requires user decision. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
 
 Agents must NOT improvise, guess, or silently continue when user input needed. Non-critical findings → include in return results, no escalation.
 
@@ -114,7 +105,7 @@ All CRITICAL gaps resolved → route via `AskUserQuestion`: "All critical gaps c
 
 **5.5.** Collect bg exploration (if `bg_explore_agents` exist)
 
-Wait for completion. Merge into `bg_file_discovery` + `bg_pattern_summary`. Call `TeamDelete(team_name="define-bg-{todo_id}")`. Agents failed → log warning, continue — results advisory only.
+Wait for completion (auto-notified). Merge into `bg_file_discovery` + `bg_pattern_summary`. Agents failed → log warning, continue — results advisory only.
 
 **6.** Write req and research
 
@@ -228,7 +219,7 @@ Not found → stop: "Todo <id> not found. Run `/proj:todo list` to see available
 
 **NI-1c.** Bg codebase exploration (skip if `skip_bg_prep`)
 
-Same as step 2c: extract keywords, spawn via `TeamCreate(name="define-bg-{todo_id}", description="Background codebase exploration for todo {todo_id}")`, two read-only bg Task agents (`subagent_type="file-discovery"` + `subagent_type="pattern-explorer"`, same prompts as step 2c) w/ `team_name="define-bg-{todo_id}"`. Store as `bg_explore_agents`. Do NOT wait — proceed NI-2. Team torn down at NI-2.5.
+Same as step 2c: extract keywords, two read-only bg Agents (`subagent_type="file-discovery"` + `subagent_type="pattern-explorer"`, same prompts as step 2c) w/ `run_in_background=true`. Store as `bg_explore_agents`. Do NOT wait — proceed NI-2.
 
 **NI-2. Explore codebase**
 
@@ -236,7 +227,7 @@ Use `Read`, `Glob`, `Grep` for existing patterns, relevant code, impl ctx. Be th
 
 **NI-2.5.** Collect bg exploration (if `bg_explore_agents` exist)
 
-Wait for completion. Merge into `bg_file_discovery` + `bg_pattern_summary`. `TeamDelete(team_name="define-bg-{todo_id}")`. Agents failed → log warning, continue.
+Wait for completion (auto-notified). Merge into `bg_file_discovery` + `bg_pattern_summary`. Agents failed → log warning, continue.
 
 **NI-3. Write req and research**
 

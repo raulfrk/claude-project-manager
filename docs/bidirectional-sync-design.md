@@ -306,7 +306,7 @@ Agent executes todo 1:
 
 ### Task Ownership
 
-- **Task owner**: Agent ID (set by TeamCreate or agent assignment)
+- **Task owner**: Agent ID (set by agent assignment)
 - **Task blockedBy**: Infer from proj todo.blocked_by (optional; agents can ignore)
 - **Task blocks**: Infer from dependent todos (optional)
 

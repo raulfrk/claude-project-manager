@@ -1,8 +1,8 @@
 ---
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
-allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
-argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
+allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, AskUserQuestion
+argument-hint: "[todo-id | range] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] [--max-parallel N] e.g. 1 or 2-4"
 ---
 
 
@@ -12,7 +12,6 @@ Execute todo(s): $ARGUMENTS
 
 **Scope from $ARGUMENTS:**
 - Parse `--no-verify` → skip verification (4a).
-- Parse `--team` → force team ON. `--no-team` → force team OFF.
 - Parse `--full-context` → include CLAUDE.md/NOTES.md in agent ctx.
 - Parse `--trust N` (0-3). Unset → `mcp__proj__config_load` → `team_mode.trust_level` (default 1).
  - Trust 0 (supervised): per-todo approval, sequential.
@@ -201,29 +200,25 @@ After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(st
 
 **Range w/ independent todos (no blocked_by between them):**
 
-**Mode selection:** `mcp__proj__config_load` → `team_mode.enabled`.
-- `--team` passed, OR (config `team_mode.enabled` true AND `--no-team` NOT passed) AND 3+ independent non-manual todos → **Pattern A**.
-- Otherwise → **Pattern B**.
+**Mode selection:** 3+ independent non-manual todos → **Pattern A**. Otherwise → **Pattern B**.
 
 
-**Pattern A — Team exec (independent todos):**
+**Pattern A — Parallel exec (independent todos):**
 
 **Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
 
 `TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
 
-`TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")`. Each read-only Task agent gets `team_name`.
-
-Each todo → `subagent_type="speculative-planner"` read-only Task agent:
+Each todo → `subagent_type="speculative-planner"` read-only Agent w/ `run_in_background=true`:
 - Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
 
 Agent fails → exclude todo, fall back to sequential planning.
 Store in `speculative_plans[todo_id]`.
 
 `--batch-approve` → auto-approve all. Display: `Batch-approved N speculative plans.`
 
-After collection: `TeamDelete(team_name="exec-spec-{timestamp}")`.
+Wait for all agents (auto-notified on completion).
 After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 1 — Plan (sequential, main conversation):**
@@ -231,8 +226,6 @@ After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskU
 Skip if trust 3 → Phase 2 w/ ctx only.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
-
-IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-plan-{timestamp}", description="Pipeline execution agents for {N} independent todos")`. All pipeline agents use this team. Torn down in Phase 2.
 
 `TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -272,14 +265,14 @@ Each todo in range:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait for one to complete.
- Spawn background `subagent_type="implementer"` Task agent w/ `team_name="exec-plan-{timestamp}"`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
 After plan phase: `TaskUpdate(status="completed")`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
+One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. Wait for all agents.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract "Files to modify/create" from each plan.
@@ -315,43 +308,39 @@ Options:
  - Restart → ignore, start Phase 1. Use anyway → proceed w/ stale data.
 4. Not found: `No checkpoint found — starting fresh`.
 
-**Phase 2 — Execute (parallel w/ Team):**
+**Phase 2 — Execute (parallel agents):**
 
 `TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
 Enforce max_parallel from quality_level mapping.
 
-**1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {id1}, {id2}, ...")`
 **1a. Task Mapping** (one-way — tasks mirror todos for coordination):
  Each todo:
- - `TaskCreate(title=<todo title>, description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}", "team_name": "{team_name}"})`
+ - `TaskCreate(title=<todo title>, description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}"})`
  - `blocked_by` rels → `addBlockedBy` w/ Task IDs from prev `TaskCreate`.
- Agents discover tasks via `TaskList(metadata={"team_name": team_name})` (pull model).
  One-way: Task completion ≠ proj todo completion. Satisfaction loop handles that.
 
 **2.** Single batch of independent todos:
  IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-plan-{timestamp}")`.
+ Wait for all `executing_agents`. Report failures.
  All failed → "All N agents in batch failed. (1) Retry (2) Skip (3) Stop." Handle choice; skip satisfaction.
  ELSE:
  - Display: `Executing batch: todos <id1>, <id2>, ...`
  - N roles per target → N individual agents.
- - Spawn one `subagent_type="implementer"` Agent per todo w/ `team_name`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
  - `worktree_enabled` + todo has `worktree_path`: include `worktree_path`, `worktree_branch` in ctx. Instruction: exec in worktree dir. Prefix commits `[todo-{id}]`.
  - Pattern group todo → include: "Part of pattern group (N similar). Common pattern: <normalized>. Implement consistently."
- - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead, wait for `ASK_USER_RESPONSE`. Do NOT improvise. (See run/SKILL.md Agent Delegation Protocols appendix.)
- - Wait for batch. Report failures.
- - Write checkpoint to `<tracking_dir>/<project>/.team-state/<team-name>/checkpoint.yaml`:
+ - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → return `{status: "escalation_needed", issue: "<description>"}`. Do NOT improvise. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
+ - Wait for all agents (auto-notified on completion). Report failures.
+ - Write checkpoint to `<tracking_dir>/<project>/.team-state/checkpoint.yaml`:
      ```yaml
-     team_name: execute-{project}-{timestamp}
      batch_index: 1
      total_batches: 1
      completed_todos: [<completed todo IDs>]
      approved_plans:
        <todo_id>: "<plan text>"
      ```
-**3.** All agents done: `TeamDelete(team_name)`.
-**4.** Failed → log to `tracking/{project}/.team-state/failed-teams.yaml`.
+**3.** Failed → log to `tracking/{project}/.team-state/failed-agents.yaml`.
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 2a — Verification** (skip if `--no-verify`; no TaskCreate when skipped):
@@ -374,7 +363,7 @@ Persist each to `todos/<id>/verification-report.md`.
 
 Summary line (e.g. "2 passed, 1 failed"):
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ failed → `TeamCreate(name="exec-fix-indep-{timestamp}", ...)`, one `subagent_type="verification-fixer"` agent per failed todo. After: `TeamDelete`. 1 failed → single agent. Re-verify (max 2 retries). Still failing → display, re-prompt.
+- Fix: 2+ failed → one `subagent_type="verification-fixer"` Agent per failed todo w/ `run_in_background=true`. Wait for all. 1 failed → single agent. Re-verify (max 2 retries). Still failing → display, re-prompt.
 - Proceed: continue to Phase 3.
 - Skip: go to Phase 3.
 
@@ -392,15 +381,13 @@ Clear `executing_agents = {}`. Report summary incl skipped/failed.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 
-**Pattern B — Task agent exec (independent, fallback):**
+**Pattern B — Sequential exec (independent, fallback):**
 
 Phase 1 — Plan (sequential, main conversation):
 
 Skip if trust 3 → Phase 2 w/ ctx only.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
-
-IF `pipeline_enabled` AND trust != 3: `TeamCreate(name="exec-fallback-{timestamp}", description="Pipeline execution agents (Pattern B fallback) for {N} independent todos")`. Torn down in Phase 2.
 
 `TaskCreate(title="Phase C1: Plan — batch (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -422,32 +409,29 @@ Each todo:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
 After plan phase: `TaskUpdate(status="completed")`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
+One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. Wait for all agents.
 
-Phase 2 — Execute (parallel Task agents):
+Phase 2 — Execute (Task agents):
 
 `TaskCreate(title="Phase C2: Execute — batch (fallback)", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 
-Enforce max_parallel. `TeamCreate` for 2+ agents.
-
-IF `pipeline_enabled`: team already created in Phase 1.
-ELSE: `TeamCreate(name="exec-fallback-{timestamp}", ...)` before spawning.
+Enforce max_parallel.
 
 IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-fallback-{timestamp}")`.
+ Wait for all `executing_agents`. Report failures.
  All failed → "All N failed. (1) Retry (2) Skip (3) Stop."
 ELSE:
-After plans approved (or skipped trust 3), spawn one `subagent_type="implementer"` Task agent per todo (excl manual-skipped) w/ `team_name`.
+After plans approved (or skipped trust 3), spawn one `subagent_type="implementer"` Agent per todo (excl manual-skipped) w/ `run_in_background=true`.
 Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
 Pattern group → include pattern info.
 Agents impl per plan. Do NOT `todo_complete`.
-After all return (ELSE): `TeamDelete(team_name="exec-fallback-{timestamp}")`.
+Wait for all agents (auto-notified on completion).
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 Phase 2a — Verification (skip if `--no-verify`; no TaskCreate when skipped):
@@ -470,7 +454,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-indep-fallback-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents per failed. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → one `subagent_type="verification-fixer"` Agent per failed todo w/ `run_in_background=true`. Wait for all. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same as Pattern A.
 
 All pass → proceed w/o prompt.
@@ -488,22 +472,20 @@ After satisfaction: `TaskUpdate(status="completed")`.
 
 **Range w/ dependencies:**
 
-**Mode selection:** `config_load` → `team_mode.enabled`.
-- `--team` OR (config enabled AND NOT `--no-team`) AND 3+ non-manual todos → **Pattern A**.
-- Otherwise → **Pattern B**.
+**Mode selection:** 3+ non-manual todos → **Pattern A**. Otherwise → **Pattern B**.
 
 
-**Pattern A — Team exec (w/ deps):**
+**Pattern A — Parallel exec (w/ deps):**
 
 **Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
 
 `TaskCreate(title="Phase C0: Speculative Planning — deps batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
 
-`TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → `subagent_type="speculative-planner"` read-only Task agent:
+Each todo → `subagent_type="speculative-planner"` read-only Agent w/ `run_in_background=true`:
 - Output: JSON plan `{prose, actions: [{type, file}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent drafts plan → SendMessage "PLAN_ESCALATION: <plan>" to team-lead → lead EnterPlanMode → ExitPlanMode → user approves/rejects → lead relays result → agent continues or revises.
+- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
 Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
-`--batch-approve` → auto-approve. `TeamDelete`.
+`--batch-approve` → auto-approve. Wait for all agents.
 After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 1 — Plan (sequential, dependency order):**
@@ -511,8 +493,6 @@ After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskU
 Skip if trust 3 → Phase 2 w/ ctx only.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
-
-Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-plan-deps-{timestamp}", ...)`. Torn down after Phase 2.
 
 `TaskCreate(title="Phase C1: Plan — deps batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -531,13 +511,13 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-plan-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
 After plan phase: `TaskUpdate(status="completed")`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
+One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. Wait for all agents.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract file lists from plans. Deps: check overlaps **within each batch** (cross-batch OK — sequential).
@@ -569,36 +549,33 @@ Same rules as independent Pattern above.
 
 Enforce max_parallel.
 
-**1.** `TeamCreate(name="execute-{project}-{timestamp}", description="Executing todos {ids} in {N} batches")`
 **1a. Task Mapping** (one-way):
  Each todo across all batches:
- - `TaskCreate(title, description="Implement todo {id} — {title}", metadata={"proj_todo_id", "team_name"})`
+ - `TaskCreate(title, description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}"})`
  - `blocked_by` rels (same or diff batch) → `addBlockedBy`.
- Pull model: `TaskList(metadata={"team_name"})`. One-way: satisfaction loop handles completion.
+ One-way: satisfaction loop handles completion.
 
 **2.** Each batch in dep order:
  IF `pipeline_enabled`:
- Wait for `executing_agents` in batch. Report failures. After all batches: `TeamDelete(team_name="exec-plan-deps-{timestamp}")`.
+ Wait for `executing_agents` in batch. Report failures.
  All failed → "(1) Retry (2) Skip (3) Stop."
  ELSE:
  - Display: `Executing batch <N>/<total>: todos <ids>`
  - N roles → N agents.
- - Spawn one `subagent_type="implementer"` Agent per todo w/ `team_name`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
  - `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
  - Pattern group → include pattern info.
- - Agents exec as-is. No `todo_complete`. Plan gap → use ASK_USER protocol: send `ASK_USER: <issue>` via SendMessage to team-lead. (See run/SKILL.md Agent Delegation Protocols.)
- - Wait for batch before next. Report failures.
+ - Agents exec as-is. No `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
+ - Wait for batch before next (auto-notified on completion). Report failures.
  - Write checkpoint:
      ```yaml
-     team_name: execute-{project}-{timestamp}
      batch_index: <current batch number>
      total_batches: <total>
      completed_todos: [<all completed todo IDs so far>]
      approved_plans:
        <todo_id>: "<plan text>"
      ```
-**3.** All batches done: `TeamDelete(team_name)`.
-**4.** Failed → log to `tracking/{project}/.team-state/failed-teams.yaml`.
+**3.** Failed → log to `tracking/{project}/.team-state/failed-agents.yaml`.
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **Phase 2a — Verification** (skip if `--no-verify`; no TaskCreate when skipped):
@@ -621,7 +598,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-deps-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → one `subagent_type="verification-fixer"` Agent per failed todo w/ `run_in_background=true`. Wait for all. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.
@@ -644,8 +621,6 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-Pipeline team (if `pipeline_enabled` AND trust != 3): `TeamCreate(name="exec-fallback-deps-{timestamp}", ...)`. Torn down Phase 2.
-
 `TaskCreate(title="Phase C1: Plan — deps (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
 Topo order (respect blocked_by). Each todo:
@@ -663,12 +638,12 @@ Topo order (respect blocked_by). Each todo:
 **5.** Store in `approved_plans[todo_id]`.
 **6.** IF `pipeline_enabled` AND trust != 3:
  `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
+ Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`. Store in `executing_agents[todo_id]`.
 
 After plan phase: `TaskUpdate(status="completed")`.
 
 **Cross-review** (careful AND N > 1):
-`TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. One `subagent_type="drift-reviewer"` per plan. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
+One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. Wait for all agents.
 
 Phase 2 — Execute (sequential, dep order):
 
@@ -677,7 +652,7 @@ Phase 2 — Execute (sequential, dep order):
 Enforce max_parallel.
 
 IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures. `TeamDelete(team_name="exec-fallback-deps-{timestamp}")`.
+ Wait for all `executing_agents`. Report failures.
  All failed → "(1) Retry (2) Skip (3) Stop."
 ELSE:
 Exec each per plan (or ctx trust 3), one at time (respect blocked_by). Mark in_progress, impl.
@@ -706,7 +681,7 @@ Persist to `todos/<id>/verification-report.md`.
 
 Summary + prompt:
 > Fix failed todos? (1) Fix (2) Proceed (3) Skip
-- Fix: 2+ → `TeamCreate(name="exec-fix-deps-fallback-{timestamp}", ...)`, `subagent_type="verification-fixer"` agents. `TeamDelete`. 1 → single agent. Re-verify (max 2 retries).
+- Fix: 2+ → one `subagent_type="verification-fixer"` Agent per failed todo w/ `run_in_background=true`. Wait for all. 1 → single agent. Re-verify (max 2 retries).
 - Proceed / Skip: same.
 
 All pass → proceed w/o prompt.
@@ -724,16 +699,15 @@ Root todo exec does NOT auto-recurse into children. Specify child IDs explicitly
 
 **6.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Execute: {todo-id}")`.
 
-## ASK_USER Escalation (execution agents)
+## Agent Escalation (execution agents)
 
-Spawned execution agents CANNOT call `AskUserQuestion` directly. Protocol:
+Spawned agents return structured output on issues requiring user input:
 
 1. Agent detects need for user input
-2. Agent → `SendMessage` to team-lead: `"ASK_USER: <question details, options if applicable>"`
-3. Lead calls `AskUserQuestion` w/ agent's question + options
+2. Agent returns `{status: "escalation_needed", issue: "<description>", options: ["opt1", "opt2"]}`
+3. Parent reads Agent result → calls `AskUserQuestion` w/ agent's issue + options
 4. User answers
-5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
-6. Agent continues w/ answer
+5. Parent spawns new Agent w/ resolution ctx + user's answer
 
 **When to escalate:**
 - **Plan gaps** — impl discovers work outside approved plan (new file needed, unexpected dep, missing API)
@@ -741,9 +715,7 @@ Spawned execution agents CANNOT call `AskUserQuestion` directly. Protocol:
 - **Architectural blockers** — existing code structure conflicts w/ planned approach, multiple valid resolutions
 - **Edge cases** — discovered during impl, not covered by requirements, affects correctness
 
-Agents must NOT improvise, guess, or auto-resolve when user input needed. Wait for `ASK_USER_RESPONSE` before proceeding.
-
-See run/SKILL.md Agent Delegation Protocols appendix for full protocol spec incl PLAN_ESCALATION.
+Agents must NOT improvise, guess, or auto-resolve when user input needed. Return escalation output immediately.
 
 ## Prerequisites
 
@@ -756,7 +728,7 @@ See run/SKILL.md Agent Delegation Protocols appendix for full protocol spec incl
 - Manual-tagged → warning from `todo_check_executable`, stop.
 - Blocked → err, stop.
 - Verification failures → combined report + Fix/Proceed/Skip.
-- Agent failures → report per todo. Log to `failed-teams.yaml`.
+- Agent failures → report per todo. Log to `failed-agents.yaml`.
 - Stale checkpoint → ask restart or use stale.
 
 ### Worktree Failure Handling

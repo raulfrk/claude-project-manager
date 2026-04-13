@@ -167,19 +167,13 @@ class TestManagedSectionContent:
         assert canonical in MANAGED_SECTION
 
     def test_escalation_rule_in_managed_section(self):
-        canonical = (
-            "On issue not covered by the plan: (1) detect, "
-            "(2) SendMessage team-lead with issue details, "
-            "(3) team-lead escalates to user via AskUserQuestion."
-        )
-        assert canonical in MANAGED_SECTION
-        assert "SendMessage" in MANAGED_SECTION
-        assert ("team-lead" in MANAGED_SECTION) or ("team lead" in MANAGED_SECTION)
+        assert "escalation_needed" in MANAGED_SECTION
+        assert "AskUserQuestion" in MANAGED_SECTION
         assert "Do NOT improvise" in MANAGED_SECTION
 
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
-        assert "TeamCreate" in MANAGED_SECTION
+        assert "run_in_background=true" in MANAGED_SECTION
         assert "plan mode" in MANAGED_SECTION
         assert "Auto-capture" in MANAGED_SECTION
         assert "Interactive Q&A" in MANAGED_SECTION

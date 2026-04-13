@@ -1,8 +1,8 @@
 ---
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--careful] [--force-plan] [--worktree] [--no-worktree] [--max-parallel N]"
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--careful] [--force-plan] [--worktree] [--no-worktree] [--max-parallel N]"
 ---
 
 
@@ -15,8 +15,6 @@ Run workflow for: $ARGUMENTS
 Extract from $ARGUMENTS:
 - Input: single ID (`1`). Range/comma list → dispatched to `/proj:run-batch`.
 - `--no-verify`: skip verification in execute (passed through)
-- `--team`: force team mode ON (overrides config)
-- `--no-team`: force team mode OFF (overrides config)
 - `--full-context`: include CLAUDE.md + NOTES.md in each agent's ctx
 - `--trust N` (0-3): override trust level. If unset, use `team_mode.trust_level` from config (default 1).
  - Trust 0 (supervised): per-todo approval — each plan presented individually, user approves one at time
@@ -217,7 +215,7 @@ Runs only when `quality_level == careful`. NEVER under `--fast`. (No TaskCreate 
 
 **Batch sampling**: descendant list > 5 → agents run on **5 highest-complexity** todos (ranked by 7-dimension complexity score from Phase C1 smart gating). Others get structural checks only. Override: `--force-preflight-all`.
 
-**Agents** — spawn via `TeamCreate`, one Agent per role per todo. Never combine roles. Call `TeamCreate(name="preflight-adversarial-define-{todo_id}", description="Adversarial review agents (Ambiguity, Completeness, Research Validation) for todo {todo_id}")`, spawn each w/ that `team_name`. After all return + findings aggregated → `TeamDelete(team_name="preflight-adversarial-define-{todo_id}")`.
+**Agents** — one Agent per role per todo w/ `run_in_background=true`. Never combine roles. Wait for all agents (auto-notified on completion), then aggregate findings.
 
 | Agent | Reads | Checks |
 |-------|-------|--------|
@@ -266,15 +264,13 @@ See **Preflight Agents Reference** appendix for prompt templates.
 
 After adversarial review complete: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
 
-**If `decompose`** — parallel Task agents:
+**If `decompose`** — parallel agents:
 `TaskCreate(title="Phase B: Decompose — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "B"})` → `TaskUpdate(status="in_progress")`
 
-Spawn via `TeamCreate` before per-batch loop: `TeamCreate(name="run-decompose-single-{timestamp}", description="Run: decomposing descendants of root todo")`. Each Task agent uses that `team_name`. After all batches → `TeamDelete`.
-
 Each batch in dep order:
- - One `subagent_type="decomposer"` Task per todo w/ `team_name`. Each runs decompose autonomously.
- - Wait for batch. Report failures.
-After: refresh descendant list via `mcp__proj__todo_tree`. `TeamDelete`.
+ - One `subagent_type="decomposer"` Agent per todo w/ `run_in_background=true`. Each runs decompose autonomously.
+ - Wait for batch (auto-notified on completion). Report failures.
+After: refresh descendant list via `mcp__proj__todo_tree`.
 After decompose complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
 **If `refine`** — after decompose, within iteration (if `quality_level == careful` AND `refine` in steps AND NOT `--no-interactive`):
@@ -396,7 +392,7 @@ Suggested next: `1. /proj:status`
 - Manual-tagged → skip w/ warn.
 - Quality gate failure (define) → low-confidence display, Continue/Re-define/Stop.
 - Verification failures (execute) → combined report, Fix/Proceed/Skip.
-- Agent failures → report + log to `failed-teams.yaml`.
+- Agent failures → report + log to `failed-agents.yaml`.
 - Stale checkpoint → ask restart or use stale.
 
 ## Output
@@ -410,7 +406,7 @@ Suggested next: `1. /proj:status`
 
 Agent defs in `plugins/proj/agents/`. Each agent file includes frontmatter (name, tools, model) + output schema inline. Load at runtime via `Read` when spawning.
 
-All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned via named `subagent_type` in TeamCreate group, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
+All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned via named `subagent_type` w/ `run_in_background=true`, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
 
 ### Phase A.5b — Define-phase agents
 
@@ -436,20 +432,17 @@ See: plugins/proj/agents/impact-scanner.md
 
 ### Spawning pattern
 
-All agents via `TeamCreate` (never bare parallel Task calls). Example for A.5b:
+All agents via parallel `Agent()` calls w/ `run_in_background=true`. Example for A.5b:
 
 ```
-# Pseudocode — TeamCreate first, then spawn Agents with team_name
-TeamCreate(name="preflight-adversarial-define-<id>",
-           description="Adversarial review agents for todo <id>")
+# Pseudocode — spawn parallel Agents, wait for completion
 Agent(subagent_type="ambiguity-reviewer", description="Ambiguity review — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
+      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
 Agent(subagent_type="completeness-reviewer", description="Completeness review — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
+      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
 Agent(subagent_type="research-validator", description="Research validation — todo <id>",
-      team_name="preflight-adversarial-define-<id>", prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
-# ... await all three ...
-TeamDelete(name="preflight-adversarial-define-<id>")
+      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
+# ... auto-notified on completion — no cleanup needed ...
 ```
 
 Await all three, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show). Repeat per sampled todo.
@@ -471,7 +464,7 @@ If `subagent_type="<name>"` not found (agent .md file missing/renamed):
 
 ## Agent Delegation Protocols
 
-Spawned agents lack user-facing tools. These protocols bridge gap via SendMessage to lead.
+Spawned agents lack user-facing tools. These protocols bridge gap via structured return values.
 
 ### Tool Availability (spawned agents)
 
@@ -479,49 +472,39 @@ Spawned agents lack user-facing tools. These protocols bridge gap via SendMessag
 |------|-----------|
 | AskUserQuestion | NO |
 | EnterPlanMode / ExitPlanMode | NO |
-| SendMessage | YES |
 | Read / Edit / Write / Bash / Glob / Grep | YES |
 | Task tools (TaskCreate, TaskUpdate, etc.) | YES |
 | MCP tools (proj, worktree, sandbox, router, etc.) | YES |
 
 ### ASK_USER Protocol
 
-Agent needs user input → SendMessage to lead:
+Agent needs user input → returns structured output:
 
-```
-ASK_USER: <question or decision needed>
-Context: <why this matters>
-Options: <if enumerable, list them>
+```json
+{
+  "status": "escalation_needed",
+  "issue": "<question or decision needed>",
+  "context": "<why this matters>",
+  "options": ["opt1", "opt2"]
+}
 ```
 
-Lead receives → calls `AskUserQuestion` w/ options → relays answer:
-
-```
-ASK_USER_RESPONSE: <user's answer>
-```
+Parent reads Agent result → calls `AskUserQuestion` w/ options → spawns new Agent w/ resolution ctx + user's answer.
 
 Use for: plan gaps, ambiguous requirements, architectural decisions, scope clarifications.
 
 ### PLAN_ESCALATION Protocol
 
-Agent researched + drafted impl plan → SendMessage to lead:
+Agent researched + drafted impl plan → returns structured output:
 
-```
-PLAN_ESCALATION:
-<full plan content — Context, Files, Changes, Verification>
-```
-
-Lead receives → `EnterPlanMode` → writes plan file → `ExitPlanMode` → relays:
-
-```
-PLAN_APPROVED
-```
-or
-```
-PLAN_REJECTED: <user feedback>
+```json
+{
+  "status": "plan_escalation",
+  "plan": "<full plan content — Context, Files, Changes, Verification>"
+}
 ```
 
-Agent continues impl (approved) or revises plan + re-escalates (rejected).
+Parent reads result → `EnterPlanMode` → writes plan file → `ExitPlanMode` → if approved, spawns new Agent w/ approved plan. If rejected, spawns new Agent w/ feedback for revision.
 
 Use for: execution agents needing plan approval, speculative planners needing user sign-off.
 
@@ -531,10 +514,9 @@ All agent spawn instructions MUST include:
 
 ```
 If you encounter work outside approved plan or need user input:
-send "ASK_USER: <description>" via SendMessage to team-lead.
-Do NOT improvise or auto-fix. Wait for ASK_USER_RESPONSE.
+return {status: "escalation_needed", issue: "<description>", options: [...]}
+Do NOT improvise or auto-fix.
 
 If you need plan approval:
-send "PLAN_ESCALATION:\n<plan>" via SendMessage to team-lead.
-Wait for PLAN_APPROVED or PLAN_REJECTED before proceeding.
+return {status: "plan_escalation", plan: "<plan>"}
 ```

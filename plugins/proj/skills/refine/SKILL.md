@@ -27,18 +27,11 @@ Refine todo: $ARGUMENTS
 
 **3.** Determine agent set, spawn parallel (read-only: `Read, Glob, Grep`):
 
-N roles = N agents — never combine. **Spawn via `TeamCreate` — never bare parallel Task calls for 2+ agents.** Before spawning: `TeamCreate(name="refine-review-{todo_id}", description="Refine review agents for todo {todo_id}")`, each Agent w/ `team_name="refine-review-{todo_id}"`. After all return (step 4): `TeamDelete(team_name="refine-review-{todo_id}")`.
+N roles = N agents — never combine. Each Agent w/ `run_in_background=true`.
 
-### ASK_USER Escalation (review agents)
+### Escalation (review agents)
 
-Review agents CANNOT call `AskUserQuestion` directly. Protocol:
-
-1. Agent finds BLOCKING issue requiring user/architectural decision (not just a suggestion)
-2. Agent → `SendMessage` to team-lead: `"ASK_USER: <issue details, decision needed, options if applicable>"`
-3. Lead calls `AskUserQuestion` w/ agent's question + options
-4. User answers
-5. Lead → `SendMessage` answer back: `"ASK_USER_RESPONSE: <answer>"`
-6. Agent incorporates answer into findings report
+Review agents CANNOT call `AskUserQuestion` directly. Agent returns `{status: "escalation_needed", issue: "<details>", options: [...]}` for BLOCKING issues requiring user/architectural decision. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
 
 Agents must NOT auto-demote blocking findings or guess architectural intent. Non-blocking suggestions → include in Suggestions section, no escalation.
 
@@ -90,7 +83,7 @@ Each agent produces exact structure:
 
 Agent finds nothing → all sections present; Critical Issues/Suggestions empty; Confirmed Sound lists what validated.
 
-**4.** Wait all agents. Agent fails/times out → report partial results, note failure. After collecting: `TeamDelete(team_name="refine-review-{todo_id}")`.
+**4.** Wait all agents (auto-notified on completion). Agent fails/times out → report partial results, note failure.
 
 **5.** Synthesize Refinement Report — each agent gets summary block:
 

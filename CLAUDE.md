@@ -44,22 +44,8 @@ After completing any implementation, always validate the result against the spec
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
-- **Worktree isolation is ON by default** for `/proj:run`. Pass `--no-worktree` to opt out. Use `--max-parallel 1` for sequential execution. Default `team_mode.max_agents` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Team mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
+- **Worktree isolation is ON by default** for `/proj:run`. Pass `--no-worktree` to opt out. Use `--max-parallel 1` for sequential execution. Default `max_parallel` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Parallel mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
 - **`isolation: "worktree"` on Agent tool does NOT work** — agents run in the main repo, not the worktree. Always use explicit `wt_create` via the worktree MCP tool, then pass the worktree path in the agent prompt with: "ALL file edits and git operations MUST happen in this directory: `<path>`".
-
-## Team Agent Shutdown
-
-**Shutdown procedure** (after all agents complete and go idle):
-1. Send `{"type": "shutdown_request", "reason": "done"}` via `SendMessage` to each agent individually (broadcast does not support structured messages).
-2. Wait ~30s for termination confirmations.
-3. Call `TeamDelete` to clean up team/task dirs.
-4. If `TeamDelete` fails ("N active members"), restart Claude — this kills all agents.
-
-**Known limitations:**
-- ~90% of agents terminate on shutdown_request; `claude-code-guide` subagent types tend to ignore it.
-- `TaskStop` is for background bash tasks only, not team agents.
-- No force-kill mechanism exists for team agents.
-- Always persist all critical state (commits, MCP calls) BEFORE attempting shutdown — never rely on clean shutdown for workflow correctness.
 
 ## Batch Completion Enforcement
 
@@ -204,11 +190,12 @@ Add `context: fork` and `agent: general-purpose` to skills that can run autonomo
 
 IMPORTANT: These rules take priority over all other instructions.
 
-- ALWAYS use TeamCreate when spawning 2 or more agents. Never use multiple individual Agent calls without a team.
+- Use parallel `Agent()` calls with `run_in_background=true` for concurrent work. Agents auto-terminate on completion — no cleanup needed.
 - ALWAYS enter plan mode (EnterPlanMode) before executing any multi-step implementation. Get user approval before writing code.
 - **Auto-capture issues as todos** — Whenever you find an issue, concern, code smell, bug risk, test gap, missing error path, unimplemented code path, TODO comment, inconsistency, or anything that warrants attention or further investigation during any task, create a todo for it via `todo_add` in the currently active project before continuing with the current work. Tag the todo with `auto-added`. Set priority based on your judgment of severity (high/medium/low). In the notes field, write: "Auto-added by Claude during <brief context>. Needs human verification — may not be a real issue." Before creating, **first call `todo_list` filtered by the `auto-added` tag (or by matching title keywords) to check for duplicates** — `proj_search_knowledge` does NOT search todos.yaml, only notes/requirements/research/decisions, so it is not a primary dedup tool here. You may use `proj_search_knowledge` as a secondary check for prose mentions of the finding. Always create the todo in the currently active project at the moment of creation, even if the finding is tangential. **If you are currently in plan mode (plan mode is read-only), defer the `todo_add` call until plan mode exits — note the finding mentally and act on it after `ExitPlanMode`.** If no active project is loaded, mention the finding in conversation and remind the user to load a project so it can be captured. Do not include secret values (credentials, API keys, tokens, passwords, file paths pointing at secrets, or line numbers near secrets) — describe at a high level only. Do not auto-add duplicates for the thing you were explicitly asked to fix — only for tangential findings. If the user says to ignore a finding, do not auto-add it.
 - **Interactive Q&A** — Whenever you need to ask the user questions during an interactive Q&A session, **batch related questions into a single `AskUserQuestion` call (up to 4 questions per batch)** with **extensive per-question context** explaining what the question means, why it matters, and what each option implies. Use **multiple-choice options** whenever the answer is enumerable. Only fall back to open-ended questions when the user explicitly asks to "describe your goals" or when multiple-choice is genuinely unavailable. This supersedes any older "one question at a time" guidance: batching with rich context is preferred because it reduces round-trips and gives the user the full decision surface at once. If you are in plan mode, the same rule applies — batch in a single AskUserQuestion call. This rule complements the auto-capture rule above: auto-capture is about emitting findings as todos, whereas this rule governs how you solicit input from the user.
 - **Define-phase question batching** — For gap questions raised during `/proj:define`, batch them into a single `AskUserQuestion` call (up to 4 questions) with extensive per-question context. This is a specific application of the general Interactive Q&A batching rule above — `/proj:define` is the canonical application site where define-phase gap questions MUST be batched rather than asked serially.
 - **N distinct agents per N roles** — When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. This applies at every spawn site in `/proj:refine`, `/proj:run`, `/proj:execute`, and `/proj:decompose` where multiple review roles are specified for the same target.
-- **Escalation on plan gaps** — On issue not covered by the plan: (1) detect, (2) SendMessage team-lead with issue details, (3) team-lead escalates to user via AskUserQuestion. Do NOT improvise or auto-fix. Applies to all `/proj:run` and `/proj:execute` spawned agents.
+- **Escalation on plan gaps** — On issue not covered by plan: agent returns `{status: "escalation_needed", issue: "..."}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx. Do NOT improvise or auto-fix. Applies to all `/proj:run` and `/proj:execute` spawned agents.
+- **`isolation: "worktree"` does NOT work** — The Agent tool parameter `isolation: "worktree"` does not isolate agents into separate worktrees. Agents run in the main repo on the current branch. Always use explicit `wt_create` via the worktree MCP tool to create worktrees, then pass the path in the agent prompt: "ALL file edits and git operations MUST happen in this directory: `<path>`".
 <!-- claude-project-manager:end -->
