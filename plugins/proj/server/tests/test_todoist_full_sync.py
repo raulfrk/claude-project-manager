@@ -31,8 +31,11 @@ from server.tools.todoist_full_sync import (
     _execute_push_completes,
     _execute_push_creates,
     _execute_push_reopens,
+    _find_existing_todoist_task,
     _infer_parent_link_from_children,
     _migrate_parent_links,
+    _normalize_title,
+    _reconcile_unlinked_todos,
     apply_changes,
     compute_diff,
 )
@@ -1835,3 +1838,179 @@ class TestPushHelperErrorLogging:
 
         assert any(r.levelno == logging.ERROR for r in caplog.records)
         assert len(errors) == 1
+
+
+# ── _normalize_title tests ───────────────────────────────────────────────────
+
+
+class TestNormalizeTitle:
+    def test_lowercase(self) -> None:
+        assert _normalize_title("Hello World") == "hello world"
+
+    def test_whitespace_collapse(self) -> None:
+        assert _normalize_title("  spaces  everywhere  ") == "spaces everywhere"
+
+    def test_tabs_newlines(self) -> None:
+        assert _normalize_title("tabs\tand\nnewlines") == "tabs and newlines"
+
+    def test_empty_string(self) -> None:
+        assert _normalize_title("") == ""
+
+    def test_already_normalized(self) -> None:
+        assert _normalize_title("hello world") == "hello world"
+
+
+# ── _reconcile_unlinked_todos tests ──────────────────────────────────────────
+
+
+class TestReconcileUnlinkedTodos:
+    def test_simple_1to1_match(self, cfg_with_project: tuple) -> None:
+        """1 local todo + 1 Todoist task w/ matching title + parent context → auto-link."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
+        child = _make_todo(cfg, name, "Fix bug", parent=parent.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        todoist_tasks = [
+            _make_todoist_task("td-child", "Fix bug", parent_id="td-parent"),
+        ]
+
+        count = _reconcile_unlinked_todos([parent, child], todoist_tasks, cfg, name)
+        assert count == 1
+
+        # Verify link persisted
+        todos = storage.load_todos(cfg, name)
+        linked = [t for t in todos if t.id == child.id]
+        assert linked[0].todoist_task_id == "td-child"
+
+    def test_multiple_candidates_parent_disambiguates(self, cfg_with_project: tuple) -> None:
+        """2 Todoist tasks same title, parent context picks correct one."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
+        child = _make_todo(cfg, name, "Deploy", parent=parent.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        todoist_tasks = [
+            _make_todoist_task("td-1", "Deploy", parent_id="td-other"),
+            _make_todoist_task("td-2", "Deploy", parent_id="td-parent"),
+        ]
+
+        count = _reconcile_unlinked_todos([parent, child], todoist_tasks, cfg, name)
+        assert count == 1
+
+        todos = storage.load_todos(cfg, name)
+        linked = [t for t in todos if t.id == child.id]
+        assert linked[0].todoist_task_id == "td-2"
+
+    def test_no_parent_context_ambiguous(self, cfg_with_project: tuple) -> None:
+        """No parent on local todo → should NOT auto-link (even 1:1)."""
+        cfg, name = cfg_with_project
+
+        todo = _make_todo(cfg, name, "Solo task")
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [_make_todoist_task("td-1", "Solo task")]
+
+        count = _reconcile_unlinked_todos([todo], todoist_tasks, cfg, name)
+        assert count == 0
+
+    def test_already_claimed_excluded(self, cfg_with_project: tuple) -> None:
+        """Todoist task already linked to another local todo → excluded from matching."""
+        cfg, name = cfg_with_project
+
+        existing = _make_todo(cfg, name, "Fix bug", todoist_task_id="td-claimed")
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
+        unlinked = _make_todo(cfg, name, "Fix bug", parent=parent.id)
+        storage.save_todos(cfg, name, [existing, parent, unlinked])
+
+        todoist_tasks = [
+            _make_todoist_task("td-claimed", "Fix bug", parent_id="td-parent"),
+        ]
+
+        count = _reconcile_unlinked_todos([existing, parent, unlinked], todoist_tasks, cfg, name)
+        assert count == 0
+
+    def test_terminal_status_excluded(self, cfg_with_project: tuple) -> None:
+        """Done/cancelled todos excluded from matching."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
+        done_todo = _make_todo(cfg, name, "Fix bug", parent=parent.id, status="done")
+        storage.save_todos(cfg, name, [parent, done_todo])
+
+        todoist_tasks = [
+            _make_todoist_task("td-1", "Fix bug", parent_id="td-parent"),
+        ]
+
+        count = _reconcile_unlinked_todos([parent, done_todo], todoist_tasks, cfg, name)
+        assert count == 0
+
+    def test_empty_lists(self, cfg_with_project: tuple) -> None:
+        """Empty input → count=0."""
+        cfg, name = cfg_with_project
+        assert _reconcile_unlinked_todos([], [], cfg, name) == 0
+
+    def test_case_insensitive_match(self, cfg_with_project: tuple) -> None:
+        """'Fix Bug' matches 'fix bug' via normalization."""
+        cfg, name = cfg_with_project
+
+        parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
+        child = _make_todo(cfg, name, "Fix Bug", parent=parent.id)
+        storage.save_todos(cfg, name, [parent, child])
+
+        todoist_tasks = [
+            _make_todoist_task("td-1", "fix bug", parent_id="td-parent"),
+        ]
+
+        count = _reconcile_unlinked_todos([parent, child], todoist_tasks, cfg, name)
+        assert count == 1
+
+
+# ── _find_existing_todoist_task tests ────────────────────────────────────────
+
+
+class TestFindExistingTodoistTask:
+    def test_match_with_parent_constraint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Finds task matching title + parent."""
+        tasks = [
+            {"id": "t1", "content": "Deploy", "parent_id": "p1"},
+            {"id": "t2", "content": "Deploy", "parent_id": "p2"},
+        ]
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: json.dumps(tasks),
+        )
+        result = _find_existing_todoist_task("proj-1", "Deploy", parent_id="p2")
+        assert result == "t2"
+
+    def test_match_without_parent_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Finds task by title only when no parent constraint."""
+        tasks = [{"id": "t1", "content": "Deploy", "parent_id": "p1"}]
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: json.dumps(tasks),
+        )
+        result = _find_existing_todoist_task("proj-1", "Deploy")
+        assert result == "t1"
+
+    def test_no_match_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No matching title → None."""
+        tasks = [{"id": "t1", "content": "Unrelated"}]
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: json.dumps(tasks),
+        )
+        result = _find_existing_todoist_task("proj-1", "Deploy")
+        assert result is None
+
+    def test_normalized_title_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Matches despite case/whitespace differences."""
+        tasks = [{"id": "t1", "content": "  Fix  Bug  "}]
+        monkeypatch.setattr(
+            "server.tools.todoist_full_sync._call_todoist_tool",
+            lambda *a, **kw: json.dumps(tasks),
+        )
+        result = _find_existing_todoist_task("proj-1", "fix bug")
+        assert result == "t1"
