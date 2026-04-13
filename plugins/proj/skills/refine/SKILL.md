@@ -14,7 +14,7 @@ Refine todo: $ARGUMENTS
 
 **Quality level behavior** (controlled by `/proj:run`):
 - `--fast`: refine skipped entirely
-- `--careful` / `--paranoid`: refine auto-enabled
+- `--careful`: refine auto-enabled
 
 **1.** Parse `todo_id` from $ARGUMENTS.
 
@@ -111,7 +111,7 @@ Load todo `tags`. Select agents per logic below. Spawn all selected parallel:
 >
 > Report ONLY new info. Do NOT restate existing API decisions.
 
-**Agent 7 — Complexity & Maintainability Reviewer** (`--paranoid` only):
+**Agent 7 — Complexity & Maintainability Reviewer** (tags: `complexity` or `architecture`, or always under `--careful`):
 > Complexity & Maintainability Reviewer. Assess long-term code health:
 > - DRY violations, code duplication
 > - High cyclomatic complexity
@@ -126,7 +126,7 @@ Load todo `tags`. Select agents per logic below. Spawn all selected parallel:
 **Agent selection:**
 - Core (1-3): ALWAYS run.
 - Tag-based (4-6): `security`/`breaking-change` → Agent 4; `performance` → Agent 5; `api` → Agent 6.
-- `--paranoid` → ALL 7 despite tags.
+- `--careful` → ALL 7 despite tags.
 - Respect quality_level `max_parallel` when spawning.
 
 Each agent receives: todo ctx, requirements.md, research.md, codebase read access.

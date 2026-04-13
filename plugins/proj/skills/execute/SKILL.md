@@ -2,7 +2,7 @@
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
 allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, TeamCreate, TeamDelete, SendMessage
-argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--balanced|--careful|--paranoid] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
+argument-hint: "[todo-id | range] [--no-verify] [--team] [--no-team] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] e.g. 1 or 2-4"
 ---
 
 
@@ -21,7 +21,9 @@ Execute todo(s): $ARGUMENTS
  - Trust 3 (full-auto): skip Phase 1 entirely. Agents get ctx only, no plans.
 - Parse `--resume` → resume from checkpoint. See Resume checkpoint below.
 - Parse `--no-pipeline` → disable plan-while-executing pipeline (default: enabled).
-- Parse `--fast`/`--balanced`/`--careful`/`--paranoid` — mutually exclusive, last wins, default `--careful`.
+- Parse `--fast`/`--careful` — mutually exclusive, last wins, default `--careful`.
+- `--balanced` → ERROR: "balanced removed, use --careful"
+- `--paranoid` → ERROR: "paranoid removed, use --careful --max-parallel 1"
 - Parse `--force-plan` → force FULL REVIEW despite complexity.
 - Parse `--batch-approve` → auto-approve all speculative plans.
 - Parse `--worktree` / `--no-worktree` → enable/disable worktree isolation.
@@ -33,39 +35,34 @@ Worktree lifecycle (Phase 1.5/2.5/5 cleanup) orchestrated by `/proj:run`. Direct
 
 **Quality Level Param Mapping:**
 
-| Parameter | --fast | --balanced | --careful | --paranoid |
-|-----------|--------|-----------|-----------|-----------|
-| gate_override | auto-execute (tag-immune) | smart-gate | full-review | full-review |
-| batch_approve | auto | smart-gate | disabled | disabled |
-| speculative_planning | enabled | enabled | disabled | disabled |
-| verification_mode | skip | standard | enhanced | full |
-| max_parallel | 20 | 6 | 3 | 1 |
-| satisfaction | skip (auto-complete) | per-batch | per-todo | per-todo + re-verify |
-| preflight | N/A (run-only) | N/A (run-only) | N/A (run-only) | N/A (run-only) |
-| refine | N/A (run-only) | N/A (run-only) | N/A (run-only) | N/A (run-only) |
-| pattern_detection | auto-approve | enabled | disabled | disabled |
-| worktree | from config (worktree_isolation) | from config (worktree_isolation) | from config (worktree_isolation) | off (max_parallel=1) |
-| overlap_action | auto-proceed | prompt user | auto-serialize | auto-serialize + warn |
+| Parameter | --fast | --careful |
+|-----------|--------|-----------|
+| gate_override | auto-execute (tag-immune) | smart-gate + full-review |
+| batch_approve | auto | disabled |
+| speculative_planning | enabled | disabled |
+| verification_mode | skip | enhanced |
+| max_parallel | 20 | 10 |
+| satisfaction | skip (auto-complete) | per-todo |
+| preflight | N/A (run-only) | N/A (run-only) |
+| refine | N/A (run-only) | N/A (run-only) |
+| pattern_detection | auto-approve | disabled |
+| worktree | from config (worktree_isolation) | from config (worktree_isolation) |
+| overlap_action | auto-proceed | auto-serialize |
 
 Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **Flag compatibility:**
 - `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
 - `--careful --batch-approve` → careful wins, batch approve disabled (warn).
-- `--paranoid --batch-approve` → paranoid wins, batch approve disabled (warn).
 - `--force-plan --batch-approve` → ERROR: "Cannot combine --force-plan with --batch-approve."
-- `--no-verify --paranoid` → ERROR: "Cannot combine --no-verify with --paranoid."
 - `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification skipped.
 - `--fast --steps refine` → ERROR (execute lacks refine).
 - `--batch-approve --no-pipeline` → Allowed.
-- `--paranoid --no-pipeline` → Redundant warning.
 - `--careful --no-pipeline` → Allowed.
 - `--fast --no-pipeline` → Redundant warning.
-- `--force-plan --careful` / `--force-plan --paranoid` → Redundant warning.
-- `--no-verify --balanced` → --no-verify wins.
+- `--force-plan --careful` → Redundant warning.
 - `--no-verify --fast` → Redundant.
 - `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
-- `--paranoid --worktree` → paranoid wins, worktree disabled (warn).
 - `--worktree --no-interactive` → Allowed. Auto-resolve conflicts only.
 - `--fast --worktree` → Allowed: coexist.
 - Empty → `mcp__proj__todo_list(status="in_progress")`; if none, `todo_list(status="ready")`. Show results, proceed w/ first (or ask if multiple).
@@ -129,9 +126,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
  Mode by quality_level:
  - `skip` (--fast): Skip entirely.
- - `standard` (--balanced): automated checks + spec validation + diff review.
- - `enhanced` (--careful): standard + manual test checklist from acceptance criteria.
- - `full` (--paranoid): enhanced + independent review agent reads diff, reqs, plan. Produces risk rating (LOW/MEDIUM/HIGH). HIGH → flag for user.
+ - `enhanced` (--careful): automated checks + spec validation + diff review + manual test checklist from acceptance criteria.
 
  Three check categories; missing prereqs → skip gracefully w/ note.
 
@@ -184,7 +179,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  - `Skill("proj:define", args="<id>")` (existing reqs/research kept — non-destructive)
  - After define: if decomposable → `Skill("proj:decompose", args="<id>")`
  - `Skill("proj:execute", args="<id>")`
- - Satisfaction-driven recursive run: enforce `--no-pipeline --balanced --no-worktree`. Max recursion depth: 2.
+ - Satisfaction-driven recursive run: enforce `--no-pipeline --careful --no-worktree`. Max recursion depth: 2.
  - Re-ask on orig todo (→ 5a)
  d. `mcp__proj__todo_complete`
  - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
@@ -199,7 +194,7 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 **Pattern A — Team exec (independent todos):**
 
-**Phase C0 — Speculative planning** (if quality_level != careful/paranoid AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3):
 
 `TeamCreate(name="exec-spec-{timestamp}", description="Speculative planning agents for {N} independent todos")`. Each read-only Task agent gets `team_name`.
 
@@ -263,7 +258,7 @@ Each todo in range:
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
-**Cross-review** (paranoid AND N > 1):
+**Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-{timestamp}", description="Cross-review agents for N approved plans")`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. After all: `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
@@ -396,7 +391,7 @@ Each todo:
  `len(executing_agents) >= max_parallel` → wait.
  Spawn background agent w/ `team_name="exec-fallback-{timestamp}"`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
-**Cross-review** (paranoid AND N > 1):
+**Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-indep-{timestamp}", ...)`. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (parallel Task agents):
@@ -454,7 +449,7 @@ Clear `executing_agents = {}`. Report summary.
 
 **Pattern A — Team exec (w/ deps):**
 
-**Phase C0 — Speculative planning** (quality_level != careful/paranoid AND trust != 0 AND trust != 3):
+**Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3):
 
 `TeamCreate(name="exec-spec-deps-{timestamp}", ...)`. Each todo → read-only Task agent:
 - Tools: Read, Glob, Grep, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
@@ -490,7 +485,7 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
 
 After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
 
-**Cross-review** (paranoid AND N > 1):
+**Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-deps-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
@@ -606,7 +601,7 @@ Topo order (respect blocked_by). Each todo:
  `len(executing_agents) >= max_parallel` → wait.
  Spawn background agent w/ `team_name="exec-fallback-deps-{timestamp}"`. Store in `executing_agents[todo_id]`.
 
-**Cross-review** (paranoid AND N > 1):
+**Cross-review** (careful AND N > 1):
 `TeamCreate(name="execute-cross-review-deps-fallback-{timestamp}", ...)`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. `TeamDelete`.
 
 Phase 2 — Execute (sequential, dep order):
