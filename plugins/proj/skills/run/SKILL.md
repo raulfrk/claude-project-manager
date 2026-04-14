@@ -187,9 +187,23 @@ After preflight complete: (only if tasks_enabled) `TaskUpdate(task_A5_id, status
 Pass `parent_task_id=task_B_id` to agents spawned in this phase.
 
 Each batch in dep order:
- - One `subagent_type="decomposer"` Agent per todo w/ `run_in_background=true`. Each runs decompose autonomously.
+ - If child IDs already known (from prior step), write TodoWrite to track progress before spawning:
+   ```
+   TodoWrite([
+     {content: "<child-id>: <title>", status: "pending"},
+     ...
+   ])
+   ```
+   (Skip pre-spawn TodoWrite if no children known yet.)
+ - One `subagent_type="decomposer"` Agent per todo w/ `run_in_background=true`. Each runs decompose autonomously. Decompose agents append result via `todo_notes_append(parent_id, 'decompose_result: {"created_ids": [...]}')`.
  - Wait for batch (auto-notified on completion). Report failures.
-After: refresh descendant list via `mcp__proj__todo_tree`.
+
+After agents complete — collect created IDs (replaces `todo_tree` refresh):
+1. `mcp__proj__todo_get(parent_id)` → read `.notes` → find last line matching `decompose_result:` → parse JSON → extract `created_ids` → store as `decomposed_ids`.
+2. Fallback (no `decompose_result` found): `mcp__proj__todo_list(status="pending")` → filter by `group:<parent_id>` tag → store as `decomposed_ids`.
+
+Update TodoWrite: mark each `decomposed_ids` entry as `in_progress` when its execute agent launches; mark `completed` when merged.
+
 After decompose complete: (only if tasks_enabled) `TaskUpdate(task_B_id, status="completed")`. Failure → `TaskUpdate(task_B_id, status="failed")`.
 
 **If `refine`** — after decompose, within iteration (if `quality_level == careful` AND `refine` in steps AND NOT `--no-interactive`):
@@ -224,7 +238,7 @@ Option 3 → prompt for todo IDs, interactive define on each, resume from decomp
 (only if tasks_enabled) `TaskCreate(title="Phase C: Execute — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C", "kind": "phase_task"})` → store as `task_C_id` → `TaskUpdate(status="in_progress")`
 Pass `parent_task_id=task_C_id` to agents spawned in this phase.
 
-Refresh todo via `mcp__proj__todo_get`. `has_children = len(children) > 0`.
+Refresh todo via `mcp__proj__todo_get`. Use `decomposed_ids` (from Phase B) if available; else `has_children = len(children) > 0`.
 
 NOT `--no-interactive` → prompt:
 
@@ -236,8 +250,8 @@ NOT `--no-interactive` → prompt:
 3. **Stop** — Exit (prep saved)
 ```
 
-No children → exec parent directly.
-Has children → invoke `skill: "proj:execute"` w/ child IDs + same flags.
+No `decomposed_ids` + no children → exec parent directly.
+Has `decomposed_ids` → invoke `skill: "proj:execute"` w/ `decomposed_ids` + same flags. (Fallback: use children from `todo_get` if `decomposed_ids` absent.)
 
 **5a. Execute (single, no children):**
 
