@@ -197,6 +197,7 @@ Serialize → remove conflicting from parallel, add sequential batch at end. Can
 2. Fresh (< 24h) → `Resuming from batch {batch_index}/{total_batches} — {N} todos already completed`. Use stored `approved_plans`, skip to `batch_index`.
 3. Stale (> 24h) or nonexistent refs → prompt: `(1) Restart (2) Use anyway`.
 4. Not found → `No checkpoint found — starting fresh`.
+5. **Pre-623 graceful degradation**: checkpoint missing `work_units` key (pre-623 format) → fallback: `todo_list(status="in_progress or ready", tags=<group-tag>)` to find decomposed todos. Warn: `Checkpoint pre-623 format — work_units missing, falling back to group-tag filter`.
 
 ### Shared: Execute Phase (all patterns)
 
@@ -210,6 +211,20 @@ Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=tru
 Agents exec plan as-is. Do NOT `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "..."}`. See `_shared/errors.md`.
 Wait per batch (auto-notified on completion). Report failures.
 
+**Implementer agent TaskCreate micro-steps** (only if tasks_enabled; skip all if `--no-tasks`):
+
+Each implementer agent creates 5–15 TaskCreate subtasks covering full arc: define → read → edit → verify → merge. Each subtask blocks the next (sequential). Pattern:
+
+```
+TaskCreate("Define <todo-title>") → TaskUpdate(in_progress) → [run /proj:define if no req] → TaskUpdate(completed)
+TaskCreate("Read: <file>") → TaskUpdate(in_progress) → [Read tool] → TaskUpdate(completed)        # one per key file
+TaskCreate("Edit: <specific change>") → TaskUpdate(in_progress) → [Edit tool] → TaskUpdate(completed)  # one per logical edit
+TaskCreate("Verify: grep <pattern>") → TaskUpdate(in_progress) → [Grep/Bash check] → TaskUpdate(completed)
+TaskCreate("Commit + merge worktree") → TaskUpdate(in_progress) → [wt_merge] → TaskUpdate(completed)
+```
+
+Target: 5–15 TaskCreate entries per implementer (cover full arc). Granularity: one TaskCreate per meaningful unit (e.g. one per file read, one per logical edit block, not one per tool call). Pass `parent_task_id = todo_task_id` on each subtask so they nest under the todo task.
+
 Write checkpoint:
 ```yaml
 batch_index: <current batch number>
@@ -217,6 +232,12 @@ total_batches: <total>
 completed_todos: [<completed todo IDs>]
 approved_plans:
   <todo_id>: "<plan text>"
+work_units:
+  - title: "Edit: replace todo_batch_add_children"
+    proj_todo_id: "623.1"
+    status: "completed"  # pending | in_progress | completed | failed
+    blocked_by: []
+    description: "<notes[:300]>"
 ```
 Failures → log to `tracking/{project}/.team-state/failed-agents.yaml`.
 
