@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -140,4 +141,42 @@ def tracking_push(tracking_path: Path) -> bool:
     if rc != 0:
         return False
     rc, _, _ = _run(["git", "push", "-u", "origin", "HEAD"], tracking_path)
+    return rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Async variants — offload blocking subprocess calls via asyncio.to_thread
+# ---------------------------------------------------------------------------
+
+
+async def _arun(cmd: list[str], cwd: str | Path) -> tuple[int, str, str]:
+    """Async wrapper around _run(). Offloads to a thread to avoid blocking the event loop."""
+    return await asyncio.to_thread(_run, cmd, cwd)
+
+
+async def tracking_commit_async(tracking_path: Path, message: str) -> str | None:
+    """Async variant of tracking_commit(). Stage all changes and commit.
+
+    Returns commit SHA or None if nothing to commit.
+    """
+    await _arun(["git", "add", "-A"], tracking_path)
+    rc, _, _ = await _arun(["git", "diff", "--cached", "--quiet"], tracking_path)
+    if rc == 0:
+        return None
+    rc, _stdout, _ = await _arun(["git", "commit", "-m", message], tracking_path)
+    if rc != 0:
+        return None
+    rc, sha, _ = await _arun(["git", "rev-parse", "--short", "HEAD"], tracking_path)
+    return sha.strip() if rc == 0 else None
+
+
+async def tracking_push_async(tracking_path: Path) -> bool:
+    """Async variant of tracking_push(). Push to origin with pull-rebase retry."""
+    rc, _, _ = await _arun(["git", "push", "-u", "origin", "HEAD"], tracking_path)
+    if rc == 0:
+        return True
+    rc, _, _ = await _arun(["git", "pull", "--rebase", "origin", "HEAD"], tracking_path)
+    if rc != 0:
+        return False
+    rc, _, _ = await _arun(["git", "push", "-u", "origin", "HEAD"], tracking_path)
     return rc == 0

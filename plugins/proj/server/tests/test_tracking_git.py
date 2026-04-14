@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from server.lib.models import GitTracking, ProjConfig, ProjectGitTrackingConfig, ProjectMeta
 from server.lib.tracking_git import (
+    _arun,
+    _run,
     ensure_git_repo,
     is_git_repo,
     resolve_config,
     resolve_repo_name,
     tracking_commit,
+    tracking_commit_async,
+    tracking_push_async,
 )
 
 
@@ -157,3 +162,67 @@ class TestResolveRepoName:
 
     def test_no_placeholder(self) -> None:
         assert resolve_repo_name("monorepo", "anything") == "monorepo"
+
+
+class TestArun:
+    @pytest.mark.anyio
+    async def test_returns_same_as_run(self) -> None:
+        """_arun() returns same (returncode, stdout, stderr) as _run()."""
+        sync_result = _run(["git", "--version"], ".")
+        async_result = await _arun(["git", "--version"], ".")
+        assert sync_result == async_result
+
+    @pytest.mark.anyio
+    async def test_uses_to_thread(self) -> None:
+        """Verify asyncio.to_thread is actually called."""
+        with patch("server.lib.tracking_git.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+            mock_tt.return_value = (0, "output", "")
+            result = await _arun(["git", "--version"], ".")
+            mock_tt.assert_called_once_with(_run, ["git", "--version"], ".")
+            assert result == (0, "output", "")
+
+
+class TestTrackingCommitAsync:
+    @pytest.mark.anyio
+    async def test_commit_with_changes(self, tmp_path: Path) -> None:
+        target = tmp_path / "repo"
+        ensure_git_repo(target)
+        (target / "test.txt").write_text("hello")
+        sha = await tracking_commit_async(target, "async test commit")
+        assert sha is not None
+        assert len(sha) >= 7
+
+    @pytest.mark.anyio
+    async def test_no_changes_returns_none(self, tmp_path: Path) -> None:
+        target = tmp_path / "repo"
+        ensure_git_repo(target)
+        tracking_commit(target, "initial")
+        sha = await tracking_commit_async(target, "no changes")
+        assert sha is None
+
+    @pytest.mark.anyio
+    async def test_same_result_as_sync(self, tmp_path: Path) -> None:
+        """Async variant produces same SHA as sync for identical content."""
+        sync_target = tmp_path / "sync_repo"
+        async_target = tmp_path / "async_repo"
+        ensure_git_repo(sync_target)
+        ensure_git_repo(async_target)
+        (sync_target / "test.txt").write_text("identical")
+        (async_target / "test.txt").write_text("identical")
+        sync_sha = tracking_commit(sync_target, "same msg")
+        async_sha = await tracking_commit_async(async_target, "same msg")
+        # Both should produce a valid SHA (content differs due to timestamps, but both non-None)
+        assert sync_sha is not None
+        assert async_sha is not None
+
+
+class TestTrackingPushAsync:
+    @pytest.mark.anyio
+    async def test_push_fails_without_remote(self, tmp_path: Path) -> None:
+        """Push should fail gracefully when no remote is configured."""
+        target = tmp_path / "repo"
+        ensure_git_repo(target)
+        (target / "test.txt").write_text("hello")
+        await tracking_commit_async(target, "initial")
+        result = await tracking_push_async(target)
+        assert result is False

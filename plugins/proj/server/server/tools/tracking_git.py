@@ -23,7 +23,7 @@ def register(app: FastMCP) -> None:
             "Call at the end of skill invocations for batched commits."
         )
     )
-    def tracking_git_flush(
+    async def tracking_git_flush(
         commit_message: str | None = None,
         project_name: str | None = None,
     ) -> str:
@@ -43,7 +43,7 @@ def register(app: FastMCP) -> None:
             return json.dumps({"status": "error", "message": "Failed to init git repo"})
 
         msg = commit_message or f"[{name}] Update {name}"
-        sha = tg.tracking_commit(tracking_path, msg)
+        sha = await tg.tracking_commit_async(tracking_path, msg)
         if not sha:
             return json.dumps({"status": "no_changes"})
 
@@ -52,6 +52,6 @@ def register(app: FastMCP) -> None:
             repo_name = tg.resolve_repo_name(github_repo_format, name)
             tg.ensure_github_repo(repo_name)
             tg.ensure_remote(tracking_path, repo_name)
-            pushed = tg.tracking_push(tracking_path)
+            pushed = await tg.tracking_push_async(tracking_path)
 
         return json.dumps({"status": "ok", "sha": sha, "pushed": pushed, "message": msg})
