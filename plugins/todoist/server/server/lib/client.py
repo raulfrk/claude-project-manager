@@ -33,7 +33,14 @@ class TodoistClient:
             raise RuntimeError(f"Todoist rate limited. Retry after {retry_after} seconds.")
         if resp.is_success:
             if resp.content:
-                result: JsonValue = resp.json()
+                try:
+                    result: JsonValue = resp.json()
+                except ValueError as e:
+                    body_preview = resp.text[:200] if resp.text else "(empty)"
+                    raise RuntimeError(
+                        f"Todoist API returned non-JSON response "
+                        f"(status {resp.status_code}): {body_preview}"
+                    ) from e
                 return result
             return {"ok": True}
         raise RuntimeError(f"Todoist API error {resp.status_code}: {resp.text}")
@@ -48,8 +55,10 @@ class TodoistClient:
     ) -> JsonValue:
         try:
             resp = self._http.request(method, path, params=params, json=json)
-        except httpx.TimeoutException:
-            raise RuntimeError("Todoist API request timed out") from None
+        except httpx.TimeoutException as e:
+            raise RuntimeError("Todoist API request timed out") from e
+        except httpx.ConnectError as e:
+            raise RuntimeError("Todoist API connection failed") from e
         return self._handle_response(resp)
 
     def get(self, path: str, params: dict[str, str] | None = None) -> JsonValue:

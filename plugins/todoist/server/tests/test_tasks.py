@@ -87,8 +87,8 @@ class TestResolvePriority:
     def test_local_low(self) -> None:
         assert _resolve_priority("low") == 4
 
-    def test_unknown_string_defaults_to_1(self) -> None:
-        assert _resolve_priority("urgent") == 1
+    def test_unknown_string_defaults_to_medium(self) -> None:
+        assert _resolve_priority("urgent") == 3
 
     def test_case_insensitive(self) -> None:
         assert _resolve_priority("P2") == 2

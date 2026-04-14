@@ -45,12 +45,9 @@ def register(app: FastMCP) -> None:
                 }
             )
 
-        # Parse the response safely
+        # Parse the response safely — cache result to avoid double parse
         try:
-            data = resp.json()
-            if not isinstance(data, dict):
-                raise ValueError("unexpected response type")
-            project_count = len(data.get("results", []))
+            parsed = resp.json()
         except (json.JSONDecodeError, ValueError):
             return json.dumps(
                 {
@@ -58,6 +55,15 @@ def register(app: FastMCP) -> None:
                     "status_code": resp.status_code,
                 }
             )
+
+        if not isinstance(parsed, dict):
+            return json.dumps(
+                {
+                    "error": "todoist_init succeeded but response was not valid JSON",
+                    "status_code": resp.status_code,
+                }
+            )
+        project_count = len(parsed.get("results", []))
 
         # Build YAML config
         config_data = {

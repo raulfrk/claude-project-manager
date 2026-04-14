@@ -1,7 +1,9 @@
 """Todoist task MCP tools."""
 
 import json
+import logging
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from server.lib.client import get_client
@@ -12,6 +14,8 @@ from server.lib.models import (
     TodoistTask,
     local_to_todoist_priority,
 )
+
+logger = logging.getLogger(__name__)
 
 # Todoist REST API v2 expects priority as an integer 1-4.
 # String "p1"-"p4" → strip "p" → int.
@@ -36,8 +40,8 @@ def _resolve_priority(value: str | int | None) -> int | None:
     if v in _LOCAL_PRIORITY_NAMES:
         todoist_str = local_to_todoist_priority(v)  # e.g. "p2"
         return int(todoist_str[1])
-    # Unknown → default normal priority
-    return 1
+    # Unknown → default medium priority (p3), consistent with models.py
+    return 3
 
 
 def _to_json_value(val: str | int | float | bool | list[str] | None) -> JsonValue:
@@ -118,7 +122,16 @@ def register(app: FastMCP) -> None:
                 todoist_task = TodoistTask.from_api(result)
                 created_ids[idx] = todoist_task.id
                 successes.append(todoist_task.to_dict())
-            except Exception as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                logger.warning("Transient error adding task %d: %s", idx, exc)
+                failures.append(
+                    {
+                        "index": idx,
+                        "content": str(task.get("content", "")),
+                        "error": f"transient: {exc}",
+                    }
+                )
+            except (httpx.HTTPStatusError, RuntimeError) as exc:
                 failures.append(
                     {
                         "index": idx,
@@ -266,7 +279,10 @@ def register(app: FastMCP) -> None:
             try:
                 client.close_task(task_id)
                 successes.append({"id": task_id})
-            except Exception as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                logger.warning("Transient error completing task %s: %s", task_id, exc)
+                failures.append({"id": task_id, "error": f"transient: {exc}"})
+            except (httpx.HTTPStatusError, RuntimeError) as exc:
                 failures.append({"id": task_id, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
 
@@ -314,7 +330,16 @@ def register(app: FastMCP) -> None:
                     failures.append({"index": idx, "error": "Unexpected response type"})
                     continue
                 successes.append(TodoistTask.from_api(result).to_dict())
-            except Exception as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                logger.warning("Transient error updating task %d: %s", idx, exc)
+                failures.append(
+                    {
+                        "index": idx,
+                        "id": str(task.get("id", "")),
+                        "error": f"transient: {exc}",
+                    }
+                )
+            except (httpx.HTTPStatusError, RuntimeError) as exc:
                 failures.append(
                     {
                         "index": idx,
@@ -344,6 +369,9 @@ def register(app: FastMCP) -> None:
             try:
                 client.reopen_task(task_id)
                 successes.append({"id": task_id})
-            except Exception as exc:
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                logger.warning("Transient error reopening task %s: %s", task_id, exc)
+                failures.append({"id": task_id, "error": f"transient: {exc}"})
+            except (httpx.HTTPStatusError, RuntimeError) as exc:
                 failures.append({"id": task_id, "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})

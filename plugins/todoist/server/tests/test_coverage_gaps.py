@@ -130,9 +130,9 @@ class TestResolvePriorityEdgeCases:
     def test_mixed_case_local(self) -> None:
         assert _resolve_priority("Medium") == 3
 
-    def test_empty_string_defaults_to_1(self) -> None:
-        """Empty string is unknown, defaults to 1."""
-        assert _resolve_priority("") == 1
+    def test_empty_string_defaults_to_medium(self) -> None:
+        """Empty string is unknown, defaults to 3 (medium)."""
+        assert _resolve_priority("") == 3
 
 
 # -- todoist_add_tasks: unexpected response type -----------------------------
