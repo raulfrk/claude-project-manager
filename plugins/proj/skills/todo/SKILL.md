@@ -1,7 +1,7 @@
 ---
 name: todo
 description: Manage project todos — add, complete, list, view tree, set dependencies, delete. Use when the user says "add todo", "mark done", "list todos", "show todo tree", or "1 blocks 2".
-allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_ready, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__proj_update_meta, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_proj_proj__proj_identify_batches
+allowed-tools: mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_ready, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__proj_update_meta, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_proj_proj__proj_identify_batches, mcp__plugin_proj_proj__todo_notes_patch, mcp__plugin_proj_proj__todo_notes_append
 argument-hint: "[add|update|done|list|tree|block|unblock|delete] [args]"
 ---
 
@@ -25,6 +25,13 @@ Manage project todos. Parse $ARGUMENTS for operation.
 
 **update** `<id> [tags=tag1,tag2 | title=... | priority=... | notes=... | due_date=...]` — update todo fields
  - Parse key=value pairs; `mcp__plugin_proj_proj__todo_update`; show updated todo
+ - Notes-only updates: prefer `todo_notes_patch` (find/replace) or `todo_notes_append` (append) over `todo_update(notes=...)`. Full replacement only for complete rewrites.
+
+**notes-patch** `<id> <find> <replace> [count=1]` — find/replace in todo notes
+ - Call `mcp__plugin_proj_proj__todo_notes_patch`
+
+**notes-append** `<id> <text>` — append text to todo notes
+ - Call `mcp__plugin_proj_proj__todo_notes_append`
 
 **done** `<id>` — mark complete (e.g. "done 2")
  - `mcp__plugin_proj_proj__todo_complete`

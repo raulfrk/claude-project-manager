@@ -1,7 +1,7 @@
 ---
 name: status
 description: Show the current project status, open todos, and recent git activity. Use when asked "what's the project status", "what are my todos", "what should I work on next", or "project overview".
-allowed-tools: mcp__proj__proj_status_context, mcp__proj__proj_search_knowledge, mcp__proj__todo_update
+allowed-tools: mcp__proj__proj_status_context, mcp__proj__proj_search_knowledge, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append
 context: fork
 agent: general-purpose
 ---

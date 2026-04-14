@@ -1,7 +1,7 @@
 ---
 name: define
 description: Gather requirements and research implementation approach for a todo. Runs interactive Q&A, then researches the codebase. Use when asked "define 1", "clarify requirements for 1", or "research 1".
-allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task, AskUserQuestion
+allowed-tools: mcp__proj__proj_get_todo_context, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__content_patch_requirements, mcp__proj__content_patch_research, mcp__proj__todo_set_content_flag, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, EnterPlanMode, ExitPlanMode, Read, Glob, Grep, WebSearch, WebFetch, Task, AskUserQuestion
 argument-hint: "<todo-id> [--no-interactive] [--skip-bg-prep]"
 ---
 
@@ -163,7 +163,7 @@ Write `research.md`:
 - <link or file path>
 ```
 
-`mcp__proj__content_set_requirements(requirements)`.
+`mcp__proj__content_set_requirements(requirements)`. Prefer `content_patch_requirements`/`content_patch_research` for section-localized edits. Use `content_set_*` only for initial write or complete rewrite.
 `mcp__proj__content_set_research(research)`.
 
 Each major architectural/design decision (chosen approach, key constraint, scope boundary) → `mcp__proj__proj_decision_log(action="add", decision=<concise statement>, tags="requirements", todo_id={todo_id})`. Decisions self-contained, referenceable in future sessions.
@@ -183,7 +183,7 @@ Validate req against ALL criteria:
 > 1. **Fix** — iterate failing sections, re-run gate
 > 2. **Restart** — back to step 3 w/ cur req as bg ctx
 
-Fix → revise sections, `mcp__proj__content_set_requirements`, re-run gate.
+Fix → revise sections via `mcp__proj__content_patch_requirements` (prefer patch for section-localized fixes; `content_set_requirements` only for complete rewrite), re-run gate.
 Restart → return step 3, show cur req as "Previous context".
 
 3 consecutive gate iterations w/o pass → suggest Restart:
@@ -233,7 +233,7 @@ Wait for completion (auto-notified). Merge into `bg_file_discovery` + `bg_patter
 
 Write both `requirements.md` and `research.md` from todo ctx + codebase exploration. Same formats as step 6. Include `bg_file_discovery` + `bg_pattern_summary` — skip re-exploring covered files.
 
-`mcp__proj__content_set_requirements(requirements)`.
+`mcp__proj__content_set_requirements(requirements)`. Prefer `content_patch_requirements`/`content_patch_research` for section-localized edits. Use `content_set_*` only for initial write or complete rewrite.
 `mcp__proj__content_set_research(research)`.
 
 **NI-4. Self-assessment**
