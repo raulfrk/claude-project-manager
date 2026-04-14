@@ -18,10 +18,12 @@ from server.lib.git import (
     clean_untracked,
     commit,
     is_git_repo,
+    is_rebase_in_progress,
     list_worktrees,
     lock_worktree,
     merge_ff_only,
     prune_worktrees,
+    rebase_continue,
     rebase_worktree,
     remove_worktree,
     reset_hard,
@@ -360,8 +362,8 @@ class TestRebaseWorktree:
         result = rebase_worktree(str(repo), str(repo), "main")
         assert result == {"status": "rebased", "base_branch": "main"}
 
-    def test_rebase_conflict_raises_and_aborts(self, tmp_path: Path) -> None:
-        """Diverged commits on the same file raise GitConflictError and abort."""
+    def test_rebase_conflict_returns_conflict_dict(self, tmp_path: Path) -> None:
+        """Diverged commits on the same file return conflict dict without aborting."""
         repo = tmp_path / "repo"
         _init_repo(repo)
 
@@ -405,76 +407,14 @@ class TestRebaseWorktree:
             capture_output=True,
         )
 
-        with pytest.raises(GitConflictError, match="Rebase conflict"):
-            rebase_worktree(str(repo), str(repo), "main")
+        result = rebase_worktree(str(repo), str(repo), "main")
+        assert result["status"] == "conflict"
+        assert result["base_branch"] == "main"
+        assert "init.txt" in result["conflicted_files"]
 
-        # Verify rebase was aborted (no .git/rebase-merge dir)
+        # Verify rebase is in progress (NOT aborted)
         git_dir = repo / ".git"
-        assert not (git_dir / "rebase-merge").exists()
-        assert not (git_dir / "rebase-apply").exists()
-
-    def test_rebase_abort_failure_silently_lost(self) -> None:
-        """When rebase fails AND abort also fails, abort error is silently lost.
-
-        Documents current buggy behavior: the abort result is never checked,
-        so GitConflictError is raised as if abort succeeded. The worktree may
-        be left in a broken mid-rebase state.
-        """
-        rebase_fail = subprocess.CompletedProcess(
-            args=["git", "rebase", "main"],
-            returncode=1,
-            stdout="",
-            stderr="CONFLICT (content): Merge conflict in file.txt",
-        )
-        abort_fail = subprocess.CompletedProcess(
-            args=["git", "rebase", "--abort"],
-            returncode=128,
-            stdout="",
-            stderr="fatal: No rebase in progress?",
-        )
-
-        with (
-            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_fail]),
-            pytest.raises(GitConflictError, match="Rebase conflict"),
-        ):
-            rebase_worktree("/repo", "/repo/wt", "main")
-
-    def test_rebase_abort_success_no_rebase_dirs(self, tmp_path: Path) -> None:
-        """After successful abort, no rebase-merge or rebase-apply dirs remain.
-
-        Mock-based complement to test_rebase_conflict_raises_and_aborts.
-        """
-        rebase_fail = subprocess.CompletedProcess(
-            args=["git", "rebase", "main"],
-            returncode=1,
-            stdout="",
-            stderr="CONFLICT (content): Merge conflict in file.txt",
-        )
-        abort_ok = subprocess.CompletedProcess(
-            args=["git", "rebase", "--abort"],
-            returncode=0,
-            stdout="",
-            stderr="",
-        )
-
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-        git_dir = wt / ".git"
-        git_dir.mkdir()
-        # Simulate rebase-merge dir that abort should clean up
-        (git_dir / "rebase-merge").mkdir()
-
-        with (
-            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_ok]),
-            pytest.raises(GitConflictError),
-        ):
-            rebase_worktree("/repo", str(wt), "main")
-
-        # In a real scenario, a successful abort removes these dirs.
-        # Since we mock subprocess.run, the dirs are not actually removed,
-        # but the test verifies the function completes the abort call.
-        # The existing integration test (test_rebase_conflict_raises_and_aborts)
-        # verifies the dirs are actually cleaned up with real git.
+        assert (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
 
     def test_rebase_file_not_found_raises_git_error(self) -> None:
         """FileNotFoundError (e.g., git binary missing) raises GitError."""
@@ -487,31 +427,75 @@ class TestRebaseWorktree:
         ):
             rebase_worktree("/repo", "/some/worktree", "main")
 
-    def test_rebase_conflict_error_includes_path_and_stderr(self) -> None:
-        """GitConflictError message includes both worktree path and stderr text."""
-        rebase_fail = subprocess.CompletedProcess(
-            args=["git", "rebase", "main"],
-            returncode=1,
-            stdout="",
-            stderr="CONFLICT (content): Merge conflict in important.py",
-        )
-        abort_ok = subprocess.CompletedProcess(
-            args=["git", "rebase", "--abort"],
-            returncode=0,
-            stdout="",
-            stderr="",
-        )
+    def test_rebase_conflict_does_not_abort(self) -> None:
+        """Mock: conflict detected -> returns conflict dict, abort NOT called."""
+        calls = []
 
-        wt_path = "/home/user/worktrees/feature-branch"
+        def side_effect(cmd, *args, **kwargs):
+            calls.append(list(cmd))
+            if cmd == ["git", "rebase", "main"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="CONFLICT"
+                )
+            if cmd == ["git", "diff", "--name-only", "--diff-filter=U"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="file.txt\n", stderr=""
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("server.lib.git.subprocess.run", side_effect=side_effect):
+            result = rebase_worktree("/repo", "/repo/wt", "main")
+
+        assert result == {
+            "status": "conflict",
+            "conflicted_files": ["file.txt"],
+            "base_branch": "main",
+        }
+        assert not any("--abort" in cmd for cmd in calls), "rebase --abort must NOT be called"
+
+    def test_rebase_non_conflict_error_aborts_and_raises(self) -> None:
+        """Mock: non-zero exit + no conflicts -> aborts and raises GitError."""
+        calls = []
+
+        def side_effect(cmd, *args, **kwargs):
+            calls.append(list(cmd))
+            if cmd == ["git", "rebase", "main"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="some other error"
+                )
+            if cmd == ["git", "diff", "--name-only", "--diff-filter=U"]:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
         with (
-            patch("server.lib.git.subprocess.run", side_effect=[rebase_fail, abort_ok]),
-            pytest.raises(GitConflictError, match=wt_path) as exc_info,
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitError),
         ):
-            rebase_worktree("/repo", wt_path, "main")
+            rebase_worktree("/repo", "/repo/wt", "main")
 
-        error_msg = str(exc_info.value)
-        assert wt_path in error_msg
-        assert "Merge conflict in important.py" in error_msg
+        assert any("--abort" in cmd for cmd in calls), "rebase --abort should be called"
+
+    def test_rebase_abort_failure_logs_warning(self) -> None:
+        """Mock: abort raises OSError -> GitError raised (original), warning logged."""
+        call_count = [0]
+
+        def side_effect(cmd, *args, **kwargs):
+            call_count[0] += 1
+            if cmd == ["git", "rebase", "main"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="some error"
+                )
+            if cmd == ["git", "diff", "--name-only", "--diff-filter=U"]:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            if "--abort" in list(cmd):
+                raise OSError("abort command failed")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitError),
+        ):
+            rebase_worktree("/repo", "/repo/wt", "main")
 
 
 # ---------------------------------------------------------------------------
@@ -660,14 +644,10 @@ class TestCommit:
 
 
 class TestRebaseWorktreeSubprocess:
-    """Tests for bare subprocess.run calls in rebase_worktree() that bypass _run().
-
-    These tests mock subprocess.run at the git module level to capture
-    current behavior before the refactor in todo 475.7.
-    """
+    """Tests for bare subprocess.run calls in rebase_worktree() that bypass _run()."""
 
     def test_rebase_success(self) -> None:
-        """Site 4 (git.py:170): subprocess.run returns 0 → {"status": "rebased", ...}."""
+        """subprocess.run returns 0 → {"status": "rebased", ...}."""
         with patch(
             "server.lib.git.subprocess.run",
             return_value=subprocess.CompletedProcess(
@@ -680,30 +660,31 @@ class TestRebaseWorktreeSubprocess:
             result = rebase_worktree("/repo", "/worktree", "main")
         assert result == {"status": "rebased", "base_branch": "main"}
 
-    def test_rebase_conflict_raises_and_aborts(self) -> None:
-        """Site 4+5 (git.py:170-183): rebase returns non-zero → abort called → GitConflictError."""
+    def test_rebase_conflict_returns_dict_no_abort(self) -> None:
+        """rebase returns non-zero + diff shows conflicts → returns conflict dict, no abort."""
         calls = []
 
         def side_effect(cmd, *args, **kwargs):
-            calls.append(cmd)
-            if "rebase" in cmd and "--abort" not in cmd:
+            calls.append(list(cmd))
+            if cmd == ["git", "rebase", "main"]:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict"
                 )
-            # abort call
+            if cmd == ["git", "diff", "--name-only", "--diff-filter=U"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="file.txt\n", stderr=""
+                )
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-        with (
-            patch("server.lib.git.subprocess.run", side_effect=side_effect),
-            pytest.raises(GitConflictError, match="Rebase conflict"),
-        ):
-            rebase_worktree("/repo", "/worktree", "main")
+        with patch("server.lib.git.subprocess.run", side_effect=side_effect):
+            result = rebase_worktree("/repo", "/worktree", "main")
 
-        # Verify abort was called
-        assert any("--abort" in cmd for cmd in calls), "rebase --abort should have been called"
+        assert result["status"] == "conflict"
+        assert result["conflicted_files"] == ["file.txt"]
+        assert not any("--abort" in cmd for cmd in calls)
 
     def test_rebase_file_not_found(self) -> None:
-        """Site 4 (git.py:185): subprocess.run raises FileNotFoundError → GitError."""
+        """subprocess.run raises FileNotFoundError → GitError."""
         with (
             patch(
                 "server.lib.git.subprocess.run",
@@ -712,33 +693,6 @@ class TestRebaseWorktreeSubprocess:
             pytest.raises(GitError, match="git not found"),
         ):
             rebase_worktree("/repo", "/worktree", "main")
-
-    def test_rebase_abort_failure_is_silent(self) -> None:
-        """Site 5 (git.py:178): abort fails but error is swallowed
-        -- only GitConflictError raised."""
-        calls = []
-
-        def side_effect(cmd, *args, **kwargs):
-            calls.append(cmd)
-            if "rebase" in cmd and "--abort" not in cmd:
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="CONFLICT"
-                )
-            if "--abort" in cmd:
-                # abort also fails
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="abort failed"
-                )
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-
-        with (
-            patch("server.lib.git.subprocess.run", side_effect=side_effect),
-            pytest.raises(GitConflictError, match="Rebase conflict"),
-        ):
-            rebase_worktree("/repo", "/worktree", "main")
-
-        # Verify abort was attempted even though it failed
-        assert any("--abort" in cmd for cmd in calls)
 
 
 # ---------------------------------------------------------------------------
@@ -924,3 +878,158 @@ class TestGitErrorPropagation:
             pytest.raises(GitError, match=r"^fatal: not a git repository$"),
         ):
             prune_worktrees("/repo")
+
+
+# ---------------------------------------------------------------------------
+# is_rebase_in_progress tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsRebaseInProgress:
+    def test_true_when_rebase_merge_exists(self, tmp_path: Path) -> None:
+        """Returns True when .git/rebase-merge subdir exists."""
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "rebase-merge").mkdir()
+
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-dir"],
+                returncode=0,
+                stdout=".git\n",
+                stderr="",
+            ),
+        ):
+            assert is_rebase_in_progress(str(tmp_path)) is True
+
+    def test_true_when_rebase_apply_exists(self, tmp_path: Path) -> None:
+        """Returns True when .git/rebase-apply subdir exists."""
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "rebase-apply").mkdir()
+
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-dir"],
+                returncode=0,
+                stdout=".git\n",
+                stderr="",
+            ),
+        ):
+            assert is_rebase_in_progress(str(tmp_path)) is True
+
+    def test_false_when_no_rebase_dirs(self, tmp_path: Path) -> None:
+        """Returns False when neither rebase dir exists."""
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-dir"],
+                returncode=0,
+                stdout=".git\n",
+                stderr="",
+            ),
+        ):
+            assert is_rebase_in_progress(str(tmp_path)) is False
+
+    def test_false_when_git_rev_parse_fails(self, tmp_path: Path) -> None:
+        """Returns False when git rev-parse --git-dir fails."""
+        with patch(
+            "server.lib.git.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-dir"],
+                returncode=128,
+                stdout="",
+                stderr="fatal: not a git repository",
+            ),
+        ):
+            assert is_rebase_in_progress(str(tmp_path)) is False
+
+    def test_false_when_file_not_found(self, tmp_path: Path) -> None:
+        """Returns False when git binary not found."""
+        with patch(
+            "server.lib.git.subprocess.run",
+            side_effect=FileNotFoundError("git not found"),
+        ):
+            assert is_rebase_in_progress(str(tmp_path)) is False
+
+
+# ---------------------------------------------------------------------------
+# rebase_continue tests
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseContinue:
+    def test_success_returns_rebased(self) -> None:
+        """git add + git rebase --continue both succeed → {"status": "rebased"}."""
+
+        def side_effect(cmd, *args, **kwargs):
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("server.lib.git.subprocess.run", side_effect=side_effect):
+            result = rebase_continue("/some/worktree")
+        assert result == {"status": "rebased"}
+
+    def test_add_failure_raises_git_error(self) -> None:
+        """git add -A fails → GitError raised."""
+
+        def side_effect(cmd, *args, **kwargs):
+            if "add" in list(cmd):
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="add failed"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitError, match="git add -A failed"),
+        ):
+            rebase_continue("/some/worktree")
+
+    def test_continue_still_conflicted_raises_git_conflict_error(self) -> None:
+        """git rebase --continue returns non-zero + conflicts remain → GitConflictError."""
+
+        def side_effect(cmd, *args, **kwargs):
+            cmd_list = list(cmd)
+            if "add" in cmd_list:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            if "--continue" in cmd_list:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="still conflicted"
+                )
+            if "--diff-filter=U" in cmd_list:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="conflict.txt\n", stderr=""
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitConflictError),
+        ):
+            rebase_continue("/some/worktree")
+
+    def test_continue_non_conflict_failure_raises_git_error(self) -> None:
+        """git rebase --continue fails without conflicts → GitError."""
+
+        def side_effect(cmd, *args, **kwargs):
+            cmd_list = list(cmd)
+            if "add" in cmd_list:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            if "--continue" in cmd_list:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="unexpected error"
+                )
+            if "--diff-filter=U" in cmd_list:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("server.lib.git.subprocess.run", side_effect=side_effect),
+            pytest.raises(GitError),
+        ):
+            rebase_continue("/some/worktree")

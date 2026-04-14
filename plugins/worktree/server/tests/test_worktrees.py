@@ -21,6 +21,7 @@ from server.tools.worktrees import (
     lock_worktree,
     merge_worktree,
     prune_worktrees,
+    rebase_continue_worktree,
     remove_worktree,
     unlock_worktree,
 )
@@ -460,8 +461,8 @@ class TestMergeWorktree:
         assert data["result"] == "error"
         assert "Cannot determine default branch" in data["message"]
 
-    def test_merge_conflict_rebase_aborted(self, real_git_repo: Path) -> None:
-        """AC1: After conflict, rebase is fully aborted — no rebase state, clean tree."""
+    def test_merge_conflict_rebase_left_in_progress(self, real_git_repo: Path) -> None:
+        """AC1: After conflict, rebase is left in progress for model to resolve."""
         create_result = create_worktree("myapp", "feature/conflict-abort")
         create_data = json.loads(create_result)
         assert "Created" in create_data["result"]
@@ -480,23 +481,19 @@ class TestMergeWorktree:
         result = merge_worktree(str(wt_path), base_branch="main")
         data = json.loads(result)
         assert data["result"] == "conflict"
+        assert "conflicted_files" in data
+        assert isinstance(data["conflicted_files"], list)
 
-        # Verify no rebase-merge or rebase-apply dir in worktree git dir
+        # Rebase is still in progress (NOT aborted)
         git_dir = _git(wt_path, "rev-parse", "--git-dir")
         git_dir_path = Path(git_dir) if Path(git_dir).is_absolute() else wt_path / git_dir
-        assert not (git_dir_path / "rebase-merge").exists()
-        assert not (git_dir_path / "rebase-apply").exists()
+        rebase_in_progress = (git_dir_path / "rebase-merge").exists() or (
+            git_dir_path / "rebase-apply"
+        ).exists()
+        assert rebase_in_progress, "rebase should be left in progress for model resolution"
 
-        # git status should not report rebase in progress
-        status_output = _git(wt_path, "status")
-        assert "rebase in progress" not in status_output.lower()
-
-        # Working tree should be clean (no conflict markers)
-        status_porcelain = _git(wt_path, "status", "--porcelain")
-        assert status_porcelain == ""
-
-    def test_merge_conflict_message_contains_info(self, real_git_repo: Path) -> None:
-        """AC2: Conflict response message field contains meaningful info."""
+    def test_merge_conflict_includes_conflicted_files(self, real_git_repo: Path) -> None:
+        """AC2: Conflict response includes conflicted_files list."""
         create_result = create_worktree("myapp", "feature/conflict-msg")
         create_data = json.loads(create_result)
         assert "Created" in create_data["result"]
@@ -513,12 +510,14 @@ class TestMergeWorktree:
         result = merge_worktree(str(wt_path), base_branch="main")
         data = json.loads(result)
         assert data["result"] == "conflict"
-        # message should contain conflict-related info from GitConflictError
-        assert "conflict" in data["message"].lower()
-        assert len(data["message"]) > 10  # not empty/trivial
+        # conflicted_files should list the conflicting file
+        assert "conflicted_files" in data
+        assert isinstance(data["conflicted_files"], list)
+        assert len(data["conflicted_files"]) > 0
+        assert any("README.md" in f for f in data["conflicted_files"])
 
-    def test_merge_conflict_worktree_remains_usable(self, real_git_repo: Path) -> None:
-        """AC3: After conflict, worktree is functional — commits possible, branch intact."""
+    def test_merge_conflict_worktree_remains_usable_after_abort(self, real_git_repo: Path) -> None:
+        """AC3: After conflict + manual abort, worktree is functional."""
         create_result = create_worktree("myapp", "feature/conflict-usable")
         create_data = json.loads(create_result)
         assert "Created" in create_data["result"]
@@ -535,19 +534,14 @@ class TestMergeWorktree:
         result = merge_worktree(str(wt_path), base_branch="main")
         data = json.loads(result)
         assert data["result"] == "conflict"
+        assert "conflicted_files" in data
+
+        # Manually abort the rebase so the worktree is clean
+        _git(wt_path, "rebase", "--abort")
 
         # Branch is still checked out (not detached HEAD)
         head_ref = _git(wt_path, "symbolic-ref", "HEAD")
         assert head_ref == "refs/heads/feature/conflict-usable"
-
-        # New commits can still be made
-        (wt_path / "newfile.txt").write_text("post-conflict commit")
-        _git(wt_path, "add", ".")
-        _git(wt_path, "commit", "-m", "post-conflict work")
-
-        # Verify the commit landed
-        log_output = _git(wt_path, "log", "--oneline", "-1")
-        assert "post-conflict work" in log_output
 
         # A subsequent merge can succeed after the conflict source is resolved.
         # Reset the feature branch to main (so they share history), then add
@@ -561,8 +555,8 @@ class TestMergeWorktree:
         data2 = json.loads(result2)
         assert data2["result"] == "merged"
 
-    def test_merge_conflict_abort_failure(self, real_git_repo: Path) -> None:
-        """AC4: Both rebase AND abort fail — GitConflictError still raised."""
+    def test_merge_conflict_with_diff_detection(self, real_git_repo: Path) -> None:
+        """AC4: Rebase fails + diff detects conflicts -> conflict dict returned."""
         create_result = create_worktree("myapp", "feature/abort-fail")
         create_data = json.loads(create_result)
         assert "Created" in create_data["result"]
@@ -574,29 +568,27 @@ class TestMergeWorktree:
 
         def patched_run(cmd, *args, **kwargs):
             cmd_list = list(cmd)
-            if "rebase" in cmd_list:
-                if "--abort" in cmd_list:
-                    # Abort fails
-                    return subprocess.CompletedProcess(
-                        args=cmd, returncode=128, stdout="", stderr="fatal: abort failed"
-                    )
-                else:
-                    call_count["rebase"] += 1
-                    # Initial rebase fails (conflict)
-                    return subprocess.CompletedProcess(
-                        args=cmd,
-                        returncode=1,
-                        stdout="",
-                        stderr="CONFLICT (content): Merge conflict in README.md",
-                    )
+            if "rebase" in cmd_list and "--abort" not in cmd_list and "--continue" not in cmd_list:
+                call_count["rebase"] += 1
+                # Initial rebase fails (conflict)
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=1,
+                    stdout="",
+                    stderr="CONFLICT (content): Merge conflict in README.md",
+                )
+            if "--diff-filter=U" in cmd_list:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="README.md\n", stderr=""
+                )
             return real_run(cmd, *args, **kwargs)
 
         with patch("server.lib.git.subprocess.run", side_effect=patched_run):
             result = merge_worktree(wt_path, base_branch="main")
 
         data = json.loads(result)
-        # GitConflictError is still raised and caught by merge_worktree
         assert data["result"] == "conflict"
+        assert "conflicted_files" in data
         assert call_count["rebase"] == 1
 
     def test_merge_conflict_no_worktree_commits(self, real_git_repo: Path) -> None:
@@ -625,10 +617,8 @@ class TestMergeWorktree:
         data = json.loads(result)
         assert data["result"] == "conflict"
         assert data["branch"] == "feature/no-commits"
-
-        # Worktree should be clean after abort
-        status_porcelain = _git(wt_path, "status", "--porcelain")
-        assert status_porcelain == ""
+        assert "conflicted_files" in data
+        assert isinstance(data["conflicted_files"], list)
 
 
 # ---------------------------------------------------------------------------
@@ -1298,3 +1288,158 @@ class TestMergeWorktreeBareSubprocess:
         assert data["result"] == "auto-committed"
         assert data["files_committed"] == 3  # overcounts -- should be 2
         assert mock_status.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# wt_rebase_continue tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseContinueWorktree:
+    def test_worktree_not_found(self, config_with_repo: Path) -> None:
+        """Non-existent path -> error."""
+        with patch("server.tools.worktrees.git.list_worktrees", return_value=_SAMPLE_ENTRIES):
+            result = rebase_continue_worktree("/does/not/exist")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "No managed worktree" in data["message"]
+
+    def test_no_rebase_in_progress(self, config_with_repo: Path) -> None:
+        """is_rebase_in_progress=False -> error."""
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.is_rebase_in_progress", return_value=False),
+        ):
+            result = rebase_continue_worktree("/worktree/path")
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "No rebase in progress" in data["message"]
+
+    def test_success_merged(self, config_with_repo: Path) -> None:
+        """Full success: rebase_continue + merge_ff_only both succeed -> merged."""
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.is_rebase_in_progress", return_value=True),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["git", "-C", "/worktree/path", "symbolic-ref", "HEAD"],
+                    returncode=0,
+                    stdout="refs/heads/feature/my-branch\n",
+                    stderr="",
+                ),
+            ),
+            patch(
+                "server.tools.worktrees.git.rebase_continue",
+                return_value={"status": "rebased"},
+            ),
+            patch(
+                "server.tools.worktrees.git.merge_ff_only",
+                return_value={"status": "merged", "branch": "feature/my-branch"},
+            ),
+        ):
+            result = rebase_continue_worktree("/worktree/path")
+        data = json.loads(result)
+        assert data["result"] == "merged"
+        assert data["branch"] == "feature/my-branch"
+        assert data["worktree_path"] == "/worktree/path"
+
+    def test_continue_still_conflicted(self, config_with_repo: Path) -> None:
+        """rebase_continue raises GitConflictError -> conflict result with files."""
+        from server.lib.git import GitConflictError
+
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.is_rebase_in_progress", return_value=True),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["git", "-C", "/worktree/path", "symbolic-ref", "HEAD"],
+                    returncode=0,
+                    stdout="refs/heads/feature\n",
+                    stderr="",
+                ),
+            ),
+            patch(
+                "server.tools.worktrees.git.rebase_continue",
+                side_effect=GitConflictError("still conflicted: still.txt"),
+            ),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout="refs/heads/feature\n",
+                    stderr="",
+                ),
+            ),
+        ):
+            # Patch subprocess.run once for symbolic-ref, then for diff
+            def run_side_effect(cmd, *args, **kwargs):
+                cmd_list = list(cmd)
+                if "symbolic-ref" in cmd_list:
+                    return subprocess.CompletedProcess(
+                        args=cmd, returncode=0, stdout="refs/heads/feature\n", stderr=""
+                    )
+                if "--diff-filter=U" in cmd_list:
+                    return subprocess.CompletedProcess(
+                        args=cmd, returncode=0, stdout="still.txt\n", stderr=""
+                    )
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+            with (
+                patch(
+                    "server.tools.worktrees._find_worktree",
+                    return_value=("/worktree/path", "/repo/path"),
+                ),
+                patch("server.tools.worktrees.git.is_rebase_in_progress", return_value=True),
+                patch("server.tools.worktrees.subprocess.run", side_effect=run_side_effect),
+                patch(
+                    "server.tools.worktrees.git.rebase_continue",
+                    side_effect=GitConflictError("conflicts remain"),
+                ),
+            ):
+                result = rebase_continue_worktree("/worktree/path")
+        data = json.loads(result)
+        assert data["result"] == "conflict"
+        assert "conflicted_files" in data
+
+    def test_ff_only_failed(self, config_with_repo: Path) -> None:
+        """rebase_continue succeeds but merge_ff_only fails -> ff_only_failed."""
+        with (
+            patch(
+                "server.tools.worktrees._find_worktree",
+                return_value=("/worktree/path", "/repo/path"),
+            ),
+            patch("server.tools.worktrees.git.is_rebase_in_progress", return_value=True),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["git", "-C", "/worktree/path", "symbolic-ref", "HEAD"],
+                    returncode=0,
+                    stdout="refs/heads/feature\n",
+                    stderr="",
+                ),
+            ),
+            patch(
+                "server.tools.worktrees.git.rebase_continue",
+                return_value={"status": "rebased"},
+            ),
+            patch(
+                "server.tools.worktrees.git.merge_ff_only",
+                side_effect=GitError("not a fast-forward"),
+            ),
+        ):
+            result = rebase_continue_worktree("/worktree/path")
+        data = json.loads(result)
+        assert data["result"] == "ff_only_failed"
+        assert data["branch"] == "feature"

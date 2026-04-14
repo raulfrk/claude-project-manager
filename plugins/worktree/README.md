@@ -76,6 +76,9 @@ All tools are prefixed `wt_` and available as `mcp__plugin_worktree_worktree__<t
 | `wt_prune` | `repo_label=None` | Prune stale worktree admin files for one or all repos |
 | `wt_lock` | `path`, `reason=""` | Lock a worktree to prevent pruning or deletion |
 | `wt_unlock` | `path` | Unlock a previously locked worktree |
+| `wt_merge` | `path`, `base_branch=None` | Rebase worktree onto base branch and ff-merge; returns conflict info when conflicts exist |
+| `wt_rebase_continue` | `path` | Continue an in-progress rebase after conflicts are resolved |
+| `wt_auto_commit` | `worktree_path`, `message="Auto-commit agent work"` | Stage and commit any uncommitted changes in a worktree |
 
 ### wt_create path resolution
 
@@ -117,6 +120,25 @@ wt_remove(path="~/worktrees/myapp/feature-my-thing")
 # 7. Clean up any leftover git admin files
 wt_prune(repo_label="myapp")
 ```
+
+### wt_merge conflict resolution flow
+
+When `wt_merge` encounters a rebase conflict it returns:
+
+```json
+{
+  "result": "conflict",
+  "conflicted_files": ["path/to/file.py"],
+  "worktree_path": "/path/to/worktree",
+  "branch": "feature/my-branch"
+}
+```
+
+The rebase is left in progress so the model can resolve the conflicts. Workflow:
+
+1. Edit each file in `conflicted_files` to resolve conflict markers.
+2. Call `wt_rebase_continue(path=worktree_path)` to stage, continue the rebase, and ff-merge.
+3. If further conflicts remain, `wt_rebase_continue` returns another `{"result": "conflict", ...}` — repeat from step 1.
 
 ## Technical notes
 

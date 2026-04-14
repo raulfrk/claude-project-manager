@@ -6,10 +6,14 @@ All operations are side-effect-free reads except create/remove/prune/lock/unlock
 
 from __future__ import annotations
 
+import logging
+import os
 import subprocess
 from pathlib import Path
 
 from server.lib.models import WorktreeEntry
+
+logger = logging.getLogger(__name__)
 
 
 class GitError(Exception):
@@ -161,10 +165,14 @@ def commit(path: Path, message: str) -> str:
     return _run(["-C", str(path), "rev-parse", "HEAD"]).strip()
 
 
-def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dict[str, str]:
+def rebase_worktree(
+    repo_path: str, worktree_path: str, base_branch: str
+) -> dict[str, str | list[str]]:
     """Rebase the worktree's branch onto base_branch.
 
-    On conflict, aborts the rebase and raises GitConflictError.
+    On conflict, returns {"status": "conflict", "conflicted_files": [...], "base_branch": ...}.
+    On non-conflict failure, aborts the rebase and raises GitError.
+    On success, returns {"status": "rebased", "base_branch": ...}.
     """
     try:
         result = subprocess.run(
@@ -174,17 +182,109 @@ def rebase_worktree(repo_path: str, worktree_path: str, base_branch: str) -> dic
             cwd=worktree_path,
         )
         if result.returncode != 0:
-            stderr = result.stderr.strip()
-            subprocess.run(
-                ["git", "rebase", "--abort"],
+            # Check if this is a conflict
+            diff_result = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=U"],
                 capture_output=True,
                 text=True,
                 cwd=worktree_path,
             )
-            raise GitConflictError(f"Rebase conflict in {worktree_path}: {stderr}")
+            conflicted_files = (
+                diff_result.stdout.strip().splitlines() if diff_result.returncode == 0 else []
+            )
+            if conflicted_files:
+                return {
+                    "status": "conflict",
+                    "conflicted_files": conflicted_files,
+                    "base_branch": base_branch,
+                }
+            # Non-conflict failure — abort and propagate original error
+            stderr = result.stderr.strip()
+            try:
+                subprocess.run(
+                    ["git", "rebase", "--abort"],
+                    capture_output=True,
+                    text=True,
+                    cwd=worktree_path,
+                )
+            except Exception as abort_err:
+                logger.warning("git rebase --abort also failed: %s", abort_err)
+            raise GitError(f"Rebase failed in {worktree_path}: {stderr}")
     except FileNotFoundError as err:
         raise GitError(f"git not found or invalid path: {worktree_path}") from err
     return {"status": "rebased", "base_branch": base_branch}
+
+
+def rebase_abort(worktree_path: str) -> None:
+    """Abort an in-progress rebase."""
+    _run(["rebase", "--abort"], cwd=worktree_path)
+
+
+def is_rebase_in_progress(worktree_path: str) -> bool:
+    """Return True if a rebase is currently in progress in the worktree."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            cwd=worktree_path,
+        )
+        if result.returncode != 0:
+            return False
+        git_dir_str = result.stdout.strip()
+        git_dir = Path(git_dir_str)
+        if not git_dir.is_absolute():
+            git_dir = Path(worktree_path) / git_dir
+        return (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def rebase_continue(worktree_path: str) -> dict[str, str]:
+    """Stage all changes and continue an in-progress rebase.
+
+    Returns {"status": "rebased"} on success.
+    Raises GitConflictError if conflicts remain after continue.
+    Raises GitError on other failures.
+    """
+    # Stage all changes
+    add_result = subprocess.run(
+        ["git", "add", "-A"],
+        capture_output=True,
+        text=True,
+        cwd=worktree_path,
+    )
+    if add_result.returncode != 0:
+        raise GitError(f"git add -A failed in {worktree_path}: {add_result.stderr.strip()}")
+
+    # Continue rebase with non-interactive editor
+    continue_result = subprocess.run(
+        ["git", "rebase", "--continue"],
+        capture_output=True,
+        text=True,
+        cwd=worktree_path,
+        env={**os.environ, "GIT_EDITOR": "true"},
+    )
+    if continue_result.returncode != 0:
+        # Check for remaining conflicts
+        diff_result = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            capture_output=True,
+            text=True,
+            cwd=worktree_path,
+        )
+        conflicted_files = (
+            diff_result.stdout.strip().splitlines() if diff_result.returncode == 0 else []
+        )
+        if conflicted_files:
+            raise GitConflictError(
+                f"Conflicts remain after rebase --continue in {worktree_path}: "
+                + ", ".join(conflicted_files)
+            )
+        raise GitError(
+            f"git rebase --continue failed in {worktree_path}: " + continue_result.stderr.strip()
+        )
+    return {"status": "rebased"}
 
 
 def merge_ff_only(repo_path: str, branch: str) -> dict[str, str]:

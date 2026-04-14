@@ -293,13 +293,12 @@ def merge_worktree(path: str, base_branch: str | None = None) -> str:
             )
 
     # Rebase worktree onto base_branch
-    try:
-        git.rebase_worktree(repo_path, abs_path, base_branch)
-    except GitConflictError as e:
+    rebase_result = git.rebase_worktree(repo_path, abs_path, base_branch)
+    if rebase_result["status"] == "conflict":
         return json.dumps(
             {
                 "result": "conflict",
-                "message": str(e),
+                "conflicted_files": rebase_result["conflicted_files"],
                 "worktree_path": abs_path,
                 "branch": branch_name,
             }
@@ -324,6 +323,78 @@ def merge_worktree(path: str, base_branch: str | None = None) -> str:
             "worktree_path": abs_path,
             "branch": branch_name,
             "base_branch": base_branch,
+        }
+    )
+
+
+def rebase_continue_worktree(path: str) -> str:
+    """Continue an in-progress rebase in a worktree after conflicts are resolved."""
+    result = _find_worktree(path)
+    if not result:
+        return json.dumps({"result": "error", "message": f"No managed worktree found at: {path}"})
+    abs_path, repo_path = result
+
+    if not git.is_rebase_in_progress(abs_path):
+        return json.dumps({"result": "error", "message": f"No rebase in progress at {abs_path}"})
+
+    # Get branch name
+    try:
+        head_ref = subprocess.run(
+            ["git", "-C", abs_path, "symbolic-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if head_ref.returncode != 0:
+            return json.dumps(
+                {"result": "error", "message": f"Worktree is in detached HEAD state: {abs_path}"}
+            )
+        branch_name = head_ref.stdout.strip().removeprefix("refs/heads/")
+    except FileNotFoundError:
+        return json.dumps(
+            {"result": "error", "message": f"git not found or invalid path: {abs_path}"}
+        )
+
+    # Continue rebase
+    try:
+        git.rebase_continue(abs_path)
+    except GitConflictError:
+        diff_result = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            capture_output=True,
+            text=True,
+            cwd=abs_path,
+        )
+        conflicted_files = (
+            diff_result.stdout.strip().splitlines() if diff_result.returncode == 0 else []
+        )
+        return json.dumps(
+            {
+                "result": "conflict",
+                "conflicted_files": conflicted_files,
+                "worktree_path": abs_path,
+            }
+        )
+    except GitError as e:
+        return json.dumps({"result": "error", "message": str(e)})
+
+    # Fast-forward merge into base repo
+    try:
+        git.merge_ff_only(repo_path, branch_name)
+    except GitError as e:
+        return json.dumps(
+            {
+                "result": "ff_only_failed",
+                "message": str(e),
+                "worktree_path": abs_path,
+                "branch": branch_name,
+            }
+        )
+
+    return json.dumps(
+        {
+            "result": "merged",
+            "worktree_path": abs_path,
+            "branch": branch_name,
         }
     )
 
@@ -437,6 +508,10 @@ def register(app: FastMCP) -> None:
     )
     def wt_merge(path: str, base_branch: str | None = None) -> str:
         return merge_worktree(path, base_branch)
+
+    @app.tool(description="Continue an in-progress rebase after resolving conflicts in a worktree.")
+    def wt_rebase_continue(path: str) -> str:
+        return rebase_continue_worktree(path)
 
     @app.tool(
         description=(
