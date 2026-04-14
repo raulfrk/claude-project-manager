@@ -478,6 +478,24 @@ _GenericToolFn = Callable[..., ToolResult]
 _ToolDecorator = Callable[[_GenericToolFn], _GenericToolFn]
 
 
+def _result_has_skip_hooks(result: _RawToolOutput) -> bool:
+    """Check whether the tool result contains a ``_skip_hooks: true`` flag.
+
+    Supports dict results and JSON-string results.  Returns False on any
+    parse error or when the flag is absent/falsy.
+    """
+    if isinstance(result, dict):
+        return bool(result.get("_skip_hooks"))
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, dict):
+                return bool(parsed.get("_skip_hooks"))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return False
+
+
 def enable_hook_dispatch(
     mcp: FastMCP,
     hooks_port: int = 19100,
@@ -558,6 +576,8 @@ def _wrap_tool_fn[**P, R](
             *args: P.args, **kwargs: P.kwargs
         ) -> R | str | dict[str, JsonValue]:
             result: R = await fn(*args, **kwargs)
+            if _result_has_skip_hooks(result):  # type: ignore[arg-type]
+                return result  # type: ignore[return-value]
             fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
             serialized = _serialize_result(result)  # type: ignore[arg-type]
             merged = _merge_feedback(serialized, fire_response)
@@ -582,6 +602,8 @@ def _wrap_tool_fn[**P, R](
         *args: P.args, **kwargs: P.kwargs
     ) -> R | str | dict[str, JsonValue]:
         result: R = fn(*args, **kwargs)
+        if _result_has_skip_hooks(result):  # type: ignore[arg-type]
+            return result  # type: ignore[return-value]
         fire_response = await _dispatch_hook(tool_name, result, hooks_port)  # type: ignore[arg-type]
         serialized = _serialize_result(result)  # type: ignore[arg-type]
         merged = _merge_feedback(serialized, fire_response)

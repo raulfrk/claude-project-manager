@@ -1331,3 +1331,58 @@ class TestManualTagDisplay:
         await call_tool(mcp_app, "todo_update", todo_id="1", due_date="2026-09-15")
         todos = storage.load_todos(project[0], "myapp")
         assert todos[0].due_date == "2026-09-15"
+
+
+@pytest.mark.asyncio
+class TestTodoUpdateSkipHooks:
+    """Tests for _skip_hooks flag on todo_update."""
+
+    async def test_skip_hooks_with_sync_field_only(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """skip_hooks=True + only sync field → _skip_hooks in result."""
+        await call_tool(mcp_app, "todo_add", title="Task")
+        raw = await call_tool(
+            mcp_app, "todo_update", todo_id="1", todoist_task_id="t999", skip_hooks=True
+        )
+        data = _json.loads(raw)
+        assert data.get("_skip_hooks") is True
+        # Verify the field was actually written
+        todos = storage.load_todos(project[0], "myapp")
+        assert todos[0].todoist_task_id == "t999"
+
+    async def test_skip_hooks_rejected_with_title(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """skip_hooks=True + title field → scope guard rejects, no _skip_hooks in result."""
+        await call_tool(mcp_app, "todo_add", title="Task")
+        raw = await call_tool(
+            mcp_app,
+            "todo_update",
+            todo_id="1",
+            title="New",
+            todoist_task_id="t999",
+            skip_hooks=True,
+        )
+        data = _json.loads(raw)
+        assert "_skip_hooks" not in data
+
+    async def test_no_skip_hooks_flag_normal(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Without _skip_hooks, result has no _skip_hooks key."""
+        await call_tool(mcp_app, "todo_add", title="Task")
+        raw = await call_tool(mcp_app, "todo_update", todo_id="1", todoist_task_id="t999")
+        data = _json.loads(raw)
+        assert "_skip_hooks" not in data
+
+    async def test_skip_hooks_rejected_with_status(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """_skip_hooks + status field → rejected by scope guard."""
+        await call_tool(mcp_app, "todo_add", title="Task")
+        raw = await call_tool(
+            mcp_app, "todo_update", todo_id="1", status="in_progress", skip_hooks=True
+        )
+        data = _json.loads(raw)
+        assert "_skip_hooks" not in data

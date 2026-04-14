@@ -1374,3 +1374,78 @@ class TestWrapToolFnMergesFeedback:
         assert parsed["todoist_task_id"] == "t999"
         assert "_hooks" in parsed
         assert parsed["_hooks"]["hooks_fired"] == 1
+
+
+# ── _skip_hooks flag tests ──────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_skip_hooks_skips_dispatch_json_string(mock_mcp):
+    """When tool returns JSON with _skip_hooks=True, _dispatch_hook is NOT called."""
+    enable_hook_dispatch(mock_mcp)
+
+    @mock_mcp.tool()
+    def sync_feedback_tool() -> str:
+        return json.dumps({"result": "Updated", "_skip_hooks": True})
+
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
+        result = await mock_mcp._registered_tools["sync_feedback_tool"]()
+
+    mock_dispatch.assert_not_awaited()
+    parsed = json.loads(result)
+    assert parsed["_skip_hooks"] is True
+
+
+@pytest.mark.anyio
+async def test_skip_hooks_skips_dispatch_async(mock_mcp):
+    """Async tool returning _skip_hooks=True also skips dispatch."""
+    enable_hook_dispatch(mock_mcp)
+
+    @mock_mcp.tool()
+    async def async_feedback_tool() -> str:
+        return json.dumps({"result": "Updated", "_skip_hooks": True})
+
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
+        result = await mock_mcp._registered_tools["async_feedback_tool"]()
+
+    mock_dispatch.assert_not_awaited()
+    parsed = json.loads(result)
+    assert parsed["_skip_hooks"] is True
+
+
+@pytest.mark.anyio
+async def test_no_skip_hooks_dispatches_normally(mock_mcp):
+    """Without _skip_hooks, dispatch proceeds as normal."""
+    enable_hook_dispatch(mock_mcp)
+
+    @mock_mcp.tool()
+    def normal_tool() -> str:
+        return json.dumps({"result": "Updated", "todo_id": "1"})
+
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
+        await mock_mcp._registered_tools["normal_tool"]()
+
+    mock_dispatch.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_skip_hooks_false_dispatches_normally(mock_mcp):
+    """_skip_hooks=False still dispatches hooks."""
+    enable_hook_dispatch(mock_mcp)
+
+    @mock_mcp.tool()
+    def tool_with_false_skip() -> str:
+        return json.dumps({"result": "Updated", "_skip_hooks": False})
+
+    with patch(
+        "hook_dispatch.dispatch._dispatch_hook", new_callable=AsyncMock, return_value=None
+    ) as mock_dispatch:
+        await mock_mcp._registered_tools["tool_with_false_skip"]()
+
+    mock_dispatch.assert_awaited_once()

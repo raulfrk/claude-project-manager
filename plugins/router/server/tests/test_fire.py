@@ -2172,3 +2172,115 @@ class TestResultCondition:
         mock_fire.assert_not_called()
         data = json.loads(result)
         assert data["skipped"] == 1
+
+
+# ── Feedback writeback _skip_hooks tests ────────────────────────────────────
+
+
+class TestFeedbackSkipHooks:
+    """Verify feedback writeback includes _skip_hooks: True in params."""
+
+    @pytest.mark.asyncio
+    async def test_single_feedback_includes_skip_hooks(self, hooks_yaml: Path, failures_yaml: Path):
+        """Single-value feedback writeback passes _skip_hooks=True to target tool."""
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-fb-skip",
+                    "trigger_tool": "todo_add",
+                    "target_tool": "todoist_add_tasks",
+                    "server": "todoist",
+                    "blocking": True,
+                    "param_mapping": {},
+                    "feedback_mapping": {"todoist_task_id": "todoist_task_id"},
+                    "feedback_tool": "todo_update",
+                }
+            ]
+        }
+        hooks_yaml.write_text(yaml.dump(hook_data))
+
+        feedback_calls: list[dict] = []
+
+        async def mock_post_hook(*, hook_id, url, target_tool, params):
+            if target_tool == "todo_update":
+                feedback_calls.append({"hook_id": hook_id, "params": params})
+                return FireResult(hook_id=hook_id, status_code=200, body="ok")
+            return FireResult(
+                hook_id=hook_id,
+                status_code=200,
+                body='{"todoist_task_id": "t123"}',
+                result='{"todoist_task_id": "t123"}',
+            )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._resolve_server_url", return_value="unix:///tmp/test.sock"),
+            patch("server.tools.fire.post_hook", side_effect=mock_post_hook),
+        ):
+            await hooks_fire(
+                "todo_add",
+                source_result='{"todo_id": "t1", "project_name": "proj1"}',
+                depth=0,
+            )
+
+        assert len(feedback_calls) == 1
+        assert feedback_calls[0]["params"]["skip_hooks"] is True
+        assert feedback_calls[0]["params"]["todoist_task_id"] == "t123"
+
+    @pytest.mark.asyncio
+    async def test_batch_feedback_includes_skip_hooks(self, hooks_yaml: Path, failures_yaml: Path):
+        """Batch feedback writeback passes _skip_hooks=True for each item."""
+        hook_data = {
+            "hooks": [
+                {
+                    "id": "h-batch-skip",
+                    "trigger_tool": "todo_batch_add_children",
+                    "target_tool": "todoist_add_tasks",
+                    "server": "todoist",
+                    "blocking": True,
+                    "param_mapping": {},
+                    "feedback_mapping": {
+                        "successes[*].id": "todoist_task_id",
+                    },
+                    "feedback_tool": "todo_update",
+                }
+            ]
+        }
+        hooks_yaml.write_text(yaml.dump(hook_data))
+
+        feedback_calls: list[dict] = []
+
+        async def mock_post_hook(*, hook_id, url, target_tool, params):
+            if target_tool == "todo_update":
+                feedback_calls.append({"hook_id": hook_id, "params": params})
+                return FireResult(hook_id=hook_id, status_code=200, body="ok")
+            return FireResult(
+                hook_id=hook_id,
+                status_code=200,
+                body=json.dumps({"successes": [{"id": "tid1"}, {"id": "tid2"}]}),
+                result=json.dumps({"successes": [{"id": "tid1"}, {"id": "tid2"}]}),
+            )
+
+        source = json.dumps(
+            {
+                "project_name": "proj1",
+                "created": [{"id": "c1"}, {"id": "c2"}],
+            }
+        )
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.storage._FAILURES_FILE", failures_yaml),
+            patch("server.tools.fire._resolve_server_url", return_value="unix:///tmp/test.sock"),
+            patch("server.tools.fire.post_hook", side_effect=mock_post_hook),
+        ):
+            await hooks_fire(
+                "todo_batch_add_children",
+                source_result=source,
+                depth=0,
+            )
+
+        assert len(feedback_calls) == 2
+        for call in feedback_calls:
+            assert call["params"]["skip_hooks"] is True

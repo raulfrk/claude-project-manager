@@ -421,6 +421,7 @@ async def _fire_hooks_internal(
                         fb_params: dict[str, JsonValue] = {
                             "todo_id": child_id,
                             target_param: value,
+                            "skip_hooks": True,
                         }
                         if "project_name" in source:
                             fb_params["project_name"] = source["project_name"]
@@ -492,6 +493,8 @@ async def _fire_hooks_internal(
 
             if not feedback_params:
                 continue
+
+            feedback_params["skip_hooks"] = True
 
             # Add source entity IDs for writeback context
             if "todo_id" in source:

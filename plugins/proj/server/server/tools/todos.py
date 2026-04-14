@@ -509,6 +509,7 @@ def register(app: FastMCP) -> None:
         todoist_task_id: str | None = None,
         due_date: str | None = None,
         project_name: str | None = None,
+        skip_hooks: bool = False,
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -537,13 +538,22 @@ def register(app: FastMCP) -> None:
         todo.updated = _now()
         meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
-        return json.dumps(
-            {
-                "result": f"Updated todo {todo_id}.",
-                "todo_id": todo_id,
-                **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
-            }
+
+        # Scope guard: only honour skip_hooks when the update contains
+        # exclusively sync-ID fields (no real user-facing fields changed).
+        _non_sync_fields_present = any(
+            v is not None for v in (title, status, priority, tags, notes, due_date)
         )
+        honour_skip = skip_hooks and not _non_sync_fields_present
+
+        result_dict: dict[str, JsonValue] = {
+            "result": f"Updated todo {todo_id}.",
+            "todo_id": todo_id,
+            **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
+        }
+        if honour_skip:
+            result_dict["_skip_hooks"] = True
+        return json.dumps(result_dict)
 
     @app.tool(
         description=(
