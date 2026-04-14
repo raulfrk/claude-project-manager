@@ -6,9 +6,7 @@ id is ``group-<sanitized>`` where sanitization lowercases and replaces
 non-alphanumerics with dashes.
 
 Expected group ids (see wizard_specs.PROJ_YAML_PROMPTS):
-    group-team-mode
-    group-smart-gate
-    group-resilience
+    group-smart-gate          (single bool toggle)
     group-context-injection
     group-archive
     group-permissions
@@ -17,7 +15,7 @@ Expected group ids (see wizard_specs.PROJ_YAML_PROMPTS):
     group-trello-list-mappings   (only when sync.trello.enabled in existing)
 
 Widget ids come from ``spec.dotted_key.replace(".", "-")``, e.g.
-``team_mode-trust_level``, ``smart_gate-enabled``, ``archive-after_days``.
+``smart_gate``, ``archive-after_days``.
 """
 
 from __future__ import annotations
@@ -107,10 +105,9 @@ class TestAdvancedConfigScreenSnapshots:
             # Required groups must all exist in the DOM.
             # Note: `trello-list-mappings` only renders when sync.trello.enabled
             # is True in the existing config, so it is NOT in this baseline set.
+            # team-mode and resilience were removed in 605.3 (config surface reduction).
             for group_id in (
-                "team-mode",
                 "smart-gate",
-                "resilience",
                 "context-injection",
                 "archive",
                 "permissions",
@@ -129,124 +126,8 @@ class TestAdvancedConfigScreenSnapshots:
             _assert_snapshot(svg, "advanced_initial_render")
 
     @pytest.mark.asyncio
-    async def test_advanced_expand_team_mode(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-
-            for wid in (
-                "team_mode-enabled",
-                "team_mode-max_agents",
-                "team_mode-trust_level",
-            ):
-                assert screen.query_one(f"#{wid}").region.width > 0
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_expand_team_mode")
-
-    @pytest.mark.asyncio
-    async def test_advanced_focus_team_mode_trust(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-            screen.query_one("#team_mode-trust_level", Input).focus()
-            await pilot.pause()
-
-            assert pilot.app.focused is not None
-            assert pilot.app.focused.id == "team_mode-trust_level"
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_focus_team_mode_trust")
-
-    @pytest.mark.asyncio
-    async def test_advanced_invalid_trust_level(self) -> None:
-        """Set trust_level out of range then call _collect_values to trigger
-        the error label path."""
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-            screen.query_one("#team_mode-trust_level", Input).value = "9"
-            await pilot.pause()
-
-            result = screen._collect_values()
-            assert result is None  # validation failed — _show_error was called
-            # Error Static exists and is queryable (error text presence is
-            # verified visually via the snapshot golden; Static content is
-            # not accessible via a public attribute in this Textual version).
-            screen.query_one("#error-message", Static)
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_invalid_trust_level")
-
-    @pytest.mark.asyncio
-    async def test_advanced_valid_trust_level(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-            screen.query_one("#team_mode-trust_level", Input).value = "2"
-            await pilot.pause()
-
-            result = screen._collect_values()
-            assert result is not None
-            assert result["team_mode.trust_level"] == 2
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_valid_trust_level")
-
-    @pytest.mark.asyncio
-    async def test_advanced_focus_team_mode_enabled(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-            screen.query_one("#team_mode-enabled", Switch).focus()
-            await pilot.pause()
-
-            assert pilot.app.focused is not None
-            assert pilot.app.focused.id == "team_mode-enabled"
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_focus_team_mode_enabled")
-
-    @pytest.mark.asyncio
-    async def test_advanced_focus_max_agents(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "team-mode")
-            screen.query_one("#team_mode-max_agents", Input).focus()
-            await pilot.pause()
-
-            assert pilot.app.focused is not None
-            assert pilot.app.focused.id == "team_mode-max_agents"
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_focus_max_agents")
-
-    @pytest.mark.asyncio
     async def test_advanced_expand_smart_gate(self) -> None:
+        """Smart gate is now a single bool toggle (collapsed SmartGateConfig removed in 605.3)."""
         app = _ScreenHost()
         async with app.run_test(size=_TERM_SIZE) as pilot:
             screen = _make_screen()
@@ -255,33 +136,11 @@ class TestAdvancedConfigScreenSnapshots:
 
             await _expand_collapsible(pilot, screen, "smart-gate")
 
-            for wid in (
-                "smart_gate-enabled",
-                "smart_gate-auto_execute_threshold",
-                "smart_gate-full_review_threshold",
-            ):
-                assert screen.query_one(f"#{wid}").region.width > 0
+            # smart_gate is now a single bool field — widget id is "smart_gate"
+            assert screen.query_one("#smart_gate", Switch).region.width > 0
 
             svg = app.export_screenshot()
             _assert_snapshot(svg, "advanced_expand_smart_gate")
-
-    @pytest.mark.asyncio
-    async def test_advanced_expand_resilience(self) -> None:
-        app = _ScreenHost()
-        async with app.run_test(size=_TERM_SIZE) as pilot:
-            screen = _make_screen()
-            app.push_screen(screen)
-            await pilot.pause()
-
-            await _expand_collapsible(pilot, screen, "resilience")
-
-            assert screen.query_one("#resilience-max_retries", Input).region.width > 0
-            assert (
-                screen.query_one("#resilience-backoff_seconds", Input).region.width > 0
-            )
-
-            svg = app.export_screenshot()
-            _assert_snapshot(svg, "advanced_expand_resilience")
 
     @pytest.mark.asyncio
     async def test_advanced_expand_context_injection(self) -> None:
@@ -452,9 +311,9 @@ class TestAdvancedConfigScreenSnapshots:
     @pytest.mark.asyncio
     async def test_advanced_load_existing_values(self) -> None:
         """Pre-populate advanced widgets from an existing config dict."""
+        # smart_gate is now a scalar bool (605.3 removed SmartGateConfig sub-keys)
         existing = {
-            "team_mode": {"enabled": False, "max_agents": 7, "trust_level": 2},
-            "smart_gate": {"enabled": False, "auto_execute_threshold": 5},
+            "smart_gate": False,
             "archive": {"after_days": 90},
             "default_priority": "high",
         }
@@ -464,19 +323,11 @@ class TestAdvancedConfigScreenSnapshots:
             app.push_screen(screen)
             await pilot.pause()
 
-            await _expand_collapsible(pilot, screen, "team-mode")
             await _expand_collapsible(pilot, screen, "smart-gate")
             await _expand_collapsible(pilot, screen, "archive")
             await _expand_collapsible(pilot, screen, "other-proj")
 
-            assert screen.query_one("#team_mode-enabled", Switch).value is False
-            assert screen.query_one("#team_mode-max_agents", Input).value == "7"
-            assert screen.query_one("#team_mode-trust_level", Input).value == "2"
-            assert screen.query_one("#smart_gate-enabled", Switch).value is False
-            assert (
-                screen.query_one("#smart_gate-auto_execute_threshold", Input).value
-                == "5"
-            )
+            assert screen.query_one("#smart_gate", Switch).value is False
             assert screen.query_one("#archive-after_days", Input).value == "90"
             assert screen.query_one("#default_priority", Select).value == "high"
 

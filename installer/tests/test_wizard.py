@@ -529,33 +529,6 @@ class TestRichWizardPromptSpec:
         assert recorded  # at least one 'advanced' toggle fired
         assert all(d is False for d in recorded)
 
-    def test_advanced_toggle_yes_drills_into_team_mode(
-        self, mock_home: Path, rich_console: Console
-    ):
-        confirm_labels: list[str] = []
-
-        def fake_confirm(label, *args, **kwargs):
-            confirm_labels.append(label)
-            if "advanced" in label.lower():
-                return True
-            return kwargs.get("default", False)
-
-        with (
-            patch(
-                "installer.wizard.Prompt.ask",
-                side_effect=lambda *a, **k: k.get("default", ""),
-            ),
-            patch("installer.wizard.Confirm.ask", side_effect=fake_confirm),
-            patch("installer.wizard.int_in_range", side_effect=lambda *a, **k: a[1]),
-            patch(
-                "installer.wizard.prompt_choice",
-                side_effect=lambda label, default, choices, console: default,
-            ),
-        ):
-            _setup_proj_yaml(rich_console, [])
-
-        assert any("team mode" in label.lower() for label in confirm_labels)
-
     def test_advanced_toggle_yes_drills_into_smart_gate(
         self, mock_home: Path, rich_console: Console
     ):
