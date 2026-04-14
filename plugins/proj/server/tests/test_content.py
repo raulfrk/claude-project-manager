@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import statistics
-import time
 from pathlib import Path
 from typing import Any
 
@@ -324,7 +322,9 @@ def test_content_patch_faster_than_set_for_localized_edit(tmp_path: Path) -> Non
 
     # Run patch operation.
     p.write_text(original, encoding="utf-8")
-    patch_result = _patch_content_file(p, r"FIND-ME-HERE", "REPLACED-TOKEN", None, 0, "requirements.md")
+    patch_result = _patch_content_file(
+        p, r"FIND-ME-HERE", "REPLACED-TOKEN", None, 0, "requirements.md"
+    )
     patch_result_json = json.loads(patch_result)
     assert patch_result_json["ok"], f"patch failed: {patch_result_json.get('error')}"
     assert patch_result_json["replacements"] == 1

@@ -10,13 +10,25 @@ from rich.table import Table
 
 from installer.detect import InstallState
 
-# Marketplace JSON bundled with the installer
-_MARKETPLACE_PATH = Path(__file__).resolve().parent / "marketplace.json"
+
+def _resolve_marketplace_path() -> Path:
+    """Resolve marketplace.json path with fallback for source tree.
+
+    Wheel install: installer/marketplace.json (bundled via force-include)
+    Source tree: ../.claude-plugin/marketplace.json
+    """
+    bundled = Path(__file__).resolve().parent / "marketplace.json"
+    if bundled.exists():
+        return bundled
+    # Fallback for running from source
+    return (
+        Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
+    )
 
 
 def _read_marketplace_versions(marketplace_path: Path | None = None) -> dict[str, str]:
     """Read plugin versions from the bundled marketplace.json."""
-    path = marketplace_path or _MARKETPLACE_PATH
+    path = marketplace_path or _resolve_marketplace_path()
     data = json.loads(path.read_text(encoding="utf-8"))
     return {
         entry["name"]: entry.get("version", "0.0.0")

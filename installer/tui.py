@@ -29,8 +29,20 @@ _UTILITY_PLUGINS = {"worktree", "zoxide", "analyse"}
 # Plugins pre-selected by default (core set)
 DEFAULT_PRESELECT = {"sandbox", "router", "proj"}
 
-# Marketplace data path (relative to installer package)
-_MARKETPLACE_PATH = Path(__file__).resolve().parent / "marketplace.json"
+
+def _resolve_marketplace_path() -> Path:
+    """Resolve marketplace.json path with fallback for source tree.
+
+    Wheel install: installer/marketplace.json (bundled via force-include)
+    Source tree: ../.claude-plugin/marketplace.json
+    """
+    bundled = Path(__file__).resolve().parent / "marketplace.json"
+    if bundled.exists():
+        return bundled
+    # Fallback for running from source
+    return (
+        Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
+    )
 
 
 @dataclass
@@ -88,7 +100,7 @@ def load_plugins(
     if branch and marketplace_path is None:
         data = _fetch_marketplace_json(branch)
     if data is None:
-        path = marketplace_path or _MARKETPLACE_PATH
+        path = marketplace_path or _resolve_marketplace_path()
         data = json.loads(path.read_text(encoding="utf-8"))
 
     plugins: list[PluginInfo] = []

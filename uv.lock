@@ -232,6 +232,7 @@ name = "cpm-install"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "textual" },
 ]
@@ -261,6 +262,7 @@ test = [
 requires-dist = [
     { name = "claude-hook-transport", marker = "extra == 'plugins'", directory = "plugins/_shared" },
     { name = "gitpython", marker = "extra == 'plugins'", specifier = ">=3.1" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.28" },
     { name = "mcp", marker = "extra == 'plugins'", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
