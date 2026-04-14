@@ -1898,3 +1898,80 @@ def register(app: FastMCP) -> None:
         cfg, name = result
         stats = storage.migrate_done_to_archive(cfg, name)
         return json.dumps(stats)
+
+    @app.tool(
+        description=(
+            "Patch a todo's notes via find/replace. Avoids resending the full "
+            "notes content. count=1 replaces first occurrence, count=0 replaces all."
+        ),
+    )
+    def todo_notes_patch(
+        todo_id: str,
+        find: str,
+        replace: str,
+        count: int = 1,
+        project_name: str | None = None,
+    ) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        todos = storage.load_todos(cfg, name)
+        todo = next((t for t in todos if t.id == todo_id), None)
+        if not todo:
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
+        if find not in (todo.notes or ""):
+            return json.dumps({"error": f"Pattern not found in notes for todo {todo_id}"})
+        notes = todo.notes or ""
+        if count == 0:
+            occurrences = notes.count(find)
+            todo.notes = notes.replace(find, replace)
+        else:
+            occurrences = min(count, notes.count(find))
+            todo.notes = notes.replace(find, replace, count)
+        todo.updated = _now()
+        meta = storage.load_meta(cfg, name)
+        storage.save_todos(cfg, name, todos)
+        return json.dumps(
+            {
+                "result": "patched",
+                "todo_id": todo_id,
+                "occurrences": occurrences,
+                **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
+            }
+        )
+
+    @app.tool(
+        description=(
+            "Append text to a todo's notes. Avoids resending the full "
+            "notes content on every update."
+        ),
+    )
+    def todo_notes_append(
+        todo_id: str,
+        text: str,
+        project_name: str | None = None,
+    ) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        todos = storage.load_todos(cfg, name)
+        todo = next((t for t in todos if t.id == todo_id), None)
+        if not todo:
+            return json.dumps({"error": f"Todo '{todo_id}' not found."})
+        if todo.notes:
+            todo.notes = todo.notes + "\n" + text
+        else:
+            todo.notes = text
+        todo.updated = _now()
+        meta = storage.load_meta(cfg, name)
+        storage.save_todos(cfg, name, todos)
+        return json.dumps(
+            {
+                "result": "appended",
+                "todo_id": todo_id,
+                "notes_length": len(todo.notes),
+                **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
+            }
+        )
