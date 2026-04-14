@@ -81,8 +81,42 @@ class TestZoxideBoost:
         result = zoxide_boost("/some/path")
 
         parsed = json.loads(result)
-        assert parsed["result"] == "zoxide not found, skipping"
+        assert "0/10" in parsed["result"]
+        assert "zoxide not found" in parsed["result"]
+        assert parsed["successes"] == 0
         assert mock_run.call_count == 1  # fails on first call, stops immediately
+
+    @patch("server.tools.zoxide.subprocess.run")
+    def test_partial_success_mid_loop_failure(self, mock_run, zoxide_boost):
+        """Some iterations succeed before a failure occurs."""
+        effects = [None, None, None, FileNotFoundError("binary gone")]
+        mock_run.side_effect = effects
+        result = zoxide_boost("/some/path", times=5)
+
+        parsed = json.loads(result)
+        assert parsed["successes"] == 3
+        assert "3/5" in parsed["result"]
+        assert "zoxide not found" in parsed["result"]
+        assert mock_run.call_count == 4
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=OSError("disk on fire"))
+    def test_oserror_handling(self, mock_run, zoxide_boost):
+        result = zoxide_boost("/some/path", times=3)
+
+        parsed = json.loads(result)
+        assert parsed["successes"] == 0
+        assert "disk on fire" in parsed["result"]
+        assert mock_run.call_count == 1
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=PermissionError("no perms"))
+    def test_permission_error_handling(self, mock_run, zoxide_boost):
+        """PermissionError is a subclass of OSError, should be caught."""
+        result = zoxide_boost("/some/path", times=3)
+
+        parsed = json.loads(result)
+        assert parsed["successes"] == 0
+        assert "no perms" in parsed["result"]
+        assert mock_run.call_count == 1
 
 
 # --- zoxide_remove tests ---
@@ -100,13 +134,28 @@ class TestZoxideRemove:
         assert parsed["result"] == "Removed /old/path from zoxide"
         assert parsed["path"] == "/old/path"
 
-    @patch("server.tools.zoxide.subprocess.run", side_effect=FileNotFoundError)
+    @patch("server.tools.zoxide.subprocess.run", side_effect=FileNotFoundError("zoxide not found"))
     def test_zoxide_not_found(self, mock_run, zoxide_remove):
         result = zoxide_remove("/old/path")
 
         parsed = json.loads(result)
-        assert parsed["result"] == "zoxide not found, skipping"
+        assert "zoxide error:" in parsed["result"]
         assert mock_run.call_count == 1
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=OSError("disk error"))
+    def test_oserror_handling(self, mock_run, zoxide_remove):
+        result = zoxide_remove("/old/path")
+
+        parsed = json.loads(result)
+        assert "disk error" in parsed["result"]
+        assert parsed["path"] == "/old/path"
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=PermissionError("no access"))
+    def test_permission_error_handling(self, mock_run, zoxide_remove):
+        result = zoxide_remove("/old/path")
+
+        parsed = json.loads(result)
+        assert "no access" in parsed["result"]
 
 
 # --- zoxide_query tests ---
@@ -160,6 +209,22 @@ class TestZoxideQuery:
         assert parsed["paths"] == []
         assert parsed["count"] == 0
         assert mock_run.call_count == 1
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=OSError("binary missing"))
+    def test_oserror_handling(self, mock_run, zoxide_query):
+        result = zoxide_query("home")
+
+        parsed = json.loads(result)
+        assert parsed["result"] == []
+        assert parsed["count"] == 0
+
+    @patch("server.tools.zoxide.subprocess.run", side_effect=PermissionError("no access"))
+    def test_permission_error_handling(self, mock_run, zoxide_query):
+        result = zoxide_query("home")
+
+        parsed = json.loads(result)
+        assert parsed["result"] == []
+        assert parsed["count"] == 0
 
     @patch("server.tools.zoxide.subprocess.run")
     def test_max_results_limits_output(self, mock_run, zoxide_query):

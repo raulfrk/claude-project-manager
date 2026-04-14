@@ -16,15 +16,27 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool()
     def zoxide_boost(path: str, times: int = 10) -> str:
         """Boost a path in zoxide's frecency database by calling 'zoxide add' multiple times."""
-        try:
-            for _ in range(times):
+        successes = 0
+        failures: list[str] = []
+        for i in range(times):
+            try:
                 subprocess.run(
                     ["zoxide", "add", path],
                     check=False,
                     capture_output=True,
                 )
-        except FileNotFoundError:
-            return json.dumps({"result": "zoxide not found, skipping"})
+                successes += 1
+            except FileNotFoundError:
+                failures.append(f"iter {i + 1}: zoxide not found")
+                break
+            except OSError as exc:
+                failures.append(f"iter {i + 1}: {exc}")
+                break
+            except subprocess.SubprocessError as exc:
+                failures.append(f"iter {i + 1}: {exc}")
+        if failures:
+            msg = f"Boosted {successes}/{times} times. Failures: {'; '.join(failures)}"
+            return json.dumps({"result": msg, "path": path, "successes": successes, "times": times})
         return json.dumps({"result": f"Boosted {path} (x{times})", "path": path, "times": times})
 
     @mcp.tool()
@@ -36,8 +48,8 @@ def register(mcp: FastMCP) -> None:
                 check=False,
                 capture_output=True,
             )
-        except FileNotFoundError:
-            return json.dumps({"result": "zoxide not found, skipping"})
+        except (OSError, subprocess.SubprocessError) as exc:
+            return json.dumps({"result": f"zoxide error: {exc}", "path": path})
         return json.dumps({"result": f"Removed {path} from zoxide", "path": path})
 
     @mcp.tool()
@@ -50,7 +62,7 @@ def register(mcp: FastMCP) -> None:
                 text=True,
                 check=False,
             )
-        except FileNotFoundError:
+        except (OSError, subprocess.SubprocessError):
             return json.dumps({"result": [], "paths": [], "count": 0})
         lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         if not lines:
