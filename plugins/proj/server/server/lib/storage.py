@@ -11,7 +11,8 @@ from pathlib import Path
 
 import yaml
 
-from server.lib.enums import TERMINAL_STATUSES
+from server.lib import sql_archive, sql_decisions, sql_meta, sql_todos
+from server.lib.migration import _ensure_migrated
 from server.lib.models import (
     JsonValue,
     ProjConfig,
@@ -65,13 +66,11 @@ def _index_path(cfg: ProjConfig) -> Path:
 
 
 def load_index(cfg: ProjConfig) -> ProjectIndex:
-    data = _load_yaml(_index_path(cfg))
-    return ProjectIndex.from_dict(data)
+    return sql_meta.load_index(cfg)
 
 
 def save_index(cfg: ProjConfig, index: ProjectIndex) -> None:
-    path = _index_path(cfg)
-    _write_yaml(path, index.to_dict())
+    sql_meta.save_index(cfg, index)
 
 
 # ── Project metadata ──────────────────────────────────────────────────────────
@@ -86,18 +85,13 @@ def meta_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_meta(cfg: ProjConfig, project_name: str) -> ProjectMeta:
-    path = meta_path(cfg, project_name)
-    if not path.exists():
-        msg = f"Project not found: {project_name}"
-        raise FileNotFoundError(msg)
-    data = _load_yaml(path)
-    return ProjectMeta.from_dict(data)
+    _ensure_migrated(cfg, project_name)
+    return sql_meta.load_meta(cfg, project_name)
 
 
 def save_meta(cfg: ProjConfig, meta: ProjectMeta) -> None:
-    path = meta_path(cfg, meta.name)
-    meta.dates.last_updated = str(date.today())
-    _write_yaml(path, meta.to_dict())
+    _ensure_migrated(cfg, meta.name)
+    sql_meta.save_meta(cfg, meta)
 
 
 # ── Todos ─────────────────────────────────────────────────────────────────────
@@ -108,16 +102,13 @@ def todos_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    data = _load_yaml(todos_path(cfg, project_name))
-    todos_raw = data.get("todos", [])
-    if not isinstance(todos_raw, list):
-        return []
-    return [Todo.from_dict(t) for t in todos_raw if isinstance(t, dict)]
+    _ensure_migrated(cfg, project_name)
+    return sql_todos.load_todos(cfg, project_name)
 
 
 def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
-    path = todos_path(cfg, project_name)
-    _write_yaml(path, {"todos": [t.to_dict() for t in todos]})
+    _ensure_migrated(cfg, project_name)
+    sql_todos.save_todos(cfg, project_name, todos)
 
 
 # ── Archive ────────────────────────────────────────────────────────────────────
@@ -128,19 +119,14 @@ def archive_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    data = _load_yaml(archive_path(cfg, project_name))
-    todos_raw = data.get("todos", [])
-    if not isinstance(todos_raw, list):
-        return []
-    return [Todo.from_dict(t) for t in todos_raw if isinstance(t, dict)]
+    _ensure_migrated(cfg, project_name)
+    return sql_todos.load_archived_todos(cfg, project_name)
 
 
 def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[Todo]) -> None:
-    """Append todos to archive.yaml, creating it if needed."""
-    existing = load_archived_todos(cfg, project_name)
-    _write_yaml(
-        archive_path(cfg, project_name), {"todos": [t.to_dict() for t in existing + todos_to_add]}
-    )
+    """Append todos to archive, creating it if needed."""
+    _ensure_migrated(cfg, project_name)
+    sql_todos.save_archived_todos_append(cfg, project_name, todos_to_add)
 
 
 def archive_and_remove_todos(
@@ -149,115 +135,15 @@ def archive_and_remove_todos(
     remaining: list[Todo],
     to_archive: list[Todo],
 ) -> None:
-    """Stage both archive append and active removal.
-
-    Commit archive-first to minimise data-loss window.
-
-    Both writes are prepared as temp files before either is committed. Archive rename
-    happens first so a failure between the two renames leaves the todo in the archive
-    (recoverable duplication) rather than lost entirely.
-    """
-    existing = load_archived_todos(cfg, project_name)
-    new_archive = existing + to_archive
-
-    archive_p = archive_path(cfg, project_name)
-    active_p = todos_path(cfg, project_name)
-    archive_p.parent.mkdir(parents=True, exist_ok=True)
-
-    fd_a, tmp_a_str = tempfile.mkstemp(dir=archive_p.parent, suffix=".tmp")
-    tmp_a = Path(tmp_a_str)
-    fd_t, tmp_t_str = tempfile.mkstemp(dir=active_p.parent, suffix=".tmp")
-    tmp_t = Path(tmp_t_str)
-    try:
-        with os.fdopen(fd_a, "w") as f:
-            yaml.dump(
-                {"todos": [t.to_dict() for t in new_archive]},
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
-        with os.fdopen(fd_t, "w") as f:
-            yaml.dump(
-                {"todos": [t.to_dict() for t in remaining]},
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
-        tmp_a.replace(archive_p)
-        tmp_t.replace(active_p)
-    except Exception:
-        tmp_a.unlink(missing_ok=True)
-        tmp_t.unlink(missing_ok=True)
-        raise
+    """Move todos to archive atomically."""
+    _ensure_migrated(cfg, project_name)
+    sql_archive.archive_and_remove_todos(cfg, project_name, remaining, to_archive)
 
 
 def migrate_done_to_archive(cfg: ProjConfig, project_name: str) -> dict[str, int]:
-    """Move legacy done/cancelled todos to archive.yaml.
-
-    Rules:
-    - Leaf done todo (no children, terminal status) → archive
-    - Done parent where ALL descendants also done → archive whole family
-    - Done child under pending parent → archive the child only
-    - Done parent with ANY pending descendant → DO NOT archive
-    """
-    todos = load_todos(cfg, project_name)
-    if not todos:
-        return {"archived_count": 0, "remaining_count": 0}
-
-    todo_map = {t.id: t for t in todos}
-
-    def _all_descendants_done(tid: str) -> bool:
-        t = todo_map.get(tid)
-        if t is None:
-            return True
-        if t.status not in TERMINAL_STATUSES:
-            return False
-        return all(_all_descendants_done(cid) for cid in t.children)
-
-    def _collect_family_ids(tid: str) -> set[str]:
-        result: set[str] = {tid}
-        t = todo_map.get(tid)
-        if t:
-            for cid in t.children:
-                result.update(_collect_family_ids(cid))
-        return result
-
-    archive_ids: set[str] = set()
-
-    for t in todos:
-        if t.id in archive_ids:
-            continue
-        if t.status not in TERMINAL_STATUSES:
-            continue
-
-        # Leaf (no children, no parent)
-        if not t.children and not t.parent:
-            archive_ids.add(t.id)
-        # Leaf child (no children, has parent)
-        elif not t.children and t.parent:
-            # Archive child regardless of parent status
-            archive_ids.add(t.id)
-        # Parent (has children) — only archive when ALL descendants also done
-        elif t.children and _all_descendants_done(t.id):
-            archive_ids.update(_collect_family_ids(t.id))
-
-    if not archive_ids:
-        return {"archived_count": 0, "remaining_count": len(todos)}
-
-    to_archive = [t for t in todos if t.id in archive_ids]
-    remaining = [t for t in todos if t.id not in archive_ids]
-
-    # Clean up blocks/blocked_by references to archived IDs in remaining todos
-    for t in remaining:
-        if any(b in archive_ids for b in t.blocks):
-            t.blocks = [b for b in t.blocks if b not in archive_ids]
-        if any(b in archive_ids for b in t.blocked_by):
-            t.blocked_by = [b for b in t.blocked_by if b not in archive_ids]
-
-    archive_and_remove_todos(cfg, project_name, remaining, to_archive)
-    return {"archived_count": len(to_archive), "remaining_count": len(remaining)}
+    """Move terminal-status todos to archive based on tree rules."""
+    _ensure_migrated(cfg, project_name)
+    return sql_archive.migrate_done_to_archive(cfg, project_name)
 
 
 # ── Sessions / Decisions ──────────────────────────────────────────────────
@@ -298,15 +184,15 @@ def _write_yaml_list(path: Path, data: list[dict[str, JsonValue]]) -> None:
 
 
 def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, JsonValue]]:
-    """Read decisions.yaml, returning a list of decision dicts or empty list."""
-    return _load_yaml_list(decisions_path(cfg, project_name))
+    """Read decisions for project from SQLite."""
+    _ensure_migrated(cfg, project_name)
+    return sql_decisions.load_decisions(cfg, project_name)  # type: ignore[return-value]
 
 
 def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, JsonValue]) -> None:
-    """Atomic read + append + write for a single decision entry."""
-    existing = load_decisions(cfg, project_name)
-    existing.append(entry)
-    _write_yaml_list(decisions_path(cfg, project_name), existing)
+    """Append a single decision entry to SQLite."""
+    _ensure_migrated(cfg, project_name)
+    sql_decisions.append_decision(cfg, project_name, entry)  # type: ignore[arg-type]
 
 
 def build_decision_entry(
