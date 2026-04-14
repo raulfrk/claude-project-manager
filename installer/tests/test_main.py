@@ -16,7 +16,6 @@ from installer.main import (
     _install,
     _reinstall,
     _uninstall,
-    _update,
     main,
 )
 
@@ -29,7 +28,6 @@ from installer.main import (
 def _make_args(**overrides) -> argparse.Namespace:
     """Build a minimal args namespace with sensible defaults."""
     defaults = {
-        "update": False,
         "reinstall": False,
         "uninstall": False,
         "full_cleanup": False,
@@ -160,100 +158,6 @@ class TestInstall:
         args = _make_args(plugins=["proj"])
         _install(args)
         _add_mp.assert_called_once_with(branch=None)
-
-
-# ===================================================================
-# _update dispatch
-# ===================================================================
-
-
-class TestUpdate:
-    """Tests for _update()."""
-
-    @patch("installer.main.display_version_diff")
-    @patch("installer.main.compare_versions", return_value={})
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_no_installed_plugins(self, mock_detect, _disp, _cmp, _diff):
-        """No installed plugins returns success with message."""
-        mock_detect.return_value = InstallState(installed_plugins=[])
-        args = _make_args(update=True)
-        result = _update(args)
-        assert result == EXIT_SUCCESS
-
-    @patch("installer.main.display_version_diff")
-    @patch("installer.main.compare_versions", return_value={})
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_no_diffs_returns_success(self, mock_detect, _disp, _cmp, _diff):
-        """No version diffs means nothing to update."""
-        mock_detect.return_value = InstallState(installed_plugins=["proj"])
-        args = _make_args(update=True)
-        result = _update(args)
-        assert result == EXIT_SUCCESS
-
-    @patch("installer.main.update_plugin")
-    @patch("installer.main.display_version_diff")
-    @patch("installer.main.compare_versions", return_value={"proj": ("1.0", "1.1")})
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_update_single_plugin_success(
-        self, mock_detect, _disp, _cmp, _diff, mock_update
-    ):
-        mock_detect.return_value = InstallState(installed_plugins=["proj"])
-        args = _make_args(update=True)
-        result = _update(args)
-        assert result == EXIT_SUCCESS
-        mock_update.assert_called_once_with("proj")
-
-    @patch("installer.main.Confirm")
-    @patch("installer.main.update_plugin", side_effect=InstallerError("fail"))
-    @patch("installer.main.display_version_diff")
-    @patch("installer.main.compare_versions", return_value={"proj": ("1.0", "1.1")})
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_update_failure_no_retry(
-        self, mock_detect, _disp, _cmp, _diff, mock_update, mock_confirm
-    ):
-        """Update failure with no retry returns EXIT_ERROR."""
-        mock_detect.return_value = InstallState(installed_plugins=["proj"])
-        mock_confirm.ask.return_value = False
-        args = _make_args(update=True)
-        result = _update(args)
-        assert result == EXIT_ERROR
-
-    @patch("installer.main.update_plugin")
-    @patch("installer.main.display_version_diff")
-    @patch("installer.main.compare_versions", return_value={"proj": ("1.0", "1.1")})
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_update_with_specific_plugins(
-        self, mock_detect, _disp, _cmp, _diff, mock_update
-    ):
-        """--plugins flag limits which plugins get updated."""
-        mock_detect.return_value = InstallState(installed_plugins=["proj", "hooks"])
-        args = _make_args(update=True, plugins=["proj"])
-        result = _update(args)
-        assert result == EXIT_SUCCESS
-        mock_update.assert_called_once_with("proj")
-
-    @patch("installer.main.update_plugin")
-    @patch("installer.main.display_version_diff")
-    @patch(
-        "installer.main.compare_versions",
-        return_value={"proj": ("1.0", "1.1")},
-    )
-    @patch("installer.main.display_detection")
-    @patch("installer.main.detect_existing")
-    def test_update_plugins_filter_no_match(
-        self, mock_detect, _disp, _cmp, _diff, mock_update
-    ):
-        """--plugins with no matching diffs returns success."""
-        mock_detect.return_value = InstallState(installed_plugins=["proj"])
-        args = _make_args(update=True, plugins=["hooks"])  # hooks not in diffs
-        result = _update(args)
-        assert result == EXIT_SUCCESS
-        mock_update.assert_not_called()
 
 
 # ===================================================================
@@ -501,23 +405,6 @@ class TestMain:
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
     @patch("installer.main.check_root")
-    @patch("installer.main._update", return_value=EXIT_SUCCESS)
-    @patch("installer.main.build_parser")
-    def test_main_no_tui_update(
-        self, mock_parser, mock_update, _root, _prereq, _lock, _release
-    ):
-        """--no-tui --update routes to _update."""
-        args = _make_args(no_tui=True, update=True)
-        mock_parser.return_value.parse_args.return_value = args
-        _lock.return_value = MagicMock()
-        result = main()
-        assert result == EXIT_SUCCESS
-        mock_update.assert_called_once_with(args)
-
-    @patch("installer.main.release_lock")
-    @patch("installer.main.acquire_lock")
-    @patch("installer.main.check_prerequisites")
-    @patch("installer.main.check_root")
     @patch("installer.main._reinstall", return_value=EXIT_SUCCESS)
     @patch("installer.main.build_parser")
     def test_main_no_tui_reinstall(
@@ -629,22 +516,6 @@ class TestMain:
         mock_parser.return_value.parse_args.return_value = args
         main()
         mock_release.assert_called_once_with(lock_fh)
-
-    @patch("installer.main.release_lock")
-    @patch("installer.main.acquire_lock")
-    @patch("installer.main.check_prerequisites")
-    @patch("installer.main.check_root")
-    @patch("installer.main.InstallerApp")
-    @patch("installer.main.build_parser")
-    def test_main_tui_update_mode(
-        self, mock_parser, mock_app_cls, _root, _prereq, _lock, _release
-    ):
-        """--update without --no-tui launches TUI in update mode."""
-        args = _make_args(no_tui=False, update=True)
-        mock_parser.return_value.parse_args.return_value = args
-        _lock.return_value = MagicMock()
-        main()
-        mock_app_cls.assert_called_once_with(mode="update", args=args)
 
     @patch("installer.main.release_lock")
     @patch("installer.main.acquire_lock")
