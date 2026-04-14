@@ -12,9 +12,6 @@ from server.lib.models import (
     ContextInjectionSectionsConfig,
     ProjConfig,
     QualityLevel,
-    ResilienceConfig,
-    SmartGateConfig,
-    TeamModeConfig,
 )
 
 if TYPE_CHECKING:
@@ -104,16 +101,7 @@ def register(app: FastMCP) -> None:
             f"  git_tracking.enabled: {cfg.git_tracking.enabled}\n"
             f"  git_tracking.github_enabled: {cfg.git_tracking.github_enabled}\n"
             f"  git_tracking.github_repo_format: {cfg.git_tracking.github_repo_format}\n"
-            f"  team_mode.enabled: {cfg.team_mode.enabled}\n"
-            f"  team_mode.max_agents: {cfg.team_mode.max_agents}\n"
-            f"  team_mode.trust_level: {cfg.team_mode.trust_level}\n"
-            f"  resilience.failure_threshold: {cfg.resilience.failure_threshold}\n"
-            f"  resilience.recovery_timeout: {cfg.resilience.recovery_timeout}\n"
-            f"  smart_gate:\n"
-            f"    enabled: {cfg.smart_gate.enabled}\n"
-            f"    auto_execute_threshold: {cfg.smart_gate.auto_execute_threshold}\n"
-            f"    light_review_threshold: {cfg.smart_gate.light_review_threshold}\n"
-            f"    critical_path_patterns: {cfg.smart_gate.critical_path_patterns}\n"
+            f"  smart_gate: {cfg.smart_gate}\n"
             f"  quality_level: {cfg.quality_level}\n"
             f"  worktree_isolation: {cfg.worktree_isolation}\n"
             f"  context_injection:\n"
@@ -161,13 +149,8 @@ def register(app: FastMCP) -> None:
         archive_destination: str = "~/projects/archived",
         archive_purge_after_days: int | None = None,
         archive_trash_grace_days: int = 7,
-        team_mode_enabled: bool = False,
-        team_mode_max_agents: int = 30,
-        team_mode_trust_level: int = 1,
-        resilience_failure_threshold: int = 3,
-        resilience_recovery_timeout: int = 300,
         quality_level: str = "careful",
-        smart_gate_enabled: bool = True,
+        smart_gate: bool = True,
         worktree_isolation: bool = False,
         context_injection_enabled: bool = True,
         context_injection_budget: int = 2000,
@@ -219,15 +202,6 @@ def register(app: FastMCP) -> None:
         cfg.archive.destination = archive_destination
         cfg.archive.purge_after_days = archive_purge_after_days
         cfg.archive.trash_grace_days = archive_trash_grace_days
-        cfg.team_mode = TeamModeConfig(
-            enabled=team_mode_enabled,
-            max_agents=team_mode_max_agents,
-            trust_level=team_mode_trust_level,
-        )
-        cfg.resilience = ResilienceConfig(
-            failure_threshold=resilience_failure_threshold,
-            recovery_timeout=resilience_recovery_timeout,
-        )
         if quality_level in _REMOVED_QUALITY_LEVELS:
             return _REMOVED_QUALITY_LEVELS[quality_level]
         _valid_quality = tuple(q.value for q in QualityLevel)
@@ -237,7 +211,7 @@ def register(app: FastMCP) -> None:
                 f"Must be one of: {', '.join(_valid_quality)}."
             )
         cfg.quality_level = quality_level
-        cfg.smart_gate = SmartGateConfig(enabled=smart_gate_enabled)
+        cfg.smart_gate = smart_gate
         cfg.worktree_isolation = worktree_isolation
         cfg.context_injection = ContextInjectionConfig(
             enabled=context_injection_enabled,
@@ -288,16 +262,8 @@ def register(app: FastMCP) -> None:
         archive_destination: str | None = None,
         archive_purge_after_days: int | None = None,
         archive_trash_grace_days: int | None = None,
-        team_mode_enabled: bool | None = None,
-        team_mode_max_agents: int | None = None,
-        team_mode_trust_level: int | None = None,
-        resilience_failure_threshold: int | None = None,
-        resilience_recovery_timeout: int | None = None,
         quality_level: str | None = None,
-        smart_gate_enabled: bool | None = None,
-        smart_gate_auto_execute_threshold: int | None = None,
-        smart_gate_light_review_threshold: int | None = None,
-        smart_gate_critical_path_patterns: list[str] | None = None,
+        smart_gate: bool | None = None,
         worktree_isolation: bool | None = None,
         context_injection_enabled: bool | None = None,
         context_injection_budget: int | None = None,
@@ -359,26 +325,6 @@ def register(app: FastMCP) -> None:
         ):
             return "Invalid archive_trash_grace_days: must be a positive integer."
 
-        if team_mode_max_agents is not None and (
-            not isinstance(team_mode_max_agents, int) or team_mode_max_agents <= 0
-        ):
-            return "Invalid team_mode_max_agents: must be a positive integer."
-
-        if team_mode_trust_level is not None and (
-            not isinstance(team_mode_trust_level, int) or team_mode_trust_level not in (0, 1, 2, 3)
-        ):
-            return "Invalid team_mode_trust_level: must be 0, 1, 2, or 3."
-
-        if resilience_failure_threshold is not None and (
-            not isinstance(resilience_failure_threshold, int) or resilience_failure_threshold <= 0
-        ):
-            return "Invalid resilience_failure_threshold: must be a positive integer."
-
-        if resilience_recovery_timeout is not None and (
-            not isinstance(resilience_recovery_timeout, int) or resilience_recovery_timeout <= 0
-        ):
-            return "Invalid resilience_recovery_timeout: must be a positive integer."
-
         if quality_level is not None and quality_level in _REMOVED_QUALITY_LEVELS:
             return _REMOVED_QUALITY_LEVELS[quality_level]
         _valid_quality = tuple(q.value for q in QualityLevel)
@@ -387,18 +333,6 @@ def register(app: FastMCP) -> None:
                 f"Invalid quality_level '{quality_level}'. "
                 f"Must be one of: {', '.join(_valid_quality)}."
             )
-
-        if smart_gate_auto_execute_threshold is not None and (
-            not isinstance(smart_gate_auto_execute_threshold, int)
-            or smart_gate_auto_execute_threshold < 0
-        ):
-            return "Invalid smart_gate_auto_execute_threshold: must be a non-negative integer."
-
-        if smart_gate_light_review_threshold is not None and (
-            not isinstance(smart_gate_light_review_threshold, int)
-            or smart_gate_light_review_threshold < 0
-        ):
-            return "Invalid smart_gate_light_review_threshold: must be a non-negative integer."
 
         if context_injection_budget is not None and (
             not isinstance(context_injection_budget, int) or context_injection_budget <= 0
@@ -492,26 +426,10 @@ def register(app: FastMCP) -> None:
             cfg.archive.purge_after_days = archive_purge_after_days
         if archive_trash_grace_days is not None:
             cfg.archive.trash_grace_days = archive_trash_grace_days
-        if team_mode_enabled is not None:
-            cfg.team_mode.enabled = team_mode_enabled
-        if team_mode_max_agents is not None:
-            cfg.team_mode.max_agents = team_mode_max_agents
-        if team_mode_trust_level is not None:
-            cfg.team_mode.trust_level = team_mode_trust_level
-        if resilience_failure_threshold is not None:
-            cfg.resilience.failure_threshold = resilience_failure_threshold
-        if resilience_recovery_timeout is not None:
-            cfg.resilience.recovery_timeout = resilience_recovery_timeout
         if quality_level is not None:
             cfg.quality_level = quality_level
-        if smart_gate_enabled is not None:
-            cfg.smart_gate.enabled = smart_gate_enabled
-        if smart_gate_auto_execute_threshold is not None:
-            cfg.smart_gate.auto_execute_threshold = smart_gate_auto_execute_threshold
-        if smart_gate_light_review_threshold is not None:
-            cfg.smart_gate.light_review_threshold = smart_gate_light_review_threshold
-        if smart_gate_critical_path_patterns is not None:
-            cfg.smart_gate.critical_path_patterns = smart_gate_critical_path_patterns
+        if smart_gate is not None:
+            cfg.smart_gate = smart_gate
         if worktree_isolation is not None:
             cfg.worktree_isolation = worktree_isolation
         if context_injection_enabled is not None:

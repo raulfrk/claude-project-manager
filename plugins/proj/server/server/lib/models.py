@@ -72,54 +72,6 @@ def _validated_quality_level(value: str) -> str:
     return value
 
 
-@dataclass
-class SmartGateConfig:
-    """Configuration for smart gate complexity scoring."""
-
-    enabled: bool = True
-    auto_execute_threshold: int = 3  # score 0-3 → AUTO-EXECUTE
-    light_review_threshold: int = 7  # score 4-7 → LIGHT REVIEW
-    # score 8-14 → FULL REVIEW (implicit)
-    critical_path_patterns: list[str] = field(
-        default_factory=lambda: [
-            "*.env*",
-            "*secret*",
-            "*credential*",
-            "*key*",
-            "*auth*",
-            "*permission*",
-            "Dockerfile",
-            "docker-compose*",
-            ".github/workflows/*",
-            "pyproject.toml",
-            "package.json",
-            "settings.json",
-            "proj.yaml",
-            "*.config.*",
-        ]
-    )
-
-    def to_dict(self) -> dict[str, JsonValue]:
-        return {
-            "enabled": self.enabled,
-            "auto_execute_threshold": self.auto_execute_threshold,
-            "light_review_threshold": self.light_review_threshold,
-            "critical_path_patterns": self.critical_path_patterns,
-        }
-
-    @classmethod
-    def from_dict(cls, data: JsonDict) -> SmartGateConfig:
-        raw_patterns = data.get("critical_path_patterns")
-        return cls(
-            enabled=bool(data.get("enabled", True)),
-            auto_execute_threshold=_int(data.get("auto_execute_threshold"), 3),
-            light_review_threshold=_int(data.get("light_review_threshold"), 7),
-            critical_path_patterns=[str(p) for p in raw_patterns]
-            if isinstance(raw_patterns, list)
-            else cls().critical_path_patterns,
-        )
-
-
 # ── Config ────────────────────────────────────────────────────────────────────
 
 
@@ -352,47 +304,6 @@ class PermissionsConfig:
 
 
 @dataclass
-class TeamModeConfig:
-    enabled: bool = True
-    max_agents: int = 30
-    trust_level: int = 1  # 0=supervised, 1=guided, 2=autonomous, 3=full-auto
-
-    def to_dict(self) -> dict[str, JsonValue]:
-        return {
-            "enabled": self.enabled,
-            "max_agents": self.max_agents,
-            "trust_level": self.trust_level,
-        }
-
-    @classmethod
-    def from_dict(cls, data: JsonDict) -> TeamModeConfig:
-        return cls(
-            enabled=bool(data.get("enabled", True)),
-            max_agents=_int(data.get("max_agents"), 30),
-            trust_level=_int(data.get("trust_level"), 1),
-        )
-
-
-@dataclass
-class ResilienceConfig:
-    failure_threshold: int = 3
-    recovery_timeout: int = 300
-
-    def to_dict(self) -> dict[str, JsonValue]:
-        return {
-            "failure_threshold": self.failure_threshold,
-            "recovery_timeout": self.recovery_timeout,
-        }
-
-    @classmethod
-    def from_dict(cls, data: JsonDict) -> ResilienceConfig:
-        return cls(
-            failure_threshold=_int(data.get("failure_threshold"), 3),
-            recovery_timeout=_int(data.get("recovery_timeout"), 300),
-        )
-
-
-@dataclass
 class ContextInjectionSectionsConfig:
     """Budget allocation percentages for context injection sections."""
 
@@ -463,9 +374,7 @@ class ProjConfig:
     zoxide_integration: bool = False
     claudemd_management: bool = False
     archive: ArchiveConfig = field(default_factory=ArchiveConfig)
-    team_mode: TeamModeConfig = field(default_factory=TeamModeConfig)
-    resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
-    smart_gate: SmartGateConfig = field(default_factory=SmartGateConfig)
+    smart_gate: bool = True
     quality_level: str = "careful"
     worktree_isolation: bool = True  # default-on: isolate parallel agents in git worktrees
     context_injection: ContextInjectionConfig = field(default_factory=ContextInjectionConfig)
@@ -489,9 +398,7 @@ class ProjConfig:
             "zoxide_integration": self.zoxide_integration,
             "claudemd_management": self.claudemd_management,
             "archive": self.archive.to_dict(),
-            "team_mode": self.team_mode.to_dict(),
-            "resilience": self.resilience.to_dict(),
-            "smart_gate": self.smart_gate.to_dict(),
+            "smart_gate": self.smart_gate,
             "quality_level": self.quality_level,
             "worktree_isolation": self.worktree_isolation,
             "context_injection": self.context_injection.to_dict(),
@@ -524,18 +431,6 @@ class ProjConfig:
         if not isinstance(archive_raw, dict):
             archive_raw = {}
 
-        team_mode_raw = data.get("team_mode", {})
-        if not isinstance(team_mode_raw, dict):
-            team_mode_raw = {}
-
-        resilience_raw = data.get("resilience", {})
-        if not isinstance(resilience_raw, dict):
-            resilience_raw = {}
-
-        smart_gate_raw = data.get("smart_gate", {})
-        if not isinstance(smart_gate_raw, dict):
-            smart_gate_raw = {}
-
         ctx_injection_raw = data.get("context_injection", {})
         if not isinstance(ctx_injection_raw, dict):
             ctx_injection_raw = {}
@@ -557,9 +452,9 @@ class ProjConfig:
             zoxide_integration=bool(data.get("zoxide_integration", False)),
             claudemd_management=bool(data.get("claudemd_management", False)),
             archive=ArchiveConfig.from_dict(archive_raw),
-            team_mode=TeamModeConfig.from_dict(team_mode_raw),
-            resilience=ResilienceConfig.from_dict(resilience_raw),
-            smart_gate=SmartGateConfig.from_dict(smart_gate_raw),
+            smart_gate=bool(_sg.get("enabled", True))
+            if isinstance((_sg := data.get("smart_gate")), dict)
+            else bool(_sg if _sg is not None else True),
             quality_level=_validated_quality_level(str(data.get("quality_level", "careful"))),
             worktree_isolation=bool(data.get("worktree_isolation", True)),
             context_injection=ContextInjectionConfig.from_dict(ctx_injection_raw),

@@ -14,7 +14,6 @@ from server.lib.models import (
     ProjectGitTrackingConfig,
     ProjectMeta,
     QualityLevel,
-    TeamModeConfig,
     Todo,
     TodoistSync,
 )
@@ -205,59 +204,32 @@ class TestProjectGitTrackingConfig:
         assert meta.git_tracking.enabled is None
 
 
-class TestTeamModeConfig:
-    def test_defaults(self) -> None:
-        tmc = TeamModeConfig()
-        assert tmc.enabled is True
-        assert tmc.max_agents == 30
-        assert tmc.trust_level == 1
+class TestSmartGateBool:
+    def test_default_is_true(self) -> None:
+        cfg = ProjConfig()
+        assert cfg.smart_gate is True
 
-    def test_to_dict_from_dict_roundtrip(self) -> None:
-        tmc = TeamModeConfig(enabled=False, max_agents=8, trust_level=3)
-        data = tmc.to_dict()
-        tmc2 = TeamModeConfig.from_dict(data)
-        assert tmc2.enabled is False
-        assert tmc2.max_agents == 8
-        assert tmc2.trust_level == 3
-
-    def test_from_dict_empty_uses_defaults(self) -> None:
-        tmc = TeamModeConfig.from_dict({})
-        assert tmc.enabled is True
-        assert tmc.max_agents == 30
-        assert tmc.trust_level == 1
-
-    def test_from_dict_fallback_max_agents_is_30(self) -> None:
-        """Empty dict falls back to max_agents=30 (ultra-parallel default)."""
-        tmc = TeamModeConfig.from_dict({})
-        assert tmc.max_agents == 30
-
-    def test_from_dict_explicit_override_preserved(self) -> None:
-        """Explicit max_agents in data takes precedence over the 30 default."""
-        tmc = TeamModeConfig.from_dict({"max_agents": 4})
-        assert tmc.max_agents == 4
-
-
-class TestProjConfigTeamModeBackwardCompat:
-    def test_from_dict_without_team_mode_key_uses_defaults(self) -> None:
-        """ProjConfig.from_dict({}) without 'team_mode' key uses TeamModeConfig defaults."""
-        cfg = ProjConfig.from_dict({})
-        assert cfg.team_mode.enabled is True
-        assert cfg.team_mode.max_agents == 30
-        assert cfg.team_mode.trust_level == 1
-
-    def test_from_dict_with_team_mode_key_preserves_value(self) -> None:
-        cfg = ProjConfig.from_dict(
-            {"team_mode": {"enabled": False, "max_agents": 2, "trust_level": 3}}
-        )
-        assert cfg.team_mode.enabled is False
-        assert cfg.team_mode.max_agents == 2
-        assert cfg.team_mode.trust_level == 3
-
-    def test_proj_config_to_dict_includes_team_mode(self) -> None:
+    def test_to_dict_serializes_scalar(self) -> None:
         cfg = ProjConfig()
         d = cfg.to_dict()
-        assert "team_mode" in d
-        assert d["team_mode"] == {"enabled": True, "max_agents": 30, "trust_level": 1}
+        assert d["smart_gate"] is True
+
+    def test_from_dict_bool_value(self) -> None:
+        cfg = ProjConfig.from_dict({"smart_gate": False})
+        assert cfg.smart_gate is False
+
+    def test_from_dict_legacy_dict_value_reads_enabled(self) -> None:
+        """Backward compat: old configs stored smart_gate as a dict with 'enabled' key."""
+        cfg = ProjConfig.from_dict({"smart_gate": {"enabled": False, "auto_execute_threshold": 3}})
+        assert cfg.smart_gate is False
+
+    def test_from_dict_legacy_dict_enabled_true(self) -> None:
+        cfg = ProjConfig.from_dict({"smart_gate": {"enabled": True}})
+        assert cfg.smart_gate is True
+
+    def test_from_dict_missing_key_defaults_true(self) -> None:
+        cfg = ProjConfig.from_dict({})
+        assert cfg.smart_gate is True
 
 
 class TestQualityLevel:

@@ -257,8 +257,28 @@ class TestGitTrackingConfig:
 
 
 @pytest.mark.anyio
-class TestTeamModeConfig:
-    async def test_config_init_with_team_mode_params(
+class TestSmartGateBool:
+    async def test_config_load_displays_smart_gate(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_load")
+
+        assert "smart_gate" in result
+
+    async def test_config_update_smart_gate(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+    ) -> None:
+        result = await call_tool(mcp_app, "config_update", smart_gate=False)
+
+        assert "updated" in result.lower()
+        loaded = storage.load_config()
+        assert loaded.smart_gate is False
+
+    async def test_config_init_smart_gate_false(
         self,
         mcp_app: Any,
         cfg: ProjConfig,
@@ -272,88 +292,9 @@ class TestTeamModeConfig:
             mcp_app,
             "config_init",
             tracking_dir=str(tmp_path / "tracking"),
-            team_mode_enabled=True,
-            team_mode_max_agents=6,
-            team_mode_trust_level=2,
+            smart_gate=False,
         )
 
         assert "saved" in result.lower()
         loaded = storage.load_config()
-        assert loaded.team_mode.enabled is True
-        assert loaded.team_mode.max_agents == 6
-        assert loaded.team_mode.trust_level == 2
-
-    async def test_config_load_displays_team_mode(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-    ) -> None:
-        result = await call_tool(mcp_app, "config_load")
-
-        assert "team_mode.enabled" in result
-        assert "team_mode.max_agents" in result
-        assert "team_mode.trust_level" in result
-
-    async def test_config_update_modifies_team_mode_fields(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-    ) -> None:
-        result = await call_tool(
-            mcp_app,
-            "config_update",
-            team_mode_enabled=True,
-            team_mode_max_agents=8,
-            team_mode_trust_level=3,
-        )
-
-        assert "updated" in result.lower()
-        loaded = storage.load_config()
-        assert loaded.team_mode.enabled is True
-        assert loaded.team_mode.max_agents == 8
-        assert loaded.team_mode.trust_level == 3
-
-    async def test_config_update_rejects_invalid_trust_level(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-    ) -> None:
-        result = await call_tool(mcp_app, "config_update", team_mode_trust_level=5)
-
-        assert "Invalid team_mode_trust_level" in result
-        loaded = storage.load_config()
-        assert loaded.team_mode.trust_level == 1  # unchanged default
-
-    async def test_config_update_rejects_invalid_max_agents(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-    ) -> None:
-        result = await call_tool(mcp_app, "config_update", team_mode_max_agents=0)
-
-        assert "Invalid team_mode_max_agents" in result
-        loaded = storage.load_config()
-        assert loaded.team_mode.max_agents == 30  # unchanged default
-
-    async def test_config_update_partial_team_mode_leaves_others_unchanged(
-        self,
-        mcp_app: Any,
-        cfg: ProjConfig,
-    ) -> None:
-        # First set team_mode to non-default values
-        await call_tool(
-            mcp_app,
-            "config_update",
-            team_mode_enabled=True,
-            team_mode_max_agents=6,
-            team_mode_trust_level=2,
-        )
-
-        # Update only max_agents
-        result = await call_tool(mcp_app, "config_update", team_mode_max_agents=10)
-
-        assert "updated" in result.lower()
-        loaded = storage.load_config()
-        assert loaded.team_mode.enabled is True  # unchanged
-        assert loaded.team_mode.max_agents == 10  # updated
-        assert loaded.team_mode.trust_level == 2  # unchanged
+        assert loaded.smart_gate is False
