@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from server.lib.config import JiraConfig
-from server.tools.issues import register
+from server.tools import issues as issues_mod
+from server.tools.issues import (
+    _DEFAULT_DONE_STATUSES,
+    _DEFAULT_ISSUE_FIELDS,
+    _get_done_statuses,
+    _get_issue_fields,
+    _load_jira_yaml,
+    register,
+)
 
 
 @pytest.fixture()
@@ -26,7 +36,8 @@ class TestJiraSearch:
         search_result = {"issues": [{"key": "PROJ-1"}], "total": 1}
         mock_jira_client.get.return_value = search_result
 
-        result = issue_tools["jira_search"](jql="project = PROJ", max_results=10, start_at=5)
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            result = issue_tools["jira_search"](jql="project = PROJ", max_results=10, start_at=5)
 
         mock_jira_client.get.assert_called_once_with(
             "/rest/api/2/search",
@@ -34,10 +45,7 @@ class TestJiraSearch:
                 "jql": "project = PROJ",
                 "maxResults": 10,
                 "startAt": 5,
-                "fields": (
-                    "summary,description,priority,assignee,labels,"
-                    "duedate,status,issuetype,parent,subtasks"
-                ),
+                "fields": _DEFAULT_ISSUE_FIELDS,
             },
         )
         assert json.loads(result) == search_result
@@ -45,7 +53,8 @@ class TestJiraSearch:
     def test_uses_default_params(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
-        issue_tools["jira_search"](jql="status = Open")
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            issue_tools["jira_search"](jql="status = Open")
 
         _, kwargs = mock_jira_client.get.call_args
         assert kwargs["params"]["maxResults"] == 50
@@ -108,27 +117,50 @@ class TestJiraGetEpicIssues:
         epic_result = {"issues": [{"key": "PROJ-10"}], "total": 1}
         mock_jira_client.get.return_value = epic_result
 
-        result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5", max_results=25)
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5", page_size=25)
 
         call_args = mock_jira_client.get.call_args
         assert call_args[0][0] == "/rest/api/2/search"
         params = call_args[1]["params"]
         assert "parent = PROJ-5" in params["jql"]
         assert params["maxResults"] == 25
-        assert json.loads(result) == epic_result
+        parsed = json.loads(result)
+        assert parsed["issues"] == [{"key": "PROJ-10"}]
+        assert parsed["total"] == 1
 
-    def test_default_max_results(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+    def test_default_page_size(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
-        issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
 
         params = mock_jira_client.get.call_args[1]["params"]
         assert params["maxResults"] == 50
 
+    def test_paginates_all_results(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        """Pagination loop fetches all pages until total is reached."""
+        page1 = {"issues": [{"key": "PROJ-1"}, {"key": "PROJ-2"}], "total": 3}
+        page2 = {"issues": [{"key": "PROJ-3"}], "total": 3}
+        mock_jira_client.get.side_effect = [page1, page2]
+
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5", page_size=2)
+
+        parsed = json.loads(result)
+        assert parsed["total"] == 3
+        assert len(parsed["issues"]) == 3
+        assert mock_jira_client.get.call_count == 2
+        # Verify startAt was 0 then 2
+        calls = mock_jira_client.get.call_args_list
+        assert calls[0][1]["params"]["startAt"] == 0
+        assert calls[1][1]["params"]["startAt"] == 2
+
     def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.get.side_effect = RuntimeError("Jira API error: 500")
 
-        result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
+        with patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS):
+            result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5")
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -147,9 +179,13 @@ class TestJiraGetUserIssues:
         )
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
-        issue_tools["jira_get_user_issues"](
-            username="alice", project_keys=["PROJ", "DEV"], max_results=10
-        )
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=_DEFAULT_DONE_STATUSES),
+        ):
+            issue_tools["jira_get_user_issues"](
+                username="alice", project_keys=["PROJ", "DEV"], page_size=10
+            )
 
         params = mock_jira_client.get.call_args[1]["params"]
         jql = params["jql"]
@@ -169,7 +205,11 @@ class TestJiraGetUserIssues:
         )
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
-        issue_tools["jira_get_user_issues"]()
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=_DEFAULT_DONE_STATUSES),
+        ):
+            issue_tools["jira_get_user_issues"]()
 
         params = mock_jira_client.get.call_args[1]["params"]
         jql = params["jql"]
@@ -202,11 +242,57 @@ class TestJiraGetUserIssues:
         )
         mock_jira_client.get.return_value = {"issues": [], "total": 0}
 
-        issue_tools["jira_get_user_issues"](username="alice")
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=_DEFAULT_DONE_STATUSES),
+        ):
+            issue_tools["jira_get_user_issues"](username="alice")
 
         params = mock_jira_client.get.call_args[1]["params"]
         jql = params["jql"]
         assert "project in" not in jql
+
+    def test_custom_done_statuses(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        """Configurable done statuses appear in the JQL filter."""
+        mock_jira_client._config = JiraConfig(
+            personal_access_token="pat",
+            base_url="https://jira.example.com",
+            default_user="alice",
+        )
+        mock_jira_client.get.return_value = {"issues": [], "total": 0}
+
+        custom_statuses = ("Finished", "Archived")
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=custom_statuses),
+        ):
+            issue_tools["jira_get_user_issues"](username="alice")
+
+        params = mock_jira_client.get.call_args[1]["params"]
+        jql = params["jql"]
+        assert "status not in (Finished, Archived)" in jql
+
+    def test_paginates_all_results(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
+        """Pagination loop fetches all pages."""
+        mock_jira_client._config = JiraConfig(
+            personal_access_token="pat",
+            base_url="https://jira.example.com",
+            default_user="alice",
+        )
+        page1 = {"issues": [{"key": "P-1"}], "total": 2}
+        page2 = {"issues": [{"key": "P-2"}], "total": 2}
+        mock_jira_client.get.side_effect = [page1, page2]
+
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=_DEFAULT_DONE_STATUSES),
+        ):
+            result = issue_tools["jira_get_user_issues"](username="alice", page_size=1)
+
+        parsed = json.loads(result)
+        assert parsed["total"] == 2
+        assert len(parsed["issues"]) == 2
+        assert mock_jira_client.get.call_count == 2
 
     def test_api_error_json(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client._config = JiraConfig(
@@ -217,7 +303,11 @@ class TestJiraGetUserIssues:
         )
         mock_jira_client.get.side_effect = RuntimeError("Jira API error 403: forbidden")
 
-        result = issue_tools["jira_get_user_issues"](username="alice")
+        with (
+            patch.object(issues_mod, "_get_issue_fields", return_value=_DEFAULT_ISSUE_FIELDS),
+            patch.object(issues_mod, "_get_done_statuses", return_value=_DEFAULT_DONE_STATUSES),
+        ):
+            result = issue_tools["jira_get_user_issues"](username="alice")
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -553,3 +643,61 @@ class TestJiraBulkUpdateIssues:
         assert "403" in parsed["failures"][2]["error"]
         assert len(parsed["successes"]) == 1
         assert parsed["successes"][0]["key"] == "PROJ-3"
+
+
+class TestLoadJiraYaml:
+    def test_returns_empty_dict_when_file_missing(self, tmp_path: Path) -> None:
+        with patch("server.tools.issues.Path.expanduser", return_value=tmp_path / "nope.yaml"):
+            assert _load_jira_yaml() == {}
+
+    def test_returns_empty_dict_on_empty_file(self, tmp_path: Path) -> None:
+        """475.52: yaml.safe_load returns None on empty file — guard with `or {}`."""
+        empty_file = tmp_path / "jira.yaml"
+        empty_file.write_text("")
+        with patch("server.tools.issues.Path.expanduser", return_value=empty_file):
+            assert _load_jira_yaml() == {}
+
+    def test_returns_parsed_content(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "jira.yaml"
+        cfg_file.write_text(yaml.dump({"issue_fields": ["summary", "status"]}))
+        with patch("server.tools.issues.Path.expanduser", return_value=cfg_file):
+            result = _load_jira_yaml()
+        assert result == {"issue_fields": ["summary", "status"]}
+
+
+class TestGetIssueFields:
+    def test_returns_default_when_not_configured(self) -> None:
+        with patch.object(issues_mod, "_load_jira_yaml", return_value={}):
+            assert _get_issue_fields() == _DEFAULT_ISSUE_FIELDS
+
+    def test_returns_custom_list_as_csv(self) -> None:
+        with patch.object(
+            issues_mod, "_load_jira_yaml", return_value={"issue_fields": ["summary", "status"]}
+        ):
+            assert _get_issue_fields() == "summary,status"
+
+    def test_returns_custom_string_as_is(self) -> None:
+        with patch.object(
+            issues_mod, "_load_jira_yaml", return_value={"issue_fields": "summary,priority"}
+        ):
+            assert _get_issue_fields() == "summary,priority"
+
+
+class TestGetDoneStatuses:
+    def test_returns_default_when_not_configured(self) -> None:
+        with patch.object(issues_mod, "_load_jira_yaml", return_value={}):
+            assert _get_done_statuses() == _DEFAULT_DONE_STATUSES
+
+    def test_returns_custom_statuses(self) -> None:
+        with patch.object(
+            issues_mod,
+            "_load_jira_yaml",
+            return_value={"done_statuses": ["Finished", "Archived"]},
+        ):
+            assert _get_done_statuses() == ("Finished", "Archived")
+
+    def test_ignores_non_list_done_statuses(self) -> None:
+        with patch.object(
+            issues_mod, "_load_jira_yaml", return_value={"done_statuses": "not a list"}
+        ):
+            assert _get_done_statuses() == _DEFAULT_DONE_STATUSES

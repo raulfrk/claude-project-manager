@@ -3,22 +3,57 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from server.lib.client import JsonValue, get_client
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-_ISSUE_FIELDS = (
+_DEFAULT_ISSUE_FIELDS = (
     "summary,description,priority,assignee,labels,duedate,status,issuetype,parent,subtasks"
 )
+
+_DEFAULT_DONE_STATUSES = ("Done", "Closed", "Resolved")
+
+
+def _load_jira_yaml() -> dict[str, JsonValue]:
+    """Load jira.yaml config, returning empty dict on missing/empty file."""
+    config_path = Path("~/.claude/jira.yaml").expanduser()
+    if not config_path.exists():
+        return {}
+    with config_path.open() as f:
+        return yaml.safe_load(f) or {}
+
+
+def _get_issue_fields() -> str:
+    """Return issue fields string — from jira.yaml 'issue_fields' or default."""
+    cfg = _load_jira_yaml()
+    custom = cfg.get("issue_fields")
+    if custom:
+        if isinstance(custom, list):
+            return ",".join(str(f) for f in custom)
+        return str(custom)
+    return _DEFAULT_ISSUE_FIELDS
+
+
+def _get_done_statuses() -> tuple[str, ...]:
+    """Return done-status values — from jira.yaml 'done_statuses' or default."""
+    cfg = _load_jira_yaml()
+    custom = cfg.get("done_statuses")
+    if custom and isinstance(custom, list):
+        return tuple(str(s) for s in custom)
+    return _DEFAULT_DONE_STATUSES
 
 
 def register(app: FastMCP) -> None:
     @app.tool(description="Search Jira issues using JQL.")
     def jira_search(jql: str, max_results: int = 50, start_at: int = 0) -> str:
         client = get_client()
+        fields = _get_issue_fields()
         try:
             data = client.get(
                 "/rest/api/2/search",
@@ -26,7 +61,7 @@ def register(app: FastMCP) -> None:
                     "jql": jql,
                     "maxResults": max_results,
                     "startAt": start_at,
-                    "fields": _ISSUE_FIELDS,
+                    "fields": fields,
                 },
             )
             return json.dumps(data)
@@ -51,20 +86,37 @@ def register(app: FastMCP) -> None:
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
 
-    @app.tool(description="Get all issues under a Jira epic.")
-    def jira_get_epic_issues(epic_key: str, max_results: int = 50) -> str:
+    @app.tool(description="Get all issues under a Jira epic (auto-paginates).")
+    def jira_get_epic_issues(epic_key: str, page_size: int = 50) -> str:
         client = get_client()
+        fields = _get_issue_fields()
         jql = f"parent = {epic_key} ORDER BY priority DESC"
         try:
-            data = client.get(
-                "/rest/api/2/search",
-                params={
-                    "jql": jql,
-                    "maxResults": max_results,
-                    "fields": _ISSUE_FIELDS,
-                },
-            )
-            return json.dumps(data)
+            all_issues: list[JsonValue] = []
+            start_at = 0
+            while True:
+                data = client.get(
+                    "/rest/api/2/search",
+                    params={
+                        "jql": jql,
+                        "maxResults": page_size,
+                        "startAt": start_at,
+                        "fields": fields,
+                    },
+                )
+                if not isinstance(data, dict):
+                    break
+                issues = data.get("issues", [])
+                if not isinstance(issues, list):
+                    break
+                all_issues.extend(issues)
+                total = data.get("total", 0)
+                if not isinstance(total, int):
+                    break
+                start_at += len(issues)
+                if start_at >= total or not issues:
+                    break
+            return json.dumps({"issues": all_issues, "total": len(all_issues)})
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
 
@@ -77,18 +129,21 @@ def register(app: FastMCP) -> None:
     def jira_get_user_issues(
         username: str = "",
         project_keys: list[str] | None = None,
-        max_results: int = 50,
+        page_size: int = 50,
     ) -> str:
         client = get_client()
         cfg = client._config
+        fields = _get_issue_fields()
+        done_statuses = _get_done_statuses()
 
         user = username or cfg.default_user
         if not user:
             return json.dumps({"error": "No username provided and no default_user configured."})
 
+        status_csv = ", ".join(done_statuses)
         jql_parts = [
             f"assignee = {user}",
-            "status not in (Done, Closed, Resolved)",
+            f"status not in ({status_csv})",
         ]
 
         keys = project_keys or cfg.allowed_project_keys
@@ -98,15 +153,31 @@ def register(app: FastMCP) -> None:
 
         jql = " AND ".join(jql_parts) + " ORDER BY priority DESC"
         try:
-            data = client.get(
-                "/rest/api/2/search",
-                params={
-                    "jql": jql,
-                    "maxResults": max_results,
-                    "fields": _ISSUE_FIELDS,
-                },
-            )
-            return json.dumps(data)
+            all_issues: list[JsonValue] = []
+            start_at = 0
+            while True:
+                data = client.get(
+                    "/rest/api/2/search",
+                    params={
+                        "jql": jql,
+                        "maxResults": page_size,
+                        "startAt": start_at,
+                        "fields": fields,
+                    },
+                )
+                if not isinstance(data, dict):
+                    break
+                issues = data.get("issues", [])
+                if not isinstance(issues, list):
+                    break
+                all_issues.extend(issues)
+                total = data.get("total", 0)
+                if not isinstance(total, int):
+                    break
+                start_at += len(issues)
+                if start_at >= total or not issues:
+                    break
+            return json.dumps({"issues": all_issues, "total": len(all_issues)})
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
 
