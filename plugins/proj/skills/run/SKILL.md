@@ -2,7 +2,7 @@
 name: run
 description: Run the full workflow (define → decompose → execute) on a todo interactively, prompting between each step. Use when asked "run 1", "full workflow on 1", or "proj:run 1".
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--refine] [--fast|--careful] [--force-plan] [--worktree] [--no-worktree] [--max-parallel N] [--no-tasks]"
+argument-hint: "<todo-id> [--steps define,execute] [--from <step>] [--iter N] [--no-interactive] [--no-verify] [--resume] [--fast|--careful] [--max-parallel N] [--with-adversarial-review] [--no-tasks]"
 ---
 
 
@@ -15,31 +15,16 @@ Run workflow for: $ARGUMENTS
 Extract from $ARGUMENTS:
 - Input: single ID (`1`). Range/comma list → dispatched to `/proj:run-batch`.
 - `--no-verify`: skip verification in execute (passed through)
-- `--full-context`: include CLAUDE.md + NOTES.md in each agent's ctx
-- `--trust N` (0-3): override trust level. If unset, use `team_mode.trust_level` from config (default 1).
- - Trust 0 (supervised): per-todo approval — each plan presented individually, user approves one at time
- - Trust 1 (guided): bulk approval + parallel exec — all plans presented sequentially, user approves each, bulk confirm before exec. Default.
- - Trust 2 (autonomous): auto-approve plans — skip `ExitPlanMode` user review
- - Trust 3 (full-auto): no plan phase — agents exec w/ ctx only (requirements + research + parent ctx)
 - `--resume`: resume from most recent checkpoint. See Resume checkpoint sections.
-- `--no-pipeline`: disable plan-while-executing pipeline (default: pipeline enabled)
-- `--refine`: enable requirement refinement w/ review agents (default: off for `--fast`, auto-enabled for `--careful`)
 - `--fast`: minimize review gates, auto-exec low-complexity todos, skip verification. Tag immunity: `security`/`breaking-change`/`migration` still get FULL REVIEW.
 - `--careful`: default. Full review all plans, auto-enable refine, enhanced verification. For sequential exec, combine w/ `--max-parallel 1`.
 - `--max-parallel N`: override max_parallel (e.g. `--careful --max-parallel 1` for former `--paranoid` behavior).
 - Quality levels mutually exclusive (last wins, default: `--careful`).
-- `--force-plan`: force FULL REVIEW on all todos despite complexity score.
-- `--batch-approve`: (batch mode only — passed through to `/proj:run-batch`).
-- `--worktree`: (default) enable worktree isolation for parallel exec. No-op; kept for explicitness.
-- `--no-worktree`: opt out of worktree isolation — run all agents on cur branch. Use when batch is small, fully sequential, or worktree setup costs outweigh benefits.
+- `--with-adversarial-review`: re-enables Phase A.5b (adversarial review — define) + Phase C0.5b (adversarial review — pre-execute). Default: off.
 - `--no-tasks`: disable all TaskCreate calls. Use when you want clean output without task tracking.
 
 Derive: `tasks_enabled = "--no-tasks" not in ARGUMENTS`
-
-Derive `worktree_enabled` — **default: on**:
- 1. `--no-worktree` explicitly passed → off.
- 2. `max_parallel == 1` → off (sequential exec makes worktree unnecessary).
- 3. Else → on (despite `config.worktree_isolation`; config flag retained for legacy callers, force-off via `--no-worktree`).
+Derive: `adversarial_review_enabled = "--with-adversarial-review" in ARGUMENTS`
 
 Derive `quality_level` from flags. If no quality flag, call `mcp__proj__config_load` and read `config.quality_level`, defaulting to `--careful` if unset/unrecognized.
 
@@ -48,39 +33,22 @@ Derive `quality_level` from flags. If no quality flag, call `mcp__proj__config_l
 | Parameter | --fast | --careful (default) |
 |-----------|--------|---------------------|
 | gate_override | auto-execute (tag-immune) | full-review |
-| batch_approve | auto | disabled |
-| speculative_planning | enabled | disabled |
-| pattern_detection | auto-approve | disabled |
 | verification_mode | skip | enhanced |
 | max_parallel | 30 | 10 |
 | satisfaction | skip (auto-complete) | per-todo |
 | preflight | skip | enabled |
 | preflight_structural | skip | enabled |
-| preflight_adversarial_agents | skip | enabled |
 | pre_execute_preflight | skip | enabled |
 | refine | skip | auto-enabled (per iteration) |
-| worktree | on (unless `--no-worktree`) | on (unless `--no-worktree` or max_parallel=1) |
 | overlap_action | auto-proceed | auto-serialize |
 
-**Former `--paranoid` behavior**: `--careful --max-parallel 1` (sequential exec, worktree auto-off).
+**Former `--paranoid` behavior**: `--careful --max-parallel 1` (sequential exec).
 
-**Recommended cap**: 10 for CPU-bound/API-rate-limited workloads (heavy test suites, rate-limited LLM calls, DB migrations). `--fast` ceiling of 30 tuned for I/O-bound work w/ isolated worktrees; override via `--max-parallel` or `config.team_mode.max_agents` when agent saturates shared resource.
-
-Derive: `pipeline_enabled = not no_pipeline_flag`
+**Recommended cap**: 10 for CPU-bound/API-rate-limited workloads. `--fast` ceiling of 30 tuned for I/O-bound work; override via `--max-parallel` or `config.team_mode.max_agents`.
 
 **Flag compatibility check** (validate before proceeding):
-- `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
-- `--fast --refine` → fast wins, refine skipped (warn).
 - `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification skipped.
-- `--fast --steps refine` → ERROR: "Cannot use --fast with --steps refine (fast skips refine)."
-- `--careful --no-pipeline` → Allowed.
-- `--fast --no-pipeline` → Redundant warn: "--fast with auto-execute makes pipeline moot."
-- `--force-plan --careful` → Redundant warn: "--careful already forces full review."
-- `--no-verify --fast` → Redundant: --fast already skips verification.
-- `--refine --from execute` → Refine skipped (--from execute skips refine per step-order slicing).
-- `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3 (trust 3 skips planning)."
-- `--max-parallel 1 --worktree` → max_parallel wins, worktree disabled (warn: "max_parallel=1 makes worktree isolation unnecessary").
-- `--worktree --no-interactive` → Allowed. Auto-resolve only for merge conflicts.
+- `--no-verify --fast` → Redundant.
 
 No todo ID → stop: "Todo ID required. Usage: `/proj:run <id> [--steps define,execute] [--from <step>]`"
 
@@ -212,63 +180,7 @@ Each todo in descendant list:
 
 After preflight complete: (only if tasks_enabled) `TaskUpdate(task_A5_id, status="completed")`. Failure → `TaskUpdate(task_A5_id, status="failed")`.
 
-**Phase A.5b — Adversarial Review (Define)**
-
-Runs only when `quality_level == careful`. NEVER under `--fast`. (No TaskCreate when skipped.) Runs after structural checks pass, in parallel across 3 read-only agents.
-
-(only if tasks_enabled) `TaskCreate(title="Phase A.5b: Adversarial Review (Define) — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "A.5b", "kind": "phase_task"})` → store as `task_A5b_id` → `TaskUpdate(status="in_progress")`
-Pass `parent_task_id=task_A5b_id` to agents spawned in this phase.
-
-**Batch sampling**: descendant list > 5 → agents run on **5 highest-complexity** todos (ranked by 7-dimension complexity score from Phase C1 smart gating). Others get structural checks only. Override: `--force-preflight-all`.
-
-**Agents** — one Agent per role per todo w/ `run_in_background=true`. Never combine roles. Wait for all agents (auto-notified on completion), then aggregate findings.
-
-| Agent | Reads | Checks |
-|-------|-------|--------|
-| Ambiguity | requirements.md + research.md | undefined domain terms, handwavey claims, unmeasurable goals |
-| Completeness | requirements.md + research.md | missing failure modes, missing auth/security concerns, scope gaps |
-| Research Validation | research.md + repo filesystem | each ref'd file exists, option distinctness, risk realism |
-
-Each spawned via named `subagent_type` (see `plugins/proj/agents/`):
-- Tools (read-only): `Read`, `Glob`, `Grep`, `mcp__proj__content_get_requirements`, `mcp__proj__content_get_research`, `mcp__proj__proj_explore_codebase`
-- Timeout: 90s
-- Output schema (strict JSON):
-
-  ```json
-  {
-    "agent": "ambiguity|completeness|research_validation",
-    "findings": [
-      {
-        "severity": "BLOCKING|WARNING|INFO",
-        "title": "short description",
-        "evidence": "direct quote or file:line reference",
-        "suggested_fix": "optional"
-      }
-    ]
-  }
-  ```
-
-See **Preflight Agents Reference** appendix for prompt templates.
-
-**Findings aggregation**: merge across 3 agents, single table keyed by todo:
-
-```
-### Preflight Adversarial Review — todo <id>
-
-| Severity | Agent | Finding | Evidence |
-|----------|-------|---------|----------|
-| BLOCKING | Completeness | Missing auth failure path | requirements.md L23 |
-| WARNING  | Ambiguity | Undefined term "downstream" | requirements.md L12 |
-```
-
-**Severity semantics**:
-- BLOCKING — triggers Fix / Continue / Stop. Subject to `--no-interactive` demotion + fix-loop cap.
-- WARNING — shown, non-blocking, single OK. Under `--careful --max-parallel 1`, WARNINGs need explicit ack; "Acknowledge all WARNINGs" shortcut when >= 3.
-- INFO — shown, non-blocking, no ack.
-
-**Degraded mode**: agent timeouts/malformed JSON → demoted to WARNING (never BLOCKING). Raw output shown under finding.
-
-After adversarial review complete: (only if tasks_enabled) `TaskUpdate(task_A5b_id, status="completed")`. Timeout/failure → `TaskUpdate(task_A5b_id, status="failed")`.
+> Adversarial review phases (A.5b, C0.5b) removed by default. Re-enable via `--with-adversarial-review`.
 
 **If `decompose`** — parallel agents:
 (only if tasks_enabled) `TaskCreate(title="Phase B: Decompose — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "B", "kind": "phase_task"})` → store as `task_B_id` → `TaskUpdate(status="in_progress")`
@@ -282,7 +194,7 @@ After decompose complete: (only if tasks_enabled) `TaskUpdate(task_B_id, status=
 
 **If `refine`** — after decompose, within iteration (if `quality_level == careful` AND `refine` in steps AND NOT `--no-interactive`):
 
-fast → skip refine. careful → auto-enable despite --refine flag. (No TaskCreate when skipped.)
+fast → skip refine. careful → auto-enable. (No TaskCreate when skipped.)
 
 (only if tasks_enabled) `TaskCreate(title="Phase B.75: Refine — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "B.75", "kind": "phase_task"})` → store as `task_B75_id` → `TaskUpdate(status="in_progress")`
 Pass `parent_task_id=task_B75_id` to agents spawned in this phase.
@@ -291,40 +203,9 @@ Each todo: `skill: "proj:refine", args: "<id>"`.
  Apply → requirements/research updated, preflight re-runs automatically.
 After refine complete: (only if tasks_enabled) `TaskUpdate(task_B75_id, status="completed")`.
 
-**3a.** Capture iteration snapshots (only when N > 1)
-
-**Before iteration 1** (after building initial descendant list, before any prep steps), capture pre-existing state as `snapshot_0`:
-- Each todo: read `content_get_requirements` + `content_get_research`
-- Record descendant list structure: child IDs, titles, blocked_by
-- Descendant list > 15 → read content for root-level children only.
-
-**After each iteration's prep steps**: capture as `snapshot_<i>` (same method).
-
 **4.** Between-iteration prompt (skip if last iteration or `--no-interactive`)
 
-**4a.** Convergence assessment
-
-Compare `snapshot_<i>` w/ `snapshot_<i-1>` across 4 dimensions:
-
-- Requirements: compare requirements.md text per todo. Ignore whitespace/fmt/minor rewording. Flag new acceptance criteria, changed goals/testing strategy.
-- Research: compare research.md. Flag changed recommended approach, new options, significant findings.
-- Structure: compare descendant lists. Flag new/removed children, title changes.
-- Dependencies: compare blocked_by. Flag new/removed blocking edges.
-
-```
-### Convergence Assessment (Iteration <i>)
-
-**Requirements**: [Stable | Minor changes | Significant changes] — <1-line summary>
-**Research**: [Stable | Minor changes | Significant changes] — <1-line summary>
-**Structure**: [Stable | Changed] — <summary>
-**Dependencies**: [Stable | Changed] — <summary>
-
-**Recommendation**: [Ready to execute — prep has converged] OR [Continue iterating — <reason>]
-```
-
-Recommend "Ready to execute" when ALL dimensions Stable/Minor w/ no new structural additions. Else "Continue iterating".
-
-**4b.** Next action prompt
+**4a.** Next action prompt
 
 ```
 ### Iteration <i>/<N> complete — Next Action?
@@ -413,11 +294,13 @@ Suggested next: `1. /proj:status`
 
 ## Preflight Agents Reference
 
+> Adversarial review agents (A.5b, C0.5b) are opt-in via `--with-adversarial-review`. Off by default.
+
 Agent defs in `plugins/proj/agents/`. Each agent file includes frontmatter (name, tools, model) + output schema inline. Load at runtime via `Read` when spawning.
 
-All 6 preflight agents ref'd by Phase A.5b (define) + Phase C0.5b (pre-execute). Spawned via named `subagent_type` w/ `run_in_background=true`, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
+When `adversarial_review_enabled`: 6 preflight agents available. Spawned via named `subagent_type` w/ `run_in_background=true`, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
 
-### Phase A.5b — Define-phase agents
+### Phase A.5b — Define-phase agents (opt-in)
 
 #### 1. Ambiguity Reviewer
 See: plugins/proj/agents/ambiguity-reviewer.md
@@ -428,7 +311,7 @@ See: plugins/proj/agents/completeness-reviewer.md
 #### 3. Research Validator
 See: plugins/proj/agents/research-validator.md
 
-### Phase C0.5b — Pre-execute agents
+### Phase C0.5b — Pre-execute agents (opt-in)
 
 #### 4. File Path Verifier
 See: plugins/proj/agents/file-path-verifier.md
@@ -455,6 +338,22 @@ Agent(subagent_type="research-validator", description="Research validation — t
 ```
 
 Await all three, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show). Repeat per sampled todo.
+
+**Findings aggregation**: merge across 3 agents, single table keyed by todo:
+
+```
+### Preflight Adversarial Review — todo <id>
+
+| Severity | Agent | Finding | Evidence |
+|----------|-------|---------|----------|
+| BLOCKING | Completeness | Missing auth failure path | requirements.md L23 |
+| WARNING  | Ambiguity | Undefined term "downstream" | requirements.md L12 |
+```
+
+**Severity semantics**:
+- BLOCKING — triggers Fix / Continue / Stop. Subject to `--no-interactive` demotion + fix-loop cap.
+- WARNING — shown, non-blocking.
+- INFO — shown, non-blocking, no ack.
 
 
 ## Agent Fallback

@@ -2,7 +2,7 @@
 name: run-batch
 description: Batch/range execution workflow for multiple todos. Extension of run skill.
 allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
-argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--trust N] [--max-parallel N] [--no-worktree] [--no-verify] [--no-interactive]"
+argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--max-parallel N] [--no-verify] [--no-interactive] [--with-adversarial-review]"
 ---
 
 
@@ -21,7 +21,7 @@ After parsing: `mcp__proj__todo_get` on each ID to confirm existence; parse erro
 Store `per_todo_quality: dict[str, str]` (id → level for annotated only). If ≥1 annotation → `auto_suggest_mode = false`; zero → `auto_suggest_mode = true`.
 Tag-immune upgrade: each ID in `per_todo_quality` w/ tags `security`/`breaking-change`/`migration`: if annotated `fast`, silently upgrade to `careful` + warn: "Todo N has tag X — annotation :fast upgraded to :careful (tag-immune safety rule)"
 
-All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--full-context`, `--trust`, `--resume`, `--no-pipeline`, `--refine`, `--fast`/`--careful`, `--force-plan`, `--batch-approve`, `--worktree`/`--no-worktree`, `--max-parallel`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
+All flags (`--steps`, `--from`, `--iter`, `--no-interactive`, `--no-verify`, `--resume`, `--fast`/`--careful`, `--max-parallel`, `--with-adversarial-review`) parsed per run/SKILL.md Section 1. Quality param mapping + flag compat checks per run/SKILL.md tables.
 
 ## Batch mode
 
@@ -82,8 +82,8 @@ Each todo in dep order, `mcp__proj__todo_get` + compute suggested quality:
 Skip auto-suggest. `per_todo_quality` populated from parse. Unspecified → fallback via `effective_quality()`.
 
 **Derive batch-level exec params** (after `per_todo_quality` confirmed):
-- `batch_max_parallel_execute`: most conservative quality across `per_todo_quality` (careful→10, fast→30). Override via `--max-parallel`. Replaces table `max_parallel` for **Phase C exec only**. Phases B + C0 use orig batch-level `max_parallel`.
-- `batch_worktree_enabled`: `max_parallel == 1` → false (whole batch). Else: use existing `worktree_enabled` derivation.
+- `batch_max_parallel_execute`: most conservative quality across `per_todo_quality` (careful→10, fast→30). Override via `--max-parallel`. Replaces table `max_parallel` for **Phase C exec only**. Phase B uses orig batch-level `max_parallel`.
+- `batch_worktree_enabled`: `max_parallel == 1` → false (whole batch). Else: use `worktree_enabled` from config.
 
 `--no-interactive`: skip AskUserQuestion; auto-accept all; log via `notes_append` tag `auto-suggest:accepted`; body = markdown table `| Todo | Title | Suggested | Reason |` w/ timestamp.
 
@@ -150,29 +150,16 @@ Failures AND NOT `--no-interactive` (attempts < 3):
  Attempt 4 → auto-demote, `(1) Continue anyway (2) Stop`.
 
 Failures AND `--no-interactive` → demote, log, auto-continue.
-All pass → silent, Phase A.5b.
+All pass → silent.
 After preflight: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
-**Phase A.5b — Adversarial Review (Define) — Batch:**
-
-Only when `effective_quality(todo_id) == careful`. NEVER `fast`. (No TaskCreate when skipped.)
-
-**Batch sampling**: > 5 todos → only **5 highest-complexity** (7-dim score). Override: `--force-preflight-all`.
-
-`TaskCreate(title="Phase A.5b: Adversarial Review (Define) — batch", metadata={"phase": "A.5b"})` → `TaskUpdate(status="in_progress")`
-
-One Agent per role per todo w/ `run_in_background=true` (never combine roles).
-
-Each sampled todo: 3 agents (Ambiguity, Completeness, Research Validation) in parallel. Same tools, timeout, JSON schema, severity as run/SKILL.md Phase A.5b. See run/SKILL.md Preflight Agents Reference appendix for prompts.
-
-Wait for all agents (auto-notified on completion). Aggregate into combined table. Same BLOCKING prompt flow. Timeouts/malformed JSON → WARNING.
-After adversarial review: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
+> Adversarial review phases (A.5b, C0.5b) removed by default. Re-enable via `--with-adversarial-review`. See run/SKILL.md Preflight Agents Reference.
 
 **Phase B — Remaining steps (parallel agents):**
 
 **Parallel agent mode:**
 `TaskCreate(title="Phase B: Decompose — batch", metadata={"phase": "B"})` → `TaskUpdate(status="in_progress")`
-Each batch in dep order: one Agent per todo w/ `run_in_background=true`. Each runs `agent_steps` autonomously. `--full-context` → include CLAUDE.md + NOTES.md. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx. Wait per batch (auto-notified on completion). Report failures.
+Each batch in dep order: one Agent per todo w/ `run_in_background=true`. Each runs `agent_steps` autonomously. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx. Wait per batch (auto-notified on completion). Report failures.
 Failures → log to `failed-agents.yaml`.
 
 After Phase B: refresh descendants via `mcp__proj__todo_tree`.
@@ -180,35 +167,13 @@ After decompose: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(statu
 
 **Phase B.75 — Refine (if `effective_quality(todo_id) == careful` AND `refine` in steps AND NOT `--no-interactive`):**
 
-fast → skip. careful → auto-enable despite --refine. (No TaskCreate when skipped.)
+fast → skip. careful → auto-enable. (No TaskCreate when skipped.)
 
 `TaskCreate(title="Phase B.75: Refine — batch", metadata={"phase": "B.75"})` → `TaskUpdate(status="in_progress")`
 
 Each todo in dep order: `skill: "proj:refine", args: "<id>"`. Subject to `max_parallel` throttle.
  Present reports sequentially. Apply → requirements/research updated, preflight re-runs.
 After refine: `TaskUpdate(status="completed")`.
-
-**Phase B.5 — Convergence check** (skip if `--no-interactive`, only when N > 1; no TaskCreate when skipped)
-
-`TaskCreate(title="Phase B.5: Convergence Check — iter {i}", metadata={"phase": "B.5"})` → `TaskUpdate(status="in_progress")`
-
-Before iter 1: capture `snapshot_0` (requirements, research, tree structure per todo).
-After each iter: `snapshot_<i>`.
-
-Compare + display:
-
-```
-### Convergence Assessment (Iteration <i>) — Batch
-
-| Todo | Requirements | Research | Structure |
-|------|-------------|----------|-----------|
-| <id> | Stable/Minor/Significant | ... | ... |
-
-**Overall**: [Ready to execute | Continue iterating] — <reason>
-```
-
-Then between-iteration prompt (same 4 options as run/SKILL.md Section 4b).
-After convergence check: `TaskUpdate(status="completed")`.
 
 **Phase C — Execute (after iteration loop):**
 
@@ -224,25 +189,11 @@ NOT `--no-interactive`:
 
 All fast → display: "⚡ --fast mode. Auto-executing low-complexity. Tag-immune get full review."
 
-**Phase C0 — Speculative planning** (if effective_quality == fast AND trust != 0 AND trust != 3; no TaskCreate when skipped):
-
-`TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
-
-One read-only Agent per todo w/ `run_in_background=true`. Each:
-- Gets: todo ctx, requirements.md, research.md, parent ctx
-- Read-only tools: `Read`, `Glob`, `Grep`, `proj_get_todo_context`, `proj_explore_codebase`, `content_get_requirements`, `content_get_research`
-- Produces: `{prose: "<plan text>", actions: [{type: "create"|"modify"|"delete"|"test", file: "<path>"}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
-
-Wait for all agents (auto-notified on completion). Failure → exclude, fall back to sequential planning. Store in `speculative_plans[todo_id]`.
-After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
-
 **Phase C1 — Plan (sequential, main):**
 
-Trust 3 → skip to C2 w/ ctx only.
 `--no-interactive` → skip to C2 w/ exec instructions.
 
-Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `manual_skipped_ids = []`.
 
 `TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -251,59 +202,15 @@ Each todo in dep order:
 2. `proj_get_todo_context(include_parent=true)`.
 3. `proj_search_knowledge(query=<title>, scope=all)` → "### Related Context" if snippets.
 
-**Smart gate scoring** (skip if effective_quality == fast w/ auto-exec, or --force-plan):
+**Smart gate scoring** (skip if effective_quality == fast w/ auto-exec):
 
 Same 7-dimension complexity score (0-14), same eval order (tags → score → critical-path guard), same gate routing (AUTO-EXECUTE/LIGHT/FULL) as run/SKILL.md Section 5ii-T smart gate scoring.
-
-`--force-plan` → FULL REVIEW all.
 
 4. Plan creation (per gate level). Include Related Context.
 5. Approval (per trust + gate).
 6. Store.
-7. Pipeline spawn (if enabled, trust != 3): respect `batch_max_parallel_execute` from Phase A.0. Spawn Agent w/ `run_in_background=true`.
 
-**Pattern detection** (skip if effective_quality == careful):
-
-1. Normalize each plan: strip todo IDs, extract (action_type, file_pattern), replace unique segments w/ *.
-2. Pairwise Jaccard: |A∩B| / |A∪B|.
-3. Group plans >80% similarity. Min 2, max 10.
-4. fast → auto-approve all groups.
-5. Else → display groups as collapsible sections:
-
- **Pattern Group 1** (3 todos: 1.1, 1.2, 1.3) — 85% similar
- Common: modify `tests/test_*.py`, modify `server/tools/*.py`
- Deviations: todo 1.2 also creates `server/tools/new_helper.py`
-
- Per-group: Approve pattern / Edit pattern / Review individually
-
-IF speculative_plans exist:
- **Phase C1a — Batch review:**
-
-  ```
-  ### Batch Plan Review — N todos
-
-  **Todo <id>**: <1-line summary>
-  Actions: create X, modify Y, test Z
-
-  [repeat for each todo]
-
-  ### File Overlap Table
-  | File | Touched by |
-  |------|-----------|
-  | ... | ... |
-
-  ### Pattern Groups (if any — see pattern detection)
-  [collapsible pattern sections]
-
-  1. **Approve all** — proceed to execution
-  2. **Edit** — re-plan specific todos (enter IDs). After re-planning, re-run file-overlap detection on the updated plan set.
-  3. **Reject** — remove specific todos (enter IDs)
-  4. **Cancel** — abort batch
-  ```
-
- `--batch-approve` OR trust 2 → auto-approve all.
-
-**File-Overlap Detection** (after C1, before C2, skip if trust 3):
+**File-Overlap Detection** (after C1, before C2):
 1-2: Same as run/SKILL.md Section 5ii-T file-overlap (extract file lists, build within-batch overlap matrix).
 3. Quality behavior (pairwise — `max(effective_quality(A), effective_quality(B))`):
  - fast → auto-proceed.
@@ -330,10 +237,9 @@ After plan phase: `TaskUpdate(status="completed")`.
 
 **Phase C0.5 — Pre-execute Preflight**
 
-After C1 plan approval, before C2 exec spawn (before C1.5 worktree setup). Per-todo, dep order, not batch-aggregated.
+After C1 plan approval, before C2 exec spawn. Per-todo, dep order, not batch-aggregated.
 
-**Skip under trust 3**: no plan → checks N/A. Log: `Phase C0.5 skipped — trust 3 (no plan)`. (No TaskCreate when skipped.)
-**Skip when `effective_quality(todo_id) == fast`**: consistent w/ `preflight: skip`.
+**Skip when `effective_quality(todo_id) == fast`**: consistent w/ `preflight: skip`. (No TaskCreate when skipped.)
 
 `TaskCreate(title="Phase C0.5: Pre-execute Preflight — batch", metadata={"phase": "C0.5"})` → `TaskUpdate(status="in_progress")`
 
@@ -344,34 +250,10 @@ Each todo (excl `manual_skipped_ids` + AUTO-EXECUTE w/o plan), 6 structural chec
 - `--no-interactive` → demote BLOCKING→WARNING, log, decision log, continue.
 - 4th attempt → auto-demote, `(1) Continue anyway (2) Stop`.
 
-All pass → silent, Phase C0.5b.
+All pass → silent.
 After pre-execute preflight: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
-**Phase C0.5b — Adversarial Review (Pre-execute)**
-
-Only `effective_quality(todo_id) == careful`. Never fast. Skip under trust 3. (No TaskCreate when skipped.)
-
-**Batch sampling**: > 5 → 5 highest-complexity (same ranking as A.5b). Override: `--force-preflight-all`.
-
-`TaskCreate(title="Phase C0.5b: Adversarial Review (Pre-execute) — batch", metadata={"phase": "C0.5b"})` → `TaskUpdate(status="in_progress")`
-
-One Agent per role per todo w/ `run_in_background=true`.
-
-Each sampled todo, 3 read-only Agents in parallel (File Path Verifier, Spec-Plan Alignment, Impact Scanner). Same tools, timeout, JSON schema as run/SKILL.md Phase C0.5b. See run/SKILL.md Preflight Agents Reference appendix for prompts.
-
-Wait for all agents (auto-notified on completion). **Findings aggregation**: merge across 3 agents, combined table (same fmt as A.5b). Same severity semantics. Timeouts/malformed JSON → WARNING.
-
-`worktree_enabled` → File Path Verifier checks worktree tree for todo's branch.
-After adversarial review: `TaskUpdate(status="completed")`. Timeout/failure → `TaskUpdate(status="failed")`.
-
-**Phase C1.5 — Worktree setup** (if `worktree_enabled`; no TaskCreate when skipped):
-
-`TaskCreate(title="Phase C1.5: Worktree Setup — batch", metadata={"phase": "C1.5"})` → `TaskUpdate(status="in_progress")`
-
-Same prereq check + dirty-tree handling + per-todo setup as run/SKILL.md Phase 1.5.
-
-Pipeline → per-todo after plan approval. Non-pipeline → all batch todos before C2.
-After worktree setup: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+> Adversarial review (C0.5b) removed by default. Re-enable via `--with-adversarial-review`. See run/SKILL.md Preflight Agents Reference.
 
 **Phase C2 — Execute:**
 
@@ -379,17 +261,10 @@ After worktree setup: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(
 
 **Resume checkpoint** (`--resume`): same 4-step logic as run/SKILL.md Section 5ii-T (find checkpoint, fresh/stale check, skip to batch_index or restart).
 
-**Parallel agent mode:**
-
-IF `pipeline_enabled`:
- Wait for all pipeline agents (auto-notified on completion). Report.
- All failed → batch failure short-circuit.
-ELSE:
-
 1a. Task Mapping (one-way): same as run/SKILL.md Section 5ii-T Phase 2 (TaskCreate per todo, addBlockedBy, one-way only).
 
 2. Each batch in dep order (excl `manual_skipped_ids`):
- - Display batch. One Agent per todo w/ `run_in_background=true`. Gets: plan (or ctx/exec instructions) + requirements.md + research.md + parent ctx. `--full-context` → CLAUDE.md + NOTES.md.
+ - Display batch. One Agent per todo w/ `run_in_background=true`. Gets: plan (or ctx/exec instructions) + requirements.md + research.md + parent ctx.
  - Worktree → same instruction.
  - Agents exec plan, no `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
  - Wait per batch (auto-notified on completion). Report failures.
@@ -481,11 +356,10 @@ Per-todo/re-verify: `satisfied_ids = []`. Each completed todo (excl `manual_skip
 
  After: `len >= 2` → `todo_batch_complete`. `== 1` → `todo_complete`.
 
- Recursive → `--no-pipeline --careful --no-worktree`. Max depth 2. Depth >= 2 → refuse.
+ Recursive → `--careful`. Max depth 2. Depth >= 2 → refuse.
 
 All fast → post-run summary w/ `git diff HEAD~N`.
 
-Clear `executing_agents = {}`.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 **Phase C5 — Worktree cleanup** (if `worktree_enabled`, always runs; no TaskCreate when skipped):

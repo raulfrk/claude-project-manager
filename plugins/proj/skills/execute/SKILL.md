@@ -2,7 +2,7 @@
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
 allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, AskUserQuestion
-argument-hint: "[todo-id | range] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] [--max-parallel N] [--no-tasks] e.g. 1 or 2-4"
+argument-hint: "[todo-id | range] [--no-verify] [--resume] [--fast|--careful] [--max-parallel N] [--no-tasks] e.g. 1 or 2-4"
 ---
 
 
@@ -12,60 +12,34 @@ Execute todo(s): $ARGUMENTS
 
 **Scope from $ARGUMENTS:**
 - Parse `--no-verify` → skip verification (4a).
-- Parse `--full-context` → include CLAUDE.md/NOTES.md in agent ctx.
-- Parse `--trust N` (0-3). Unset → `mcp__proj__config_load` → `team_mode.trust_level` (default 1).
- - Trust 0 (supervised): per-todo approval, sequential.
- - Trust 1 (guided): sequential plan approval + bulk confirm before exec. Default Pattern A.
- - Trust 2 (autonomous): auto-approve plans, skip `ExitPlanMode` review.
- - Trust 3 (full-auto): skip Phase 1 entirely. Agents get ctx only, no plans.
 - Parse `--resume` → resume from checkpoint. See Resume checkpoint below.
-- Parse `--no-pipeline` → disable plan-while-executing pipeline (default: enabled).
 - Parse `--fast`/`--careful` — mutually exclusive, last wins, default `--careful`.
 - `--balanced` → ERROR: "balanced removed, use --careful"
 - `--paranoid` → ERROR: "paranoid removed, use --careful --max-parallel 1"
-- Parse `--force-plan` → force FULL REVIEW despite complexity.
-- Parse `--batch-approve` → auto-approve all speculative plans.
-- Parse `--worktree` / `--no-worktree` → enable/disable worktree isolation.
 - `--no-tasks`: disable all TaskCreate calls. Use when you want clean output without task tracking.
 
 Derive: `tasks_enabled = "--no-tasks" not in ARGUMENTS`
-Derive: `worktree_enabled` from flags + config (`worktree_isolation` default).
+Derive: `worktree_enabled` from config (`worktree_isolation` default).
 Derive: `quality_level` from flags.
 
-Worktree lifecycle (Phase 1.5/2.5/5 cleanup) orchestrated by `/proj:run`. Direct execute w/ `--worktree` → caller manages lifecycle. Standalone → use `/proj:run`.
+Worktree lifecycle (Phase 1.5/2.5/5 cleanup) orchestrated by `/proj:run`. Direct execute w/ worktree → caller manages lifecycle. Standalone → use `/proj:run`.
 
 **Quality Level Param Mapping:**
 
 | Parameter | --fast | --careful |
 |-----------|--------|-----------|
 | gate_override | auto-execute (tag-immune) | smart-gate + full-review |
-| batch_approve | auto | disabled |
-| speculative_planning | enabled | disabled |
 | verification_mode | skip | enhanced |
 | max_parallel | 20 | 10 |
 | satisfaction | skip (auto-complete) | per-todo |
 | preflight | N/A (run-only) | N/A (run-only) |
 | refine | N/A (run-only) | N/A (run-only) |
-| pattern_detection | auto-approve | disabled |
 | worktree | from config (worktree_isolation) | from config (worktree_isolation) |
 | overlap_action | auto-proceed | auto-serialize |
 
-Derive: `pipeline_enabled = not no_pipeline_flag`
-
 **Flag compatibility:**
-- `--fast --force-plan` → ERROR: "Cannot combine --fast with --force-plan."
-- `--careful --batch-approve` → careful wins, batch approve disabled (warn).
-- `--force-plan --batch-approve` → ERROR: "Cannot combine --force-plan with --batch-approve."
 - `--no-verify --careful` → WARNING: "--no-verify overrides --careful's enhanced verification." Verification skipped.
-- `--fast --steps refine` → ERROR (execute lacks refine).
-- `--batch-approve --no-pipeline` → Allowed.
-- `--careful --no-pipeline` → Allowed.
-- `--fast --no-pipeline` → Redundant warning.
-- `--force-plan --careful` → Redundant warning.
 - `--no-verify --fast` → Redundant.
-- `--force-plan --trust 3` → ERROR: "Cannot combine --force-plan with --trust 3."
-- `--worktree --no-interactive` → Allowed. Auto-resolve conflicts only.
-- `--fast --worktree` → Allowed: coexist.
 - Empty → `mcp__proj__todo_list(status="in_progress")`; if none, `todo_list(status="ready")`. Show results, proceed w/ first (or ask if multiple).
 - Single ID (e.g. `1`) → execute that todo
 - Range (e.g. `2-4`) → execute those todos
@@ -80,9 +54,9 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
 
 > Pre-execute preflight: via `/proj:run` only (Phase C0.5/C0.5b). Direct `/proj:execute` skips preflight. See `plugins/proj/skills/run/SKILL.md` Phase C0.5.
 
-**3a. Smart gate scoring** (skip if quality_level == fast w/ auto-execute, or --force-plan):
+**3a. Smart gate scoring** (skip if quality_level == fast w/ auto-execute):
 
- File-impact estimation (for dims 1-2 w/o speculative plan):
+ File-impact estimation (for dims 1-2):
  Spawn `subagent_type="file-discovery"` read-only Task agent w/: todo ctx, reqs, research.
  Agent estimates: files modified/created, dirs involved.
  Wait. Use results for dims 1 (file count), 2 (dir spread).
@@ -110,8 +84,6 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  - AUTO-EXECUTE (0-3): git tag `pre-auto-execute-{todo_id}`. Skip plan, exec w/ ctx.
  - LIGHT REVIEW (4-7): 1-line summary + `Proceed? [Y/n]` (default yes).
  - FULL REVIEW (8-14): Full `EnterPlanMode`/`ExitPlanMode`.
-
- `--force-plan` → always FULL REVIEW.
 
 **3b. Plan creation** (respects trust, skipped if AUTO-EXECUTE):
 (only if tasks_enabled) `TaskCreate(title="Phase C1: Plan — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C1", "kind": "phase_task"})` → store as `task_C1_id` → `TaskUpdate(status="in_progress")`
@@ -221,7 +193,7 @@ After verification: (only if tasks_enabled) `TaskUpdate(task_C2a_id, status="com
  - `Skill("proj:define", args="<id>")` (existing reqs/research kept — non-destructive)
  - After define: if decomposable → `Skill("proj:decompose", args="<id>")`
  - `Skill("proj:execute", args="<id>")`
- - Satisfaction-driven recursive run: enforce `--no-pipeline --careful --no-worktree`. Max recursion depth: 2.
+ - Satisfaction-driven recursive run: enforce `--careful`. Max recursion depth: 2.
  - Re-ask on orig todo (→ 5a)
  d. `mcp__proj__todo_complete`
  - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
@@ -235,28 +207,11 @@ After verification: (only if tasks_enabled) `TaskUpdate(task_C2a_id, status="com
 
 **Pattern A — Parallel exec (independent todos):**
 
-**Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
-
-(only if tasks_enabled) `TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0", "kind": "phase_task"})` → store as `task_C0_id` → `TaskUpdate(status="in_progress")`
-Pass `parent_task_id=task_C0_id` to agents spawned in this phase.
-
-Each todo → `subagent_type="speculative-planner"` read-only Agent w/ `run_in_background=true`:
-- Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
-
-Agent fails → exclude todo, fall back to sequential planning.
-Store in `speculative_plans[todo_id]`.
-
-`--batch-approve` → auto-approve all. Display: `Batch-approved N speculative plans.`
-
-Wait for all agents (auto-notified on completion).
-After speculative planning: (only if tasks_enabled) `TaskUpdate(task_C0_id, status="completed")`. Failure → `TaskUpdate(task_C0_id, status="failed")`.
-
 **Phase 1 — Plan (sequential, main conversation):**
 
 Skip if trust 3 → Phase 2 w/ ctx only.
 
-Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `manual_skipped_ids = []`.
 
 (only if tasks_enabled) `TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1", "kind": "phase_task"})` → store as `task_C1_id` → `TaskUpdate(status="in_progress")`
 Pass `parent_task_id=task_C1_id` to agents spawned in this phase.
@@ -265,7 +220,7 @@ Each todo in range:
 **1.** `todo_check_executable` — "⚠️" → skip: `⚠️ Todo <id> [manual] — skipped execute`.
 **2.** `proj_get_todo_context(todo_id, include_parent=true)`.
 **3.** `proj_search_knowledge(query=<todo title>, scope=all)`. Snippets → "### Related Context". None → skip.
-**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
+**3a. Smart gate scoring** (skip if fast+auto-execute):
 
  Complexity score (0-14), 7 dimensions:
 
@@ -285,7 +240,7 @@ Each todo in range:
 
  Critical-path guard: planned file matches `*.env*`, `*auth*`, `*secret*`, `*credential*`, `Dockerfile`, `.github/workflows/*`, `pyproject.toml`, `settings.json` → min LIGHT REVIEW.
 
- Gate: AUTO-EXECUTE (0-3) → git tag, skip plan. LIGHT REVIEW (4-7) → 1-line + `Proceed? [Y/n]`. FULL REVIEW (8-14) → `EnterPlanMode`/`ExitPlanMode`. `--force-plan` → always FULL.
+ Gate: AUTO-EXECUTE (0-3) → git tag, skip plan. LIGHT REVIEW (4-7) → 1-line + `Proceed? [Y/n]`. FULL REVIEW (8-14) → `EnterPlanMode`/`ExitPlanMode`.
 
 **3b.** `proj_decision_log(action="search", decision=<todo title>, project_name)`. Results → "### Prior Decisions".
 `EnterPlanMode`. Plan: files, changes, order, testing. Include Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
@@ -295,16 +250,10 @@ Each todo in range:
  - Trust 2: Skip `ExitPlanMode`. Display: `Plan auto-approved (trust 2): <summary>`.
 **4a.** After approval: `proj_decision_log(action="add", decision=<approach>, tags="plan", todo_id)`.
 **5.** Store in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust != 3:
- `len(executing_agents) >= max_parallel` → wait for one to complete.
- Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`: todo, reqs, research, parent ctx, plan. Instruction: implement plan, do NOT call `todo_complete`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
 After plan phase: (only if tasks_enabled) `TaskUpdate(task_C1_id, status="completed")`.
-
-**Cross-review** (careful AND N > 1):
-One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. Wait for all agents.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract "Files to modify/create" from each plan.
@@ -354,16 +303,10 @@ Enforce max_parallel from quality_level mapping.
  One-way: Task completion ≠ proj todo completion. Satisfaction loop handles that.
 
 **2.** Single batch of independent todos:
- IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures.
- All failed → "All N agents in batch failed. (1) Retry (2) Skip (3) Stop." Handle choice; skip satisfaction.
- ELSE:
- - **NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
  - Display: `Executing batch: todos <id1>, <id2>, ...`
  - N roles per target → N individual agents.
- - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx.
  - `worktree_enabled` + todo has `worktree_path`: include `worktree_path`, `worktree_branch` in ctx. Instruction: exec in worktree dir. Prefix commits `[todo-{id}]`.
- - Pattern group todo → include: "Part of pattern group (N similar). Common pattern: <normalized>. Implement consistently."
  - Agents exec plan as-is. Do NOT call `todo_complete`. Issue not in plan → return `{status: "escalation_needed", issue: "<description>"}`. Do NOT improvise. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
  - Wait for all agents (auto-notified on completion). Report failures.
  - Write checkpoint to `<tracking_dir>/<project>/.team-state/checkpoint.yaml`:
@@ -411,7 +354,7 @@ After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(st
 Each completed todo (excl manual-skipped + failed):
 **1.** Review agent output.
 **2.** Satisfaction loop (5a-5d).
-Clear `executing_agents = {}`. Report summary incl skipped/failed.
+Report summary incl skipped/failed.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 
@@ -421,7 +364,7 @@ Phase 1 — Plan (sequential, main conversation):
 
 Skip if trust 3 → Phase 2 w/ ctx only.
 
-Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `manual_skipped_ids = []`.
 
 `TaskCreate(title="Phase C1: Plan — batch (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -429,26 +372,20 @@ Each todo:
 **1.** `todo_check_executable` — "⚠️" → skip.
 **2.** `proj_get_todo_context(todo_id, include_parent=true)`.
 **3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
-**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
+**3a. Smart gate scoring** (skip if fast+auto-execute):
 
  Complexity score (0-14), same 7-dimension table.
  Same eval order: Tag overrides → score → critical-path guard.
  Same tag overrides + critical-path guard rules.
- Same gate routing: AUTO-EXECUTE (0-3) / LIGHT (4-7) / FULL (8-14). `--force-plan` → FULL.
+ Same gate routing: AUTO-EXECUTE (0-3) / LIGHT (4-7) / FULL (8-14).
 
 **3b.** `proj_decision_log(action="search", ...)`. Results → "### Prior Decisions".
 `EnterPlanMode`. Plan w/ Related Context + Prior Decisions. (Skip if AUTO-EXECUTE.)
 **4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next. Trust 2 → auto-approve.
 **4a.** After approval: `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
 **5.** Store in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust != 3:
- `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`: todo, reqs, research, parent, plan. Do NOT `todo_complete`. Store in `executing_agents[todo_id]`.
 
 After plan phase: `TaskUpdate(status="completed")`.
-
-**Cross-review** (careful AND N > 1):
-One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews plan (i+1) % N. N=1 → skip. Output: risk (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. Wait for all agents.
 
 Phase 2 — Execute (Task agents):
 
@@ -456,15 +393,9 @@ Phase 2 — Execute (Task agents):
 
 Enforce max_parallel.
 
-IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures.
- All failed → "All N failed. (1) Retry (2) Skip (3) Stop."
-ELSE:
-**NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
-After plans approved (or skipped trust 3), spawn one `subagent_type="implementer"` Agent per todo (excl manual-skipped) w/ `run_in_background=true`.
+Spawn one `subagent_type="implementer"` Agent per todo (excl manual-skipped) w/ `run_in_background=true`.
 Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
-Pattern group → include pattern info.
 Agents impl per plan. Do NOT `todo_complete`.
 Wait for all agents (auto-notified on completion).
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
@@ -502,7 +433,7 @@ Phase 3 — Satisfaction (sequential):
 Each completed todo (excl manual-skipped):
 **1.** Review agent output.
 **2.** Satisfaction loop (5a-5d).
-Clear `executing_agents = {}`. Report summary.
+Report summary.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 **Range w/ dependencies:**
@@ -512,22 +443,11 @@ After satisfaction: `TaskUpdate(status="completed")`.
 
 **Pattern A — Parallel exec (w/ deps):**
 
-**Phase C0 — Speculative planning** (quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
-
-`TaskCreate(title="Phase C0: Speculative Planning — deps batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
-
-Each todo → `subagent_type="speculative-planner"` read-only Agent w/ `run_in_background=true`:
-- Output: JSON plan `{prose, actions: [{type, file}]}`
-- PLAN_ESCALATION: agents CANNOT call EnterPlanMode/ExitPlanMode. Agent returns `{status: "plan_escalation", plan: "<plan>"}`. Parent reads result → EnterPlanMode → ExitPlanMode → user approves/rejects → spawns new Agent w/ resolution ctx if rejected.
-Fails → exclude, fall back to sequential. Store in `speculative_plans[todo_id]`.
-`--batch-approve` → auto-approve. Wait for all agents.
-After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
-
 **Phase 1 — Plan (sequential, dependency order):**
 
 Skip if trust 3 → Phase 2 w/ ctx only.
 
-Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `manual_skipped_ids = []`.
 
 `TaskCreate(title="Phase C1: Plan — deps batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -535,7 +455,7 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
 **1.** `todo_check_executable` — "⚠️" → skip.
 **2.** `proj_get_todo_context(todo_id, include_parent=true)`.
 **3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
-**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
+**3a. Smart gate scoring** (skip if fast+auto-execute):
 
  Same 7-dimension table + eval order + tag overrides + critical-path guard + gate routing.
 
@@ -544,15 +464,9 @@ Group todos into dependency batches (topo order). Within-batch = parallel, batch
 **4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next; after all → bulk summary. Trust 2 → auto-approve.
 **4a.** `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
 **5.** Store in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust != 3:
- `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`. Store in `executing_agents[todo_id]`.
 
 After all plans (trust 0-1): bulk approval summary w/ IDs, batch assignments, summaries.
 After plan phase: `TaskUpdate(status="completed")`.
-
-**Cross-review** (careful AND N > 1):
-One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. Wait for all agents.
 
 **File-Overlap Detection** (before Phase 2, skip if trust 3):
 1. Extract file lists from plans. Deps: check overlaps **within each batch** (cross-batch OK — sequential).
@@ -591,16 +505,10 @@ Enforce max_parallel.
  One-way: satisfaction loop handles completion.
 
 **2.** Each batch in dep order:
- IF `pipeline_enabled`:
- Wait for `executing_agents` in batch. Report failures.
- All failed → "(1) Retry (2) Skip (3) Stop."
- ELSE:
- - **NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
  - Display: `Executing batch <N>/<total>: todos <ids>`
  - N roles → N agents.
- - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
+ - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: plan (or ctx trust 3) + reqs + research + parent.
  - `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
- - Pattern group → include pattern info.
  - Agents exec as-is. No `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "<description>"}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx.
  - Wait for batch before next (auto-notified on completion). Report failures.
  - Write checkpoint:
@@ -645,7 +553,7 @@ After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(st
 `TaskCreate(title="Phase SAT: Satisfaction — deps batch", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
 
 Each completed todo (excl manual-skipped + failed): satisfaction loop (5a-5d) before `todo_complete`.
-Clear `executing_agents = {}`. Report summary.
+Report summary.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 
@@ -655,7 +563,7 @@ Phase 1 — Plan (sequential, dep order):
 
 Skip if trust 3 → Phase 2 w/ ctx only.
 
-Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
+Init `approved_plans = {}`, `manual_skipped_ids = []`.
 
 `TaskCreate(title="Phase C1: Plan — deps (fallback)", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
 
@@ -663,7 +571,7 @@ Topo order (respect blocked_by). Each todo:
 **1.** `todo_check_executable` — "⚠️" → skip.
 **2.** `proj_get_todo_context(todo_id, include_parent=true)`.
 **3.** `proj_search_knowledge(query=<title>, scope=all)`. Snippets → "### Related Context".
-**3a. Smart gate scoring** (skip if fast+auto-execute or --force-plan):
+**3a. Smart gate scoring** (skip if fast+auto-execute):
 
  Same 7-dimension table + eval order + tag overrides + critical-path guard + gate routing.
 
@@ -672,14 +580,8 @@ Topo order (respect blocked_by). Each todo:
 **4.** Plan approval by trust: Trust 0 → approve before next. Trust 1 → approve, next. Trust 2 → auto-approve.
 **4a.** `proj_decision_log(action="add", ..., tags="plan", todo_id)`.
 **5.** Store in `approved_plans[todo_id]`.
-**6.** IF `pipeline_enabled` AND trust != 3:
- `len(executing_agents) >= max_parallel` → wait.
- Spawn background `subagent_type="implementer"` Agent w/ `run_in_background=true`. Store in `executing_agents[todo_id]`.
 
 After plan phase: `TaskUpdate(status="completed")`.
-
-**Cross-review** (careful AND N > 1):
-One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews (i+1) % N. N=1 → skip. Output: risk + concerns. HIGH → flag user. Wait for all agents.
 
 Phase 2 — Execute (sequential, dep order):
 
@@ -687,13 +589,8 @@ Phase 2 — Execute (sequential, dep order):
 
 Enforce max_parallel.
 
-IF `pipeline_enabled`:
- Wait for all `executing_agents`. Report failures.
- All failed → "(1) Retry (2) Skip (3) Stop."
-ELSE:
 Exec each per plan (or ctx trust 3), one at time (respect blocked_by). Mark in_progress, impl.
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
-Pattern group → include pattern info.
 
 After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
 
@@ -728,7 +625,6 @@ Phase 3 — Satisfaction (sequential, dep order):
 `TaskCreate(title="Phase SAT: Satisfaction — deps (fallback)", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
 
 Each completed todo: satisfaction loop (5a-5d). Batch completion: collect satisfied IDs → 2+ → single `mcp__proj__todo_batch_complete`. 1 → `mcp__proj__todo_complete`.
-Clear `executing_agents = {}`.
 After satisfaction: `TaskUpdate(status="completed")`.
 
 Root todo exec does NOT auto-recurse into children. Specify child IDs explicitly.
@@ -790,8 +686,6 @@ If `subagent_type="<name>"` not found (agent .md file missing/renamed):
 1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
 2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
 3. Fallback prompts (one-line per agent):
-   - `speculative-planner`: "Read todo ctx + reqs + research. Draft impl plan as JSON {prose, actions: [{type, file}]}. Read-only — no writes."
-   - `drift-reviewer`: "Review plan against reqs. Flag scope drift, missing criteria, unplanned changes. Return risk rating (LOW/MEDIUM/HIGH) + concerns."
    - `implementer`: "Implement approved plan. Read requirements + research, follow plan steps, write code + tests, commit w/ [todo-{id}] prefix."
    - `verification-fixer`: "Fix verification failures. Read report + todo ctx + reqs + plan. Apply targeted fixes, re-run tests."
 
