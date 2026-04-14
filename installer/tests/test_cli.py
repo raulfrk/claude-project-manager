@@ -14,7 +14,6 @@ class TestBuildParser:
         """No flags produces default namespace."""
         parser = build_parser()
         args = parser.parse_args([])
-        assert args.update is False
         assert args.reinstall is False
         assert args.uninstall is False
         assert args.full_cleanup is False
@@ -22,34 +21,15 @@ class TestBuildParser:
         assert args.skip_wizard is False
         assert args.verbose is False
 
-    def test_update_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["--update"])
-        assert args.update is True
-        assert args.reinstall is False
-        assert args.uninstall is False
-
     def test_reinstall_flag(self):
         parser = build_parser()
         args = parser.parse_args(["--reinstall"])
         assert args.reinstall is True
-        assert args.update is False
 
     def test_uninstall_flag(self):
         parser = build_parser()
         args = parser.parse_args(["--uninstall"])
         assert args.uninstall is True
-
-    def test_mutual_exclusion_update_reinstall(self):
-        """--update and --reinstall cannot be combined."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--update", "--reinstall"])
-
-    def test_mutual_exclusion_update_uninstall(self):
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--update", "--uninstall"])
 
     def test_mutual_exclusion_reinstall_uninstall(self):
         parser = build_parser()

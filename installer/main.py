@@ -28,13 +28,10 @@ from installer.plugin_cli import (
     install_plugin,
     remove_marketplace,
     update_plugin,
+    uninstall_plugin,
 )
 from installer.uninstall import cleanup_config_files
 from installer.tui import load_plugins, select_plugins
-from installer.update import (
-    compare_versions,
-    display_version_diff,
-)
 from installer.wizard import run_wizard
 
 # Exit codes
@@ -130,64 +127,6 @@ def _install(args) -> int:
         )
 
     return EXIT_ERROR if n_failed > 0 else EXIT_SUCCESS
-
-
-def _update(args) -> int:
-    """Run the update flow."""
-    console = Console()
-    state = detect_existing()
-    display_detection(state, console)
-
-    if not state.installed_plugins:
-        console.print("[yellow]No installed plugins found. Nothing to update.[/yellow]")
-        return EXIT_SUCCESS
-
-    # Show version diffs
-    diffs = compare_versions(state)
-    display_version_diff(diffs, console)
-
-    if not diffs:
-        return EXIT_SUCCESS
-
-    # Determine which plugins to update
-    plugins = args.plugins if args.plugins else list(diffs.keys())
-    # Filter to only plugins that actually have diffs
-    plugins = [p for p in plugins if p in diffs]
-
-    if not plugins:
-        console.print("[dim]No matching plugins need updating.[/dim]")
-        return EXIT_SUCCESS
-
-    console.print(f"\n[bold]Updating:[/bold] {', '.join(plugins)}")
-    results: dict[str, bool] = {}
-    for name in plugins:
-        try:
-            console.print(f"  Updating [cyan]{name}[/cyan]...")
-            update_plugin(name)
-            console.print(f"  [green]✓[/green] {name} updated")
-            results[name] = True
-        except InstallerError as exc:
-            console.print(f"  [red]✗[/red] {name}: {exc}")
-            if Confirm.ask("  Retry?", default=False):
-                try:
-                    update_plugin(name)
-                    console.print(f"  [green]✓[/green] {name} updated")
-                    results[name] = True
-                except InstallerError as retry_exc:
-                    console.print(f"  [red]✗[/red] {name}: {retry_exc}")
-                    results[name] = False
-            else:
-                results[name] = False
-
-    succeeded = sum(1 for ok in results.values() if ok)
-    failed_count = sum(1 for ok in results.values() if not ok)
-    console.print(
-        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
-    )
-
-    if failed_count:
-        return EXIT_ERROR
-    return EXIT_SUCCESS
 
 
 def _reinstall(args) -> int:
@@ -310,9 +249,7 @@ def main() -> int:
             args.uninstall = True
 
         # Determine mode for TUI routing
-        if args.update:
-            mode = "update"
-        elif args.reinstall:
+        if args.reinstall:
             mode = "reinstall"
         elif args.uninstall:
             mode = "uninstall"
@@ -321,9 +258,7 @@ def main() -> int:
 
         if args.no_tui:
             # Plain Rich-based flow
-            if mode == "update":
-                return _update(args)
-            elif mode == "reinstall":
+            if mode == "reinstall":
                 return _reinstall(args)
             elif mode == "uninstall":
                 return _uninstall(args)

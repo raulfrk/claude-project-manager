@@ -11,7 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser for the installer CLI."""
     parser = argparse.ArgumentParser(
         prog="claude-pm-installer",
-        description="Install, update, or uninstall claude-project-manager plugins.",
+        description="Install, reinstall, or uninstall claude-project-manager plugins.",
     )
 
     parser.add_argument(
@@ -22,11 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Mutually exclusive mode flags
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--update",
-        action="store_true",
-        help="Update installed plugins to the latest version.",
-    )
     mode.add_argument(
         "--reinstall",
         action="store_true",
