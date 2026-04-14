@@ -26,22 +26,8 @@ worktree_isolation: true
 # Note: the yaml key is default_worktree_dir to match WorktreeConfig dataclass.
 default_worktree_dir: "~/worktrees"
 
-# ---------- Advanced tier (proj.yaml) — team_mode ----------
-team_mode:
-  enabled: true
-  max_agents: 30
-  trust_level: 1
-
 # ---------- Advanced tier (proj.yaml) — smart_gate ----------
-smart_gate:
-  enabled: true
-  auto_execute_threshold: 3
-  full_review_threshold: 8
-
-# ---------- Advanced tier (proj.yaml) — resilience ----------
-resilience:
-  max_retries: 2
-  backoff_seconds: 5
+smart_gate: true
 
 # ---------- Advanced tier (proj.yaml) — context_injection ----------
 context_injection:
