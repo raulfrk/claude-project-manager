@@ -1,7 +1,7 @@
 ---
 name: status
 description: Show the current project status, open todos, and recent git activity. Use when asked "what's the project status", "what are my todos", "what should I work on next", or "project overview".
-allowed-tools: mcp__proj__proj_status_context, mcp__proj__proj_search_knowledge, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append
+allowed-tools: mcp__proj__proj_status_context, mcp__proj__proj_search_knowledge, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, TaskList
 context: fork
 agent: general-purpose
 ---
@@ -32,6 +32,21 @@ Show comprehensive status report for active project.
    ### Recent Git Activity
    - abc1234  Fix storage layer (2026-02-26)
    ```
+
+**4. Active Tasks** (only if tasks present):
+
+`TaskList(status="in_progress")` → filter to tasks whose `metadata.proj_run_id` matches active project's in-progress todo IDs (or any proj-related tasks if proj_run_id absent).
+
+If none: omit section.
+
+If tasks present: show after Recent Git Activity:
+```
+### Active Tasks
+  ▸ <Task subject> [phase: <phase>] — <status>
+    ▸ <subtask subject> [in_progress]
+```
+
+Nest subtasks under parent using `metadata.parent_task_id`. Show `kind` badge if `kind == "todo_task"` or `kind == "agent_subtask"`.
 
 ## Prerequisites
 
