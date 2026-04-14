@@ -356,7 +356,7 @@ NOT `--no-interactive` → prompt:
 ```
 
 No children → exec parent directly.
-Has children → invoke `skill: "proj:run-batch"` w/ parent + descendant IDs + same flags.
+Has children → invoke `skill: "proj:execute"` w/ child IDs + same flags.
 
 **5a. Execute (single, no children):**
 
