@@ -63,23 +63,23 @@ Manage project todos. Parse $ARGUMENTS for operation.
  - `/proj:todo list --prio` — open todos grouped by blocking tiers
  - `/proj:todo list all --prio` — all todos incl done, grouped by tiers, completed separate
  - `/proj:todo list --priorities` — alias for --prio
- - Display: nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Order: `_(priority)_ [manual] [blocked by X] [blocks Y]`.
+ - Display: nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Tag matching `group:*` → extract value after `group:` → append `[group:<value>]` at end. Order: `_(priority)_ [manual] [blocked by X] [blocks Y] [group:X]`.
  - Example:
     ```
     - 🔲 **2** — Build API _(high)_
-      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2]
+      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2] [group:623]
       - 🔲 **2.2** — Add auth _(medium)_ [blocked by 2.1]
     - 🔲 **3** — Write skills _(medium)_
     ```
 
 **tree** — todos as hierarchy
  - `mcp__plugin_proj_proj__todo_tree`
- - Nested bullets, 2-space indent. Same icons/bold ID/inline metadata as `list` (incl `[manual]`, `[blocked by X]`/`[blocks Y]`).
+ - Nested bullets, 2-space indent. Same icons/bold ID/inline metadata as `list` (incl `[manual]`, `[blocked by X]`/`[blocks Y]`, `[group:X]`).
  - Example:
     ```
     - ✅ **1** — Implement storage layer _(medium)_
     - 🔲 **2** — Build API _(high)_
-      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2]
+      - 🔄 **2.1** — Design endpoints _(high)_ [manual] [blocks 2.2] [group:623]
       - 🔲 **2.2** — Add auth _(medium)_ [blocked by 2.1]
     - 🔲 **3** — Write tests _(low)_
     ```
