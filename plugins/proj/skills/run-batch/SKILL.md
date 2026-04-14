@@ -1,7 +1,7 @@
 ---
 name: run-batch
 description: Batch/range execution workflow for multiple todos. Extension of run skill.
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add_child, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_notes_append, mcp__proj__todo_notes_patch, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
 argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--max-parallel N] [--no-verify] [--no-interactive] [--with-adversarial-review]"
 ---
 
@@ -90,8 +90,24 @@ After: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed"
 
 **Phase B — Decompose + Refine (parallel agents):**
 `TaskCreate(title="Phase B: Decompose — batch", metadata={"phase": "B"})` → `TaskUpdate(status="in_progress")`
-Each batch in dep order: one Agent per todo w/ `run_in_background=true`. Runs `agent_steps` autonomously. Plan gap → escalation (see `_shared/errors.md`). Wait per batch, report failures → `failed-agents.yaml`.
-After decompose: refresh via `mcp__proj__todo_tree`. `TaskUpdate(status="completed")`.
+Each batch in dep order:
+- If child IDs already known, write TodoWrite to track progress before spawning:
+  ```
+  TodoWrite([
+    {content: "<child-id>: <title>", status: "pending"},
+    ...
+  ])
+  ```
+  (Skip pre-spawn TodoWrite if no children known yet.)
+- One Agent per todo w/ `run_in_background=true`. Runs `agent_steps` autonomously. Decompose agents append result via `todo_notes_append(parent_id, 'decompose_result: {"created_ids": [...]}')`. Plan gap → escalation (see `_shared/errors.md`). Wait per batch, report failures → `failed-agents.yaml`.
+
+After agents complete — collect created IDs per todo (replaces `todo_tree` refresh):
+1. `mcp__proj__todo_get(parent_id)` → read `.notes` → find last line matching `decompose_result:` → parse JSON → extract `created_ids` → store as `decomposed_ids[todo_id]`.
+2. Fallback (no `decompose_result` found): `mcp__proj__todo_list(status="pending")` → filter by `group:<parent_id>` tag → store as `decomposed_ids[todo_id]`.
+
+Update TodoWrite: mark each `decomposed_ids[todo_id]` entry as `in_progress` when its execute agent launches; mark `completed` when merged.
+
+`TaskUpdate(status="completed")`.
 
 **Phase B.75 — Refine** (if `effective_quality(todo_id) == careful` AND `refine` in steps AND NOT `--no-interactive`):
 fast → skip. careful → auto-enable. (No TaskCreate when skipped.)
@@ -130,6 +146,7 @@ All pass → silent. After: `TaskUpdate(status="completed")`. Failure → `faile
 `TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
 Resume checkpoint (`--resume`): same 4-step logic as run/SKILL.md §5ii-T.
 Task mapping (one-way): `TaskCreate` per todo, `addBlockedBy` rels. Only if tasks_enabled.
+Children source: use `decomposed_ids[todo_id]` from Phase B if available; fallback to children from `todo_get` if `decomposed_ids` absent.
 Each batch in dep order: one Agent per todo w/ `run_in_background=true`. Gets plan (or ctx/exec instructions) + reqs + research + parent ctx. Worktree → same instruction. Escalation on plan gap → see `_shared/errors.md`. Wait per batch, report failures. Write checkpoint per execute/SKILL.md §Shared. Failures → `failed-agents.yaml`.
 Dirty main → warn merge conflicts.
 After: `TaskUpdate(status="completed")`. Failure → `failed`.
