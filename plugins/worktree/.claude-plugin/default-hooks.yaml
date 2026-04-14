@@ -17,24 +17,6 @@ hooks:
     blocking: true
     condition: "sandbox_integration"
 
-  - id: worktree-on-wt-create-zoxide
-    trigger_tool: wt_create
-    target_tool: zoxide_boost
-    server: zoxide
-    param_mapping:
-      path: "${worktree_path}"
-    blocking: true
-    condition: "zoxide_integration"
-
-  - id: worktree-on-wt-remove-zoxide
-    trigger_tool: wt_remove
-    target_tool: zoxide_remove
-    server: zoxide
-    param_mapping:
-      path: "${worktree_path}"
-    blocking: true
-    condition: "zoxide_integration"
-
   - id: worktree-on-wt-merge-remove
     trigger_tool: wt_merge
     target_tool: wt_remove
