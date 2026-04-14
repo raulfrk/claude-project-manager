@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add_child, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_batch_add_children, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__proj__tracking_git_flush, Skill, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__todo_list, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__proj__tracking_git_flush, Skill, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -20,7 +20,7 @@ If `task_id` passed in args: create subtasks under it. Else standalone Tasks.
 
 2. `TaskCreate(title="Design breakdown", activeForm="Designing child structure", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → propose structure → completed
 
-3. `TaskCreate(title="Create child todos", activeForm="Creating child todos", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → call todo_batch_add_children → completed
+3. One `TaskCreate` per child todo being created: `TaskCreate(title="Create flat todo: <child-title>", activeForm="Creating flat todos", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → [todo_add call] → completed
 
 Skip if `--no-tasks` in args.
 
@@ -102,11 +102,30 @@ Decompose todo $ARGUMENTS into sub-todos.
 
 **9.** Ask: "Does this breakdown look good? Any changes?" User can add, remove, rename, restructure at any level.
 
-**10.** Create confirmed todos via `mcp__proj__todo_batch_add_children`:
- - Call once per parent w/ `children` (list of `{title, priority, tags, notes}`) and `blocking_pairs` (list of `[blocker_index, blocked_index]`).
- - Multi-level: call root-level children first, then each parent w/ nested children (via returned IDs).
+**Concurrent guard**: call `mcp__proj__todo_list(status="pending")`, filter client-side by tag `group:<parent-id>`.
+If any found → warn: "Decompose already ran for <id> — <N> group-tagged todos exist. Run /proj:flatten-children first or skip." Stop.
 
-**11.** Show final tree via `mcp__proj__todo_tree`.
+**10.** Create confirmed todos via sequential `mcp__proj__todo_add` calls:
+ - Each todo: `title`, `priority`, `tags=[...existing + "group:<parent-id>"]`, `notes`
+ - Track `created_ids = []` as you go.
+ - On any `todo_add` failure: rollback — call `mcp__proj__todo_delete` on all previously created IDs in reverse order; surface error; stop.
+ After all `todo_add` calls succeed: set `blocked_by` edges via `mcp__proj__todo_block` for each dep pair (replaces `blocking_pairs`).
+
+ **TaskCreate tracking**: for each child being created:
+ `TaskCreate(title="Create flat todo: <child-title>", activeForm="Creating todo", metadata={"kind": "agent_subtask"})` → `in_progress` → [todo_add call] → `completed`
+ After all created:
+ `TaskCreate(title="Set blocked_by edges", metadata={"kind": "agent_subtask"})` → `in_progress` → [todo_block calls] → `completed`
+
+**10b.** Write decompose result to parent notes:
+`mcp__proj__todo_notes_append(parent_id, text='decompose_result: {"created_ids": ["<id1>","<id2>",...]}')`
+This allows run/SKILL.md Phase B to collect created IDs without refreshing todo_tree.
+
+`TaskCreate(title="Write decompose_result", activeForm="Writing result", metadata={"kind": "agent_subtask"})` → `in_progress` → [notes_append] → `completed`
+
+**11.** Show created flat todos:
+- 🔲 **<id>** — title _(priority)_ [group:<parent-id>] [blocks X]
+- 🔲 **<id>** — title _(priority)_ [group:<parent-id>] [blocked by X]
+(No tree view — these are top-level siblings, not children)
 
 **12.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Decompose: {todo-id}")`.
 
@@ -120,7 +139,7 @@ Decompose todo $ARGUMENTS into sub-todos.
 - No todo ID → show usage msg, stop.
 - Todo not found → show err from `todo_get`, stop.
 - Already atomic → `Skipping decompose for <id> — already atomic.`, stop.
-- Batch add failure → show err from `todo_batch_add_children`, stop.
+- `todo_add` failure → rollback all created IDs via `todo_delete` in reverse order; surface err; stop.
 
 ## Output
 
