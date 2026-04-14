@@ -91,14 +91,14 @@ class TestUninstallFlow:
 
             # Step 5: With mocked plugin_cli functions the worker completes
             # instantly, so ProgressScreen may already have auto-dismissed.
-            # Verify the flow executed by checking uninstall_plugin was called.
+            # Verify the flow executed by checking remove_marketplace was called.
             for _ in range(20):
                 await pilot.pause()
-                if mock_plugin_cli["uninstall_plugin"].called:
+                if mock_plugin_cli["remove_marketplace"].called:
                     break
 
-            assert mock_plugin_cli["uninstall_plugin"].called, (
-                "uninstall_plugin was never called — uninstall flow did not complete"
+            assert mock_plugin_cli["remove_marketplace"].called, (
+                "remove_marketplace was never called — uninstall flow did not complete"
             )
 
     @pytest.mark.asyncio
@@ -174,11 +174,11 @@ class TestUninstallFlow:
             # Verify the uninstall flow executed.
             for _ in range(20):
                 await pilot.pause()
-                if mock_plugin_cli["uninstall_plugin"].called:
+                if mock_plugin_cli["remove_marketplace"].called:
                     break
 
-            assert mock_plugin_cli["uninstall_plugin"].called, (
-                "uninstall_plugin was never called — uninstall flow did not complete"
+            assert mock_plugin_cli["remove_marketplace"].called, (
+                "remove_marketplace was never called — uninstall flow did not complete"
             )
 
     @pytest.mark.asyncio
