@@ -207,17 +207,38 @@ def discover_and_register(
                 )
                 continue
 
+            # Check for named ID in the definition
+            def_id = str(hook_def.get("id", ""))
+
             existing = registry.find_duplicate(trigger, target, server)
             if existing is not None:
-                # Drift detection: update auto hooks whose content has changed
-                if existing.source == _AUTO_SOURCE and _hook_content_differs(existing, hook_def):
-                    existing.update_from(hook_def)
-                    updated_count += 1
-                continue
+                # Dedup: named hook replaces numeric hook-NNN duplicate
+                if def_id and not def_id.startswith("hook-") and existing.is_numeric_id:
+                    logger.info(
+                        "Replacing numeric hook %s with named hook %s "
+                        "(same trigger=%s target=%s server=%s)",
+                        existing.id,
+                        def_id,
+                        trigger,
+                        target,
+                        server,
+                    )
+                    registry.remove_by_id(existing.id)
+                    # Fall through to register the named hook below
+                else:
+                    # Drift detection: update auto hooks whose content has changed
+                    if existing.source == _AUTO_SOURCE and _hook_content_differs(
+                        existing, hook_def
+                    ):
+                        existing.update_from(hook_def)
+                        updated_count += 1
+                    continue
 
             # Build Hook from definition, forcing source="auto"
             hook_def["source"] = _AUTO_SOURCE
-            hook_def["id"] = registry.next_id()
+            # Preserve named IDs from default-hooks.yaml; generate numeric only as fallback
+            if not def_id or def_id.startswith("hook-"):
+                hook_def["id"] = registry.next_id()
             hook = Hook.from_dict(hook_def)
             registry.hooks.append(hook)
 
@@ -272,17 +293,30 @@ def run_discovery(
 
     registry = storage.load()
 
+    # Clean up existing numeric duplicates before discovery
+    deduped_ids = registry.deduplicate_numeric_hooks()
+    if deduped_ids:
+        logger.info(
+            "Removed %d numeric duplicate hook(s): %s",
+            len(deduped_ids),
+            ", ".join(deduped_ids),
+        )
+
     stats = discover_and_register(registry, root=root, glob_pattern=glob_pattern)
     urls_added = populate_server_urls(registry)
 
     total_registered = sum(s["registered"] for s in stats.values())
     total_updated = sum(s["updated"] for s in stats.values())
 
-    if stats or urls_added or total_updated:
+    if stats or urls_added or total_updated or deduped_ids:
         storage.save(registry)
 
     total_plugins = len(stats)
     lines = [f"Hook auto-discovery: scanned plugins, found {total_plugins} with default hooks."]
+    if deduped_ids:
+        lines.append(
+            f"Deduplicated: removed {len(deduped_ids)} numeric hook(s): {', '.join(deduped_ids)}"
+        )
     for plugin_name, counts in stats.items():
         parts = []
         if counts["registered"]:

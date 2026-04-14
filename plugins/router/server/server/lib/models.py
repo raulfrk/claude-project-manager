@@ -124,6 +124,17 @@ class Hook:
             and self.server == server
         )
 
+    @property
+    def is_numeric_id(self) -> bool:
+        """Return True if this hook has an auto-generated numeric ID (hook-NNN)."""
+        if not self.id.startswith("hook-"):
+            return False
+        try:
+            int(self.id[5:])
+            return True
+        except ValueError:
+            return False
+
 
 @dataclass
 class HookRegistry:
@@ -197,6 +208,38 @@ class HookRegistry:
         before = len(self.hooks)
         self.hooks = [h for h in self.hooks if h.id != hook_id]
         return len(self.hooks) < before
+
+    def find_all_duplicates(self, trigger_tool: str, target_tool: str, server: str) -> list[Hook]:
+        """Find ALL hooks matching the given trigger+target+server."""
+        return [h for h in self.hooks if h.matches(trigger_tool, target_tool, server)]
+
+    def deduplicate_numeric_hooks(self) -> list[str]:
+        """Remove numeric hook-NNN entries that duplicate a named hook.
+
+        For each (trigger_tool, target_tool, server) group containing both
+        numeric and named hooks, remove the numeric ones.
+
+        Returns list of removed hook IDs.
+        """
+        from collections import defaultdict
+
+        groups: defaultdict[tuple[str, str, str], list[Hook]] = defaultdict(list)
+        for h in self.hooks:
+            groups[(h.trigger_tool, h.target_tool, h.server)].append(h)
+
+        removed_ids: list[str] = []
+        for _key, group_hooks in groups.items():
+            named = [h for h in group_hooks if not h.is_numeric_id]
+            numeric = [h for h in group_hooks if h.is_numeric_id]
+            if named and numeric:
+                for h in numeric:
+                    removed_ids.append(h.id)
+
+        if removed_ids:
+            remove_set = set(removed_ids)
+            self.hooks = [h for h in self.hooks if h.id not in remove_set]
+
+        return removed_ids
 
 
 __all__ = ["Hook", "HookRegistry"]
