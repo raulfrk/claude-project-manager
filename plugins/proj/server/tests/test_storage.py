@@ -8,10 +8,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import yaml
 
+import server.lib.migration as _mig
 from server.lib import storage
 from server.lib.models import ProjConfig, ProjectEntry, ProjectIndex, RepoEntry, Todo
+
+
+@pytest.fixture(autouse=True)
+def clear_migration_cache():
+    _mig._migrated_projects.clear()
+    yield
+    _mig._migrated_projects.clear()
 
 
 @pytest.fixture()
@@ -184,7 +191,7 @@ class TestConcurrentWrites:
         ]
 
     def test_two_concurrent_writes_leave_valid_yaml(self, tmp_cfg: ProjConfig) -> None:
-        """Two threads simultaneously calling save_todos must not corrupt the file."""
+        """Two threads simultaneously calling save_todos must not corrupt the DB."""
         (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
 
         errors: list[Exception] = []
@@ -210,27 +217,17 @@ class TestConcurrentWrites:
 
         assert errors == [], f"Unexpected exceptions during concurrent writes: {errors}"
 
-        todos_file = storage.todos_path(tmp_cfg, "myapp")
-        assert todos_file.exists(), "todos.yaml must exist after writes"
-
-        raw = todos_file.read_text()
-        assert raw.strip() != "", "todos.yaml must not be empty"
-
-        parsed = yaml.safe_load(raw)
-        assert isinstance(parsed, dict), "File content must be a valid YAML mapping"
-        assert "todos" in parsed, "Parsed YAML must contain 'todos' key"
-        assert isinstance(parsed["todos"], list), "'todos' must be a list"
-        assert len(parsed["todos"]) > 0, "At least one write must have persisted todos"
+        loaded = storage.load_todos(tmp_cfg, "myapp")
+        assert len(loaded) > 0, "At least one write must have persisted todos"
+        assert all(isinstance(t, Todo) for t in loaded), "All items must be Todo instances"
 
     def test_two_concurrent_writes_one_wins_completely(self, tmp_cfg: ProjConfig) -> None:
-        """After concurrent writes, file contains exactly one
-        writer's complete data (no interleaving).
+        """After concurrent writes, SQLite contains exactly one writer's complete data.
 
-        Because _write_yaml uses a single fixed .tmp path, two simultaneous writes
-        may race: the loser's tmp.replace() will fail with FileNotFoundError after the
-        winner already moved the file.  The test verifies:
-          - at least one write succeeded (file exists and is valid YAML)
-          - no partial/mixed data appears (atomic rename guarantees all-or-nothing)
+        SQLite WAL mode serialises concurrent writes, so both writers succeed and
+        the last writer's data is in the DB.  The test verifies:
+          - no exceptions from either writer
+          - loaded todos are a valid list of Todo instances
         """
         (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
 
@@ -258,20 +255,17 @@ class TestConcurrentWrites:
         t1.join()
         t2.join()
 
-        # At most one writer can fail (the one that lost the tmp-file race)
-        assert len(errors) <= 1, f"More than one writer raised an exception: {errors}"
-
-        todos_file = storage.todos_path(tmp_cfg, "myapp")
-        assert todos_file.exists(), "todos.yaml must exist — at least one write must have succeeded"
+        assert errors == [], f"Writers raised exceptions: {errors}"
 
         loaded = storage.load_todos(tmp_cfg, "myapp")
+        assert len(loaded) > 0, "At least one write must have persisted todos"
         ids = {t.id for t in loaded}
 
         # All IDs must belong to one writer only — no mixing of A and B data
         all_a = all(tid.startswith("A") for tid in ids)
         all_b = all(tid.startswith("B") for tid in ids)
         assert all_a or all_b, (
-            f"File contains mixed data from both writers, indicating corruption: {ids}"
+            f"DB contains mixed data from both writers, indicating corruption: {ids}"
         )
 
     def test_read_during_write_returns_consistent_snapshot(self, tmp_cfg: ProjConfig) -> None:
@@ -353,34 +347,97 @@ class TestArchiveAndRemoveTodos:
         ids = {t.id for t in archived}
         assert ids == {"old", "new"}
 
-    def test_second_rename_failure_leaves_todo_in_archive(self, tmp_cfg: ProjConfig) -> None:
-        """If the active-file rename fails after archive succeeds, the todo is preserved in archive.
+    def test_transaction_failure_rolls_back_completely(self, tmp_cfg: ProjConfig) -> None:
+        """If archive_and_remove_todos raises mid-transaction, SQLite rolls back entirely.
 
-        This is the key data-safety property: failure between the two renames leaves
-        the todo in the archive (recoverable duplication) rather than lost entirely.
+        SQLite transactions are all-or-nothing: a simulated connection error before any
+        writes begin must leave both active and archive tables unchanged (todo stays in
+        active, archive stays empty).
         """
+        from server.lib.db import get_connection
+
         (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
         todo = self._make_todo("42", "Important task")
         storage.save_todos(tmp_cfg, "myapp", [todo])
 
         call_count = 0
-        original_replace = Path.replace
+        original_get_connection = get_connection
 
-        def replace_side_effect(self: Path, target: Path) -> Path:
+        def get_connection_side_effect(db_file):
             nonlocal call_count
             call_count += 1
-            if call_count == 2:
-                raise OSError("simulated disk error on second rename")
-            return original_replace(self, target)
+            if call_count == 1:
+                raise OSError("simulated DB connection error")
+            return original_get_connection(db_file)
 
         with (
-            patch.object(Path, "replace", replace_side_effect),
-            pytest.raises(OSError, match="simulated disk error"),
+            patch("server.lib.sql_archive.get_connection", get_connection_side_effect),
+            pytest.raises(OSError, match="simulated DB connection error"),
         ):
             storage.archive_and_remove_todos(tmp_cfg, "myapp", remaining=[], to_archive=[todo])
 
-        # Archive rename (call 1) succeeded — todo must be in archive.yaml
-        archived = storage.load_archived_todos(tmp_cfg, "myapp")
-        assert any(t.id == "42" for t in archived), (
-            "Todo must be preserved in archive even when active-file rename fails"
+        # Connection failed before writes — todo must still be in active, archive must be empty
+        active = storage.load_todos(tmp_cfg, "myapp")
+        assert any(t.id == "42" for t in active), (
+            "Todo must remain in active when archive operation fails"
         )
+        archived = storage.load_archived_todos(tmp_cfg, "myapp")
+        assert not any(t.id == "42" for t in archived), (
+            "Archive must be empty when archive operation fails before writing"
+        )
+
+
+# ── New SQLite-specific tests ──────────────────────────────────────────────────
+
+
+def test_save_load_todos_sqlite(tmp_cfg: ProjConfig) -> None:
+    """Save 5 todos via save_todos, load via load_todos, assert all 5 present w/ correct fields."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    todos = [
+        Todo(
+            id=f"T{i:03d}",
+            title=f"Todo number {i}",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
+        for i in range(1, 6)
+    ]
+    storage.save_todos(tmp_cfg, "myapp", todos)
+    loaded = storage.load_todos(tmp_cfg, "myapp")
+    assert len(loaded) == 5
+    loaded_ids = {t.id for t in loaded}
+    assert loaded_ids == {f"T{i:03d}" for i in range(1, 6)}
+    loaded_titles = {t.title for t in loaded}
+    assert loaded_titles == {f"Todo number {i}" for i in range(1, 6)}
+
+
+def test_load_todos_empty_fresh_project(tmp_cfg: ProjConfig) -> None:
+    """Brand-new project dir — load_todos returns []."""
+    (Path(tmp_cfg.tracking_dir) / "brand_new").mkdir(parents=True)
+    result = storage.load_todos(tmp_cfg, "brand_new")
+    assert result == []
+
+
+def test_archive_atomicity(tmp_cfg: ProjConfig) -> None:
+    """archive_and_remove_todos with 2 to_archive + 3 remaining: archive has 2, active has 3."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    all_todos = [
+        Todo(id=f"T{i}", title=f"Task {i}", created="2026-01-01", updated="2026-01-01")
+        for i in range(1, 6)
+    ]
+    storage.save_todos(tmp_cfg, "myapp", all_todos)
+
+    to_archive = all_todos[:2]  # T1, T2
+    remaining = all_todos[2:]  # T3, T4, T5
+
+    storage.archive_and_remove_todos(tmp_cfg, "myapp", remaining=remaining, to_archive=to_archive)
+
+    active = storage.load_todos(tmp_cfg, "myapp")
+    archived = storage.load_archived_todos(tmp_cfg, "myapp")
+
+    assert len(active) == 3, f"Expected 3 active todos, got {len(active)}"
+    assert len(archived) == 2, f"Expected 2 archived todos, got {len(archived)}"
+    active_ids = {t.id for t in active}
+    archived_ids = {t.id for t in archived}
+    assert active_ids == {"T3", "T4", "T5"}
+    assert archived_ids == {"T1", "T2"}
