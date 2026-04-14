@@ -358,6 +358,7 @@ Enforce max_parallel from quality_level mapping.
  Wait for all `executing_agents`. Report failures.
  All failed → "All N agents in batch failed. (1) Retry (2) Skip (3) Stop." Handle choice; skip satisfaction.
  ELSE:
+ - **NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
  - Display: `Executing batch: todos <id1>, <id2>, ...`
  - N roles per target → N individual agents.
  - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: approved plan (or ctx if trust 3) + reqs + research + parent ctx. `--full-context` → also CLAUDE.md + NOTES.md.
@@ -459,6 +460,7 @@ IF `pipeline_enabled`:
  Wait for all `executing_agents`. Report failures.
  All failed → "All N failed. (1) Retry (2) Skip (3) Stop."
 ELSE:
+**NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
 After plans approved (or skipped trust 3), spawn one `subagent_type="implementer"` Agent per todo (excl manual-skipped) w/ `run_in_background=true`.
 Each gets: todo, reqs, research, parent ctx, plan (or ctx if trust 3).
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
@@ -593,6 +595,7 @@ Enforce max_parallel.
  Wait for `executing_agents` in batch. Report failures.
  All failed → "(1) Retry (2) Skip (3) Stop."
  ELSE:
+ - **NEVER implement code directly in the main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
  - Display: `Executing batch <N>/<total>: todos <ids>`
  - N roles → N agents.
  - Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: plan (or ctx trust 3) + reqs + research + parent. `--full-context` → CLAUDE.md + NOTES.md.
