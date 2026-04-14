@@ -7,11 +7,13 @@ import glob
 import json
 import logging
 import os
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from server.lib import storage
 from server.lib.conditions import _load_proj_config, evaluate_condition
+from server.lib.constants import DEFAULT_SERVER_PORTS
 from server.lib.http_client import FireResult, post_hook
 from server.lib.template import _resolve_path, resolve_mapping
 
@@ -25,16 +27,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_DEPTH = 3
 
-_DEFAULT_SERVER_PORTS: dict[str, int] = {
-    "hooks": 19100,
-    "sandbox": 19101,
-    "proj": 19102,
-    "worktree": 19103,
-    "trello": 19104,
-    "jira": 19105,
-    "todoist": 19106,
-    "zoxide": 19107,
-}
+_DEFAULT_SERVER_PORTS = DEFAULT_SERVER_PORTS
 
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
 
@@ -71,8 +64,19 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
         key=lambda p: os.path.getmtime(p),
         reverse=True,
     )
-    if candidates:
-        return f"unix://{candidates[0]}"
+    for candidate in candidates:
+        try:
+            mode = os.stat(candidate).st_mode
+            if stat.S_ISSOCK(mode):
+                return f"unix://{candidate}"
+            logger.warning(
+                "Socket candidate %s is not a socket (mode=%o), skipping",
+                candidate,
+                mode,
+            )
+        except OSError:
+            logger.warning("Cannot stat socket candidate %s, skipping", candidate)
+            continue
 
     # Last resort: use server name as-is (allows direct URL or name-based routing)
     return server_name
@@ -247,13 +251,14 @@ async def _launch_nonblocking(hook: Hook, source: dict[str, JsonValue], source_r
                 error=err_msg,
                 source_result=source_result,
             )
-    except Exception as exc:
+    except Exception as e:
+        logger.warning("Non-blocking hook %s failed unexpectedly", hook.id, exc_info=True)
         storage.log_failure(
             hook_id=hook.id,
             trigger_tool=hook.trigger_tool,
             target_tool=hook.target_tool,
             server=hook.server,
-            error=str(exc),
+            error=str(e),
             source_result=source_result,
         )
 

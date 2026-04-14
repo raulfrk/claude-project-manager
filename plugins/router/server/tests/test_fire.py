@@ -74,10 +74,18 @@ class TestResolveServerUrl:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stale registry (socket doesn't exist) falls back to glob."""
+        import stat as stat_mod
+        from unittest.mock import MagicMock
+
         registry_file = tmp_path / "trello"
         registry_file.write_text("/tmp/claude-cpm-trello-10.sock")  # sandbox PID
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
+
+        # Mock os.stat to return a socket mode for the glob candidate
+        mock_stat_result = MagicMock()
+        mock_stat_result.st_mode = stat_mod.S_IFSOCK | 0o755
+
         with (
             patch("server.tools.fire.os.path.exists", return_value=False),
             patch(
@@ -87,6 +95,7 @@ class TestResolveServerUrl:
                 ],
             ),
             patch("server.tools.fire.os.path.getmtime", return_value=1000),
+            patch("server.tools.fire.os.stat", return_value=mock_stat_result),
         ):
             result = _resolve_server_url("trello", 19100)
         assert result == "unix:///tmp/claude-cpm-trello-99999.sock"

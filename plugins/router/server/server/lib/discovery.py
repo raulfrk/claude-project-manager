@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from server.lib.constants import DEFAULT_SERVER_PORTS
 from server.lib.models import Hook, HookRegistry
 
 if TYPE_CHECKING:
@@ -152,16 +153,7 @@ def _plugin_name_from_path(path: Path) -> str:
     return path.parent.parent.name
 
 
-_DEFAULT_SERVER_PORTS: dict[str, int] = {
-    "hooks": 19100,
-    "sandbox": 19101,
-    "proj": 19102,
-    "worktree": 19103,
-    "trello": 19104,
-    "jira": 19105,
-    "todoist": 19106,
-    "zoxide": 19107,
-}
+_DEFAULT_SERVER_PORTS = DEFAULT_SERVER_PORTS
 
 
 def discover_and_register(

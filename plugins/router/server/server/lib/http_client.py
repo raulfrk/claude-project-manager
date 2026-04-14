@@ -89,7 +89,7 @@ async def post_hook(
                             error=data.get("error", f"HTTP {resp.status_code}"),
                         )
             except Exception:
-                logger.debug("Failed to parse hook response as JSON", exc_info=True)
+                logger.warning("Failed to parse hook response as JSON", exc_info=True)
             # Fallback for non-JSON responses
             return FireResult(
                 hook_id=hook_id,

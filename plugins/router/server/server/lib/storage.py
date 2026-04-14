@@ -49,16 +49,68 @@ def invocations_path() -> Path:
     return _INVOCATIONS_FILE
 
 
+_KNOWN_REGISTRY_KEYS = {"hooks", "servers", "settings"}
+
+
+def _validate_registry_dict(raw: object) -> bool:
+    """Return True if *raw* looks like a valid hooks.yaml top-level dict.
+
+    Expected keys: at least one of ``hooks``, ``servers``, ``settings``.
+    """
+    if not isinstance(raw, dict):
+        return False
+    return bool(_KNOWN_REGISTRY_KEYS & set(raw.keys()))
+
+
 def load(path: Path | None = None) -> HookRegistry:
     """Load the hook registry from YAML. Returns empty registry if file doesn't exist."""
     target = path or _HOOKS_FILE
     if not target.exists():
         return HookRegistry()
 
-    with target.open() as f:
-        raw = yaml.safe_load(f)
+    try:
+        with target.open() as f:
+            raw = yaml.safe_load(f)
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.warning("Cannot open %s: %s", target, exc)
+        return HookRegistry()
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid YAML in %s: %s", target, exc)
+        return HookRegistry()
 
     if not isinstance(raw, dict):
+        if raw is not None:
+            logger.warning(
+                "Invalid hooks.yaml in %s: non-dict top level (got %s)",
+                target,
+                type(raw).__name__,
+            )
+        return HookRegistry()
+
+    # Warn about unexpected top-level keys
+    extra_keys = set(raw.keys()) - _KNOWN_REGISTRY_KEYS
+    if extra_keys:
+        logger.warning(
+            "hooks.yaml in %s has unexpected top-level keys: %s",
+            target,
+            ", ".join(sorted(extra_keys)),
+        )
+
+    # Validate 'hooks' is a list if present
+    hooks_val = raw.get("hooks")
+    if hooks_val is not None and not isinstance(hooks_val, list):
+        logger.warning(
+            "Invalid hooks.yaml in %s: 'hooks' must be a list, got %s",
+            target,
+            type(hooks_val).__name__,
+        )
+        return HookRegistry()
+
+    if not _validate_registry_dict(raw):
+        logger.warning(
+            "Invalid hooks.yaml schema in %s: expected dict with hooks/servers/settings keys",
+            target,
+        )
         return HookRegistry()
 
     return HookRegistry.from_dict(raw)
@@ -109,8 +161,10 @@ def _load_failures(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:
-        logger.warning("Could not read %s — starting fresh", target)
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.warning("Cannot open %s: %s — starting fresh", target, exc)
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid YAML in %s: %s — starting fresh", target, exc)
     return []
 
 
@@ -194,8 +248,10 @@ def _load_verifications(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:
-        logger.warning("Could not read %s — starting fresh", target)
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.warning("Cannot open %s: %s — starting fresh", target, exc)
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid YAML in %s: %s — starting fresh", target, exc)
     return []
 
 
@@ -257,8 +313,10 @@ def _load_invocations(path: Path | None = None) -> list[dict[str, JsonValue]]:
             raw = yaml.safe_load(f)
         if isinstance(raw, list):
             return raw
-    except Exception:
-        logger.warning("Could not read %s — starting fresh", target)
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.warning("Cannot open %s: %s — starting fresh", target, exc)
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid YAML in %s: %s — starting fresh", target, exc)
     return []
 
 

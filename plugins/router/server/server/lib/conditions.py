@@ -29,6 +29,7 @@ def _load_proj_config(path: Path | None = None) -> dict[str, JsonValue]:
     """
     target = path or _PROJ_CONFIG_PATH
     if not target.exists():
+        logger.warning("proj.yaml not found at %s — all conditions evaluate false", target)
         return {}
     try:
         with target.open() as f:
