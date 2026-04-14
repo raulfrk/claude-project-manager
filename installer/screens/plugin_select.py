@@ -295,8 +295,8 @@ _DEFAULT_ACTION: dict[str, str] = {
 
 _CYCLE_ORDER: dict[str, tuple[str, ...]] = {
     "available": ("install", "skip"),
-    "installed": ("skip", "reinstall", "uninstall"),
-    "outdated": ("install", "reinstall", "skip", "uninstall"),
+    "installed": ("skip", "uninstall"),
+    "outdated": ("install", "skip", "uninstall"),
 }
 
 _COLUMN_ORDER: tuple[str, ...] = ("available", "installed", "outdated")

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -671,7 +670,7 @@ class InstallerApp(App):
             progress.advance(1, detail="Nothing to reinstall")
             return
         progress = ProgressScreen(
-            description="Reinstalling plugins...", total=len(plugins)
+            description="Reinstalling plugins...", total=2 + len(plugins)
         )
         self.push_screen(progress, callback=self._on_progress_done)
         await self._run_reinstall_worker(plugins, progress, reset_configs)
@@ -684,36 +683,35 @@ class InstallerApp(App):
     ) -> None:
         """Execute plugin reinstalls, advancing the progress bar.
 
-        Phases: uninstall all → delete marketplace+cache dirs → install all.
-        Deleting the dirs ensures stale artifacts don't survive reinstall.
+        Phases: remove marketplace → re-add marketplace → install all.
+        Removing the marketplace uninstalls all plugins atomically.
         """
         await progress.wait_ready()
 
-        # Phase 1: uninstall all plugins
-        for plugin_name in plugins:
-            try:
-                progress.write_log(f"  Uninstalling {plugin_name}...")
-                await asyncio.to_thread(uninstall_plugin, plugin_name)
-            except InstallerError as exc:
-                progress.write_log(
-                    f"  [yellow]⚠ {plugin_name} uninstall warning: {exc}[/yellow]"
-                )
+        branch = self._branch
 
-        # Phase 2: delete marketplace and cache dirs for a clean slate
-        state = self._state
-        if state is not None:
-            for dir_path, label in [
-                (state.marketplace_dir, "marketplace"),
-                (state.cache_dir, "cache"),
-            ]:
-                if dir_path is not None and dir_path.exists():
-                    try:
-                        shutil.rmtree(dir_path)
-                        progress.write_log(f"  Removed {label} directory")
-                    except OSError as exc:
-                        progress.write_log(
-                            f"  [yellow]⚠ Failed to remove {label} dir: {exc}[/yellow]"
-                        )
+        # Phase 1: remove marketplace (uninstalls all plugins atomically)
+        try:
+            progress.write_log("  [bold]Removing marketplace...[/bold]")
+            await asyncio.to_thread(remove_marketplace)
+            progress.write_log("  [green]✓ Marketplace removed[/green]")
+            progress.advance(1, detail="Marketplace removed")
+        except InstallerError as exc:
+            progress.write_log(f"  [red]✗ Failed to remove marketplace: {exc}[/red]")
+            progress.advance(1, detail="Marketplace removal failed")
+            return
+
+        # Phase 2: re-add marketplace
+        try:
+            branch_msg = f" (branch: {branch})" if branch else ""
+            progress.write_log(f"  [bold]Re-adding marketplace{branch_msg}...[/bold]")
+            await asyncio.to_thread(add_marketplace, branch=branch)
+            progress.write_log(f"  [green]✓ Marketplace re-added{branch_msg}[/green]")
+            progress.advance(1, detail="Marketplace re-added")
+        except InstallerError as exc:
+            progress.write_log(f"  [red]✗ Failed to re-add marketplace: {exc}[/red]")
+            progress.advance(1, detail="Marketplace re-add failed")
+            return
 
         # Phase 3: install all plugins
         reinstalled: set[str] = set()
@@ -747,9 +745,7 @@ class InstallerApp(App):
             self.exit()
             return
         full_cleanup = result.options.get("full_cleanup", False)
-        progress = ProgressScreen(
-            description="Uninstalling plugins...", total=len(plugins)
-        )
+        progress = ProgressScreen(description="Uninstalling plugins...", total=1)
         self.push_screen(progress, callback=self._on_progress_done)
         await self._run_uninstall_worker(plugins, progress, full_cleanup)
 
@@ -759,19 +755,21 @@ class InstallerApp(App):
         progress: ProgressScreen,
         full_cleanup: bool,
     ) -> None:
-        """Execute plugin removal, advancing the progress bar."""
+        """Execute plugin removal by removing the marketplace atomically."""
         await progress.wait_ready()
-        removed: set[str] = set()
-        for plugin_name in plugins:
-            try:
-                progress.write_log(f"  Uninstalling {plugin_name}...")
-                await asyncio.to_thread(uninstall_plugin, plugin_name)
-                removed.add(plugin_name)
-                progress.write_log(f"  [green]✓ {plugin_name} removed[/green]")
-                progress.advance(1, detail=f"Removed {plugin_name}")
-            except InstallerError as exc:
-                progress.write_log(f"  [red]✗ {plugin_name} failed: {exc}[/red]")
-                progress.advance(1, detail=f"Failed: {plugin_name}")
+
+        try:
+            progress.write_log(
+                f"  [bold]Removing marketplace ({len(plugins)} plugins)...[/bold]"
+            )
+            await asyncio.to_thread(remove_marketplace)
+            progress.write_log(
+                f"  [green]✓ Marketplace removed — {len(plugins)} plugins uninstalled[/green]"
+            )
+            progress.advance(1, detail=f"Removed {len(plugins)} plugins")
+        except InstallerError as exc:
+            progress.write_log(f"  [red]✗ Failed to remove marketplace: {exc}[/red]")
+            progress.advance(1, detail="Failed")
 
         if full_cleanup:
             claude_md = Path.home() / ".claude" / "CLAUDE.md"

@@ -27,7 +27,6 @@ from installer.plugin_cli import (
     get_installed_plugins,
     install_plugin,
     remove_marketplace,
-    uninstall_plugin,
     update_plugin,
 )
 from installer.uninstall import cleanup_config_files
@@ -96,16 +95,11 @@ def _install(args) -> int:
             continue
 
         if name in installed_names:
-            if not Confirm.ask(
-                f"Plugin [bold]{name}[/bold] already installed. Reinstall?",
-                default=False,
-                console=console,
-            ):
-                results[name] = "skipped"
-                continue
-            # Uninstall first for reinstall
-            with console.status(f"[bold]Uninstalling {name}...[/bold]"):
-                uninstall_plugin(plugin_id)
+            console.print(
+                f"  [dim]⊘ {name} already installed — use --reinstall to reinstall[/dim]"
+            )
+            results[name] = "skipped"
+            continue
 
         while True:
             try:
@@ -209,24 +203,32 @@ def _reinstall(args) -> int:
         )
         return EXIT_SUCCESS
 
-    # Determine which plugins to reinstall
-    plugins = args.plugins if args.plugins else list(installed)
+    plugins = list(installed)
+    branch = getattr(args, "branch", None)
 
     console.print(f"\n[bold]Reinstalling:[/bold] {', '.join(plugins)}")
+
+    # Remove marketplace (uninstalls all plugins) then re-add
+    with console.status("[bold]Removing marketplace...[/bold]"):
+        remove_marketplace()
+    console.print("  [green]✓[/green] Marketplace removed")
+
+    branch_msg = f" (branch: {branch})" if branch else ""
+    with console.status(f"[bold]Re-adding marketplace{branch_msg}...[/bold]"):
+        add_marketplace(branch=branch)
+    console.print(f"  [green]✓[/green] Marketplace re-added{branch_msg}")
+
     results: dict[str, bool] = {}
     for name in plugins:
         try:
-            console.print(f"  Uninstalling [cyan]{name}[/cyan]...")
-            uninstall_plugin(name)
-            console.print(f"  Installing [cyan]{name}[/cyan]...")
-            install_plugin(name)
+            with console.status(f"[bold]Installing {name}...[/bold]"):
+                install_plugin(name)
             console.print(f"  [green]✓[/green] {name} reinstalled")
             results[name] = True
         except InstallerError as exc:
             console.print(f"  [red]✗[/red] {name}: {exc}")
             if Confirm.ask("  Retry?", default=False):
                 try:
-                    uninstall_plugin(name)
                     install_plugin(name)
                     console.print(f"  [green]✓[/green] {name} reinstalled")
                     results[name] = True
@@ -243,7 +245,7 @@ def _reinstall(args) -> int:
     succeeded = sum(1 for ok in results.values() if ok)
     failed_count = sum(1 for ok in results.values() if not ok)
     console.print(
-        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
+        f"\n[bold]Summary:[/bold] {succeeded} reinstalled, {failed_count} failed"
     )
 
     if failed_count:
@@ -266,38 +268,25 @@ def _uninstall(args) -> int:
 
     plugins = list(installed)
     console.print(f"\n[bold]Uninstalling:[/bold] {', '.join(plugins)}")
-    results: dict[str, bool] = {}
-    for name in plugins:
-        try:
-            console.print(f"  Uninstalling [cyan]{name}[/cyan]...")
-            uninstall_plugin(name)
-            console.print(f"  [green]✓[/green] {name} uninstalled")
-            results[name] = True
-        except InstallerError as exc:
-            console.print(f"  [red]✗[/red] {name}: {exc}")
-            if Confirm.ask("  Retry?", default=False):
-                try:
-                    uninstall_plugin(name)
-                    console.print(f"  [green]✓[/green] {name} uninstalled")
-                    results[name] = True
-                except InstallerError as retry_exc:
-                    console.print(f"  [red]✗[/red] {name}: {retry_exc}")
-                    results[name] = False
-            else:
-                results[name] = False
+
+    try:
+        with console.status("[bold]Removing marketplace...[/bold]"):
+            remove_marketplace()
+        console.print(
+            f"  [green]✓[/green] Marketplace removed ({len(plugins)} plugins uninstalled)"
+        )
+    except InstallerError as exc:
+        console.print(f"  [red]✗[/red] Failed to remove marketplace: {exc}")
+        if args.full_cleanup:
+            console.print("\n[bold]Cleaning up config files...[/bold]")
+            cleanup_config_files(console)
+        return EXIT_ERROR
 
     if args.full_cleanup:
         console.print("\n[bold]Cleaning up config files...[/bold]")
         cleanup_config_files(console)
 
-    succeeded = sum(1 for ok in results.values() if ok)
-    failed_count = sum(1 for ok in results.values() if not ok)
-    console.print(
-        f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed_count} failed"
-    )
-
-    if failed_count:
-        return EXIT_ERROR
+    console.print(f"\n[bold]Summary:[/bold] {len(plugins)} uninstalled")
     return EXIT_SUCCESS
 
 

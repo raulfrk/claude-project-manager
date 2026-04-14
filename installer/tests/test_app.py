@@ -8,12 +8,11 @@ import pytest
 
 
 class TestReinstallWorkerUsesAuthoritativePluginList:
-    """The reinstall worker must derive plugin IDs from get_installed_plugins,
-    not from the stale cache-dir inventory in InstallState.installed_plugins."""
+    """The reinstall worker removes marketplace, re-adds it, then installs plugins."""
 
     @pytest.mark.asyncio
-    async def test_reinstall_ignores_stale_cache_dir(self):
-        """Worker must call install/uninstall with JSON-sourced IDs only."""
+    async def test_reinstall_uses_marketplace_remove_add(self):
+        """Worker must call remove_marketplace, add_marketplace, then install each plugin."""
         from installer.app import InstallerApp
         from installer.detect import InstallState
 
@@ -27,13 +26,15 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
                 "installer.app.get_installed_plugins",
                 return_value=authoritative,
             ) as mock_get,
-            patch("installer.app.uninstall_plugin") as mock_uninstall,
+            patch("installer.app.remove_marketplace") as mock_remove,
+            patch("installer.app.add_marketplace") as mock_add,
             patch("installer.app.install_plugin") as mock_install,
         ):
             app = InstallerApp()
             app._state = InstallState(
                 installed_plugins=["hooks", "proj", "router"],
             )
+            app._branch = None
 
             class _FakeProgress:
                 def __init__(self):
@@ -54,11 +55,10 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             )
 
             mock_get.assert_not_called()  # queried upstream by _prepare_and_reinstall
-            uninstall_ids = [c.args[0] for c in mock_uninstall.call_args_list]
+            mock_remove.assert_called_once()
+            mock_add.assert_called_once_with(branch=None)
             install_ids = [c.args[0] for c in mock_install.call_args_list]
-            assert uninstall_ids == authoritative
             assert install_ids == authoritative
-            assert "hooks" not in uninstall_ids
             assert "hooks" not in install_ids
 
     @pytest.mark.asyncio
@@ -73,7 +73,7 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
                 "installer.app.get_installed_plugins",
                 return_value=[],
             ),
-            patch("installer.app.uninstall_plugin") as mock_uninstall,
+            patch("installer.app.remove_marketplace") as mock_remove,
             patch("installer.app.install_plugin") as mock_install,
         ):
             app = InstallerApp()
@@ -103,35 +103,29 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             await app._prepare_and_reinstall(reset_configs=False)
 
             mock_install.assert_not_called()
-            mock_uninstall.assert_not_called()
+            mock_remove.assert_not_called()
             assert any("Nothing to reinstall" in msg for msg in logs)
 
     @pytest.mark.asyncio
-    async def test_reinstall_deletes_marketplace_and_cache_dirs(self, tmp_path):
-        """Reinstall must delete marketplace and cache dirs between phases."""
+    async def test_reinstall_worker_aborts_on_remove_marketplace_failure(self):
+        """If remove_marketplace fails, worker logs error and skips install phase."""
         from installer.app import InstallerApp
         from installer.detect import InstallState
-
-        marketplace_dir = tmp_path / "marketplaces" / "claude-project-manager"
-        cache_dir = tmp_path / "cache" / "claude-project-manager"
-        marketplace_dir.mkdir(parents=True)
-        cache_dir.mkdir(parents=True)
-        # Add stale files to prove rmtree, not just rmdir
-        (marketplace_dir / "stale.json").write_text("{}")
-        (cache_dir / "stale-plugin" / "v1").mkdir(parents=True)
+        from installer.errors import InstallerError
 
         plugins = ["proj@claude-project-manager"]
 
         with (
-            patch("installer.app.uninstall_plugin") as mock_uninstall,
+            patch(
+                "installer.app.remove_marketplace",
+                side_effect=InstallerError("network error"),
+            ) as mock_remove,
+            patch("installer.app.add_marketplace") as mock_add,
             patch("installer.app.install_plugin") as mock_install,
         ):
             app = InstallerApp()
-            app._state = InstallState(
-                installed_plugins=["proj"],
-                marketplace_dir=marketplace_dir,
-                cache_dir=cache_dir,
-            )
+            app._state = InstallState(installed_plugins=["proj"])
+            app._branch = None
 
             class _FakeProgress:
                 def __init__(self):
@@ -149,15 +143,10 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             progress = _FakeProgress()
             await app._run_reinstall_worker(plugins, progress, reset_configs=False)
 
-            # Dirs should be gone
-            assert not marketplace_dir.exists(), "marketplace dir should be deleted"
-            assert not cache_dir.exists(), "cache dir should be deleted"
-            # Install still called (after deletion)
-            mock_uninstall.assert_called_once()
-            mock_install.assert_called_once()
-            # Logs mention removal
-            assert any("marketplace" in log for log in progress.logs)
-            assert any("cache" in log for log in progress.logs)
+            mock_remove.assert_called_once()
+            mock_add.assert_not_called()
+            mock_install.assert_not_called()
+            assert any("Failed" in log or "failed" in log for log in progress.logs)
 
 
 class _StubProgress:

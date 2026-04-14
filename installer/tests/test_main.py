@@ -89,55 +89,24 @@ class TestInstall:
         assert result == EXIT_ERROR
         _install_plugin.assert_not_called()
 
-    @patch("installer.main.Confirm")
     @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
     @patch("installer.main.get_installed_plugins", return_value=["proj@gh:x/y"])
     @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
     @patch("installer.main.check_marketplace_registered", return_value=True)
     @patch("installer.main.run_wizard")
-    def test_install_already_installed_skip(
+    def test_install_already_installed_is_skipped(
         self,
         _wizard,
         _check_mp,
         _avail,
         _installed,
-        _uninstall,
         _install_plugin,
-        mock_confirm,
     ):
-        """Already installed plugin is skipped when user declines reinstall."""
-        mock_confirm.ask.return_value = False
+        """Already installed plugin is always skipped — use --reinstall to reinstall."""
         args = _make_args(plugins=["proj"])
         result = _install(args)
         assert result == EXIT_SUCCESS
         _install_plugin.assert_not_called()
-        _uninstall.assert_not_called()
-
-    @patch("installer.main.Confirm")
-    @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
-    @patch("installer.main.get_installed_plugins", return_value=["proj@gh:x/y"])
-    @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
-    @patch("installer.main.check_marketplace_registered", return_value=True)
-    @patch("installer.main.run_wizard")
-    def test_install_already_installed_reinstall(
-        self,
-        _wizard,
-        _check_mp,
-        _avail,
-        _installed,
-        _uninstall,
-        _install_plugin,
-        mock_confirm,
-    ):
-        """Already installed plugin is reinstalled when user confirms."""
-        mock_confirm.ask.return_value = True
-        args = _make_args(plugins=["proj"])
-        result = _install(args)
-        assert result == EXIT_SUCCESS
-        _uninstall.assert_called_once()
-        _install_plugin.assert_called_once()
 
     @patch("installer.main.Confirm")
     @patch("installer.main.install_plugin", side_effect=InstallerError("fail"))
@@ -307,27 +276,37 @@ class TestReinstall:
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_success(
-        self, mock_detect, _disp, mock_uninstall, mock_install, _wizard, _gip
+        self,
+        mock_detect,
+        _disp,
+        mock_remove_mp,
+        mock_add_mp,
+        mock_install,
+        _wizard,
+        _gip,
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(reinstall=True)
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
-        mock_uninstall.assert_called_once_with("proj")
+        mock_remove_mp.assert_called_once()
+        mock_add_mp.assert_called_once_with(branch=None)
         mock_install.assert_called_once_with("proj")
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_skip_wizard(
-        self, mock_detect, _disp, _uninstall, _install, mock_wizard, _gip
+        self, mock_detect, _disp, _remove_mp, _add_mp, _install, mock_wizard, _gip
     ):
         """--skip-wizard prevents wizard from running after reinstall."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
@@ -338,11 +317,12 @@ class TestReinstall:
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_runs_wizard_when_not_skipped(
-        self, mock_detect, _disp, _uninstall, _install, mock_wizard, _gip
+        self, mock_detect, _disp, _remove_mp, _add_mp, _install, mock_wizard, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(reinstall=True, skip_wizard=False)
@@ -352,11 +332,12 @@ class TestReinstall:
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.Confirm")
     @patch("installer.main.install_plugin", side_effect=InstallerError("fail"))
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_reinstall_failure_no_retry(
-        self, mock_detect, _disp, _uninstall, _install, mock_confirm, _gip
+        self, mock_detect, _disp, _remove_mp, _add_mp, _install, mock_confirm, _gip
     ):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         mock_confirm.ask.return_value = False
@@ -365,20 +346,21 @@ class TestReinstall:
         assert result == EXIT_ERROR
 
     @patch("installer.main.get_installed_plugins", return_value=["proj", "hooks"])
+    @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_reinstall_with_specific_plugins(
-        self, mock_detect, _disp, mock_uninstall, mock_install, _gip
+    def test_reinstall_always_reinstalls_all_ignores_plugins_arg(
+        self, mock_detect, _disp, _remove_mp, _add_mp, mock_install, _wizard, _gip
     ):
-        """--plugins limits reinstall to named plugins."""
+        """--plugins arg is ignored for reinstall — always reinstalls all installed."""
         mock_detect.return_value = InstallState(installed_plugins=["proj", "hooks"])
         args = _make_args(reinstall=True, plugins=["hooks"])
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
-        mock_uninstall.assert_called_once_with("hooks")
-        mock_install.assert_called_once_with("hooks")
+        assert mock_install.call_count == 2  # both proj and hooks reinstalled
 
 
 # ===================================================================
@@ -399,39 +381,39 @@ class TestUninstall:
         assert result == EXIT_SUCCESS
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_uninstall_success(self, mock_detect, _disp, mock_uninstall, _gip):
+    def test_uninstall_success(self, mock_detect, _disp, mock_remove_mp, _gip):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(uninstall=True)
         result = _uninstall(args)
         assert result == EXIT_SUCCESS
-        mock_uninstall.assert_called_once_with("proj")
+        mock_remove_mp.assert_called_once()
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.cleanup_config_files")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_with_full_cleanup(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
+        self, mock_detect, _disp, mock_remove_mp, mock_cleanup, _gip
     ):
-        """--full-cleanup triggers config file removal after uninstall."""
+        """--full-cleanup triggers config file removal after marketplace removal."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(uninstall=True, full_cleanup=True)
         result = _uninstall(args)
         assert result == EXIT_SUCCESS
-        mock_uninstall.assert_called_once()
+        mock_remove_mp.assert_called_once()
         mock_cleanup.assert_called_once()
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.cleanup_config_files")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_without_full_cleanup(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
+        self, mock_detect, _disp, _remove_mp, mock_cleanup, _gip
     ):
         """Without --full-cleanup, config files are not removed."""
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
@@ -441,15 +423,11 @@ class TestUninstall:
         mock_cleanup.assert_not_called()
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
-    @patch("installer.main.Confirm")
-    @patch("installer.main.uninstall_plugin", side_effect=InstallerError("fail"))
+    @patch("installer.main.remove_marketplace", side_effect=InstallerError("fail"))
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
-    def test_uninstall_failure_no_retry(
-        self, mock_detect, _disp, mock_uninstall, mock_confirm, _gip
-    ):
+    def test_uninstall_failure(self, mock_detect, _disp, _remove_mp, _gip):
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
-        mock_confirm.ask.return_value = False
         args = _make_args(uninstall=True)
         result = _uninstall(args)
         assert result == EXIT_ERROR
@@ -459,20 +437,20 @@ class TestUninstall:
         return_value=["proj", "hooks", "sandbox"],
     )
     @patch("installer.main.cleanup_config_files")
-    @patch("installer.main.uninstall_plugin")
+    @patch("installer.main.remove_marketplace")
     @patch("installer.main.display_detection")
     @patch("installer.main.detect_existing")
     def test_uninstall_multiple_plugins(
-        self, mock_detect, _disp, mock_uninstall, mock_cleanup, _gip
+        self, mock_detect, _disp, mock_remove_mp, mock_cleanup, _gip
     ):
-        """Multiple installed plugins are all uninstalled."""
+        """Multiple installed plugins are all uninstalled via single marketplace remove."""
         mock_detect.return_value = InstallState(
             installed_plugins=["proj", "hooks", "sandbox"]
         )
         args = _make_args(uninstall=True, full_cleanup=True)
         result = _uninstall(args)
         assert result == EXIT_SUCCESS
-        assert mock_uninstall.call_count == 3
+        mock_remove_mp.assert_called_once()  # single atomic operation, not per-plugin
         mock_cleanup.assert_called_once()
 
 
