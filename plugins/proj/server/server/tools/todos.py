@@ -1883,3 +1883,18 @@ def register(app: FastMCP) -> None:
                 "orphans": orphans,
             }
         )
+
+    @app.tool(
+        description=(
+            "Migrate legacy done/cancelled todos from todos.yaml to archive.yaml. "
+            "Safe to run multiple times (idempotent). "
+            "Use when todos.yaml has accumulated many completed todos that slow down parsing."
+        ),
+    )
+    def todo_archive_done(project_name: str | None = None) -> str:
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        stats = storage.migrate_done_to_archive(cfg, name)
+        return json.dumps(stats)

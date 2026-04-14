@@ -242,6 +242,17 @@ def _build_context(
     meta = storage.load_meta(cfg, project_name)
     todos = storage.load_todos(cfg, project_name)
 
+    # Auto-archive legacy done todos when >50 terminal entries
+    terminal_count = sum(1 for t in todos if t.status in TERMINAL_STATUSES)
+    if terminal_count > 50:
+        try:
+            stats = storage.migrate_done_to_archive(cfg, project_name)
+            if stats["archived_count"] > 0:
+                logger.info("Auto-archived %d done todos to archive.yaml", stats["archived_count"])
+                todos = storage.load_todos(cfg, project_name)
+        except Exception:
+            logger.debug("auto-archive failed", exc_info=True)
+
     lines = [
         f"## Active Project: {meta.name}",
         f"**Status**: {meta.status} | **Priority**: {meta.priority}",

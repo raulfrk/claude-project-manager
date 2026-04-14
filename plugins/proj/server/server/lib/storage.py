@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from server.lib.enums import TERMINAL_STATUSES
 from server.lib.models import (
     JsonValue,
     ProjConfig,
@@ -190,6 +191,73 @@ def archive_and_remove_todos(
         tmp_a.unlink(missing_ok=True)
         tmp_t.unlink(missing_ok=True)
         raise
+
+
+def migrate_done_to_archive(cfg: ProjConfig, project_name: str) -> dict[str, int]:
+    """Move legacy done/cancelled todos to archive.yaml.
+
+    Rules:
+    - Leaf done todo (no children, terminal status) → archive
+    - Done parent where ALL descendants also done → archive whole family
+    - Done child under pending parent → archive the child only
+    - Done parent with ANY pending descendant → DO NOT archive
+    """
+    todos = load_todos(cfg, project_name)
+    if not todos:
+        return {"archived_count": 0, "remaining_count": 0}
+
+    todo_map = {t.id: t for t in todos}
+
+    def _all_descendants_done(tid: str) -> bool:
+        t = todo_map.get(tid)
+        if t is None:
+            return True
+        if t.status not in TERMINAL_STATUSES:
+            return False
+        return all(_all_descendants_done(cid) for cid in t.children)
+
+    def _collect_family_ids(tid: str) -> set[str]:
+        result: set[str] = {tid}
+        t = todo_map.get(tid)
+        if t:
+            for cid in t.children:
+                result.update(_collect_family_ids(cid))
+        return result
+
+    archive_ids: set[str] = set()
+
+    for t in todos:
+        if t.id in archive_ids:
+            continue
+        if t.status not in TERMINAL_STATUSES:
+            continue
+
+        # Leaf (no children, no parent)
+        if not t.children and not t.parent:
+            archive_ids.add(t.id)
+        # Leaf child (no children, has parent)
+        elif not t.children and t.parent:
+            # Archive child regardless of parent status
+            archive_ids.add(t.id)
+        # Parent (has children) — only archive when ALL descendants also done
+        elif t.children and _all_descendants_done(t.id):
+            archive_ids.update(_collect_family_ids(t.id))
+
+    if not archive_ids:
+        return {"archived_count": 0, "remaining_count": len(todos)}
+
+    to_archive = [t for t in todos if t.id in archive_ids]
+    remaining = [t for t in todos if t.id not in archive_ids]
+
+    # Clean up blocks/blocked_by references to archived IDs in remaining todos
+    for t in remaining:
+        if any(b in archive_ids for b in t.blocks):
+            t.blocks = [b for b in t.blocks if b not in archive_ids]
+        if any(b in archive_ids for b in t.blocked_by):
+            t.blocked_by = [b for b in t.blocked_by if b not in archive_ids]
+
+    archive_and_remove_todos(cfg, project_name, remaining, to_archive)
+    return {"archived_count": len(to_archive), "remaining_count": len(remaining)}
 
 
 # ── Sessions / Decisions ──────────────────────────────────────────────────
