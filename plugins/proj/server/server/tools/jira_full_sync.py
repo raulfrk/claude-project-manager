@@ -23,6 +23,8 @@ def _fetch_jira_issues(
     if project_key:
         params["project_key"] = project_key
     result = _call_jira_tool("jira_get_user_issues", params)
+    if result is None:
+        return [], 0
     # Unwrap {"issues": [...], "total": N} envelope
     issues: list[dict[str, JsonValue]]
     total: int
@@ -59,14 +61,17 @@ def _resolve_jira_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
+    import tempfile
+
+    _tmp = tempfile.gettempdir()
     candidates = sorted(
-        Path("/tmp").glob("claude-cpm-jira-*.sock"),  # noqa: S108
+        Path(_tmp).glob("claude-cpm-jira-*.sock"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-cpm-jira.sock"  # noqa: S108
+    return str(Path(_tmp) / "claude-cpm-jira.sock")
 
 
 def _call_jira_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:

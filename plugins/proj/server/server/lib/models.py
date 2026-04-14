@@ -50,6 +50,21 @@ _REMOVED_QUALITY_LEVELS: dict[str, str] = {
 }
 
 
+_VALID_PRIORITIES = {"high", "medium", "low"}
+
+
+def _validated_priority(value: str) -> str:
+    """Return *value* if it is a valid priority, otherwise fall back to 'medium'."""
+    if value in _VALID_PRIORITIES:
+        return value
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "Invalid default_priority '%s'; falling back to 'medium'", value
+    )
+    return "medium"
+
+
 def _validated_quality_level(value: str) -> str:
     """Validate quality level, raising ValueError for removed levels."""
     if value in _REMOVED_QUALITY_LEVELS:
@@ -531,7 +546,7 @@ class ProjConfig:
             tracking_dir=str(data.get("tracking_dir", "~/projects/tracking")),
             projects_base_dir=str(pbd) if isinstance(pbd, str) else None,
             git_integration=bool(data.get("git_integration", True)),
-            default_priority=str(data.get("default_priority", "medium")),
+            default_priority=_validated_priority(str(data.get("default_priority", "medium"))),
             permissions=PermissionsConfig.from_dict(perms_raw),
             todoist=TodoistSync.from_dict(todoist_raw),
             trello=TrelloSync.from_dict(trello_raw),

@@ -105,6 +105,9 @@ class TestProjInitHooksSync:
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with (
+            patch(
+                "server.tools.projects._resolve_router_socket_path", return_value="/tmp/fake.sock"
+            ),
             patch("httpx.HTTPTransport"),
             patch("httpx.Client", return_value=mock_client),
         ):

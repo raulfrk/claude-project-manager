@@ -47,6 +47,14 @@ def _today() -> str:
     return str(date.today())
 
 
+_JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
+
+
+def _validate_jira_key(key: str) -> bool:
+    """Return True if *key* matches the Jira issue key format (e.g. PROJ-123)."""
+    return bool(_JIRA_KEY_RE.match(key))
+
+
 def _slugify(name: str) -> str:
     """Convert a name to a slug suitable for project names."""
     slug = name.lower().strip()
@@ -635,6 +643,9 @@ def _link_standalone_key(group: JiraGroup, cfg: ProjConfig) -> None:
         issue_key = str(issue.get("key", ""))
         if not issue_key:
             continue
+        if not _validate_jira_key(issue_key):
+            _log.warning("Skipping issue with invalid key format: %s", issue_key)
+            continue
         if issue_key in by_jira_key:
             continue  # already linked — idempotent
         summary = str(issue.get("summary", ""))
@@ -979,6 +990,10 @@ def apply_mapping(
                 continue
             issue_key = str(issue.get("key", ""))
             if not issue_key:
+                continue
+            if not _validate_jira_key(issue_key):
+                _log.warning("Skipping issue with invalid key format: %s", issue_key)
+                result.per_issue[issue_key] = "skipped:invalid_key_format"
                 continue
 
             try:

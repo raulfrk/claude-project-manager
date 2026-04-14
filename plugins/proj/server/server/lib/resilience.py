@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -12,6 +13,8 @@ from server.lib.models import JsonDict, _int
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,7 +95,19 @@ class CircuitBreakerManager:
         tmp = self.state_file.with_suffix(".yaml.tmp")
         data = {"breakers": {k: v.to_dict() for k, v in self._breakers.items()}}
         tmp.write_text(yaml.dump(data, default_flow_style=False))
-        tmp.rename(self.state_file)
+        try:
+            tmp.rename(self.state_file)
+        except OSError:
+            # Cross-filesystem rename (e.g. /tmp → /home) — fall back to copy+delete
+            import shutil
+
+            logger.warning(
+                "os.rename failed across filesystems; falling back to copy+delete: %s -> %s",
+                tmp,
+                self.state_file,
+            )
+            shutil.copy2(str(tmp), str(self.state_file))
+            tmp.unlink(missing_ok=True)
 
     def _get_or_create(self, service: str) -> CircuitBreaker:
         if service not in self._breakers:

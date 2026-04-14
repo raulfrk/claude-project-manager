@@ -49,14 +49,17 @@ def _resolve_trello_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
+    import tempfile
+
+    _tmp = tempfile.gettempdir()
     candidates = sorted(
-        Path("/tmp").glob("claude-cpm-trello-*.sock"),  # noqa: S108
+        Path(_tmp).glob("claude-cpm-trello-*.sock"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-cpm-trello.sock"  # noqa: S108
+    return str(Path(_tmp) / "claude-cpm-trello.sock")
 
 
 def _get_board_lists(board_id: str) -> list[dict[str, JsonValue]]:
@@ -373,6 +376,18 @@ def register(app: FastMCP) -> None:
                     )
                 }
             )
+        if due_date is not None and due_date.strip():
+            import re as _re
+
+            if not _re.match(r"^\d{4}-\d{2}-\d{2}$", due_date.strip()):
+                return json.dumps(
+                    {
+                        "error": (
+                            f"due_date must be YYYY-MM-DD format, got '{due_date}'. "
+                            "Example: '2026-03-15'."
+                        )
+                    }
+                )
 
         # Dedup guard: reject if same normalized title exists under same parent
         if not force_create:
@@ -900,6 +915,10 @@ def register(app: FastMCP) -> None:
         # Phase 3a — 90KB whole-field truncation. Estimate payload size and
         # drop whole fields (never mid-string) if over the threshold, so
         # downstream parsers never see sliced JSON.
+        # Cap the JSON payload returned to the model at 90 KB to prevent
+        # exceeding MCP message-size limits on large batch completions.
+        # Fields are dropped whole (never mid-string) in priority order
+        # so downstream parsers always receive valid JSON.
         _MAX_SOURCE_BYTES = 90 * 1024
         truncation_notes: list[str] = []
 

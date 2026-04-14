@@ -1138,14 +1138,17 @@ def _resolve_todoist_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
+    import tempfile
+
+    _tmp = tempfile.gettempdir()
     candidates = sorted(
-        Path("/tmp").glob("claude-cpm-todoist-*.sock"),  # noqa: S108
+        Path(_tmp).glob("claude-cpm-todoist-*.sock"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-cpm-todoist.sock"  # noqa: S108
+    return str(Path(_tmp) / "claude-cpm-todoist.sock")
 
 
 def _check_hook_errors(tool_name: str, result: dict[str, JsonValue]) -> None:
@@ -1203,7 +1206,7 @@ def _call_todoist_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValu
                 try:
                     parsed = cast("JsonValue", json.loads(result))
                 except (json.JSONDecodeError, ValueError):
-                    return result
+                    raise ValueError(f"Invalid JSON from todoist sync: {result[:200]}")  # noqa: B904
                 else:
                     # Check for hook errors in parsed result
                     if isinstance(parsed, dict):

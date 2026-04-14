@@ -39,24 +39,36 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
-def _resolve_router_socket_path() -> str:
+def _resolve_router_socket_path() -> str | None:
     """Read the router server socket path from the registry file."""
 
     registry_file = Path.home() / ".claude" / "sockets" / "router"
+    if not registry_file.exists():
+        return _fallback_router_socket()
     try:
         path = registry_file.read_text().strip()
         if path and Path(path).exists():
             return path
     except (FileNotFoundError, OSError):
         pass
+    return _fallback_router_socket()
+
+
+def _fallback_router_socket() -> str | None:
+    import tempfile
+
+    _tmp = tempfile.gettempdir()
     candidates = sorted(
-        Path("/tmp").glob("claude-cpm-router-*.sock"),  # noqa: S108
+        Path(_tmp).glob("claude-cpm-router-*.sock"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-cpm-router.sock"  # noqa: S108
+    fallback = Path(_tmp) / "claude-cpm-router.sock"
+    if fallback.exists():
+        return str(fallback)
+    return None
 
 
 def _init_tracking_dir(tracking_dir: Path, project_name: str) -> None:
@@ -210,6 +222,8 @@ def register(app: FastMCP) -> None:
             import httpx
 
             sock_path = _resolve_router_socket_path()
+            if not sock_path:
+                raise FileNotFoundError("No router socket found")
             transport = httpx.HTTPTransport(uds=sock_path)
             with httpx.Client(transport=transport, timeout=5.0) as client:
                 client.post(

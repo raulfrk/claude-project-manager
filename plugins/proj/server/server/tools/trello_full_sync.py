@@ -34,6 +34,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if the error is transient and the operation can be retried."""
+    return isinstance(exc, (httpx.TimeoutException, httpx.ConnectError))
+
+
+def _classify_error(exc: Exception, context: str) -> str:
+    """Return a descriptive error message with classification."""
+    if isinstance(exc, httpx.TimeoutException):
+        logger.warning("Trello timeout (retryable) during %s: %s", context, exc)
+        return f"Timeout (retryable): {exc}"
+    if isinstance(exc, httpx.ConnectError):
+        logger.warning("Trello connection error (retryable) during %s: %s", context, exc)
+        return f"Connection error (retryable): {exc}"
+    if isinstance(exc, httpx.HTTPStatusError):
+        logger.error(
+            "Trello HTTP %s (permanent) during %s: %s", exc.response.status_code, context, exc
+        )
+        return f"HTTP {exc.response.status_code} (permanent): {exc}"
+    logger.error("Trello error (permanent) during %s: %s", context, exc)
+    return f"Error (permanent): {exc}"
+
+
 def _as_dict(v: JsonValue) -> dict[str, JsonValue]:
     """Narrow JsonValue to dict, returning empty dict if not a dict."""
     return v if isinstance(v, dict) else {}
@@ -62,14 +84,17 @@ def _resolve_trello_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
+    import tempfile
+
+    _tmp = tempfile.gettempdir()
     candidates = sorted(
-        Path("/tmp").glob("claude-cpm-trello-*.sock"),  # noqa: S108
+        Path(_tmp).glob("claude-cpm-trello-*.sock"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return "/tmp/claude-cpm-trello.sock"  # noqa: S108
+    return str(Path(_tmp) / "claude-cpm-trello.sock")
 
 
 def _call_trello_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
