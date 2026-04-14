@@ -294,52 +294,18 @@ Suggested next: `1. /proj:status`
 
 ## Preflight Agents Reference
 
-> Adversarial review agents (A.5b, C0.5b) are opt-in via `--with-adversarial-review`. Off by default.
+> Adversarial review agents (A.5b, C0.5b) opt-in via `--with-adversarial-review`. Off by default.
 
-Agent defs in `plugins/proj/agents/`. Each agent file includes frontmatter (name, tools, model) + output schema inline. Load at runtime via `Read` when spawning.
+Agent defs: `plugins/proj/agents/`. Each includes frontmatter (name, tools, model) + output schema. Load at runtime via `Read` when spawning.
 
-When `adversarial_review_enabled`: 6 preflight agents available. Spawned via named `subagent_type` w/ `run_in_background=true`, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
+When `adversarial_review_enabled`: 6 agents available. Spawn via named `subagent_type` w/ `run_in_background=true`, read-only tools, 90s timeouts, strict JSON schema. Timeouts/malformed JSON → WARNING (never BLOCKING).
 
-### Phase A.5b — Define-phase agents (opt-in)
+**Phase A.5b** (define-phase, opt-in): `ambiguity-reviewer`, `completeness-reviewer`, `research-validator`
+**Phase C0.5b** (pre-execute, opt-in): `file-path-verifier`, `spec-plan-alignment`, `impact-scanner`
 
-#### 1. Ambiguity Reviewer
-See: plugins/proj/agents/ambiguity-reviewer.md
+All agents via parallel `Agent()` calls w/ `run_in_background=true`. Await all, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show).
 
-#### 2. Completeness Reviewer
-See: plugins/proj/agents/completeness-reviewer.md
-
-#### 3. Research Validator
-See: plugins/proj/agents/research-validator.md
-
-### Phase C0.5b — Pre-execute agents (opt-in)
-
-#### 4. File Path Verifier
-See: plugins/proj/agents/file-path-verifier.md
-
-#### 5. Spec-Plan Alignment
-See: plugins/proj/agents/spec-plan-alignment.md
-
-#### 6. Impact Scanner
-See: plugins/proj/agents/impact-scanner.md
-
-### Spawning pattern
-
-All agents via parallel `Agent()` calls w/ `run_in_background=true`. Example for A.5b:
-
-```
-# Pseudocode — spawn parallel Agents, wait for completion
-Agent(subagent_type="ambiguity-reviewer", description="Ambiguity review — todo <id>",
-      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
-Agent(subagent_type="completeness-reviewer", description="Completeness review — todo <id>",
-      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
-Agent(subagent_type="research-validator", description="Research validation — todo <id>",
-      run_in_background=true, prompt="Todo <id>: <title>\nRequirements: <reqs>\nResearch: <research>")
-# ... auto-notified on completion — no cleanup needed ...
-```
-
-Await all three, parse JSON, aggregate into per-todo review table. Apply severity (BLOCKING → prompt, WARNING → show, INFO → show). Repeat per sampled todo.
-
-**Findings aggregation**: merge across 3 agents, single table keyed by todo:
+**Findings aggregation** — single table keyed by todo:
 
 ```
 ### Preflight Adversarial Review — todo <id>
@@ -350,81 +316,6 @@ Await all three, parse JSON, aggregate into per-todo review table. Apply severit
 | WARNING  | Ambiguity | Undefined term "downstream" | requirements.md L12 |
 ```
 
-**Severity semantics**:
-- BLOCKING — triggers Fix / Continue / Stop. Subject to `--no-interactive` demotion + fix-loop cap.
-- WARNING — shown, non-blocking.
-- INFO — shown, non-blocking, no ack.
+Severity: BLOCKING → Fix/Continue/Stop (subject to `--no-interactive` demotion + fix-loop cap). WARNING/INFO → shown, non-blocking.
 
-
-## Agent Fallback
-
-If `subagent_type="<name>"` not found (agent .md file missing/renamed):
-1. Log warning via `notes_append`: "Agent definition '<name>' not found, falling back to general-purpose"
-2. Use `Agent(subagent_type="general-purpose", prompt=<inline_fallback>)` w/ minimal role desc
-3. Fallback prompts (one-line per agent):
-   - `ambiguity-reviewer`: "Review requirements.md + research.md for undefined terms, handwavey claims, unmeasurable goals. Return JSON {agent, findings}."
-   - `completeness-reviewer`: "Review requirements.md + research.md for missing failure modes, auth/security gaps, scope holes. Return JSON {agent, findings}."
-   - `research-validator`: "Validate research.md file refs exist, option distinctness, risk realism. Return JSON {agent, findings}."
-   - `file-path-verifier`: "Verify all file paths in plan resolve to existing files. Return JSON {agent, findings}."
-   - `spec-plan-alignment`: "Compare plan against requirements.md acceptance criteria. Flag unaddressed criteria. Return JSON {agent, findings}."
-   - `impact-scanner`: "Scan codebase for callers/consumers of files in plan. Flag potential breakage. Return JSON {agent, findings}."
-
-
-## Agent Delegation Protocols
-
-Spawned agents lack user-facing tools. These protocols bridge gap via structured return values.
-
-### Tool Availability (spawned agents)
-
-| Tool | Available? |
-|------|-----------|
-| AskUserQuestion | NO |
-| EnterPlanMode / ExitPlanMode | NO |
-| Read / Edit / Write / Bash / Glob / Grep | YES |
-| Task tools (TaskCreate, TaskUpdate, etc.) | YES |
-| MCP tools (proj, worktree, sandbox, router, etc.) | YES |
-
-### ASK_USER Protocol
-
-Agent needs user input → returns structured output:
-
-```json
-{
-  "status": "escalation_needed",
-  "issue": "<question or decision needed>",
-  "context": "<why this matters>",
-  "options": ["opt1", "opt2"]
-}
-```
-
-Parent reads Agent result → calls `AskUserQuestion` w/ options → spawns new Agent w/ resolution ctx + user's answer.
-
-Use for: plan gaps, ambiguous requirements, architectural decisions, scope clarifications.
-
-### PLAN_ESCALATION Protocol
-
-Agent researched + drafted impl plan → returns structured output:
-
-```json
-{
-  "status": "plan_escalation",
-  "plan": "<full plan content — Context, Files, Changes, Verification>"
-}
-```
-
-Parent reads result → `EnterPlanMode` → writes plan file → `ExitPlanMode` → if approved, spawns new Agent w/ approved plan. If rejected, spawns new Agent w/ feedback for revision.
-
-Use for: execution agents needing plan approval, speculative planners needing user sign-off.
-
-### Agent Prompt Inclusion
-
-All agent spawn instructions MUST include:
-
-```
-If you encounter work outside approved plan or need user input:
-return {status: "escalation_needed", issue: "<description>", options: [...]}
-Do NOT improvise or auto-fix.
-
-If you need plan approval:
-return {status: "plan_escalation", plan: "<plan>"}
-```
+> Agent fallback, escalation protocols, tool availability: see `plugins/proj/skills/_shared/errors.md`
