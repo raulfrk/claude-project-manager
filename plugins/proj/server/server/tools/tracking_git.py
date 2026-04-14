@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib import tracking_git as tg
+from server.lib.db import db_path
+from server.lib.migration import export_sqlite_to_yaml
 from server.tools.config import require_project
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -41,6 +46,14 @@ def register(app: FastMCP) -> None:
         tracking_path = Path(cfg.tracking_dir).expanduser()
         if not tg.ensure_git_repo(tracking_path):
             return json.dumps({"status": "error", "message": "Failed to init git repo"})
+
+        if db_path(cfg, name).exists():
+            try:
+                export_sqlite_to_yaml(cfg, name)
+            except Exception as e:
+                logger.warning(
+                    "export_sqlite_to_yaml failed, committing whatever is on disk: %s", e
+                )
 
         msg = commit_message or f"[{name}] Update {name}"
         sha = await tg.tracking_commit_async(tracking_path, msg)
