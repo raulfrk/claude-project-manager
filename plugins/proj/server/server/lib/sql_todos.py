@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib.db import ensure_db, get_connection
@@ -147,15 +149,67 @@ def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
         conn.close()
 
 
-# ── Archive todos ─────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    """Load archived todos from archive_todos table. Returns [] if db doesn't exist."""
+def compute_next_todo_id(cfg: ProjConfig, project_name: str) -> int:
+    """Return next_todo_id as max base-integer ID across todos + archive_todos + 1.
+
+    IDs may be compound (e.g. '475.6') — extracts the leading integer part.
+    Returns 1 if data.db doesn't exist or tables are empty.
+    """
     from server.lib.db import db_path
 
     path = db_path(cfg, project_name)
     if not path.exists():
+        return 1
+    db_file = ensure_db(cfg, project_name)
+    conn = get_connection(db_file)
+    try:
+        row = conn.execute(
+            """
+            SELECT MAX(CAST(SUBSTR(id, 1, INSTR(id || '.', '.') - 1) AS INTEGER))
+            FROM (
+                SELECT id FROM todos WHERE project=?
+                UNION ALL
+                SELECT id FROM archive_todos WHERE project=?
+            )
+            """,
+            (project_name, project_name),
+        ).fetchone()
+        return (row[0] or 0) + 1
+    finally:
+        conn.close()
+
+
+# ── Archive todos ─────────────────────────────────────────────────────────────
+
+
+_log = logging.getLogger(__name__)
+
+
+def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
+    """Load archived todos from archive_todos table.
+
+    Falls back to archive.yaml.bak if data.db doesn't exist (pre-migration recovery).
+    Returns [] if neither source is available.
+    """
+    import yaml
+
+    from server.lib.db import db_path
+
+    path = db_path(cfg, project_name)
+    if not path.exists():
+        bak_path = Path(cfg.tracking_dir).expanduser() / project_name / "archive.yaml.bak"
+        if bak_path.exists():
+            _log.warning("data.db missing for %r — falling back to archive.yaml.bak", project_name)
+            try:
+                with bak_path.open() as f:
+                    raw = yaml.safe_load(f) or {}
+                items = raw.get("todos", []) if isinstance(raw, dict) else []
+                return [Todo.from_dict(t) for t in items if isinstance(t, dict)]
+            except Exception as exc:
+                _log.error("Failed to load archive.yaml.bak for %r: %s", project_name, exc)
         return []
 
     db_file = ensure_db(cfg, project_name)

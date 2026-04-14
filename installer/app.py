@@ -750,7 +750,7 @@ class InstallerApp(App):
         progress = ProgressScreen(
             description="Uninstalling plugins...", total=len(plugins)
         )
-        self.call_later(self.push_screen, progress, callback=self._on_progress_done)
+        self.push_screen(progress, callback=self._on_progress_done)
         await self._run_uninstall_worker(plugins, progress, full_cleanup)
 
     async def _run_uninstall_worker(

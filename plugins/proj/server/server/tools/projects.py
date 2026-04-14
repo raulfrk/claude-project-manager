@@ -129,6 +129,30 @@ def register(app: FastMCP) -> None:
         if name in index.projects:
             return json.dumps({"error": f"Project '{name}' already exists."})
 
+        # Secondary guard: detect existing tracking data even when index is stale/empty.
+        from server.lib.db import db_path
+
+        _tracking = Path(cfg.tracking_dir).expanduser() / name
+        _db_file = db_path(cfg, name)
+        if _db_file.exists():
+            return json.dumps(
+                {
+                    "error": (
+                        f"Project '{name}' already has a data.db at {_db_file}."
+                        " Use proj_update_meta to modify an existing project."
+                    )
+                }
+            )
+        if (_tracking / "todos.yaml").exists() or (_tracking / "todos.yaml.bak").exists():
+            return json.dumps(
+                {
+                    "error": (
+                        f"Project '{name}' already has tracking data in {_tracking}."
+                        " Use proj_update_meta to modify an existing project."
+                    )
+                }
+            )
+
         # Build list of RepoEntry from dirs or legacy path parameter
         repo_entries: list[RepoEntry] = []
         if dirs:

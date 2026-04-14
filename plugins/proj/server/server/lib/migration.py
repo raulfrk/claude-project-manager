@@ -169,6 +169,27 @@ def migrate_yaml_to_sqlite(cfg: ProjConfig, project_name: str) -> dict[str, int 
                 try:
                     meta = ProjectMeta.from_dict(meta_dict)  # type: ignore[arg-type]
                     meta.dates.last_updated = str(date.today())
+                    # Recompute next_todo_id from migrated rows so a stale YAML value
+                    # (e.g. reset to 1 by a failed init) doesn't cause ID collisions.
+                    computed_id = (
+                        max(
+                            (
+                                int(t.id.split(".")[0])
+                                for t in todos_objs + archive_objs
+                                if t.id and t.id.split(".")[0].isdigit()
+                            ),
+                            default=0,
+                        )
+                        + 1
+                    )
+                    if computed_id > meta.next_todo_id:
+                        logger.info(
+                            "Correcting next_todo_id for %r: %d → %d",
+                            project_name,
+                            meta.next_todo_id,
+                            computed_id,
+                        )
+                        meta.next_todo_id = computed_id
                     payload = json.dumps(dataclasses.asdict(meta))
                     conn.execute(
                         "INSERT OR REPLACE INTO project_meta (name, data) VALUES (?, ?)",

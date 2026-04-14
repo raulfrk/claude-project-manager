@@ -1416,6 +1416,7 @@ def _execute_push_updates(
 
 
 _PUSH_COMPLETE_BATCH_SIZE = 20
+_BULK_COMPLETE_WARN_THRESHOLD = 20  # log warning when completing more than this many at once
 
 
 def _execute_push_completes(
@@ -2058,7 +2059,24 @@ def register(app: FastMCP) -> None:
         all_errors.extend(update_errors)
 
         # 10f. Push completes
-        complete_succeeded, complete_errors = _execute_push_completes(plan.push_complete)
+        if len(plan.push_complete) > _BULK_COMPLETE_WARN_THRESHOLD:
+            import os
+
+            logger.warning(
+                "Sync: completing %d Todoist tasks in bulk. "
+                "Set env TODOIST_SYNC_SKIP_BULK=1 to skip bulk completions instead.",
+                len(plan.push_complete),
+            )
+            if os.environ.get("TODOIST_SYNC_SKIP_BULK"):
+                logger.warning(
+                    "TODOIST_SYNC_SKIP_BULK set — skipping %d bulk completions.",
+                    len(plan.push_complete),
+                )
+                complete_succeeded, complete_errors = [], []
+            else:
+                complete_succeeded, complete_errors = _execute_push_completes(plan.push_complete)
+        else:
+            complete_succeeded, complete_errors = _execute_push_completes(plan.push_complete)
         total_push_completed = len(complete_succeeded)
         all_errors.extend(complete_errors)
 
