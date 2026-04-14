@@ -966,11 +966,16 @@ class TestTodoArchive:
     async def test_archive_yaml_created_automatically(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
-        archive = storage.archive_path(project[0], "myapp")
-        assert not archive.exists()
         await call_tool(mcp_app, "todo_add", title="Task")
         await call_tool(mcp_app, "todo_complete", todo_id="1")
-        assert archive.exists()
+        from server.lib.db import db_path, get_connection
+
+        conn = get_connection(db_path(project[0], "myapp"))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM archive_todos WHERE project=?", ("myapp",)
+        ).fetchone()[0]
+        conn.close()
+        assert count >= 1
 
     async def test_multiple_archives_accumulate(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -1290,10 +1295,14 @@ class TestManualTagDisplay:
     async def test_todo_add_with_natural_language_due_date(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
-        """todo_add stores natural language due_date strings as-is."""
-        await call_tool(mcp_app, "todo_add", title="Task", due_date="next Friday")
+        """todo_add rejects non-YYYY-MM-DD due_date strings with an error message.
+
+        The validation was added in e1bd1b6 to enforce ISO format only.
+        """
+        result = await call_tool(mcp_app, "todo_add", title="Task", due_date="next Friday")
+        assert "YYYY-MM-DD" in result or "due_date" in result.lower()
         todos = storage.load_todos(project[0], "myapp")
-        assert todos[0].due_date == "next Friday"
+        assert len(todos) == 0  # no todo created due to validation failure
 
     async def test_todo_add_without_due_date_defaults_to_none(
         self, mcp_app: Any, project: tuple[ProjConfig, str]

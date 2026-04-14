@@ -129,6 +129,12 @@ def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[T
     sql_todos.save_archived_todos_append(cfg, project_name, todos_to_add)
 
 
+def replace_archived_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
+    """Replace all archived todos for a project atomically (DELETE + INSERT)."""
+    _ensure_migrated(cfg, project_name)
+    sql_todos.replace_archived_todos(cfg, project_name, todos)
+
+
 def archive_and_remove_todos(
     cfg: ProjConfig,
     project_name: str,
@@ -193,6 +199,14 @@ def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, JsonVal
     """Append a single decision entry to SQLite."""
     _ensure_migrated(cfg, project_name)
     sql_decisions.append_decision(cfg, project_name, entry)  # type: ignore[arg-type]
+
+
+def replace_decisions(
+    cfg: ProjConfig, project_name: str, entries: list[dict[str, JsonValue]]
+) -> None:
+    """Replace all decisions for a project atomically (DELETE + INSERT)."""
+    _ensure_migrated(cfg, project_name)
+    sql_decisions.replace_decisions(cfg, project_name, entries)  # type: ignore[arg-type]
 
 
 def build_decision_entry(

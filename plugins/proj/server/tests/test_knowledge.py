@@ -66,13 +66,17 @@ def project(cfg: ProjConfig, tmp_path: Path) -> str:
         "- python-jose: lightweight JWT\n"
     )
 
-    # Decisions (flat list matching build_decision_entry format)
-    (t_dir / "decisions.yaml").write_text(
-        "- decision: Use authlib for authentication\n"
-        "  context: Most mature OAuth2 library\n"
-        "  tags: []\n"
-        "  todo_id: ''\n"
-        "  timestamp: '2026-03-01T00:00:00'\n"
+    # Decisions — insert via storage so they go to SQLite
+    storage.append_decision(
+        cfg,
+        name,
+        {
+            "decision": "Use authlib for authentication",
+            "context": "Most mature OAuth2 library",
+            "tags": [],
+            "todo_id": "",
+            "timestamp": "2026-03-01T00:00:00",
+        },
     )
 
     return name

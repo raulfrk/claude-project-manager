@@ -9,6 +9,8 @@ import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+import yaml
+
 from server.lib import storage
 from server.tools.config import require_config
 
@@ -71,10 +73,49 @@ def _backup_file(path: Path, timestamp: str) -> Path | None:
 
 
 def _restore_backups(backups: dict[Path, Path | None]) -> None:
-    """Restore all backed-up files."""
+    """Restore all backed-up YAML files."""
     for original, backup in backups.items():
         if backup and backup.exists():
             shutil.copy2(backup, original)
+
+
+def _restore_sqlite_from_backups(
+    cfg: ProjConfig, project_name: str, backups: dict[Path, Path | None]
+) -> None:
+    """Restore SQLite state from YAML backup files. Called on rollback.
+
+    Uses sql_todos/sql_decisions directly (not storage wrappers) so that
+    mocked storage.save_todos in tests does not interfere with restore.
+    """
+    from server.lib import sql_decisions as _sqld
+    from server.lib import sql_todos as _sqlt
+    from server.lib.models import Todo as _Todo
+
+    # Restore YAML files from backups first
+    _restore_backups(backups)
+
+    with contextlib.suppress(Exception):
+        todos_yaml = storage.todos_path(cfg, project_name)
+        if todos_yaml.exists():
+            raw = yaml.safe_load(todos_yaml.read_text()) or {}
+            raw_todos = raw.get("todos", []) if isinstance(raw, dict) else []
+            todos_objs = [_Todo.from_dict(t) for t in raw_todos if isinstance(t, dict)]
+            _sqlt.save_todos(cfg, project_name, todos_objs)
+
+    with contextlib.suppress(Exception):
+        archive_yaml = storage.archive_path(cfg, project_name)
+        if archive_yaml.exists():
+            raw = yaml.safe_load(archive_yaml.read_text()) or {}
+            raw_todos = raw.get("todos", []) if isinstance(raw, dict) else []
+            archived_objs = [_Todo.from_dict(t) for t in raw_todos if isinstance(t, dict)]
+            _sqlt.replace_archived_todos(cfg, project_name, archived_objs)
+
+    with contextlib.suppress(Exception):
+        decisions_yaml = storage.decisions_path(cfg, project_name)
+        if decisions_yaml.exists():
+            raw_list = yaml.safe_load(decisions_yaml.read_text()) or []
+            if isinstance(raw_list, list):
+                _sqld.replace_decisions(cfg, project_name, raw_list)
 
 
 def _migrate_decisions(decisions: list[dict[str, JsonValue]], id_map: dict[str, str]) -> int:
@@ -181,7 +222,12 @@ def _migrate_project(
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    # Create backups
+    # Export current SQLite state to YAML files so they can be backed up
+    from server.lib.migration import export_sqlite_to_yaml
+
+    export_sqlite_to_yaml(cfg, project_name)
+
+    # Create backups of the exported YAML files
     backups: dict[Path, Path | None] = {
         storage.todos_path(cfg, project_name): _backup_file(
             storage.todos_path(cfg, project_name), timestamp
@@ -199,30 +245,27 @@ def _migrate_project(
 
     renamed: list[tuple[str, str]] = []
     try:
-        # YAML writes first (atomic, backed up)
+        # Save remapped active todos to SQLite
         storage.save_todos(cfg, project_name, todos)
         storage.save_meta(cfg, meta)
 
-        # Migrate archived todos
+        # Migrate archived todos in SQLite
         archived = storage.load_archived_todos(cfg, project_name)
         archive_count = 0
         if archived:
             _apply_remap(archived, id_map)
-            storage._write_yaml(
-                storage.archive_path(cfg, project_name),
-                {"todos": [t.to_dict() for t in archived]},
-            )
+            storage.replace_archived_todos(cfg, project_name, archived)
             archive_count = len(archived)
 
-        # Migrate decisions
+        # Migrate decisions in SQLite
         decisions = storage.load_decisions(cfg, project_name)
         decisions_count = 0
         if decisions:
             decisions_count = _migrate_decisions(decisions, id_map)
             if decisions_count:
-                storage._write_yaml_list(storage.decisions_path(cfg, project_name), decisions)
+                storage.replace_decisions(cfg, project_name, decisions)
 
-        # Directory renames LAST (after all YAML is committed)
+        # Directory renames LAST (after all SQLite writes committed)
         for old_id, new_id in id_map.items():
             if storage.rename_todo_dir(cfg, project_name, old_id, new_id):
                 renamed.append((old_id, new_id))
@@ -231,8 +274,8 @@ def _migrate_project(
         for old_id, new_id in reversed(renamed):
             with contextlib.suppress(Exception):
                 storage.rename_todo_dir(cfg, project_name, new_id, old_id)
-        # Then restore YAML backups
-        _restore_backups(backups)
+        # Restore SQLite state from YAML backups
+        _restore_sqlite_from_backups(cfg, project_name, backups)
         raise
 
     return {

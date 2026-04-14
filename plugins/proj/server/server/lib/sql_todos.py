@@ -198,3 +198,31 @@ def save_archived_todos_append(
         raise
     finally:
         conn.close()
+
+
+def replace_archived_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
+    """Replace all archived todos for a project atomically (DELETE + INSERT)."""
+    db_file = ensure_db(cfg, project_name)
+    conn = get_connection(db_file)
+    try:
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM archive_todos WHERE project=?", (project_name,))
+        if todos:
+            rows = []
+            for todo in todos:
+                row = _todo_to_row(todo)
+                row["project"] = project_name
+                rows.append(row)
+            cols = list(rows[0].keys())
+            placeholders = ", ".join(f":{c}" for c in cols)
+            col_names = ", ".join(cols)
+            conn.executemany(
+                f"INSERT INTO archive_todos ({col_names}) VALUES ({placeholders})",  # noqa: S608
+                rows,
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()

@@ -9,7 +9,16 @@ import time
 from pathlib import Path
 
 import httpx
-from hook_dispatch.dispatch import _resolve_hooks_transport
+
+
+def _resolve_hooks_transport(port: int):  # type: ignore[return]
+    try:
+        from hook_dispatch.dispatch import _resolve_hooks_transport as _real
+
+        return _real(port)
+    except ModuleNotFoundError:
+        return None, None
+
 
 _CACHE_TTL_S = 60.0
 _PROBE_TIMEOUT_S = 2.0
@@ -58,7 +67,7 @@ async def _probe_once(timeout: float) -> tuple[bool, str]:
         return False, _DETAIL_ENUM["missing_registry"]
     except Exception:
         return False, _DETAIL_ENUM["missing_registry"]
-    if transport is None:
+    if transport is None or target is None:
         return False, _DETAIL_ENUM["missing_registry"]
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:

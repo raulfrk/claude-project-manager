@@ -191,20 +191,25 @@ class TestLoadMetaCorruption:
             storage.load_meta(cfg, "myapp")
 
     def test_empty_meta_file_returns_meta_with_empty_name(self, cfg: ProjConfig) -> None:
-        """An empty meta.yaml loads gracefully and returns a ProjectMeta with name=''.
+        """An empty meta.yaml cannot be migrated to SQLite — load_meta raises FileNotFoundError.
 
-        ProjectMeta.from_dict now uses data.get('name', '') so a missing 'name'
-        key no longer raises KeyError — it falls back to an empty string.
+        With the SQLite backend, _ensure_migrated reads meta.yaml via _yaml_safe_load.
+        An empty file yields None (not a dict), so no meta row is inserted.
+        sql_meta.load_meta then raises FileNotFoundError.
         """
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
         (proj_dir / "meta.yaml").write_text("")
 
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == ""
+        with pytest.raises(FileNotFoundError):
+            storage.load_meta(cfg, "myapp")
 
     def test_meta_missing_name_returns_empty_string(self, cfg: ProjConfig) -> None:
-        """meta.yaml without 'name' field loads and returns name='' instead of raising."""
+        """meta.yaml without 'name' is migrated to SQLite with name='' default.
+
+        _yaml_safe_load returns a dict (valid YAML), so migration inserts a row via
+        ProjectMeta.from_dict which defaults name to ''. load_meta returns it.
+        """
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
         (proj_dir / "meta.yaml").write_text(
@@ -217,17 +222,17 @@ class TestLoadMetaCorruption:
         assert meta.priority == "medium"
 
     def test_invalid_yaml_in_meta_returns_empty_meta(self, cfg: ProjConfig) -> None:
-        """Syntactically invalid meta.yaml is swallowed and returns ProjectMeta with name=''.
+        """Syntactically invalid meta.yaml cannot be migrated — load_meta raises FileNotFoundError.
 
-        _load_yaml catches yaml.YAMLError and returns {}, so from_dict({}) returns
-        a ProjectMeta with name='' and default values for all optional fields.
+        _yaml_safe_load catches yaml.YAMLError and returns None, so migration skips
+        inserting a meta row. sql_meta.load_meta then raises FileNotFoundError.
         """
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
         (proj_dir / "meta.yaml").write_text("name: myapp\nrepos: [unclosed\n")
 
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == ""
+        with pytest.raises(FileNotFoundError):
+            storage.load_meta(cfg, "myapp")
 
     def test_meta_missing_optional_fields_uses_defaults(self, cfg: ProjConfig) -> None:
         """meta.yaml with only the required 'name' field fills optional fields with defaults."""
@@ -262,7 +267,10 @@ class TestLoadMetaCorruption:
         meta = storage.load_meta(cfg, "myapp")
         assert meta.name == "myapp"
         assert meta.dates.created == ""
-        assert meta.dates.last_updated == ""
+        # last_updated is bumped to today by migration (not empty)
+        from datetime import date as _date
+
+        assert meta.dates.last_updated == str(_date.today())
 
 
 # ---------------------------------------------------------------------------
@@ -555,14 +563,20 @@ class TestLoadYamlPermissionError:
             todos_file.chmod(0o644)
 
     def test_permission_error_on_index(self, cfg: ProjConfig, tmp_path: Path) -> None:
-        """PermissionError when reading active-projects.yaml propagates."""
+        """load_index reads from SQLite — YAML permission errors no longer affect it.
+
+        The index is now stored in SQLite (sql_meta.load_index), so even when
+        active-projects.yaml is unreadable, load_index succeeds and returns an
+        empty index (no projects registered yet).
+        """
         index_path = Path(cfg.tracking_dir) / "active-projects.yaml"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text("projects: {}\n")
         index_path.chmod(0o000)
         try:
-            with pytest.raises(PermissionError):
-                storage.load_index(cfg)
+            # Should NOT raise — SQLite is the source of truth
+            index = storage.load_index(cfg)
+            assert index.projects == {}
         finally:
             index_path.chmod(0o644)
 

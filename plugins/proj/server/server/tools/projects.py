@@ -866,8 +866,10 @@ def register(app: FastMCP) -> None:
         state.set_session_active(name)
         meta = storage.load_meta(cfg, name)
         msg = f"Loaded project '{name}' for this session."
-        # Detect old single-path format
-        raw = storage._load_yaml(storage.meta_path(cfg, name))
+        # Detect old single-path format — check meta.yaml or meta.yaml.bak (post-migration)
+        _meta_p = storage.meta_path(cfg, name)
+        _meta_raw_p = _meta_p if _meta_p.exists() else _meta_p.parent / (_meta_p.name + ".bak")
+        raw = storage._load_yaml(_meta_raw_p)
         if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
             msg += (
                 "\n\n⚠️ Project uses legacy single-path format."
@@ -895,7 +897,20 @@ def register(app: FastMCP) -> None:
         """Migrate one project from single-path to multi-repo format. Returns result dict."""
         meta_p = storage.meta_path(cfg, project_name)
         if not meta_p.exists():
-            return {"project": project_name, "migrated": False, "reason": "meta.yaml missing"}
+            # meta.yaml absent — check SQLite (project may have been created via SQLite directly)
+            try:
+                sqlite_meta = storage.load_meta(cfg, project_name)
+                # Project exists in SQLite — check if it has repos (already multi-dir)
+                if sqlite_meta.repos:
+                    return {
+                        "project": project_name,
+                        "migrated": False,
+                        "reason": "already multi-dir",
+                    }
+                # No repos in SQLite and no path — truly no config
+                return {"project": project_name, "migrated": False, "reason": "meta.yaml missing"}
+            except FileNotFoundError:
+                return {"project": project_name, "migrated": False, "reason": "meta.yaml missing"}
 
         raw = storage._load_yaml(meta_p)
         path_val = raw.get("path")

@@ -262,8 +262,11 @@ def _build_context(
     if meta.description:
         lines.append(f"**Description**: {meta.description}")
 
-    # Detect old single-path format
-    raw = storage._load_yaml(storage.meta_path(cfg, project_name))
+    # Detect old single-path format — check meta.yaml (pre-SQLite) or meta.yaml.bak (post-migration)
+    meta_p = storage.meta_path(cfg, project_name)
+    meta_bak_p = meta_p.parent / (meta_p.name + ".bak")
+    meta_raw_p = meta_p if meta_p.exists() else meta_bak_p
+    raw = storage._load_yaml(meta_raw_p)
     if raw.get("path") and (not raw.get("repos") or raw.get("repos") == []):
         lines.append(
             "\n⚠️ Project uses legacy single-path format."

@@ -76,13 +76,8 @@ def _setup_project_with_todos(
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
     storage.save_index(cfg, index)
 
-    # Write todos
-    todo_dicts = [t.to_dict() for t in todos] if todos else []
-    (proj_dir / "todos.yaml").write_text(
-        "todos:\n" + "".join(f"  - {json.dumps(td)}\n" for td in todo_dicts)
-        if todo_dicts
-        else "todos: []\n"
-    )
+    # Write todos via SQLite (direct YAML write bypassed after migration)
+    storage.save_todos(cfg, name, todos or [])
     (proj_dir / "NOTES.md").write_text(f"# {name}\n")
 
 

@@ -1648,13 +1648,19 @@ class TestRootIssueToNotes:
         # Save, then reload to prove from_dict handles missing field
         storage.save_meta(cfg, meta)
 
-        # Manually strip jira_synced_comment_ids from the saved file
-        meta_path = storage.tracking_dir(cfg, name) / "meta.yaml"
-        import yaml
+        # Manually strip jira_synced_comment_ids from the SQLite row
+        import json
 
-        raw = yaml.safe_load(meta_path.read_text())
+        from server.lib.db import db_path, get_connection
+
+        db = db_path(cfg, name)
+        conn = get_connection(db)
+        row = conn.execute("SELECT data FROM project_meta WHERE name=?", (name,)).fetchone()
+        raw = json.loads(row["data"])
         raw.pop("jira_synced_comment_ids", None)
-        meta_path.write_text(yaml.dump(raw))
+        conn.execute("UPDATE project_meta SET data=? WHERE name=?", (json.dumps(raw), name))
+        conn.commit()
+        conn.close()
 
         # Reload — should default to empty list
         meta = storage.load_meta(cfg, name)

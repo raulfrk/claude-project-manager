@@ -203,15 +203,20 @@ class TestDecisionLog:
         self, decision_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         cfg, name = project
-        path = storage.decisions_path(cfg, name)
-        assert not path.exists()
         await call_tool(
             decision_app,
             "proj_decision_log",
             action="add",
             decision="First decision",
         )
-        assert path.exists()
+        from server.lib.db import db_path, get_connection
+
+        conn = get_connection(db_path(cfg, name))
+        count = conn.execute("SELECT COUNT(*) FROM decisions WHERE project=?", (name,)).fetchone()[
+            0
+        ]
+        conn.close()
+        assert count >= 1
 
     async def test_add_without_decision_returns_error(
         self, decision_app: Any, project: tuple[ProjConfig, str]

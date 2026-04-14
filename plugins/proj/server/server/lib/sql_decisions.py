@@ -37,6 +37,19 @@ def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, object]
         )
 
 
+def replace_decisions(cfg: ProjConfig, project_name: str, entries: list[dict[str, object]]) -> None:
+    """Replace all decisions for a project atomically (DELETE + INSERT)."""
+    db_file = ensure_db(cfg, project_name)
+    with get_connection(db_file) as conn:
+        conn.execute("DELETE FROM decisions WHERE project=?", (project_name,))
+        for entry in entries:
+            timestamp = entry.get("timestamp") or datetime.now(UTC).isoformat()
+            conn.execute(
+                "INSERT INTO decisions (project, timestamp, data) VALUES (?, ?, ?)",
+                (project_name, timestamp, json.dumps(entry)),
+            )
+
+
 def load_all_decisions(cfg: ProjConfig) -> dict[str, list[dict[str, object]]]:
     """Load decisions for ALL projects (used by SQLite→YAML export).
 

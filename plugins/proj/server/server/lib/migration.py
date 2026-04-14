@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Module-level cache — reset on process restart naturally.
-_migrated_projects: set[str] = set()
+_migrated_projects: set[tuple[str, str]] = set()
 
 
 def _yaml_safe_load(path: Path) -> object:
@@ -281,12 +281,15 @@ def _ensure_migrated(cfg: ProjConfig, project_name: str) -> None:
     If data.db doesn't exist: run migrate_yaml_to_sqlite.
     If data.db exists: no-op.
     Uses module-level set to avoid re-checking on every call.
+    The cache key includes tracking_dir to avoid false hits across
+    different cfg instances (e.g. separate test fixtures).
     """
-    if project_name in _migrated_projects:
+    cache_key = (cfg.tracking_dir, project_name)
+    if cache_key in _migrated_projects:
         return
 
     path = db_path(cfg, project_name)
     if not path.exists():
         migrate_yaml_to_sqlite(cfg, project_name)
 
-    _migrated_projects.add(project_name)
+    _migrated_projects.add(cache_key)

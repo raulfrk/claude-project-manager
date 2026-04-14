@@ -67,7 +67,12 @@ class TestProjInit:
         _run_proj_init("myapp", str(tmp_path))
         tracking = Path(cfg.tracking_dir) / "myapp"
         assert (tracking / "NOTES.md").exists()
-        assert (tracking / "todos.yaml").exists()
+        # todos.yaml is migrated to SQLite (todos.yaml.bak) immediately after init;
+        # verify todos are accessible via storage instead
+        from server.lib import storage as _st
+
+        todos = _st.load_todos(cfg, "myapp")
+        assert isinstance(todos, list)
 
 
 class TestProjInitHooksSync:

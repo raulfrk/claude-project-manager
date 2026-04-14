@@ -40,11 +40,18 @@ def _needs_migration(todos: list[Todo]) -> bool:
 
 
 def _backup_todos(cfg: ProjConfig, name: str) -> Path:
-    """Create a timestamped backup of todos.yaml before migration.
+    """Create a timestamped backup of todos before migration.
 
-    Returns the backup file path.
+    Exports current SQLite state to todos.yaml first (if not already present),
+    then copies the file. Returns the backup file path.
     """
     src = storage.todos_path(cfg, name)
+    if not src.exists():
+        # todos.yaml may have been migrated to SQLite — export it first
+        from server.lib.migration import export_sqlite_to_yaml
+
+        export_sqlite_to_yaml(cfg, name)
+
     backup_dir = storage.tracking_dir(cfg, name) / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
 

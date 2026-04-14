@@ -185,14 +185,21 @@ class TestMigrateProjectActual:
     def test_backup_created_with_original_data(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Task")]
         _setup_project_with_todos(cfg, "gamma", todos)
-        original_text = storage.todos_path(cfg, "gamma").read_text()
+        # Todos are in SQLite — capture original IDs for verification
+        original_ids = {t.id for t in storage.load_todos(cfg, "gamma")}
 
         _migrate_project(cfg, "gamma", dry_run=False)
 
+        # Backup files are created from SQLite export before migration
         proj_dir = Path(cfg.tracking_dir) / "gamma"
         bak_files = list(proj_dir.glob("todos.yaml.bak-*"))
         assert len(bak_files) == 1
-        assert bak_files[0].read_text() == original_text
+        # Backup should contain the original T-prefix IDs
+        import yaml
+
+        bak_data = yaml.safe_load(bak_files[0].read_text()) or {}
+        bak_ids = {t["id"] for t in bak_data.get("todos", [])}
+        assert bak_ids == original_ids
 
     def test_updates_meta_next_todo_id(self, cfg: ProjConfig) -> None:
         todos = [
@@ -357,7 +364,8 @@ class TestMigrateRollbackAndInterrupt:
             _make_todo("T002", "Second"),
         ]
         _setup_project_with_todos(cfg, "fail_backup", todos)
-        original_text = storage.todos_path(cfg, "fail_backup").read_text()
+        # Capture original IDs from SQLite
+        original_ids = {t.id for t in storage.load_todos(cfg, "fail_backup")}
 
         with (
             patch(
@@ -368,12 +376,11 @@ class TestMigrateRollbackAndInterrupt:
         ):
             _migrate_project(cfg, "fail_backup", dry_run=False)
 
-        # todos.yaml must be unchanged
-        assert storage.todos_path(cfg, "fail_backup").read_text() == original_text
-        # saved todos still have T-prefix IDs
+        # SQLite todos still have T-prefix IDs
         saved = storage.load_todos(cfg, "fail_backup")
         assert all(t.id.startswith("T") for t in saved)
-        # no backup files should exist (copy failed)
+        assert {t.id for t in saved} == original_ids
+        # no backup files should exist (copy failed before any .bak was written)
         proj_dir = Path(cfg.tracking_dir) / "fail_backup"
         bak_files = list(proj_dir.glob("*.bak-*"))
         assert not bak_files
@@ -405,7 +412,8 @@ class TestMigrateRollbackAndInterrupt:
         original_rename = storage.rename_todo_dir
 
         def tracking_rename(c: ProjConfig, p: str, old: str, new: str) -> bool:
-            bak_files = list(proj_dir.glob("todos.yaml.bak-*"))
+            # Check for any .bak-* file (todos.yaml or meta.yaml)
+            bak_files = list(proj_dir.glob("*.bak-*"))
             backup_existed_during_rename.append(len(bak_files) > 0)
             return original_rename(c, p, old, new)
 
@@ -449,7 +457,7 @@ class TestMigrateRollbackAndInterrupt:
             _migrate_project(cfg, "partial_fail", dry_run=False)
 
         # Backup must still exist so the user can restore
-        bak_files = list(proj_dir.glob("todos.yaml.bak-*"))
+        bak_files = list(proj_dir.glob("*.bak-*"))
         assert bak_files, "Backup was removed or never created after partial failure"
 
 
@@ -532,12 +540,14 @@ class TestMigrateArchiveAndDecisions:
         entry = storage.build_decision_entry(decision="A decision", context="", todo_id="T001")
         storage.append_decision(cfg, "rollback", entry)
 
-        original_todos = storage.todos_path(cfg, "rollback").read_text()
-        original_archive = storage.archive_path(cfg, "rollback").read_text()
-        original_decisions = storage.decisions_path(cfg, "rollback").read_text()
+        # Capture original state from SQLite
+        original_todo_ids = {t.id for t in storage.load_todos(cfg, "rollback")}
+        original_archive_ids = {t.id for t in storage.load_archived_todos(cfg, "rollback")}
+        original_decision_tids = [d["todo_id"] for d in storage.load_decisions(cfg, "rollback")]
 
         # Fail during save_todos (after backups are created, during mutation)
-
+        # export_sqlite_to_yaml uses sql_todos directly, not storage.save_todos,
+        # so patching storage.save_todos fails on the first remapped write.
         def boom(*args, **kwargs):
             raise RuntimeError("simulated write failure")
 
@@ -547,10 +557,13 @@ class TestMigrateArchiveAndDecisions:
         ):
             _migrate_project(cfg, "rollback", dry_run=False)
 
-        # All files should be restored from backups
-        assert storage.todos_path(cfg, "rollback").read_text() == original_todos
-        assert storage.archive_path(cfg, "rollback").read_text() == original_archive
-        assert storage.decisions_path(cfg, "rollback").read_text() == original_decisions
+        # SQLite state should be restored to original T-prefix IDs
+        restored_todos = storage.load_todos(cfg, "rollback")
+        restored_archive = storage.load_archived_todos(cfg, "rollback")
+        restored_decisions = storage.load_decisions(cfg, "rollback")
+        assert {t.id for t in restored_todos} == original_todo_ids
+        assert {t.id for t in restored_archive} == original_archive_ids
+        assert [d["todo_id"] for d in restored_decisions] == original_decision_tids
 
     def test_migrate_empty_archive(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Task")]

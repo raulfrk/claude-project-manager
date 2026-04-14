@@ -344,20 +344,30 @@ class TestCliArgParsing:
         # Write config
         config_path.write_text(f"tracking_dir: {tracking_dir}\ngit_integration: false\n")
 
-        # Write index with project (no active field — session-only now)
+        # Create project directory and files
         proj_dir = tracking_dir / "myapp"
         proj_dir.mkdir()
         today = str(date.today())
+
+        # Write index as both YAML (legacy) and SQLite (current)
         (tracking_dir / "active-projects.yaml").write_text(
             f"projects:\n  myapp:\n    name: myapp\n"
             f"    tracking_dir: {proj_dir}\n    created: '{today}'\n"
         )
+        # Also populate the SQLite index so storage.load_index finds the project
+        cfg = ProjConfig(tracking_dir=str(tracking_dir))
+        index = ProjectIndex(
+            version=1,
+            projects={
+                "myapp": ProjectEntry(name="myapp", tracking_dir=str(proj_dir), created=today)
+            },
+        )
+        storage.save_index(cfg, index)
 
         # Write todos and notes
-        (proj_dir / "todos.yaml").write_text("todos: []\n")
         (proj_dir / "NOTES.md").write_text("# myapp\n")
 
-        # Write meta
+        # Write meta.yaml (will be migrated to SQLite on first access)
         (proj_dir / "meta.yaml").write_text(
             f"name: myapp\nstatus: active\npriority: medium\n"
             f"repos:\n  - label: code\n    path: {tmp_path}\n"
