@@ -222,9 +222,9 @@ class TestDefaultsCacheLazy:
     def test_factory_nested_key(self) -> None:
         """Dotted keys walk into nested defaults."""
         _ensure_defaults_loaded()
-        factory = _d("team_mode.max_agents")
-        assert factory({}) == 30
-        assert factory({"team_mode": {"max_agents": 7}}) == 7
+        factory = _d("context_injection.max_tokens")
+        assert factory({}) == 20000
+        assert factory({"context_injection": {"max_tokens": 5000}}) == 5000
 
     def test_distinct_yaml_files(self) -> None:
         distinct = get_distinct_yaml_files(PROJ_YAML_PROMPTS)
