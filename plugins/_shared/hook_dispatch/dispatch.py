@@ -168,7 +168,7 @@ async def _dispatch_hook(
         },
     }
     try:
-        async with httpx.AsyncClient(timeout=30.0, transport=hooks_transport) as client:
+        async with httpx.AsyncClient(timeout=60.0, transport=hooks_transport) as client:
             resp = await client.post(hooks_url, json=payload)
             try:
                 data: dict[str, JsonValue] = resp.json()

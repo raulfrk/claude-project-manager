@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT = 30.0  # seconds
+_DEFAULT_TIMEOUT = 60.0  # seconds
 
 
 @dataclass

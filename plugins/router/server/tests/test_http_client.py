@@ -330,3 +330,41 @@ class TestFireResultOk:
         assert fr.ok is False
         assert fr.error == "Unknown tool: foo"
         assert fr.status_code == 404
+
+
+# ── Timeout constant tests ─────────────────────────────────────────────────
+
+
+class TestDefaultTimeout:
+    def test_default_timeout_is_60(self):
+        """_DEFAULT_TIMEOUT must be 60s to survive nested feedback writeback chains."""
+        from server.lib.http_client import _DEFAULT_TIMEOUT
+
+        assert _DEFAULT_TIMEOUT == 60.0
+
+    @pytest.mark.asyncio
+    async def test_post_hook_passes_60s_timeout_to_client(self):
+        """post_hook should create AsyncClient with timeout=60.0 by default."""
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"ok": true, "result": "done"}'
+        mock_resp.json.return_value = {"ok": True, "result": "done"}
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "server.lib.http_client.httpx.AsyncClient", return_value=mock_client
+        ) as mock_cls:
+            await post_hook(
+                hook_id="h1",
+                url="http://localhost:9000/hook",
+                target_tool="test_tool",
+                params={},
+            )
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert (
+                call_kwargs.kwargs.get("timeout") == 60.0 or call_kwargs[1].get("timeout") == 60.0
+            )
