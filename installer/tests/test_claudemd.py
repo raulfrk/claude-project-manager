@@ -171,6 +171,32 @@ class TestManagedSectionContent:
         assert "AskUserQuestion" in MANAGED_SECTION
         assert "Do NOT improvise" in MANAGED_SECTION
 
+    def test_task_usage_during_multi_step_work(self):
+        assert "Task usage during multi-step work" in MANAGED_SECTION
+        assert "TaskCreate" in MANAGED_SECTION
+        assert "in_progress" in MANAGED_SECTION
+
+    def test_task_status_accuracy(self):
+        assert "Task status accuracy" in MANAGED_SECTION
+        assert (
+            "NEVER mark a Task completed unless work is fully done" in MANAGED_SECTION
+        )
+
+    def test_proj_todo_boundary(self):
+        assert "Proj todo boundary" in MANAGED_SECTION
+        assert "execution-time progress tracking" in MANAGED_SECTION
+        assert "durable project state" in MANAGED_SECTION
+
+    def test_taskcreate_during_run_and_execute(self):
+        assert "TaskCreate during /proj:run and /proj:execute" in MANAGED_SECTION
+        assert "task_id" in MANAGED_SECTION
+        assert "TaskUpdate" in MANAGED_SECTION
+
+    def test_sub_task_nesting(self):
+        assert "Sub-task nesting" in MANAGED_SECTION
+        assert "No depth cap" in MANAGED_SECTION
+        assert "3-10 subtasks per agent" in MANAGED_SECTION
+
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
         assert "run_in_background=true" in MANAGED_SECTION
