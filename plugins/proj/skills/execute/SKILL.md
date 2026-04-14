@@ -2,7 +2,7 @@
 name: execute
 description: Execute one or more todos. Reads requirements and research before implementing. For independent todos in a range, spawns parallel agents. Use when asked "execute 1", "work on 2-4", or "implement the active task".
 allowed-tools: mcp__proj__todo_list, mcp__proj__todo_check_executable, mcp__proj__proj_get_todo_context, mcp__proj__todo_update, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__notes_append, mcp__proj__tracking_git_flush, mcp__proj__proj_session_context, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, Task, TaskCreate, TaskList, Skill, EnterPlanMode, ExitPlanMode, AskUserQuestion
-argument-hint: "[todo-id | range] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] [--max-parallel N] e.g. 1 or 2-4"
+argument-hint: "[todo-id | range] [--no-verify] [--full-context] [--trust 0-3] [--resume] [--no-pipeline] [--fast|--careful] [--force-plan] [--batch-approve] [--worktree] [--no-worktree] [--max-parallel N] [--no-tasks] e.g. 1 or 2-4"
 ---
 
 
@@ -26,7 +26,9 @@ Execute todo(s): $ARGUMENTS
 - Parse `--force-plan` → force FULL REVIEW despite complexity.
 - Parse `--batch-approve` → auto-approve all speculative plans.
 - Parse `--worktree` / `--no-worktree` → enable/disable worktree isolation.
+- `--no-tasks`: disable all TaskCreate calls. Use when you want clean output without task tracking.
 
+Derive: `tasks_enabled = "--no-tasks" not in ARGUMENTS`
 Derive: `worktree_enabled` from flags + config (`worktree_isolation` default).
 Derive: `quality_level` from flags.
 
@@ -112,7 +114,8 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  `--force-plan` → always FULL REVIEW.
 
 **3b. Plan creation** (respects trust, skipped if AUTO-EXECUTE):
-`TaskCreate(title="Phase C1: Plan — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C1"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C1: Plan — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C1", "kind": "phase_task"})` → store as `task_C1_id` → `TaskUpdate(status="in_progress")`
+Pass `parent_task_id=task_C1_id` to agents spawned in this phase.
  - `mcp__proj__proj_decision_log(action="search", decision=<todo title>, project_name=<project>)`. Results → "### Prior Decisions" in plan ctx.
  - Trust 0-2: `EnterPlanMode`. Read ctx (reqs, research, notes, Related Context). Explore source. Plan: files to modify/create, key changes, impl order, testing.
  - Trust 0-1: `ExitPlanMode` for user review. Approve before proceeding.
@@ -120,17 +123,44 @@ Derive: `pipeline_enabled = not no_pipeline_flag`
  - After approval (trust 0-2): `proj_decision_log(action="add", decision=<approach summary>, tags="plan", todo_id)`.
  - Trust 3: Skip 3b entirely → step 4 w/ ctx only.
 
-After plan approved/skipped: `TaskUpdate(status="completed")`.
+After plan approved/skipped: (only if tasks_enabled) `TaskUpdate(task_C1_id, status="completed")`.
 
-`TaskCreate(title="Phase C2: Execute — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C2: Execute — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2", "kind": "phase_task"})` → store as `task_C2_id` → `TaskUpdate(status="in_progress")`
+Pass `parent_task_id=task_C2_id` to agents spawned in this phase.
+
+Create per-todo Task (only if tasks_enabled):
+```
+TaskCreate(
+  title="Implement todo {id} — {title}",
+  description="{notes[:300] if notes else ''}",
+  activeForm="Implementing {title}",
+  metadata={
+    "proj_todo_id": "{id}",
+    "phase": "C2",
+    "kind": "todo_task",
+    "parent_task_id": "<task_C2_id>",
+    "proj": {
+      "id": "{id}",
+      "priority": "{priority}",
+      "tags": [...],
+      "parent_id": "{parent or null}"
+    }
+  }
+) → store as `todo_task_id`
+TaskUpdate(status="in_progress")
+```
+Pass `todo_task_id` to implementer agent prompt:
+```
+task_id: {todo_task_id}  ← agent uses for TaskUpdate + subtask creation
+```
 
 **4.** `mcp__proj__todo_update(status="in_progress")`. Review ctx, implement. Non-empty `notes` field → additional impl ctx (constraints/design decisions).
 
-After impl complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+After impl complete: (only if tasks_enabled) `TaskUpdate(task_C2_id, status="completed")`. Failure → `TaskUpdate(task_C2_id, status="failed")`.
 
 **4a. Verification** (skip if `--no-verify`; no TaskCreate when skipped):
 
-`TaskCreate(title="Phase C2a: Verification — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C2a: Verification — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "C2a", "kind": "phase_task"})` → store as `task_C2a_id` → `TaskUpdate(status="in_progress")`
 
  Mode by quality_level:
  - `skip` (--fast): Skip entirely.
@@ -174,9 +204,9 @@ After impl complete: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(s
 
  All pass → display report, → step 5 w/o prompt.
 
-After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+After verification: (only if tasks_enabled) `TaskUpdate(task_C2a_id, status="completed")`. Failure → `TaskUpdate(task_C2a_id, status="failed")`.
 
-`TaskCreate(title="Phase SAT: Satisfaction — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "SAT"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase SAT: Satisfaction — todo {id}", metadata={"proj_todo_id": "{id}", "phase": "SAT", "kind": "phase_task"})` → store as `task_SAT_id` → `TaskUpdate(status="in_progress")`
 
 **5. Satisfaction loop:**
  a. Ask: "Are you satisfied with outcome of todo <id>?"
@@ -196,7 +226,7 @@ After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(st
  d. `mcp__proj__todo_complete`
  - Update CLAUDE.md if relevant: `mcp__proj__claudemd_write`
  - Append progress note: `mcp__proj__notes_append`
- After satisfaction: `TaskUpdate(status="completed")`.
+ After satisfaction: (only if tasks_enabled) `TaskUpdate(task_SAT_id, status="completed")`.
 
 **Range w/ independent todos (no blocked_by between them):**
 
@@ -207,7 +237,8 @@ After verification: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(st
 
 **Phase C0 — Speculative planning** (if quality_level != careful AND trust != 0 AND trust != 3; no TaskCreate when skipped):
 
-`TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C0: Speculative Planning — batch", metadata={"phase": "C0", "kind": "phase_task"})` → store as `task_C0_id` → `TaskUpdate(status="in_progress")`
+Pass `parent_task_id=task_C0_id` to agents spawned in this phase.
 
 Each todo → `subagent_type="speculative-planner"` read-only Agent w/ `run_in_background=true`:
 - Output: JSON `{prose: string, actions: [{type: "create"|"modify"|"delete"|"test", file: string}]}`
@@ -219,7 +250,7 @@ Store in `speculative_plans[todo_id]`.
 `--batch-approve` → auto-approve all. Display: `Batch-approved N speculative plans.`
 
 Wait for all agents (auto-notified on completion).
-After speculative planning: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+After speculative planning: (only if tasks_enabled) `TaskUpdate(task_C0_id, status="completed")`. Failure → `TaskUpdate(task_C0_id, status="failed")`.
 
 **Phase 1 — Plan (sequential, main conversation):**
 
@@ -227,7 +258,8 @@ Skip if trust 3 → Phase 2 w/ ctx only.
 
 Init `approved_plans = {}`, `executing_agents = {}`, `manual_skipped_ids = []`.
 
-`TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C1: Plan — batch", metadata={"phase": "C1", "kind": "phase_task"})` → store as `task_C1_id` → `TaskUpdate(status="in_progress")`
+Pass `parent_task_id=task_C1_id` to agents spawned in this phase.
 
 Each todo in range:
 **1.** `todo_check_executable` — "⚠️" → skip: `⚠️ Todo <id> [manual] — skipped execute`.
@@ -269,7 +301,7 @@ Each todo in range:
 
 After all plans (trust 0-1): bulk approval summary w/ all IDs + plan summaries.
 
-After plan phase: `TaskUpdate(status="completed")`.
+After plan phase: (only if tasks_enabled) `TaskUpdate(task_C1_id, status="completed")`.
 
 **Cross-review** (careful AND N > 1):
 One `subagent_type="drift-reviewer"` Agent per plan w/ `run_in_background=true`. Agent i reviews plan (i+1) % N. N=1 → skip. Each agent gets: plan + reqs + reviewer's own ctx. Output: risk rating (LOW/MEDIUM/HIGH) + concerns. HIGH → flag user. Wait for all agents.
@@ -310,13 +342,14 @@ Options:
 
 **Phase 2 — Execute (parallel agents):**
 
-`TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C2: Execute — batch", metadata={"phase": "C2", "kind": "phase_task"})` → store as `task_C2_id` → `TaskUpdate(status="in_progress")`
+Pass `parent_task_id=task_C2_id` to agents spawned in this phase.
 
 Enforce max_parallel from quality_level mapping.
 
-**1a. Task Mapping** (one-way — tasks mirror todos for coordination):
+**1a. Task Mapping** (one-way — tasks mirror todos for coordination, only if tasks_enabled):
  Each todo:
- - `TaskCreate(title=<todo title>, description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}"})`
+ - `TaskCreate(title="Implement todo {id} — {title}", description="Implement todo {id} — {title}", metadata={"proj_todo_id": "{todo.id}", "phase": "C2", "kind": "todo_task", "parent_task_id": "<task_C2_id>", "proj": {"id": "{todo.id}", "priority": "{todo.priority}", "tags": [...], "parent_id": "{todo.parent or null}"}})`
  - `blocked_by` rels → `addBlockedBy` w/ Task IDs from prev `TaskCreate`.
  One-way: Task completion ≠ proj todo completion. Satisfaction loop handles that.
 
@@ -341,11 +374,11 @@ Enforce max_parallel from quality_level mapping.
        <todo_id>: "<plan text>"
      ```
 **3.** Failed → log to `tracking/{project}/.team-state/failed-agents.yaml`.
-After execute: `TaskUpdate(status="completed")`. Failure → `TaskUpdate(status="failed")`.
+After execute: (only if tasks_enabled) `TaskUpdate(task_C2_id, status="completed")`. Failure → `TaskUpdate(task_C2_id, status="failed")`.
 
 **Phase 2a — Verification** (skip if `--no-verify`; no TaskCreate when skipped):
 
-`TaskCreate(title="Phase C2a: Verification — batch", metadata={"phase": "C2a"})` → `TaskUpdate(status="in_progress")`
+(only if tasks_enabled) `TaskCreate(title="Phase C2a: Verification — batch", metadata={"phase": "C2a", "kind": "phase_task"})` → store as `task_C2a_id` → `TaskUpdate(status="in_progress")`
 
 Verify each completed todo sequentially. Run checks from 4a (Automated, Spec, Diff). Combined batch report:
 
