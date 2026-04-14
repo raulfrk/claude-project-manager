@@ -52,7 +52,7 @@ if [ -f "$SHARED_VENV/bin/python" ]; then
 else
   echo "Shared venv not found, falling back to per-plugin venv" >&2
   export UV_PROJECT_ENVIRONMENT="$DIR/.venv"
-  test -f "$DIR/.venv/bin/python" || uv sync --frozen --directory "$DIR"
+  uv sync --frozen --directory "$DIR"
 fi
 
 exec uv --directory "$DIR" run --frozen --no-sync "$SERVER"
