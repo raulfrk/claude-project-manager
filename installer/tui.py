@@ -29,6 +29,9 @@ _UTILITY_PLUGINS = {"worktree", "zoxide", "analyse"}
 # Plugins pre-selected by default (core set)
 DEFAULT_PRESELECT = {"sandbox", "router", "proj"}
 
+# Overridable by tests via monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", path)
+_MARKETPLACE_PATH: Path | None = None
+
 
 def _resolve_marketplace_path() -> Path:
     """Resolve marketplace.json path with fallback for source tree.
@@ -100,7 +103,7 @@ def load_plugins(
     if branch and marketplace_path is None:
         data = _fetch_marketplace_json(branch)
     if data is None:
-        path = marketplace_path or _resolve_marketplace_path()
+        path = marketplace_path or _MARKETPLACE_PATH or _resolve_marketplace_path()
         data = json.loads(path.read_text(encoding="utf-8"))
 
     plugins: list[PluginInfo] = []

@@ -172,7 +172,7 @@ class TestGetEpicIssuesContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5", max_results=25)
+            result = issue_tools["jira_get_epic_issues"](epic_key="PROJ-5", page_size=25)
 
         assert route.called
         req = route.calls[0].request
@@ -198,7 +198,7 @@ class TestGetUserIssuesContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            result = issue_tools["jira_get_user_issues"](username="alice", max_results=10)
+            result = issue_tools["jira_get_user_issues"](username="alice", page_size=10)
 
         assert route.called
         req = route.calls[0].request

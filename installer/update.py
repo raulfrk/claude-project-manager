@@ -11,6 +11,10 @@ from rich.table import Table
 from installer.detect import InstallState
 
 
+# Overridable by tests via monkeypatch.setattr("installer.update._MARKETPLACE_PATH", path)
+_MARKETPLACE_PATH: Path | None = None
+
+
 def _resolve_marketplace_path() -> Path:
     """Resolve marketplace.json path with fallback for source tree.
 
@@ -28,7 +32,7 @@ def _resolve_marketplace_path() -> Path:
 
 def _read_marketplace_versions(marketplace_path: Path | None = None) -> dict[str, str]:
     """Read plugin versions from the bundled marketplace.json."""
-    path = marketplace_path or _resolve_marketplace_path()
+    path = marketplace_path or _MARKETPLACE_PATH or _resolve_marketplace_path()
     data = json.loads(path.read_text(encoding="utf-8"))
     return {
         entry["name"]: entry.get("version", "0.0.0")
