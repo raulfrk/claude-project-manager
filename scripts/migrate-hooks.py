@@ -5,6 +5,7 @@ Usage:
     python scripts/migrate-hooks.py           # apply changes
     python scripts/migrate-hooks.py --dry-run # preview only
 """
+
 import sys
 import yaml
 from pathlib import Path
@@ -13,9 +14,12 @@ HOOKS_PATH = Path.home() / ".claude" / "hooks.yaml"
 
 # Named hooks to always remove (duplicates / stale)
 REMOVE_IDS = {
-    "worktree-on-wt-create-zoxide",   # canonical: zoxide-on-wt-create
-    "worktree-on-wt-remove-zoxide",   # canonical: zoxide-on-wt-remove
-    "hook-008", "hook-009", "hook-037", "hook-048",  # stale auto-generated
+    "worktree-on-wt-create-zoxide",  # canonical: zoxide-on-wt-create
+    "worktree-on-wt-remove-zoxide",  # canonical: zoxide-on-wt-remove
+    "hook-008",
+    "hook-009",
+    "hook-037",
+    "hook-048",  # stale auto-generated
     "hook-047",  # garbage test hook (a → b)
 }
 

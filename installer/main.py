@@ -27,8 +27,6 @@ from installer.plugin_cli import (
     get_installed_plugins,
     install_plugin,
     remove_marketplace,
-    update_plugin,
-    uninstall_plugin,
 )
 from installer.uninstall import cleanup_config_files
 from installer.tui import load_plugins, select_plugins
