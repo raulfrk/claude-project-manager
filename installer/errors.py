@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import IO
+
+logger = logging.getLogger("installer.errors")
 
 # ---------------------------------------------------------------------------
 # Exception hierarchy
@@ -167,9 +170,11 @@ def acquire_lock() -> IO:
                 continue
 
             if attempt < _MAX_LOCK_RETRIES:
-                print(
-                    f"Another installer is running (PID {holder_pid}). "
-                    f"Retry {attempt + 1}/{_MAX_LOCK_RETRIES}..."
+                logger.warning(
+                    "Another installer is running (PID %d). Retry %d/%d...",
+                    holder_pid,
+                    attempt + 1,
+                    _MAX_LOCK_RETRIES,
                 )
                 continue
 

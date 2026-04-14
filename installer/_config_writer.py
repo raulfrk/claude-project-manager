@@ -14,6 +14,7 @@ Contract:
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import logging
 import os
@@ -92,10 +93,8 @@ def _atomic_write(path: Path, content: str) -> None:
             f.write(content)
         Path(tmp_path).replace(path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             Path(tmp_path).unlink()
-        except OSError:
-            pass
         raise
 
 

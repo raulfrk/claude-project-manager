@@ -37,16 +37,16 @@ def _resolve_plugin_dir(cache_dir: Path, plugin_name: str) -> Path | None:
     if not versions:
         return None
     try:
-        from packaging.version import Version  # type: ignore[import-not-found]
+        from packaging.version import InvalidVersion, Version  # type: ignore[import-not-found]
 
         def key(p: Path) -> Version:
             try:
                 return Version(p.name)
-            except Exception:
+            except InvalidVersion:
                 return Version("0")
 
         return max(versions, key=key)
-    except Exception:
+    except ImportError:
         return max(versions, key=lambda p: p.name)
 
 

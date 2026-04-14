@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,8 @@ from installer.update import (
     compare_versions,
 )
 from installer.claudemd import ensure_managed_section, remove_managed_section
+
+logger = logging.getLogger("installer.app")
 
 
 class InstallerApp(App):
@@ -535,8 +539,10 @@ class InstallerApp(App):
                     progress.write_log(f"  [dim]removed orphan: {name}[/dim]")
             else:
                 progress.write_log("  [dim]no orphans found[/dim]")
-        except Exception as exc:
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
             progress.write_log(f"  [yellow]cleanup skipped: {exc}[/yellow]")
+        except Exception:
+            logger.exception("Unexpected error during orphan cleanup")
 
         self._push_summary(outcomes)
         return outcomes
@@ -547,11 +553,13 @@ class InstallerApp(App):
 
     def _show_error(self, message: str) -> None:
         """Surface an error to the user via the placeholder Static + log."""
+        from textual.css.query import NoMatches
+
         try:
             placeholder = self.query_one("#placeholder", Static)
             placeholder.update(f"[red]Error:[/red] {message}")
-        except Exception:
-            pass
+        except NoMatches:
+            pass  # placeholder not yet mounted; log.error below still fires
         self.log.error(message)
 
     def _write_config_files(
@@ -727,7 +735,14 @@ class InstallerApp(App):
         if not result.confirmed or self._state is None:
             self.exit()
             return
-        plugins = get_installed_plugins()
+        self.run_worker(
+            self._prepare_and_uninstall(result),
+            exclusive=True,
+        )
+
+    async def _prepare_and_uninstall(self, result: ConfirmResult) -> None:
+        """Fetch installed plugins off-thread, then run the uninstall worker."""
+        plugins = await asyncio.to_thread(get_installed_plugins)
         if not plugins:
             self.exit()
             return
@@ -735,11 +750,8 @@ class InstallerApp(App):
         progress = ProgressScreen(
             description="Uninstalling plugins...", total=len(plugins)
         )
-        self.push_screen(progress, callback=self._on_progress_done)
-        self.run_worker(
-            self._run_uninstall_worker(plugins, progress, full_cleanup),
-            exclusive=True,
-        )
+        self.call_later(self.push_screen, progress, callback=self._on_progress_done)
+        await self._run_uninstall_worker(plugins, progress, full_cleanup)
 
     async def _run_uninstall_worker(
         self,
