@@ -11,9 +11,7 @@ from rich.table import Table
 from installer.detect import InstallState
 
 # Marketplace JSON bundled with the installer
-_MARKETPLACE_PATH = (
-    Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
-)
+_MARKETPLACE_PATH = Path(__file__).resolve().parent / "marketplace.json"
 
 
 def _read_marketplace_versions(marketplace_path: Path | None = None) -> dict[str, str]:

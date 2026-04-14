@@ -30,9 +30,7 @@ _UTILITY_PLUGINS = {"worktree", "zoxide", "analyse"}
 DEFAULT_PRESELECT = {"sandbox", "router", "proj"}
 
 # Marketplace data path (relative to installer package)
-_MARKETPLACE_PATH = (
-    Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
-)
+_MARKETPLACE_PATH = Path(__file__).resolve().parent / "marketplace.json"
 
 
 @dataclass
