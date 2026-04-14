@@ -8,6 +8,15 @@ argument-hint: "<todo-id>"
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
+### Task orchestration
+
+If `task_id` passed in args: create subtasks under it. Else standalone Tasks.
+
+**Per-agent subtasks** — before spawning each review agent:
+`TaskCreate(title="{agent-role} review", activeForm="Running {agent-role} review", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → spawn agent → on result: completed (findings applied) or failed (escalation)
+
+Skip if `--no-tasks` in args.
+
 Refine todo: $ARGUMENTS
 
 **Interaction rule**: Use `AskUserQuestion` for every user-facing prompt. No inline numbered lists for user input. Steps 7, 8.6, 9 route choices through `AskUserQuestion`. 4-opt cap applies.

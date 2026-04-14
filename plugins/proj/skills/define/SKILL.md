@@ -8,6 +8,22 @@ argument-hint: "<todo-id> [--no-interactive] [--skip-bg-prep]"
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
+### Task orchestration
+
+If `task_id` passed in args (from `/proj:run`): create subtasks under it. Else create standalone Tasks.
+
+**4 subtasks** (create each just before starting that step, mark completed when done):
+
+1. `TaskCreate(title="Load context + gap analysis", activeForm="Analysing requirements gap", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → `TaskUpdate(status="in_progress")` → run gap analysis → `TaskUpdate(status="completed")`
+
+2. `TaskCreate(title="Background exploration", activeForm="Exploring codebase", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → `TaskUpdate(status="in_progress")` → spawn bg agents → when bg agents done → `TaskUpdate(status="completed")`
+
+3. `TaskCreate(title="Write requirements + research", activeForm="Writing requirements", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → `TaskUpdate(status="in_progress")` → write files → `TaskUpdate(status="completed")`
+
+4. `TaskCreate(title="Quality gate", activeForm="Running quality gate", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → `TaskUpdate(status="in_progress")` → run checks → `TaskUpdate(status="completed" or status="failed")`
+
+Skip Tasks if `--no-tasks` passed in args.
+
 Define and research todo: $ARGUMENTS
 
 **1.** Parse args

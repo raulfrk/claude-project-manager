@@ -10,6 +10,20 @@ argument-hint: "<todo-id>"
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
+### Task orchestration
+
+If `task_id` passed in args: create subtasks under it. Else standalone Tasks.
+
+**3 subtasks**:
+
+1. `TaskCreate(title="Load requirements + research", activeForm="Loading requirements", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → read files → completed
+
+2. `TaskCreate(title="Design breakdown", activeForm="Designing child structure", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → propose structure → completed
+
+3. `TaskCreate(title="Create child todos", activeForm="Creating child todos", metadata={"kind": "agent_subtask", "parent_task_id": "{task_id or null}"})` → in_progress → call todo_batch_add_children → completed
+
+Skip if `--no-tasks` in args.
+
 Decompose todo $ARGUMENTS into sub-todos.
 
 **1.** `mcp__proj__todo_get` — get todo.
