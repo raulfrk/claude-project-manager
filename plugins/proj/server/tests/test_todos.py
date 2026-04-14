@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +20,7 @@ from server.lib.models import (
     RepoEntry,
     Todo,
 )
+from server.tools.todos import _normalize_title
 
 
 @pytest.fixture()
@@ -275,3 +278,280 @@ class TestContent:
         content = storage.read_claudemd(str(tmp_path))
         assert content is not None
         assert "Status: active" in content
+
+
+class TestNormalizeTitle:
+    def test_lowercases(self) -> None:
+        assert _normalize_title("Fix Bug") == "fix bug"
+
+    def test_collapses_whitespace(self) -> None:
+        assert _normalize_title("fix  bug") == "fix bug"
+
+    def test_strips_leading_trailing(self) -> None:
+        assert _normalize_title("  fix bug  ") == "fix bug"
+
+    def test_combined(self) -> None:
+        assert _normalize_title("  Fix   Bug  ") == "fix bug"
+
+
+@pytest.mark.asyncio
+class TestTodoAddDedup:
+    """Dedup guard tests for todo_add, todo_add_child, and todo_batch_add_children."""
+
+    @pytest.fixture()
+    def app(self, cfg_with_project: tuple[ProjConfig, str]) -> Any:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools import config as config_mod
+        from server.tools import projects
+        from server.tools import todos as todos_mod
+
+        app = FastMCP("test-dedup")
+        config_mod.register(app)
+        projects.register(app)
+        todos_mod.register(app)
+        return app
+
+    async def _call(self, app: Any, tool: str, **kwargs: object) -> dict:
+        from tests.conftest import call_tool
+
+        raw = await call_tool(app, tool, **kwargs)
+        return json.loads(raw)
+
+    async def test_todo_add_rejects_duplicate_title(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "error" in r2
+        assert r2["existing_id"] == r1["todo_id"]
+
+    async def test_todo_add_accepts_different_title(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="Fix typo",
+            project_name="myapp",
+        )
+        assert "todo_id" in r2
+        assert r1["todo_id"] != r2["todo_id"]
+
+    async def test_todo_add_normalized_title_match(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="Fix Bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="fix  bug",
+            project_name="myapp",
+        )
+        assert "error" in r2
+        assert r2["existing_id"] == r1["todo_id"]
+
+    async def test_todo_add_force_create_bypasses_dedup(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+            force_create=True,
+        )
+        assert "todo_id" in r2
+        assert r1["todo_id"] != r2["todo_id"]
+
+    async def test_todo_add_done_todo_not_blocking(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        cfg, name = cfg_with_project
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        # Mark it done via storage
+        todos = storage.load_todos(cfg, name)
+        todos[0].status = "done"
+        storage.save_todos(cfg, name, todos)
+        # Now adding same title should succeed
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="Fix bug",
+            project_name="myapp",
+        )
+        assert "todo_id" in r2
+
+    async def test_todo_add_different_parent_allowed(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        p1 = await self._call(
+            app,
+            "todo_add",
+            title="Parent A",
+            project_name="myapp",
+        )
+        p2 = await self._call(
+            app,
+            "todo_add",
+            title="Parent B",
+            project_name="myapp",
+        )
+        r1 = await self._call(
+            app,
+            "todo_add",
+            title="X",
+            parent=p1["todo_id"],
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        # Same title under different parent — should succeed
+        r2 = await self._call(
+            app,
+            "todo_add",
+            title="X",
+            parent=p2["todo_id"],
+            project_name="myapp",
+        )
+        assert "todo_id" in r2
+
+    async def test_todo_add_child_rejects_duplicate(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        p = await self._call(
+            app,
+            "todo_add",
+            title="Parent",
+            project_name="myapp",
+        )
+        r1 = await self._call(
+            app,
+            "todo_add_child",
+            parent_id=p["todo_id"],
+            title="Sub",
+            project_name="myapp",
+        )
+        assert "todo_id" in r1
+        r2 = await self._call(
+            app,
+            "todo_add_child",
+            parent_id=p["todo_id"],
+            title="Sub",
+            project_name="myapp",
+        )
+        assert "error" in r2
+        assert r2["existing_id"] == r1["todo_id"]
+
+    async def test_todo_batch_add_children_skips_duplicates(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        p = await self._call(
+            app,
+            "todo_add",
+            title="Parent",
+            project_name="myapp",
+        )
+        children = json.dumps(
+            [
+                {"title": "A"},
+                {"title": "B"},
+                {"title": "A"},
+            ]
+        )
+        r = await self._call(
+            app,
+            "todo_batch_add_children",
+            parent_id=p["todo_id"],
+            children=children,
+            project_name="myapp",
+        )
+        assert r["count"] == 2
+        titles = [c["title"] for c in r["created"]]
+        assert "A" in titles
+        assert "B" in titles
+        assert len(r["skipped_duplicates"]) == 1
+        assert "A" in r["skipped_duplicates"][0]
+
+    async def test_todo_batch_add_children_skips_existing(
+        self,
+        app: Any,
+        cfg_with_project: tuple[ProjConfig, str],
+    ) -> None:
+        p = await self._call(
+            app,
+            "todo_add",
+            title="Parent",
+            project_name="myapp",
+        )
+        await self._call(
+            app,
+            "todo_add_child",
+            parent_id=p["todo_id"],
+            title="X",
+            project_name="myapp",
+        )
+        children = json.dumps([{"title": "X"}, {"title": "Y"}])
+        r = await self._call(
+            app,
+            "todo_batch_add_children",
+            parent_id=p["todo_id"],
+            children=children,
+            project_name="myapp",
+        )
+        assert r["count"] == 1
+        assert r["created"][0]["title"] == "Y"
+        assert len(r["skipped_duplicates"]) == 1
+        assert "exists:" in r["skipped_duplicates"][0]

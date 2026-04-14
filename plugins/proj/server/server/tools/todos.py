@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 _UTC = UTC
 logger = logging.getLogger(__name__)
 
+
+def _normalize_title(title: str) -> str:
+    """Collapse whitespace and lowercase for dedup comparison."""
+    return " ".join(title.split()).lower()
+
+
 # Module-level lock serializes todo_batch_complete across threads. Acquired
 # BEFORE the Phase 2 loop and released after, so concurrent batches with
 # overlapping parents cannot interleave saves and produce a partial family
@@ -341,6 +347,7 @@ def register(app: FastMCP) -> None:
         due_date: str | None = None,
         todoist_task_id: str | None = None,
         project_name: str | None = None,
+        force_create: bool = False,
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -366,6 +373,24 @@ def register(app: FastMCP) -> None:
                     )
                 }
             )
+
+        # Dedup guard: reject if same normalized title exists under same parent
+        if not force_create:
+            norm_title = _normalize_title(title)
+            scope_todos = [
+                t for t in todos if t.parent == parent and t.status not in ("done", "cancelled")
+            ]
+            existing = next(
+                (t for t in scope_todos if _normalize_title(t.title) == norm_title),
+                None,
+            )
+            if existing:
+                return json.dumps(
+                    {
+                        "error": f"Todo with same title already exists: {existing.id}",
+                        "existing_id": existing.id,
+                    }
+                )
 
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
@@ -1093,6 +1118,7 @@ def register(app: FastMCP) -> None:
         tags: list[str] | None = None,
         blocked_by: list[str] | None = None,
         project_name: str | None = None,
+        force_create: bool = False,
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -1103,6 +1129,28 @@ def register(app: FastMCP) -> None:
         parent = next((t for t in todos if t.id == parent_id), None)
         if not parent:
             return json.dumps({"error": f"Parent todo '{parent_id}' not found."})
+
+        # Dedup guard: reject if same normalized title exists among parent's children
+        if not force_create:
+            norm_title = _normalize_title(title)
+            siblings = [
+                t for t in todos if t.parent == parent_id and t.status not in ("done", "cancelled")
+            ]
+            existing = next(
+                (t for t in siblings if _normalize_title(t.title) == norm_title),
+                None,
+            )
+            if existing:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Child todo with same title already exists"
+                            f" under {parent_id}: {existing.id}"
+                        ),
+                        "existing_id": existing.id,
+                    }
+                )
+
         today = _now()
         child = Todo(
             id=next_todo_id(meta, parent=parent),
@@ -1190,6 +1238,9 @@ def register(app: FastMCP) -> None:
 
         today = _now()
         created: list[dict[str, str]] = []  # {id, title, parent}
+        skipped_duplicates: list[str] = []
+        # Track normalized titles created in this batch per parent
+        _batch_titles: dict[str, set[str]] = {}
 
         def _flatten(
             specs: list[dict[str, JsonValue]],
@@ -1200,6 +1251,29 @@ def register(app: FastMCP) -> None:
                 title = spec.get("title")
                 if not isinstance(title, str) or not title.strip():
                     continue  # skip specs without a valid title
+
+                # Dedup guard: check existing children + earlier batch children
+                norm_title = _normalize_title(title)
+                existing_siblings = [
+                    t
+                    for t in todos
+                    if t.parent == parent_todo.id and t.status not in ("done", "cancelled")
+                ]
+                existing_match = next(
+                    (t for t in existing_siblings if _normalize_title(t.title) == norm_title),
+                    None,
+                )
+                if existing_match:
+                    skipped_duplicates.append(f"{title} (exists: {existing_match.id})")
+                    continue
+                batch_key = parent_todo.id
+                if batch_key not in _batch_titles:
+                    _batch_titles[batch_key] = set()
+                if norm_title in _batch_titles[batch_key]:
+                    skipped_duplicates.append(f"{title} (duplicate in batch)")
+                    continue
+                _batch_titles[batch_key].add(norm_title)
+
                 prio_raw = spec.get("priority")
                 priority = str(prio_raw) if isinstance(prio_raw, str) else cfg.default_priority
                 tags_raw = spec.get("tags")
@@ -1323,6 +1397,8 @@ def register(app: FastMCP) -> None:
         }
         if pair_errors:
             result_data["blocking_errors"] = pair_errors
+        if skipped_duplicates:
+            result_data["skipped_duplicates"] = skipped_duplicates
         return json.dumps(result_data)
 
     def _has_active_descendant(todo_dict: dict[str, JsonValue]) -> bool:
