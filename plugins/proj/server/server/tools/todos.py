@@ -328,6 +328,34 @@ def _filter_todos(
     return todos
 
 
+def todo_export_yaml(project_name: str | None = None) -> str:
+    """Export project data from SQLite back to YAML files.
+
+    Use for emergency recovery, debugging, or forcing a git-committable snapshot.
+    Exports: todos.yaml, archive.yaml, meta.yaml, decisions.yaml
+
+    Returns a JSON string listing the paths written and counts.
+    """
+    from server.lib.migration import export_sqlite_to_yaml
+
+    cfg = storage.load_config()
+    result = require_project(project_name)
+    if isinstance(result, str):
+        return result
+    cfg, name = result
+    try:
+        paths = export_sqlite_to_yaml(cfg, name)
+        return json.dumps(
+            {
+                "exported": [str(p) for p in paths],
+                "project": name,
+                "message": f"Exported {len(paths)} files to {storage.tracking_dir(cfg, name)}",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e), "project": name})
+
+
 def register(app: FastMCP) -> None:
     """Register todo management tools with the MCP app.
 
@@ -1994,3 +2022,13 @@ def register(app: FastMCP) -> None:
                 **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
             }
         )
+
+    @app.tool(
+        description=(
+            "Export project data from SQLite back to YAML files. "
+            "Use for emergency recovery, debugging, or forcing a git-committable snapshot. "
+            "Exports: todos.yaml, archive.yaml, meta.yaml, decisions.yaml"
+        ),
+    )
+    def _todo_export_yaml(project_name: str | None = None) -> str:
+        return todo_export_yaml(project_name)
