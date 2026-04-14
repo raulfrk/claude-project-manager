@@ -204,6 +204,7 @@ Enforce `max_parallel` from quality_level.
 
 **Task mapping** (one-way, only if tasks_enabled): `TaskCreate` per todo w/ `blocked_by` rels → `addBlockedBy`. Task completion ≠ proj todo completion (satisfaction loop handles that).
 
+**NEVER implement code directly in main conversation — always spawn `Agent(subagent_type="implementer", run_in_background=true)` per todo.**
 Spawn one `subagent_type="implementer"` Agent per todo w/ `run_in_background=true`. Each gets: plan (or ctx trust 3) + reqs + research + parent ctx.
 `worktree_enabled` + `worktree_path` → exec in worktree, prefix commits `[todo-{id}]`.
 Agents exec plan as-is. Do NOT `todo_complete`. Plan gap → return `{status: "escalation_needed", issue: "..."}`. See `_shared/errors.md`.
