@@ -276,45 +276,6 @@ class TestTodosMCPTools:
         archived = storage.load_archived_todos(project[0], "myapp")
         assert archived[0].status == "done"
 
-    async def test_todo_check_executable_returns_todo_when_not_manual(
-        self, mcp_app: Any, project: tuple[ProjConfig, str]
-    ) -> None:
-        await call_tool(mcp_app, "todo_add", title="Normal task")
-        result = await call_tool(mcp_app, "todo_check_executable", todo_id="1")
-        data = _json.loads(result)
-        assert data["id"] == "1"
-        assert data["title"] == "Normal task"
-
-    async def test_todo_check_executable_blocks_manual_tagged_todo(
-        self, mcp_app: Any, project: tuple[ProjConfig, str]
-    ) -> None:
-        await call_tool(mcp_app, "todo_add", title="Manual task", tags=["manual"])
-        result = await call_tool(mcp_app, "todo_check_executable", todo_id="1")
-        # todo_check_executable returns JSON with error field for manual-tagged todos
-        data = _json.loads(result)
-        assert (
-            "error" in data
-            or "⚠️" in data.get("error", "")
-            or "manual" in data.get("error", "").lower()
-        )
-
-    async def test_todo_check_executable_returns_todo_for_multi_tag_without_manual(
-        self, mcp_app: Any, project: tuple[ProjConfig, str]
-    ) -> None:
-        await call_tool(mcp_app, "todo_add", title="Tagged task", tags=["urgent", "review"])
-        result = await call_tool(mcp_app, "todo_check_executable", todo_id="1")
-        data = _json.loads(result)
-        assert data["id"] == "1"
-        assert "urgent" in data["tags"]
-
-    async def test_todo_check_executable_returns_error_for_missing_todo(
-        self, mcp_app: Any, project: tuple[ProjConfig, str]
-    ) -> None:
-        result = await call_tool(mcp_app, "todo_check_executable", todo_id="999")
-        # todo_check_executable returns JSON with error field
-        data = _json.loads(result)
-        assert "not found" in data.get("error", "").lower()
-
     async def test_todo_block(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Blocker")
         await call_tool(mcp_app, "todo_add", title="Blocked")

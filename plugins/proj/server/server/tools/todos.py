@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import storage
-from server.lib.enums import MANUAL_TAG, TERMINAL_STATUSES, TodoStatus
+from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
 from server.tools.config import require_project
@@ -529,7 +529,7 @@ def register(app: FastMCP) -> None:
 
     Registers todo_add, todo_list, todo_get, todo_update,
     todo_complete, todo_delete, todo_ready,
-    todo_tree, todo_set_content_flag, todo_check_executable,
+    todo_tree, todo_set_content_flag,
     proj_identify_batches, todo_analyze_graph, and
     proj_find_archived_by_title.
     """
@@ -1292,34 +1292,6 @@ def register(app: FastMCP) -> None:
             {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name, cfg=cfg)}
         )
 
-    @app.tool(
-        description=(
-            "Check if a todo is executable (not tagged `manual`). "
-            "Returns the todo JSON if executable, or an error message if manual-tagged. "
-            "Skills should call this before implementing a todo."
-        )
-    )
-    def todo_check_executable(todo_id: str, project_name: str | None = None) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-        todos = storage.load_todos(cfg, name)
-        todo = next((t for t in todos if t.id == todo_id), None)
-        if not todo:
-            return json.dumps({"error": f"Todo '{todo_id}' not found."})
-        if MANUAL_TAG in todo.tags:
-            return json.dumps(
-                {
-                    "error": (
-                        f"⚠️ Todo '{todo_id}' is tagged `manual`"
-                        " — execute it yourself, then run"
-                        f" `/proj:todo done {todo_id}`"
-                    ),
-                    "todo_id": todo_id,
-                }
-            )
-        return json.dumps(todo.to_dict(), indent=2)
 
     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
     def todo_delete(todo_id: str, project_name: str | None = None) -> str:
