@@ -12,7 +12,7 @@ This is a TRUE end-to-end eval. The agent MUST:
 - Call `mcp__plugin_proj_proj__todo_add` with `project_name="eval-test-status"`, `title="Design API schema"`, `priority="high"`
 - Call `mcp__plugin_proj_proj__todo_add` with `project_name="eval-test-status"`, `title="Implement endpoints"`, `priority="medium"`
 - Call `mcp__plugin_proj_proj__todo_add` with `project_name="eval-test-status"`, `title="Write integration tests"`, `priority="low"`
-- Call `mcp__plugin_proj_proj__todo_block` with `project_name="eval-test-status"`, `todo_id="1"`, `blocks_ids=["2"]` (todo 1 blocks todo 2)
+- Call `mcp__plugin_proj_proj__todo_update` with `project_name="eval-test-status"`, `todo_id="2"`, `blocked_by_set=["1"]` (todo 2 is blocked by todo 1)
 - Call `mcp__plugin_proj_proj__todo_update` with `project_name="eval-test-status"`, `todo_id="1"`, `status="in_progress"`
 
 ## Test Scenarios

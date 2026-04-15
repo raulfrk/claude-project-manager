@@ -67,7 +67,7 @@
 ### Added
 - Initial full implementation: FastMCP server with project lifecycle tools
   - Project tools: `proj_init`, `proj_list`, `proj_get`, `proj_get_active`, `proj_load_session`, `proj_update_meta`, `proj_archive`
-  - Todo tools: `todo_add` (supports `parent=` for child creation), `todo_list`, `todo_get`, `todo_update`, `todo_complete`, `todo_block`, `todo_unblock`, `todo_delete`, `todo_ready`
+  - Todo tools: `todo_add` (supports `parent=` for child creation), `todo_list`, `todo_get`, `todo_update` (supports `blocked_by_set=` for blocking), `todo_complete`, `todo_delete`, `todo_ready`
   - Config tool: `config_load`, `config_init`, `config_update`
   - Context/notes tools: `ctx_session_start`, `ctx_session_end`, `notes_append`
 - Todos stored in pure YAML (`todos.yaml`); completed todos archived to `archive.yaml`

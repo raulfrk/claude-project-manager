@@ -56,7 +56,7 @@ This is a TRUE end-to-end eval. The agent MUST:
   - Step 4.5: Analyzes shared-file conflicts and adds `blocked_by` relationships
   - Step 5: Presents proposed breakdown as indented bullet points
   - Step 6: Asks for confirmation (simulated: "yes")
-  - Step 7: Calls `todo_add` (with `parent=` param) for each sub-todo (parents before children), calls `todo_block` for dependency relationships
+  - Step 7: Calls `todo_add` (with `parent=` param) for each sub-todo (parents before children), calls `todo_update(blocked_by_set=)` for dependency relationships
   - Step 8: Calls `todo_tree` to display final structure
   - Step 9: Calls `tracking_git_flush` with `commit_message="Decompose: <TODO_ID>"`
 - **Assert**:
@@ -77,7 +77,7 @@ This is a TRUE end-to-end eval. The agent MUST:
 
 ### Scenario 3: Shared-file conflicts produce blocking relationships
 - **Prompt**: Follow the skill instructions as if user said `/proj:decompose <TODO_ID>` (using the pre-populated todo with REST API requirements). Simulate user confirmation at step 6.
-- **Expected**: Per SKILL.md step 4.5, the agent identifies that implementation and test sub-todos likely share files (e.g., conftest.py, test fixtures). Calls `todo_block` with shared-file reasoning for at least one pair of sub-todos.
+- **Expected**: Per SKILL.md step 4.5, the agent identifies that implementation and test sub-todos likely share files (e.g., conftest.py, test fixtures). Calls `todo_update(blocked_by_set=)` with shared-file reasoning for at least one pair of sub-todos.
 - **Assert**:
   - `todo_tree(todo_id=<TODO_ID>)` shows at least one blocking relationship
   - The blocking relationship corresponds to sub-todos that would modify overlapping files

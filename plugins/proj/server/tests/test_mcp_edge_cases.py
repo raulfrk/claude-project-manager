@@ -155,9 +155,14 @@ class TestTodosEdgeCases:
     async def test_todo_unblock(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="T1")
         await call_tool(mcp_app, "todo_add", title="T2")
-        await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
-        result = await call_tool(mcp_app, "todo_unblock", todo_id="1")
-        assert "Removed" in result
+        # Set T2 blocked_by T1 using new API
+        await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
+        # Clear T2's blockers using blocked_by_set=[]
+        result = await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=[])
+        import json as _json2
+
+        data = _json2.loads(result)
+        assert "Updated" in data.get("result", "")
         todos = storage.load_todos(project[0], "myapp")
         t1 = next(t for t in todos if t.id == "1")
         t2 = next(t for t in todos if t.id == "2")

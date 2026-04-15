@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a large todo into smaller sub-todos based on its requirements and research. Use when asked "decompose 1", "break down 1", or "split 1 into subtasks".
-allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__todo_list, mcp__proj__todo_tree, mcp__proj__todo_block, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__proj__tracking_git_flush, Skill, Task
+allowed-tools: mcp__proj__todo_get, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__proj_search_knowledge, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__todo_add, mcp__proj__todo_delete, mcp__proj__todo_list, mcp__proj__todo_tree, mcp__proj__todo_update, mcp__proj__todo_notes_patch, mcp__proj__todo_notes_append, mcp__proj__tracking_git_flush, Skill, Task
 argument-hint: "<todo-id>"
 ---
 
@@ -109,12 +109,12 @@ If any found → warn: "Decompose already ran for <id> — <N> group-tagged todo
  - Each todo: `title`, `priority`, `tags=[...existing + "group:<parent-id>"]`, `notes`
  - Track `created_ids = []` as you go.
  - On any `todo_add` failure: rollback — call `mcp__proj__todo_delete` on all previously created IDs in reverse order; surface error; stop.
- After all `todo_add` calls succeed: set `blocked_by` edges via `mcp__proj__todo_block` for each dep pair (replaces `blocking_pairs`).
+ After all `todo_add` calls succeed: set `blocked_by` edges via `mcp__proj__todo_update(todo_id=<blocked-id>, blocked_by_set=[...<blocker-ids>])` for each dep pair.
 
  **TaskCreate tracking**: for each child being created:
  `TaskCreate(title="Create flat todo: <child-title>", activeForm="Creating todo", metadata={"kind": "agent_subtask"})` → `in_progress` → [todo_add call] → `completed`
  After all created:
- `TaskCreate(title="Set blocked_by edges", metadata={"kind": "agent_subtask"})` → `in_progress` → [todo_block calls] → `completed`
+ `TaskCreate(title="Set blocked_by edges", metadata={"kind": "agent_subtask"})` → `in_progress` → [todo_update(blocked_by_set=) calls] → `completed`
 
 **10b.** Write decompose result to parent notes:
 `mcp__proj__todo_notes_append(parent_id, text='decompose_result: {"created_ids": ["<id1>","<id2>",...]}')`

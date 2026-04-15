@@ -318,9 +318,9 @@ class TestTodosMCPTools:
     async def test_todo_block(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Blocker")
         await call_tool(mcp_app, "todo_add", title="Blocked")
-        result = await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
+        result = await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
         data = _json.loads(result)
-        assert "blocks" in data.get("result", "").lower() or "2" in data.get("result", "")
+        assert "Updated" in data.get("result", "")
 
     async def test_todo_ready(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Ready task")

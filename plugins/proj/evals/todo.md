@@ -33,12 +33,12 @@ This is a TRUE end-to-end eval. The agent MUST:
 
 ### Scenario 3: Block and unblock
 - **Prompt**: First follow the skill instructions as if user said `/proj:todo add Write API tests priority=low`. Then follow the skill instructions as if user said `/proj:todo block 1 blocks 2`.
-- **Expected**: Per SKILL.md, calls `todo_block` with `todo_id="1"`, `blocks_ids=["2"]`. Todo 2 is now blocked by todo 1.
+- **Expected**: Per SKILL.md, calls `todo_update` with `todo_id="2"`, `blocked_by_set=["1"]`. Todo 2 is now blocked by todo 1.
 - **Assert**:
   - Call `mcp__plugin_proj_proj__todo_get` with `project_name="eval-test-todo"`, `todo_id="2"` — `blocked_by` contains `"1"`
   - Call `mcp__plugin_proj_proj__todo_ready` with `project_name="eval-test-todo"` — todo 2 is NOT in the ready list
 - **Prompt**: Follow the skill instructions as if user said `/proj:todo unblock 2`
-- **Expected**: Per SKILL.md, calls `todo_unblock` with `todo_id="2"`. Blocking relationship removed.
+- **Expected**: Per SKILL.md, calls `todo_update` with `todo_id="2"`, `blocked_by_set=[]`. Blocking relationship removed.
 - **Assert**:
   - Call `mcp__plugin_proj_proj__todo_get` with `project_name="eval-test-todo"`, `todo_id="2"` — `blocked_by` is empty
   - Call `mcp__plugin_proj_proj__todo_ready` with `project_name="eval-test-todo"` — todo 2 IS in the ready list
@@ -75,7 +75,7 @@ This is a TRUE end-to-end eval. The agent MUST:
 
 ### Scenario 7: Delete todo cleans up references
 - **Prompt**: First follow the skill instructions as if user said `/proj:todo block 2 blocks 1.1`. Then follow the skill instructions as if user said `/proj:todo delete 2`.
-- **Expected**: Per SKILL.md, calls `todo_block` then `todo_delete`. Todo 2 is removed and blocking reference on 1.1 is cleaned up.
+- **Expected**: Per SKILL.md, calls `todo_update(blocked_by_set=)` then `todo_delete`. Todo 2 is removed and blocking reference on 1.1 is cleaned up.
 - **Assert**:
   - Call `mcp__plugin_proj_proj__todo_get` with `project_name="eval-test-todo"`, `todo_id="2"` returns error (not found)
   - Call `mcp__plugin_proj_proj__todo_get` with `project_name="eval-test-todo"`, `todo_id="1.1"` — `blocked_by` does NOT contain `"2"`

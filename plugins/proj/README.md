@@ -258,8 +258,7 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 | `todo_complete` | Mark a todo done and archive it. |
 | `todo_check_executable` | Guard for the `manual` tag. |
 | `todo_delete` | Delete a todo. |
-| `todo_block` | Set blocking relationships. |
-| `todo_unblock` | Remove blocking relationships. |
+| `todo_update` (w/ `blocked_by_set=`) | Set/replace blocking relationships. |
 | `todo_ready` | List pending unblocked todos. |
 | `todo_tree` | Return todos as a nested JSON tree. |
 | `todo_set_content_flag` | Set `has_requirements` or `has_research` flags. |

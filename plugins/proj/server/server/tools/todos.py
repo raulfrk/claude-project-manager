@@ -528,7 +528,7 @@ def register(app: FastMCP) -> None:
     """Register todo management tools with the MCP app.
 
     Registers todo_add, todo_list, todo_get, todo_update,
-    todo_complete, todo_block, todo_unblock, todo_delete, todo_ready,
+    todo_complete, todo_delete, todo_ready,
     todo_tree, todo_set_content_flag, todo_check_executable,
     proj_identify_batches, todo_analyze_graph, and
     proj_find_archived_by_title.
@@ -799,7 +799,12 @@ def register(app: FastMCP) -> None:
             return f"Todo '{todo_id}' not found."
         return json.dumps(todo.to_dict(), indent=2)
 
-    @app.tool(description="Update a todo's fields.")
+    @app.tool(
+        description=(
+            "Update a todo's fields. Pass blocked_by_set to replace the full list of "
+            "todos that block this one (use [] to clear all blockers)."
+        )
+    )
     def todo_update(
         todo_id: str,
         title: str | None = None,
@@ -809,6 +814,7 @@ def register(app: FastMCP) -> None:
         notes: str | None = None,
         todoist_task_id: str | None = None,
         due_date: str | None = None,
+        blocked_by_set: list[str] | None = None,
         project_name: str | None = None,
         skip_hooks: bool = False,
     ) -> str:
@@ -836,6 +842,23 @@ def register(app: FastMCP) -> None:
             if not due_date.strip():
                 return "due_date cannot be empty. Omit it or provide a value."
             todo.due_date = due_date
+        if blocked_by_set is not None:
+            todo_map = {t.id: t for t in todos}
+            today = _now()
+            # Remove this todo from blocks lists of currently blocking todos
+            for blocker_id in todo.blocked_by:
+                blocker = todo_map.get(blocker_id)
+                if blocker and todo_id in blocker.blocks:
+                    blocker.blocks.remove(todo_id)
+                    blocker.updated = today
+            # Set new blocked_by list
+            todo.blocked_by = list(blocked_by_set)
+            # Add this todo to blocks lists of new blockers
+            for blocker_id in blocked_by_set:
+                blocker = todo_map.get(blocker_id)
+                if blocker and todo_id not in blocker.blocks:
+                    blocker.blocks.append(todo_id)
+                    blocker.updated = today
         todo.updated = _now()
         meta = storage.load_meta(cfg, name)
         storage.save_todos(cfg, name, todos)
@@ -1290,64 +1313,6 @@ def register(app: FastMCP) -> None:
                 }
             )
         return json.dumps(todo.to_dict(), indent=2)
-
-    @app.tool(description="Set blocking relationships between todos.")
-    def todo_block(
-        todo_id: str,
-        blocks_ids: list[str],
-        project_name: str | None = None,
-    ) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-        todos = storage.load_todos(cfg, name)
-        todo_map = {t.id: t for t in todos}
-        blocker = todo_map.get(todo_id)
-        if not blocker:
-            return json.dumps({"error": f"Todo '{todo_id}' not found."})
-        today = _now()
-        self_refs = [bid for bid in blocks_ids if bid == todo_id]
-        if self_refs:
-            return json.dumps({"error": f"Error: todo cannot block itself ('{todo_id}')."})
-        for blocked_id in blocks_ids:
-            target = todo_map.get(blocked_id)
-            if not target:
-                continue
-            if blocked_id not in blocker.blocks:
-                blocker.blocks.append(blocked_id)
-            if todo_id not in target.blocked_by:
-                target.blocked_by.append(todo_id)
-            target.updated = today
-        blocker.updated = today
-        storage.save_todos(cfg, name, todos)
-        return json.dumps(
-            {"result": f"{todo_id} now blocks: {', '.join(blocks_ids)}", "todo_id": todo_id}
-        )
-
-    @app.tool(description="Remove blocking relationships for a todo.")
-    def todo_unblock(todo_id: str, project_name: str | None = None) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-        todos = storage.load_todos(cfg, name)
-        todo_map = {t.id: t for t in todos}
-        today = _now()
-        todo = todo_map.get(todo_id)
-        if not todo:
-            return json.dumps({"error": f"Todo '{todo_id}' not found."})
-        for blocked_id in todo.blocks:
-            target = todo_map.get(blocked_id)
-            if target and todo_id in target.blocked_by:
-                target.blocked_by.remove(todo_id)
-                target.updated = today
-        todo.blocks = []
-        todo.updated = today
-        storage.save_todos(cfg, name, todos)
-        return json.dumps(
-            {"result": f"Removed all blocking relationships from {todo_id}.", "todo_id": todo_id}
-        )
 
     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
     def todo_delete(todo_id: str, project_name: str | None = None) -> str:

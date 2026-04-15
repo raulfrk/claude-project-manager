@@ -1,7 +1,7 @@
 ---
 name: prioritize
 description: "prioritize todos", "reorder todos", "suggest execution order", "analyze blocking"
-allowed-tools: mcp__plugin_proj_proj__todo_analyze_graph, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__todo_block, mcp__plugin_proj_proj__todo_unblock, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__proj_identify_batches, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__tracking_git_flush, EnterPlanMode, ExitPlanMode
+allowed-tools: mcp__plugin_proj_proj__todo_analyze_graph, mcp__plugin_proj_proj__todo_tree, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__proj_identify_batches, mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__tracking_git_flush, EnterPlanMode, ExitPlanMode
 context: inline
 argument-hint: "[--apply]"
 ---
@@ -111,8 +111,8 @@ Display rules:
 **10. Apply changes (on accept)**
 
 Apply all proposed:
-- `mcp__plugin_proj_proj__todo_block` each new blocking edge
-- `mcp__plugin_proj_proj__todo_unblock` each removed edge
+- `mcp__plugin_proj_proj__todo_update(todo_id=<blocked-id>, blocked_by_set=[...<blocker-ids>])` each new blocking edge
+- `mcp__plugin_proj_proj__todo_update(todo_id=<id>, blocked_by_set=[])` each removed edge (clears all blockers) — or `blocked_by_set=<remaining-ids>` to remove specific blocker
 - `mcp__plugin_proj_proj__todo_update` w/ `priority=<new>` each priority change
 
 Never call `todo_complete` — skill only reorders.

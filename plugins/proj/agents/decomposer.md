@@ -9,7 +9,7 @@ tools:
   - mcp__plugin_proj_proj__todo_delete
   - mcp__plugin_proj_proj__todo_list
   - mcp__plugin_proj_proj__todo_notes_append
-  - mcp__plugin_proj_proj__todo_block
+  - mcp__plugin_proj_proj__todo_update
   - mcp__plugin_proj_proj__todo_get
   - mcp__plugin_proj_proj__content_get_requirements
   - mcp__plugin_proj_proj__content_get_research
@@ -33,7 +33,7 @@ Role: analyze requirements + research for given todo, propose sub-todos w/ title
 7. **Create flat todos**: sequential `todo_add` calls, each w/ `group:<parent-id>` tag. Track `created_ids`.
    - TaskCreate("Create flat todo: <title>") → mark in_progress → `todo_add` → mark completed
    - On any `todo_add` failure → rollback: `todo_delete` each `created_id` in reverse order → fail
-8. **Set edges**: TaskCreate("Set blocked_by edges") → mark in_progress → `todo_block` calls → mark completed
+8. **Set edges**: TaskCreate("Set blocked_by edges") → mark in_progress → `todo_update(todo_id=<blocked-id>, blocked_by_set=[...<blocker-ids>])` calls → mark completed
 9. **Write result**: TaskCreate("Write decompose_result to notes") → mark in_progress → `todo_notes_append(parent_id, 'decompose_result: {"created_ids": [...]}')` → mark completed
 
 ## Rules

@@ -55,8 +55,8 @@ class TestPrioTiers:
         await call_tool(mcp_app, "todo_add", title="B")
         await call_tool(mcp_app, "todo_add", title="C")
         # Set up chain: 1 blocks 2, 2 blocks 3
-        await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
-        await call_tool(mcp_app, "todo_block", todo_id="2", blocks_ids=["3"])
+        await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
+        await call_tool(mcp_app, "todo_update", todo_id="3", blocked_by_set=["2"])
 
         result = await call_tool(mcp_app, "proj_identify_batches", todo_ids=["1", "2", "3"])
         data = _parse(result)
@@ -71,7 +71,7 @@ class TestPrioTiers:
         """Stale blockers: A blocks B, A is done. Skill passes only active [B] -> B in tier 0."""
         await call_tool(mcp_app, "todo_add", title="A")
         await call_tool(mcp_app, "todo_add", title="B")
-        await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
+        await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
         # Mark A as done
         await call_tool(mcp_app, "todo_complete", todo_id="1")
 
@@ -133,9 +133,9 @@ class TestPrioTiers:
         await call_tool(mcp_app, "todo_add", title="B")  # 2
         await call_tool(mcp_app, "todo_add", title="C")  # 3
         await call_tool(mcp_app, "todo_add", title="D")  # 4
-        await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2", "3"])
-        await call_tool(mcp_app, "todo_block", todo_id="2", blocks_ids=["4"])
-        await call_tool(mcp_app, "todo_block", todo_id="3", blocks_ids=["4"])
+        await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
+        await call_tool(mcp_app, "todo_update", todo_id="3", blocked_by_set=["1"])
+        await call_tool(mcp_app, "todo_update", todo_id="4", blocked_by_set=["2", "3"])
 
         result = await call_tool(mcp_app, "proj_identify_batches", todo_ids=["1", "2", "3", "4"])
         data = _parse(result)
@@ -188,8 +188,8 @@ class TestPrioTiers:
         await call_tool(mcp_app, "todo_add", title="A")  # 1
         await call_tool(mcp_app, "todo_add", title="B")  # 2
         await call_tool(mcp_app, "todo_add", title="C")  # 3
-        await call_tool(mcp_app, "todo_block", todo_id="1", blocks_ids=["2"])
-        await call_tool(mcp_app, "todo_block", todo_id="2", blocks_ids=["3"])
+        await call_tool(mcp_app, "todo_update", todo_id="2", blocked_by_set=["1"])
+        await call_tool(mcp_app, "todo_update", todo_id="3", blocked_by_set=["2"])
 
         # Only request B and C (A is external to the requested set)
         result = await call_tool(mcp_app, "proj_identify_batches", todo_ids=["2", "3"])
