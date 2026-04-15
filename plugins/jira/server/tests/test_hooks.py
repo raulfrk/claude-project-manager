@@ -99,8 +99,9 @@ class TestDefaultHooksYaml:
         hooks_by_id = {h["id"]: h for h in data["hooks"]}
         hook = hooks_by_id["jira-full-sync-on-proj-load"]
         assert hook["trigger_tool"] == "proj_load_session"
-        assert hook["target_tool"] == "proj_jira_full_sync"
+        assert hook["target_tool"] == "proj_sync"
         assert hook["server"] == "proj"
+        assert hook["param_mapping"].get("integration") == "jira"
         assert hook["blocking"] is True
         assert "sync.jira.enabled" in hook["condition"]
         assert "sync.jira.auto_sync" in hook["condition"]

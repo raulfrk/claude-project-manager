@@ -79,8 +79,9 @@ hooks:
 
   - id: jira-full-sync-on-proj-load
     trigger_tool: proj_load_session
-    target_tool: proj_jira_full_sync
+    target_tool: proj_sync
     server: proj
-    param_mapping: {}
+    param_mapping:
+      integration: "jira"
     blocking: true
     condition: "sync.jira.enabled and sync.jira.auto_sync and project.jira_issue_key"

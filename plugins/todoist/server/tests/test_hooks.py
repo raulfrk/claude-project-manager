@@ -90,8 +90,9 @@ class TestDefaultHooksYaml:
         hooks_by_id = {h["id"]: h for h in data["hooks"]}
         hook = hooks_by_id["todoist-full-sync-on-proj-load"]
         assert hook["trigger_tool"] == "proj_load_session"
-        assert hook["target_tool"] == "proj_todoist_full_sync"
+        assert hook["target_tool"] == "proj_sync"
         assert hook["server"] == "proj"
+        assert hook["param_mapping"].get("integration") == "todoist"
         assert "project_name" in hook["param_mapping"]
         assert hook["blocking"] is True
         assert "sync.todoist.enabled" in hook["condition"]

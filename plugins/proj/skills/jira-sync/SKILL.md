@@ -1,7 +1,7 @@
 ---
 name: jira-sync
 description: Pull Jira issues for the configured user and sync them to local projects/todos. Uses epic-first mapping — each epic becomes a project, standalone issues need user assignment. Works without loading a project first.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_jira_full_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_get_issue_comments, mcp__jira__jira_init
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__config_load, mcp__proj__proj_list, mcp__proj__proj_init, mcp__proj__proj_get_active, mcp__proj__proj_sync, mcp__proj__tracking_git_flush, mcp__proj__todo_list, mcp__proj__notes_append, mcp__jira__jira_get_issue_comments, mcp__jira__jira_init
 argument-hint: "[--user <username>] [--projects <key1,key2>]"
 context: fork
 agent: general-purpose
@@ -15,7 +15,7 @@ Works across all projects -- no project load required.
 
 ## Sync path
 
-Call `proj_jira_full_sync` directly -- handles fetch, map, apply in one call.
+Call `proj_sync(integration="jira")` directly -- handles fetch, map, apply in one call.
 
 ## Epic-first mapping
 
@@ -50,14 +50,14 @@ No further sync steps.
 - Build `comments_by_key` dict mapping keys → comment lists.
 - Best-effort -- skip on failure.
 
-**3.** Call `proj_jira_full_sync`
+**3.** Call `proj_sync(integration="jira")`
 
-- `mcp__proj__proj_jira_full_sync` w/ no args (opt `project_name` to scope, `comments_json` from step 2).
+- `mcp__proj__proj_sync(integration="jira")` (opt `project_name` to scope, `comments_json` from step 2 not directly supported — pre-fetch comments and pass via jira_issues_json if needed).
 - Handle response:
  - `"success"` → show summary counts
  - `"partial_success"` → show errors table, offer one retry:
  - Ask: "Some issues failed. Retry failed issues?"
- - Yes → `proj_jira_full_sync` w/ `retry_failures` = `retry_token`
+ - Yes → `proj_sync(integration="jira", retry_failures=retry_token)`
  - No → continue to summary
  - `"error"` → show err, stop
 

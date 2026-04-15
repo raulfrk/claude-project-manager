@@ -1,7 +1,7 @@
 ---
 name: trello-sync
 description: Manually trigger a full bidirectional Trello sync for the active project. Card-per-todo model -- each todo becomes its own Trello card in the tasks list; project gets a tracking card in the projects list. Use when the user says "sync with Trello", "sync trello", or "trello sync".
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_trello_full_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards, mcp__trello__toggle_card_label
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_get_active, mcp__proj__proj_list, mcp__proj__proj_get, mcp__proj__proj_trello_diff, mcp__proj__proj_trello_apply, mcp__proj__proj_sync, mcp__proj__config_load, mcp__proj__tracking_git_flush, mcp__trello__list_boards, mcp__trello__get_board, mcp__trello__update_board, mcp__trello__get_cards_by_list_id, mcp__trello__get_card, mcp__trello__add_card_to_list, mcp__trello__update_card_details, mcp__trello__move_card, mcp__trello__archive_card, mcp__trello__add_attachment, mcp__trello__get_labels, mcp__trello__get_lists, mcp__trello__create_list, mcp__trello__batch_create_cards, mcp__trello__toggle_card_label
 context: fork
 agent: general-purpose
 ---
@@ -94,22 +94,22 @@ Trello batch sync complete.
 
 ## Single-Project Mode (Accelerated Path)
 
-When `proj_trello_full_sync` available, use 3-call flow:
+Use 3-call flow:
 
 1. **`mcp__proj__proj_session_context`** — get project name + config (already called in Mode Detection)
-2. **`mcp__proj__proj_trello_full_sync(project_name=name)`** — exec full sync server-side
+2. **`mcp__proj__proj_sync(integration="trello", project_name=name)`** — exec full sync server-side
 3. **`mcp__proj__tracking_git_flush`** — commit tracking changes
 
 ### Response handling
 
 - **`"status": "success"`**: show `summary.pull` + `summary.push` counts. If `summary.up_to_date`: "Everything up to date."
-- **`"status": "partial_success"`**: show summary + list each err. Offer one retry: `proj_trello_full_sync(retry_failures=response.retry_token)`. Retry also partial_success → report remaining errs, stop.
-- **`"status": "needs_confirmation"`**: each entry in `pull_delete_pending` → prompt "Delete local todo X? [Y/n]". `todo_delete` confirmed entries, re-run `proj_trello_full_sync`.
+- **`"status": "partial_success"`**: show summary + list each err. Offer one retry: `proj_sync(integration="trello", retry_failures=response.retry_token)`. Retry also partial_success → report remaining errs, stop.
+- **`"status": "needs_confirmation"`**: each entry in `pull_delete_pending` → prompt "Delete local todo X? [Y/n]". `todo_delete` confirmed entries, re-run `proj_sync(integration="trello")`.
 - **`"status": "error"`**: show err msg, stop.
 
 ### Fallback
 
-`proj_trello_full_sync` not available (tool-not-found) → fall back to **Legacy Multi-Step Flow** below.
+`proj_sync` not available (tool-not-found) → fall back to **Legacy Multi-Step Flow** below.
 
 
 ## Single-Project Mode (Legacy Multi-Step Flow)

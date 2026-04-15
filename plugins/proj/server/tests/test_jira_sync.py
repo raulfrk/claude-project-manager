@@ -2815,15 +2815,9 @@ class TestSelfFetchFullSync:
     """Tests for the self-fetch (jira_issues_json=None) path in proj_jira_full_sync."""
 
     def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
+        from server.tools.jira_sync import _run_jira_full_sync
 
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
+        return _run_jira_full_sync
 
     def test_self_fetch_successful(
         self,
@@ -3070,15 +3064,9 @@ class TestJiraRouting:
     """Tests for epic routing, dedup idempotency, and sync counts."""
 
     def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
+        from server.tools.jira_sync import _run_jira_full_sync
 
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
+        return _run_jira_full_sync
 
     def test_epic_routing_maps_to_project(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """Epic issue routes to a project (not a todo). Verify epics_mapped >= 1."""
@@ -3203,15 +3191,9 @@ class TestFullSyncResponseShape:
     """Tests that full-sync responses are compact and well-shaped."""
 
     def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
+        from server.tools.jira_sync import _run_jira_full_sync
 
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
+        return _run_jira_full_sync
 
     def test_success_response_keys(
         self,
@@ -3342,15 +3324,9 @@ class TestRetryPath:
     """Tests for the retry_failures parameter in proj_jira_full_sync."""
 
     def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
+        from server.tools.jira_sync import _run_jira_full_sync
 
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
+        return _run_jira_full_sync
 
     def _make_retry_token(self, errors: list[JsonDict], ts: float | None = None) -> str:
         import base64
@@ -3470,15 +3446,9 @@ class TestFullSyncCommentsJson:
     """Tests for the comments_json parameter in proj_jira_full_sync."""
 
     def _get_full_sync_fn(self):
-        from unittest.mock import MagicMock
+        from server.tools.jira_sync import _run_jira_full_sync
 
-        from server.tools.jira_sync import register
-
-        app = MagicMock()
-        tools: dict[str, object] = {}
-        app.tool = lambda **kw: lambda fn: tools.update({fn.__name__: fn}) or fn
-        register(app)
-        return tools["proj_jira_full_sync"]
+        return _run_jira_full_sync
 
     def test_comments_json_passed_through(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         """comments_json parameter is parsed and applied to created todos."""

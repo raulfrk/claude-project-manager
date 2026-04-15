@@ -73,9 +73,10 @@ hooks:
 
   - id: todoist-full-sync-on-proj-load
     trigger_tool: proj_load_session
-    target_tool: proj_todoist_full_sync
+    target_tool: proj_sync
     server: proj
     param_mapping:
+      integration: "todoist"
       project_name: "${project_name}"
     blocking: true
     condition: "sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"

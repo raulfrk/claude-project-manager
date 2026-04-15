@@ -902,77 +902,66 @@ def _sync_batch(cfg: ProjConfig) -> dict[str, JsonValue]:
     }
 
 
+# -- Callable helper (used by proj_sync dispatcher) --------------------------
+
+
+def _run_trello_full_sync(
+    project_name: str | None = None,
+    retry_failures: str | None = None,
+) -> str:
+    """Full Trello sync cycle — callable without MCP registration."""
+    # -- Retry mode: re-attempt only failed ops --
+    if retry_failures:
+        try:
+            failed_ops = json.loads(base64.b64decode(retry_failures))
+        except (json.JSONDecodeError, Exception) as e:
+            return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
+
+        succeeded, still_failed = _retry_failed_ops(failed_ops)
+        if still_failed:
+            token = base64.b64encode(json.dumps(still_failed).encode()).decode()
+            return json.dumps(
+                {
+                    "status": "partial_success",
+                    "retried_succeeded": len(succeeded),
+                    "errors": still_failed,
+                    "retry_token": token,
+                }
+            )
+        return json.dumps(
+            {
+                "status": "success",
+                "retried_succeeded": len(succeeded),
+                "summary": {"retry": True, "succeeded": len(succeeded)},
+            }
+        )
+
+    # -- Normal mode: full sync cycle --
+
+    # Check if we have a specific project or active session
+    result = require_project(project_name)
+    if isinstance(result, str):
+        # No active project -- enter batch mode if no explicit name was given
+        if project_name is not None:
+            # Explicit project name was given but not found
+            return json.dumps({"status": "error", "error": result})
+
+        # Batch mode: sync all Trello-enabled projects
+        try:
+            cfg = require_config()
+        except Exception as e:
+            return json.dumps({"status": "error", "error": str(e)})
+
+        batch_result = _sync_batch(cfg)
+        return json.dumps(batch_result, indent=2)
+
+    cfg, name = result
+    single_result = _sync_single_project(cfg, name)
+    return json.dumps(single_result)
+
+
 # -- MCP tool registration ---------------------------------------------------
 
 
 def register(app: FastMCP) -> None:
-    """Register proj_trello_full_sync tool."""
-
-    @app.tool(
-        description=(
-            "Execute a full Trello sync cycle for the active project: "
-            "fetch card state -> diff -> execute push ops -> apply pull ops -> return summary. "
-            "Reduces the sync flow from ~10 tool calls to 1. "
-            "When project_name=None and no active session, enters batch mode: "
-            "syncs all Trello-enabled projects sequentially with rate limiting. "
-            'On success: {"status": "success", "summary": {...}}. '
-            'On partial failure: {"status": "partial_success",'
-            ' "errors": [...], "retry_token": "..."}. '
-            "If pull_delete candidates exist:"
-            ' {"status": "needs_confirmation",'
-            ' "pull_delete_pending": [...]}. '
-            "Pass retry_failures (base64-encoded JSON) to re-attempt only previously failed ops."
-        )
-    )
-    def proj_trello_full_sync(
-        project_name: str | None = None,
-        retry_failures: str | None = None,
-    ) -> str:
-        # -- Retry mode: re-attempt only failed ops --
-        if retry_failures:
-            try:
-                failed_ops = json.loads(base64.b64decode(retry_failures))
-            except (json.JSONDecodeError, Exception) as e:
-                return json.dumps({"status": "error", "error": f"Invalid retry_failures: {e}"})
-
-            succeeded, still_failed = _retry_failed_ops(failed_ops)
-            if still_failed:
-                token = base64.b64encode(json.dumps(still_failed).encode()).decode()
-                return json.dumps(
-                    {
-                        "status": "partial_success",
-                        "retried_succeeded": len(succeeded),
-                        "errors": still_failed,
-                        "retry_token": token,
-                    }
-                )
-            return json.dumps(
-                {
-                    "status": "success",
-                    "retried_succeeded": len(succeeded),
-                    "summary": {"retry": True, "succeeded": len(succeeded)},
-                }
-            )
-
-        # -- Normal mode: full sync cycle --
-
-        # Check if we have a specific project or active session
-        result = require_project(project_name)
-        if isinstance(result, str):
-            # No active project -- enter batch mode if no explicit name was given
-            if project_name is not None:
-                # Explicit project name was given but not found
-                return json.dumps({"status": "error", "error": result})
-
-            # Batch mode: sync all Trello-enabled projects
-            try:
-                cfg = require_config()
-            except Exception as e:
-                return json.dumps({"status": "error", "error": str(e)})
-
-            batch_result = _sync_batch(cfg)
-            return json.dumps(batch_result, indent=2)
-
-        cfg, name = result
-        single_result = _sync_single_project(cfg, name)
-        return json.dumps(single_result)
+    """No-op: proj_trello_full_sync merged into proj_sync (605.6)."""

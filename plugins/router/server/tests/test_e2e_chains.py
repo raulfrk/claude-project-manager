@@ -48,7 +48,7 @@ def mock_post_hook():
     - ``batch_create_cards`` → success with batch card results
     - ``todo_update`` → simple success (feedback writeback)
     - ``proj_update_meta`` → simple success (feedback writeback)
-    - ``proj_todoist_full_sync`` → simple success
+    - ``proj_sync`` → simple success
     - Everything else → success with empty result
     """
     _TOOL_RESPONSES: dict[str, str | None] = {
@@ -69,7 +69,7 @@ def mock_post_hook():
         ),
         "todo_update": json.dumps({"ok": True}),
         "proj_update_meta": json.dumps({"ok": True}),
-        "proj_todoist_full_sync": json.dumps({"ok": True}),
+        "proj_sync": json.dumps({"ok": True}),
     }
 
     async def _route(**kwargs: Any) -> FireResult:
@@ -562,10 +562,11 @@ class TestProjectChains:
         td_params = by_tool["todoist_find_projects"][0]["params"]
         assert td_params["name"] == "existing-project"
 
-        # Todoist full sync: proj_todoist_full_sync fires (targets proj server)
-        assert "proj_todoist_full_sync" in by_tool
-        sync_params = by_tool["proj_todoist_full_sync"][0]["params"]
+        # Todoist full sync: proj_sync fires (targets proj server)
+        assert "proj_sync" in by_tool
+        sync_params = by_tool["proj_sync"][0]["params"]
         assert sync_params["project_name"] == "existing-project"
+        assert sync_params.get("integration") == "todoist"
 
         # Trello: get_card fires with trello_card_id
         assert "get_card" in by_tool

@@ -36,11 +36,9 @@ from server.tools.todoist_full_sync import (
     _migrate_parent_links,
     _normalize_title,
     _reconcile_unlinked_todos,
+    _run_todoist_full_sync,
     apply_changes,
     compute_diff,
-)
-from server.tools.todoist_full_sync import (
-    register as register_full_sync,
 )
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -114,20 +112,8 @@ class TestProjTodoistFullSync:
     """Tests for the proj_todoist_full_sync tool."""
 
     def _register_and_call(self, **kwargs):
-        """Register the tool and call it via the captured function."""
-        captured = {}
-
-        class FakeApp:
-            def tool(self, **deco_kwargs):
-                def decorator(fn):
-                    captured["fn"] = fn
-                    return fn
-
-                return decorator
-
-        fake = FakeApp()
-        register_full_sync(fake)
-        return captured["fn"](**kwargs)
+        """Call _run_todoist_full_sync directly (register() is now a no-op)."""
+        return _run_todoist_full_sync(**kwargs)
 
     # 1. test_full_success ─────────────────────────────────────────────────────
 

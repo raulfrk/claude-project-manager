@@ -22,6 +22,7 @@ from server.tools import (
     perms_grant,
     perms_sync,
     projects,
+    sync,
     todoist_full_sync,
     todos,
     tracking_git,
@@ -39,6 +40,7 @@ todoist_full_sync.register(mcp)
 trello_sync.register(mcp)
 trello_full_sync.register(mcp)
 jira_sync.register(mcp)
+sync.register(mcp)
 content.register(mcp)
 git.register(mcp)
 context.register(mcp)

@@ -2,7 +2,7 @@
 name: todoist-sync
 description: Manually trigger a full bidirectional Todoist sync. Always runs regardless of auto_sync setting. Use when the user says "sync with Todoist", "sync todos", or "pull from Todoist".
 argument-hint: "[all | everything]"
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_todoist_full_sync, mcp__proj__tracking_git_flush
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__proj_sync, mcp__proj__tracking_git_flush
 context: fork
 agent: general-purpose
 ---
@@ -16,7 +16,7 @@ Full bidirectional Todoist sync via single server-side call.
  - `integrations.todoist.enabled` false → stop: "Todoist sync not enabled. Run `/proj:init-plugin` to enable it."
  - No `integrations.todoist.project_id` → stop: "Project not linked to Todoist. Set `todoist_project_id` via `mcp__proj__proj_update_meta` first."
 
-**2.** `mcp__plugin_proj_proj__proj_todoist_full_sync` (pass `project_name` if available).
+**2.** `mcp__plugin_proj_proj__proj_sync(integration="todoist")` (pass `project_name` if available).
 
 **3.** Handle response:
 
@@ -30,9 +30,9 @@ Full bidirectional Todoist sync via single server-side call.
   2. Skip — leave both as-is
   3. Create new — push and pull as separate tasks
   ```
- Build `confirmed_links` array from user choices. Re-call `mcp__plugin_proj_proj__proj_todoist_full_sync` w/ `confirmed_links` as JSON.
+ Build `confirmed_links` array from user choices. Re-call `mcp__plugin_proj_proj__proj_sync(integration="todoist")` w/ `confirmed_links` as JSON.
 
-- **`status == "partial_success"`**: Show summary + each err. One retry: re-call `mcp__plugin_proj_proj__proj_todoist_full_sync` w/ `retry_failures` = response's `retry_token`. Retry also `partial_success` → show remaining errs, stop.
+- **`status == "partial_success"`**: Show summary + each err. One retry: re-call `mcp__plugin_proj_proj__proj_sync(integration="todoist")` w/ `retry_failures` = response's `retry_token`. Retry also `partial_success` → show remaining errs, stop.
 
 - **`status == "error"`**: Show err msg, stop.
 

@@ -1566,281 +1566,268 @@ def register(app: FastMCP) -> None:
             response["per_issue"] = apply_result.per_issue
         return json.dumps(response)
 
-    @app.tool(
-        description=(
-            "Full Jira sync: deterministic map + apply in one call. "
-            "Takes a JSON string of Jira issues (from jira_get_user_issues). "
-            "Maps epics to projects and issues to todos using jira_issue_key "
-            "matching (no interactive disambiguation). Auto-creates projects "
-            "for new epics (cap: 10). Optionally accepts pre-fetched comments. "
-            "Returns {status: 'success', summary: {...}} or "
-            "{status: 'partial_success', errors: [...], retry_token: '...'}. "
-            "Pass retry_token back via retry_failures to re-attempt only "
-            "failed issues."
-        )
-    )
-    def proj_jira_full_sync(
-        jira_issues_json: str | None = None,
-        project_name: str | None = None,
-        comments_json: str = "{}",
-        retry_failures: str | None = None,
-    ) -> str:
-        # Resolve config
+
+# -- Callable helper (used by proj_sync dispatcher) --------------------------
+
+
+def _run_jira_full_sync(
+    jira_issues_json: str | None = None,
+    project_name: str | None = None,
+    comments_json: str = "{}",
+    retry_failures: str | None = None,
+) -> str:
+    """Full Jira sync cycle — callable without MCP registration."""
+    try:
+        cfg = require_project(project_name)
+        if isinstance(cfg, str):
+            from server.tools.config import require_config
+
+            cfg_obj = require_config()
+        else:
+            cfg_obj, project_name = cfg
+    except Exception as e:
+        return json.dumps({"status": "error", "error": f"Config error: {e}"})
+
+    # Parse comments
+    try:
+        comments_by_key: dict[str, list[JsonDict]] = json.loads(comments_json)
+    except json.JSONDecodeError:
+        comments_by_key = {}
+
+    # ── Retry path ───────────────────────────────────────────────
+    if retry_failures:
         try:
-            cfg = require_project(project_name)
-            if isinstance(cfg, str):
-                from server.tools.config import require_config
+            token_data = json.loads(base64.b64decode(retry_failures).decode())
+        except Exception:
+            return json.dumps({"status": "error", "error": "Invalid retry_token"})
 
-                cfg_obj = require_config()
-            else:
-                cfg_obj, project_name = cfg
-        except Exception as e:
-            return json.dumps({"status": "error", "error": f"Config error: {e}"})
+        ts = token_data.get("ts", 0)
+        if time.time() - ts > 1800:  # 30 minutes
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "Retry token expired (>30 min). Run a fresh sync.",
+                }
+            )
 
-        # Parse comments
+        retry_issues: list[JsonDict] = []
+        for err_entry in token_data.get("errors", []):
+            payload = err_entry.get("retry_payload", {})
+            issue = payload.get("issue")
+            if isinstance(issue, dict):
+                retry_issues.append(issue)
+
+        if not retry_issues:
+            return json.dumps(
+                {
+                    "status": "success",
+                    "summary": {"message": "No retryable issues found"},
+                }
+            )
+
+        # Dedup guard: filter out retry issues that were already
+        # successfully applied (have a matching todo with jira_issue_key)
+        # in a previous partial run.
         try:
-            comments_by_key: dict[str, list[JsonDict]] = json.loads(comments_json)
-        except json.JSONDecodeError:
-            comments_by_key = {}
+            all_projects = storage.load_index(cfg_obj)
+            existing_jira_keys: set[str] = set()
+            for pn, pe in all_projects.projects.items():
+                if pe.archived:
+                    continue
+                try:
+                    p_todos = storage.load_todos(cfg_obj, pn)
+                    for t in p_todos:
+                        if t.jira_issue_key:
+                            existing_jira_keys.add(t.jira_issue_key)
+                except Exception:
+                    _log.debug(
+                        "Failed to load todos for dedup scan of project %s",
+                        pn,
+                        exc_info=True,
+                    )
+            filtered: list[JsonDict] = []
+            for ri in retry_issues:
+                ri_key = str(ri.get("key", ""))
+                if ri_key and ri_key in existing_jira_keys:
+                    _log.warning(
+                        "Skipping duplicate on retry: issue %s already has a linked todo",
+                        ri_key,
+                    )
+                else:
+                    filtered.append(ri)
+            retry_issues = filtered
+        except Exception:
+            _log.debug("Dedup scan failed, proceeding with all retry issues", exc_info=True)
 
-        # ── Retry path ───────────────────────────────────────────────
-        if retry_failures:
+        if not retry_issues:
+            return json.dumps(
+                {
+                    "status": "success",
+                    "summary": {"message": "All retry issues already applied"},
+                }
+            )
+
+        jira_issues_parsed: list[JsonDict] = retry_issues
+    else:
+        # ── Normal path ──────────────────────────────────────────
+        if jira_issues_json is None:
+            # Self-fetch via inter-plugin socket
             try:
-                token_data = json.loads(base64.b64decode(retry_failures).decode())
-            except Exception:
-                return json.dumps({"status": "error", "error": "Invalid retry_token"})
+                from server.tools.jira_full_sync import _fetch_jira_issues
 
-            ts = token_data.get("ts", 0)
-            if time.time() - ts > 1800:  # 30 minutes
+                jira_issues_parsed, _ = _fetch_jira_issues()
+            except Exception as e:
                 return json.dumps(
                     {
                         "status": "error",
-                        "error": "Retry token expired (>30 min). Run a fresh sync.",
+                        "error": str(e),
+                        "guidance": (
+                            "Jira plugin socket unreachable. Ensure the Jira plugin is running."
+                        ),
                     }
                 )
-
-            retry_issues: list[JsonDict] = []
-            for err_entry in token_data.get("errors", []):
-                payload = err_entry.get("retry_payload", {})
-                issue = payload.get("issue")
-                if isinstance(issue, dict):
-                    retry_issues.append(issue)
-
-            if not retry_issues:
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "summary": {"message": "No retryable issues found"},
-                    }
-                )
-
-            # Dedup guard: filter out retry issues that were already
-            # successfully applied (have a matching todo with jira_issue_key)
-            # in a previous partial run.
+        elif isinstance(jira_issues_json, str):
             try:
-                all_projects = storage.load_index(cfg_obj)
-                existing_jira_keys: set[str] = set()
-                for pn, pe in all_projects.projects.items():
-                    if pe.archived:
-                        continue
-                    try:
-                        p_todos = storage.load_todos(cfg_obj, pn)
-                        for t in p_todos:
-                            if t.jira_issue_key:
-                                existing_jira_keys.add(t.jira_issue_key)
-                    except Exception:
-                        _log.debug(
-                            "Failed to load todos for dedup scan of project %s",
-                            pn,
-                            exc_info=True,
-                        )
-                filtered: list[JsonDict] = []
-                for ri in retry_issues:
-                    ri_key = str(ri.get("key", ""))
-                    if ri_key and ri_key in existing_jira_keys:
-                        _log.warning(
-                            "Skipping duplicate on retry: issue %s already has a linked todo",
-                            ri_key,
-                        )
-                    else:
-                        filtered.append(ri)
-                retry_issues = filtered
-            except Exception:
-                _log.debug("Dedup scan failed, proceeding with all retry issues", exc_info=True)
-
-            if not retry_issues:
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "summary": {"message": "All retry issues already applied"},
-                    }
+                raw_parsed = json.loads(jira_issues_json)
+                if isinstance(raw_parsed, dict) and "issues" in raw_parsed:
+                    raw_parsed = raw_parsed["issues"]
+                jira_issues_parsed = (
+                    [x for x in raw_parsed if isinstance(x, dict)]
+                    if isinstance(raw_parsed, list)
+                    else []
                 )
+            except json.JSONDecodeError as e:
+                return json.dumps({"status": "error", "error": f"Invalid JSON: {e}"})
 
-            jira_issues_parsed: list[JsonDict] = retry_issues
-        else:
-            # ── Normal path ──────────────────────────────────────────
-            if jira_issues_json is None:
-                # Self-fetch via inter-plugin socket
-                try:
-                    from server.tools.jira_full_sync import _fetch_jira_issues
+    if not jira_issues_parsed:
+        return json.dumps(
+            {
+                "status": "success",
+                "summary": {"message": "Everything up to date"},
+            }
+        )
 
-                    jira_issues_parsed, _ = _fetch_jira_issues()
-                except Exception as e:
-                    return json.dumps(
+    # Deterministic mapping
+    try:
+        apply_input, diagnostics = _deterministic_map(
+            jira_issues_parsed,
+            cfg_obj,
+            project_name,
+        )
+    except Exception as e:
+        return json.dumps({"status": "error", "error": f"Mapping error: {e}"})
+
+    if not apply_input.groups:
+        return json.dumps(
+            {
+                "status": "success",
+                "summary": {
+                    "message": "No mappable issues",
+                    "warnings": diagnostics.get("warnings", []),
+                },
+            }
+        )
+
+    # Apply with per-issue error tracking
+    errors: list[JsonDict] = []
+    safe_groups: list[JsonDict] = []
+    todo_key_idx_raw = diagnostics.get("todo_key_index")
+    todo_key_idx: dict[str, tuple[str, str]] | None = (
+        cast("dict[str, tuple[str, str]]", todo_key_idx_raw)
+        if isinstance(todo_key_idx_raw, dict)
+        else None
+    )
+    counts: dict[str, int] = {
+        "epics_mapped": 0,
+        "standalone_created": 0,
+        "todos_created": 0,
+        "todos_updated": 0,
+        "duplicates_skipped": 0,
+        "total_issues": len(jira_issues_parsed),
+    }
+
+    for group in apply_input.groups:
+        try:
+            single_input = JiraApplyInput(groups=[group])
+            _result = apply_mapping(
+                single_input,
+                cfg_obj,
+                comments_by_key=comments_by_key,
+                todo_key_index=todo_key_idx,
+            )
+            # Accumulate counts
+            counts["todos_created"] += _result.counts.get("todos_created", 0)
+            counts["todos_updated"] += _result.counts.get("todos_updated", 0)
+            counts["duplicates_skipped"] += _result.counts.get("skipped_dedup", 0)
+            if group.get("is_epic"):
+                counts["epics_mapped"] += 1
+            elif group.get("create_project") and _result.counts.get("projects_created", 0) > 0:
+                counts["standalone_created"] += 1
+            elif group.get("source") == "standalone" and not group.get("project_exists"):
+                counts["standalone_created"] += _result.counts.get("projects_created", 0)
+            # Check per-issue failures
+            for ik, status in _result.per_issue.items():
+                if status.startswith("failed:"):
+                    # Find the original issue dict for retry
+                    issue_dict = None
+                    group_issues = group.get("issues", [])
+                    for ie in group_issues if isinstance(group_issues, list) else []:
+                        if isinstance(ie, dict) and str(ie.get("key", "")) == ik:
+                            issue_dict = ie
+                            break
+                    errors.append(
                         {
-                            "status": "error",
-                            "error": str(e),
-                            "guidance": (
-                                "Jira plugin socket unreachable. Ensure the Jira plugin is running."
-                            ),
+                            "issue_key": ik,
+                            "operation_type": "apply",
+                            "error": status,
+                            "retryable": True,
+                            "retry_payload": {"issue": issue_dict} if issue_dict else {},
                         }
                     )
-            elif isinstance(jira_issues_json, str):
-                try:
-                    raw_parsed = json.loads(jira_issues_json)
-                    if isinstance(raw_parsed, dict) and "issues" in raw_parsed:
-                        raw_parsed = raw_parsed["issues"]
-                    jira_issues_parsed = (
-                        [x for x in raw_parsed if isinstance(x, dict)]
-                        if isinstance(raw_parsed, list)
-                        else []
-                    )
-                except json.JSONDecodeError as e:
-                    return json.dumps({"status": "error", "error": f"Invalid JSON: {e}"})
-
-        if not jira_issues_parsed:
-            return json.dumps(
-                {
-                    "status": "success",
-                    "summary": {"message": "Everything up to date"},
-                }
-            )
-
-        # Deterministic mapping
-        try:
-            apply_input, diagnostics = _deterministic_map(
-                jira_issues_parsed,
-                cfg_obj,
-                project_name,
-            )
+            safe_groups.append(group)
         except Exception as e:
-            return json.dumps({"status": "error", "error": f"Mapping error: {e}"})
+            jk = str(group.get("jira_key", ""))
+            exc_issues = group.get("issues", [])
+            for ie in exc_issues if isinstance(exc_issues, list) else []:
+                if isinstance(ie, dict):
+                    errors.append(
+                        {
+                            "issue_key": str(ie.get("key", jk)),
+                            "operation_type": "apply",
+                            "error": str(e),
+                            "retryable": True,
+                            "retry_payload": {"issue": ie},
+                        }
+                    )
 
-        if not apply_input.groups:
-            return json.dumps(
-                {
-                    "status": "success",
-                    "summary": {
-                        "message": "No mappable issues",
-                        "warnings": diagnostics.get("warnings", []),
-                    },
-                }
-            )
+    # Build summary
+    summary: JsonDict = {
+        "groups_processed": len(safe_groups),
+        "warnings": diagnostics.get("warnings", []),
+        "epic_count": diagnostics.get("epic_count", 0),
+        "standalone_count": diagnostics.get("standalone_count", 0),
+        "projects_to_create": diagnostics.get("projects_to_create", 0),
+        "comments_synced": sum(len(v) for v in comments_by_key.values()) if comments_by_key else 0,
+    }
 
-        # Apply with per-issue error tracking
-        errors: list[JsonDict] = []
-        safe_groups: list[JsonDict] = []
-        todo_key_idx_raw = diagnostics.get("todo_key_index")
-        todo_key_idx: dict[str, tuple[str, str]] | None = (
-            cast("dict[str, tuple[str, str]]", todo_key_idx_raw)
-            if isinstance(todo_key_idx_raw, dict)
-            else None
-        )
-        counts: dict[str, int] = {
-            "epics_mapped": 0,
-            "standalone_created": 0,
-            "todos_created": 0,
-            "todos_updated": 0,
-            "duplicates_skipped": 0,
-            "total_issues": len(jira_issues_parsed),
-        }
+    # Ensure warnings are plain strings (not Warning objects)
+    warnings_raw = summary.get("warnings", [])
+    summary["warnings"] = [str(w) for w in warnings_raw] if isinstance(warnings_raw, list) else []
 
-        for group in apply_input.groups:
-            try:
-                single_input = JiraApplyInput(groups=[group])
-                _result = apply_mapping(
-                    single_input,
-                    cfg_obj,
-                    comments_by_key=comments_by_key,
-                    todo_key_index=todo_key_idx,
-                )
-                # Accumulate counts
-                counts["todos_created"] += _result.counts.get("todos_created", 0)
-                counts["todos_updated"] += _result.counts.get("todos_updated", 0)
-                counts["duplicates_skipped"] += _result.counts.get("skipped_dedup", 0)
-                if group.get("is_epic"):
-                    counts["epics_mapped"] += 1
-                elif group.get("create_project") and _result.counts.get("projects_created", 0) > 0:
-                    counts["standalone_created"] += 1
-                elif group.get("source") == "standalone" and not group.get("project_exists"):
-                    counts["standalone_created"] += _result.counts.get("projects_created", 0)
-                # Check per-issue failures
-                for ik, status in _result.per_issue.items():
-                    if status.startswith("failed:"):
-                        # Find the original issue dict for retry
-                        issue_dict = None
-                        group_issues = group.get("issues", [])
-                        for ie in group_issues if isinstance(group_issues, list) else []:
-                            if isinstance(ie, dict) and str(ie.get("key", "")) == ik:
-                                issue_dict = ie
-                                break
-                        errors.append(
-                            {
-                                "issue_key": ik,
-                                "operation_type": "apply",
-                                "error": status,
-                                "retryable": True,
-                                "retry_payload": {"issue": issue_dict} if issue_dict else {},
-                            }
-                        )
-                safe_groups.append(group)
-            except Exception as e:
-                jk = str(group.get("jira_key", ""))
-                exc_issues = group.get("issues", [])
-                for ie in exc_issues if isinstance(exc_issues, list) else []:
-                    if isinstance(ie, dict):
-                        errors.append(
-                            {
-                                "issue_key": str(ie.get("key", jk)),
-                                "operation_type": "apply",
-                                "error": str(e),
-                                "retryable": True,
-                                "retry_payload": {"issue": ie},
-                            }
-                        )
-
-        # Build summary
-        summary: JsonDict = {
-            "groups_processed": len(safe_groups),
-            "warnings": diagnostics.get("warnings", []),
-            "epic_count": diagnostics.get("epic_count", 0),
-            "standalone_count": diagnostics.get("standalone_count", 0),
-            "projects_to_create": diagnostics.get("projects_to_create", 0),
-            "comments_synced": sum(len(v) for v in comments_by_key.values())
-            if comments_by_key
-            else 0,
-        }
-
-        # Ensure warnings are plain strings (not Warning objects)
-        warnings_raw = summary.get("warnings", [])
-        summary["warnings"] = (
-            [str(w) for w in warnings_raw] if isinstance(warnings_raw, list) else []
+    if errors:
+        # Strip retry_payload and retryable from user-facing errors
+        clean_errors = [{"issue_key": e["issue_key"], "error": e["error"]} for e in errors]
+        retry_token = base64.b64encode(
+            json.dumps({"ts": time.time(), "errors": errors}).encode()
+        ).decode()
+        return json.dumps(
+            {
+                "status": "partial_success",
+                "summary": summary,
+                "counts": counts,
+                "errors": clean_errors,
+                "retry_token": retry_token,
+            }
         )
 
-        if errors:
-            # Strip retry_payload and retryable from user-facing errors
-            clean_errors = [{"issue_key": e["issue_key"], "error": e["error"]} for e in errors]
-            retry_token = base64.b64encode(
-                json.dumps({"ts": time.time(), "errors": errors}).encode()
-            ).decode()
-            return json.dumps(
-                {
-                    "status": "partial_success",
-                    "summary": summary,
-                    "counts": counts,
-                    "errors": clean_errors,
-                    "retry_token": retry_token,
-                }
-            )
-
-        return json.dumps({"status": "success", "summary": summary, "counts": counts})
+    return json.dumps({"status": "success", "summary": summary, "counts": counts})
