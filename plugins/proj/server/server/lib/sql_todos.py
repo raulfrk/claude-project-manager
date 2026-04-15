@@ -194,9 +194,9 @@ def compute_next_todo_id(cfg: ProjConfig, project_name: str) -> int:
             """
             SELECT MAX(CAST(SUBSTR(id, 1, INSTR(id || '.', '.') - 1) AS INTEGER))
             FROM (
-                SELECT id FROM todos WHERE project=?
+                SELECT id FROM todos WHERE project=? AND id GLOB '[0-9]*'
                 UNION ALL
-                SELECT id FROM archive_todos WHERE project=?
+                SELECT id FROM archive_todos WHERE project=? AND id GLOB '[0-9]*'
             )
             """,
             (project_name, project_name),

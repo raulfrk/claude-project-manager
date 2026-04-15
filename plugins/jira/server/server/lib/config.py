@@ -40,7 +40,10 @@ def load_config() -> JiraConfig:
 
     if config_path.exists():
         with config_path.open() as f:
-            data = yaml.safe_load(f) or {}
+            try:
+                data = yaml.safe_load(f) or {}
+            except yaml.YAMLError as exc:
+                raise ValueError(f"Invalid YAML in {config_path}: {exc}") from exc
         _cached_config = JiraConfig(
             personal_access_token=data.get("personal_access_token", ""),
             base_url=data.get("base_url", ""),

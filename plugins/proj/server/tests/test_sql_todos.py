@@ -158,6 +158,24 @@ class TestComputeNextTodoId:
         result = compute_next_todo_id(cfg, "myproject")
         assert result == 11
 
+    def test_non_numeric_ids_do_not_collide(self, cfg: ProjConfig) -> None:
+        """Non-numeric IDs (e.g. 'abc') must not be treated as 0, causing collisions."""
+        # Insert a valid numeric todo with id "5" and a non-numeric one.
+        # Without the fix, CAST('abc' AS INTEGER) = 0, so MAX = 5, next = 6.
+        # The bug would be if 'abc' caused next_id to drop to 1 (max=0).
+        todos = [make_todo("5"), make_todo("abc")]
+        save_todos(cfg, "myproject", todos)
+        result = compute_next_todo_id(cfg, "myproject")
+        # Must be 6 (based on numeric id "5"), not 1 (ignoring "abc" as 0 and miscomputing)
+        assert result == 6
+
+    def test_only_non_numeric_ids_returns_1(self, cfg: ProjConfig) -> None:
+        """If all IDs are non-numeric, return 1 (no collision risk)."""
+        todos = [make_todo("abc"), make_todo("xyz")]
+        save_todos(cfg, "myproject", todos)
+        result = compute_next_todo_id(cfg, "myproject")
+        assert result == 1
+
 
 class TestSaveArchivedTodosAppend:
     def test_appends_without_overwriting(self, cfg: ProjConfig) -> None:

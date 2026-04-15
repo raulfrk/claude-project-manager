@@ -64,6 +64,28 @@ class TestYamlLoading:
             load_config()
 
 
+class TestMalformedYaml:
+    def test_malformed_yaml_raises_value_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_file = tmp_path / "jira.yaml"
+        config_file.write_text("key: [unclosed bracket")
+        monkeypatch.setenv("JIRA_CONFIG", str(config_file))
+
+        with pytest.raises(ValueError, match="Invalid YAML in"):
+            load_config()
+
+    def test_malformed_yaml_error_includes_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_file = tmp_path / "jira.yaml"
+        config_file.write_text(": bad: yaml: {")
+        monkeypatch.setenv("JIRA_CONFIG", str(config_file))
+
+        with pytest.raises(ValueError, match=str(config_file)):
+            load_config()
+
+
 class TestEnvVarFallback:
     def test_loads_from_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Point JIRA_CONFIG to a non-existent file so YAML path is skipped

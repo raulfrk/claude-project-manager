@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from installer.detect import InstallState
+from installer.errors import InstallerError
 from installer.plugin_cli import get_installed_plugin_versions
 
 
@@ -39,7 +40,7 @@ def _read_installed_version(cache_dir: Path, plugin_name: str) -> str | None:
         versions = get_installed_plugin_versions()
         if plugin_name in versions:
             return versions[plugin_name]
-    except Exception:
+    except (InstallerError, FileNotFoundError, OSError):
         pass
 
     plugin_dir = cache_dir / plugin_name
