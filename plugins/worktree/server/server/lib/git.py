@@ -113,10 +113,11 @@ def clean_untracked(worktree_path: str) -> str:
 
 
 def remove_worktree(repo_path: str, worktree_path: str, force: bool = False) -> None:
-    """Remove a worktree. Use force=True only for unclean worktrees."""
+    """Remove a worktree. Use force=True for unclean or locked worktrees."""
     args = ["worktree", "remove"]
     if force:
-        args.append("--force")
+        # Double --force is required to remove locked worktrees
+        args.extend(["--force", "--force"])
     args.append(worktree_path)
     _run(args, cwd=repo_path)
 

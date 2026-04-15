@@ -784,8 +784,13 @@ class InstallerApp(App):
 
     def _on_progress_done(self, _result: None) -> None:
         """Handle progress screen completion."""
-        placeholder = self.query_one("#placeholder", Static)
-        placeholder.update(f"{self.mode.title()} complete.")
+        from textual.css.query import NoMatches
+
+        try:
+            placeholder = self.query_one("#placeholder", Static)
+            placeholder.update(f"{self.mode.title()} complete.")
+        except NoMatches:
+            pass
 
     def action_back(self) -> None:
         """Go back to previous screen or quit."""

@@ -262,6 +262,36 @@ class TestRemoveWorktree:
         data = json.loads(result)
         assert "No managed" in data.get("result", "") or "Error" in data.get("result", "")
 
+    def test_locked_returns_error(self, real_git_repo: Path) -> None:
+        """Locked worktree + force=False -> error, no removal."""
+        create_result = create_worktree("myapp", "feature/locked-rm")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-locked-rm")
+
+        lock_worktree(wt_path, reason="testing lock check")
+
+        result = remove_worktree(wt_path, force=False)
+        data = json.loads(result)
+        assert data["result"] == "error"
+        assert "locked" in data["message"].lower()
+        assert "wt_unlock" in data["message"] or "force=true" in data["message"]
+        assert Path(wt_path).exists()
+
+    def test_locked_force_bypasses_check(self, real_git_repo: Path) -> None:
+        """Locked worktree + force=True -> removed successfully."""
+        create_result = create_worktree("myapp", "feature/locked-force")
+        create_data = json.loads(create_result)
+        assert "Created" in create_data["result"]
+        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-locked-force")
+
+        lock_worktree(wt_path, reason="testing force bypass")
+
+        result = remove_worktree(wt_path, force=True)
+        data = json.loads(result)
+        assert "Removed" in data["result"]
+        assert data["worktree_path"] == wt_path
+
 
 class TestPruneWorktrees:
     def test_prunes_all(self, real_git_repo: Path) -> None:

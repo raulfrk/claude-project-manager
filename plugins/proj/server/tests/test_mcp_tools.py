@@ -1354,3 +1354,19 @@ class TestTodoUpdateSkipHooks:
         )
         data = _json.loads(raw)
         assert "_skip_hooks" not in data
+
+    async def test_skip_hooks_rejected_with_blocked_by_set(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """skip_hooks=True + blocked_by_set → scope guard rejects, no _skip_hooks in result."""
+        await call_tool(mcp_app, "todo_add", title="Blocker")
+        await call_tool(mcp_app, "todo_add", title="Task")
+        raw = await call_tool(
+            mcp_app,
+            "todo_update",
+            todo_id="2",
+            blocked_by_set=["1"],
+            skip_hooks=True,
+        )
+        data = _json.loads(raw)
+        assert "_skip_hooks" not in data

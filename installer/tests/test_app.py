@@ -149,6 +149,46 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             assert any("Failed" in log or "failed" in log for log in progress.logs)
 
 
+class TestOnProgressDone:
+    """Tests for InstallerApp._on_progress_done NoMatches guard."""
+
+    def test_on_progress_done_no_placeholder_does_not_raise(self) -> None:
+        """_on_progress_done must silently swallow NoMatches when placeholder absent."""
+        from textual.css.query import NoMatches
+
+        from installer.app import InstallerApp
+
+        app = InstallerApp()
+
+        def _raise_no_matches(selector, widget_type=None):
+            raise NoMatches(selector)
+
+        app.query_one = _raise_no_matches  # type: ignore[method-assign]
+        app.mode = "install"
+
+        # Must not raise
+        app._on_progress_done(None)
+
+    def test_on_progress_done_updates_placeholder_when_present(self) -> None:
+        """_on_progress_done must update placeholder text when widget is present."""
+        from installer.app import InstallerApp
+
+        app = InstallerApp()
+        app.mode = "install"
+
+        updated: list[str] = []
+
+        class _FakePlaceholder:
+            def update(self, text: str) -> None:
+                updated.append(text)
+
+        app.query_one = lambda selector, widget_type=None: _FakePlaceholder()  # type: ignore[method-assign]
+
+        app._on_progress_done(None)
+
+        assert updated == ["Install complete."]
+
+
 class _StubProgress:
     """Minimal progress-screen stand-in used by the status install worker tests."""
 
