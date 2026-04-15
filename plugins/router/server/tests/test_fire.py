@@ -988,6 +988,35 @@ class TestConditionMerge:
         assert data["non_blocking_dispatched"] == 1
 
     @pytest.mark.asyncio
+    async def test_jira_issue_key_merges_to_project(self, hooks_yaml: Path, proj_yaml: Path):
+        """jira_issue_key from source_result merges into 'project' section."""
+        reg = _make_registry(
+            [
+                _hook("hook-001", "trigger_a", "target_b", condition="project.jira_issue_key"),
+            ]
+        )
+        save(reg, hooks_yaml)
+        proj_yaml.write_text("")
+
+        with (
+            patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
+            patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
+            patch(
+                "server.tools.fire._fire_single",
+                new_callable=AsyncMock,
+                return_value=FireResult(hook_id="hook-001", status_code=200, body="ok"),
+            ),
+        ):
+            source = json.dumps({"jira_issue_key": "PROJ-456"})
+            result = await hooks_fire("trigger_a", source_result=source)
+
+        data = json.loads(result)
+        assert data["non_blocking_dispatched"] == 1, (
+            "Hook with condition 'project.jira_issue_key' should fire when jira_issue_key "
+            "is present in source_result"
+        )
+
+    @pytest.mark.asyncio
     async def test_base_config_overrides_source_result(self, hooks_yaml: Path, proj_yaml: Path):
         """Base config values take precedence over source_result merge."""
         reg = _make_registry(

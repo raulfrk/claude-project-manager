@@ -740,6 +740,7 @@ async def hooks_fire(
                 "todoist_project_id",
                 "trello_card_id",
                 "trello_checklist_id",
+                "jira_issue_key",
             )
         }
         if project_fields:

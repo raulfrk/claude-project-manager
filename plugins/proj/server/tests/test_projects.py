@@ -514,6 +514,14 @@ class TestProjInitValidation:
         assert data["project_name"] == "validproject"
         assert "result" in data
 
+    def test_proj_init_returns_jira_issue_key(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """proj_init return value includes jira_issue_key field."""
+        import json
+
+        result = self._call_proj_init("jiraproject", tmp_path)
+        data = json.loads(result)
+        assert "jira_issue_key" in data, "proj_init must return jira_issue_key in result dict"
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -683,6 +691,15 @@ class TestProjUpdateMeta:
         tools = _get_tools()
         data = json.loads(tools["proj_update_meta"](name="nonexistent", description="x"))
         assert data["status"] == "not_found"
+
+    def test_update_jira_issue_key(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """proj_update_meta persists jira_issue_key to project meta."""
+        _run_proj_init("myapp", str(tmp_path))
+        tools = _get_tools()
+        data = json.loads(tools["proj_update_meta"](name="myapp", jira_issue_key="PROJ-123"))
+        assert "Updated" in data["result"]
+        meta = storage.load_meta(cfg, "myapp")
+        assert meta.jira_issue_key == "PROJ-123"
 
 
 # ── TestProjArchive ──────────────────────────────────────────────────────────

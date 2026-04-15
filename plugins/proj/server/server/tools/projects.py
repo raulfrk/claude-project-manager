@@ -267,6 +267,7 @@ def register(app: FastMCP) -> None:
                 "mcp_servers": [],
                 "todoist_project_id": meta.todoist_project_id,
                 "trello_card_id": meta.trello_card_id,
+                "jira_issue_key": meta.jira_issue_key,
                 "sync": {
                     "trello": _enrich_trello_sync(cfg),
                 },
@@ -402,6 +403,7 @@ def register(app: FastMCP) -> None:
         git_tracking_github_repo_format: str | None = None,
         todoist_project_id: str | None = None,
         trello_card_id: str | None = None,
+        jira_issue_key: str | None = None,
     ) -> str:
         result = require_project(name)
         if isinstance(result, str):
@@ -438,6 +440,8 @@ def register(app: FastMCP) -> None:
             meta.todoist_project_id = todoist_project_id
         if trello_card_id is not None:
             meta.trello_card_id = trello_card_id
+        if jira_issue_key is not None:
+            meta.jira_issue_key = jira_issue_key
         storage.save_meta(cfg, meta)
 
         # Build trello_move hint if status changed and project has Trello card
@@ -614,6 +618,7 @@ def register(app: FastMCP) -> None:
             "mcp_servers": [],
             "todoist_project_id": meta.todoist_project_id,
             "trello_card_id": meta.trello_card_id,
+            "jira_issue_key": meta.jira_issue_key,
             "sync": {
                 "trello": _enrich_trello_sync(cfg),
             },
@@ -912,6 +917,7 @@ def register(app: FastMCP) -> None:
                 "mcp_servers": [],
                 "todoist_project_id": meta.todoist_project_id or "",
                 "trello_card_id": meta.trello_card_id or "",
+                "jira_issue_key": meta.jira_issue_key or "",
             }
         )
 
