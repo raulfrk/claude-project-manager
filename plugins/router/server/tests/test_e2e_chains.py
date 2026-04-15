@@ -146,6 +146,7 @@ def make_todo_source(**overrides: Any) -> dict[str, Any]:
         "trello_list_id": "list-tasks-id",
         "trello_done_list_id": "list-done-id",
         "trello_projects_list_id": "list-projects-id",
+        "is_batch": False,
         "sync": {
             "trello": {
                 "enabled": True,
