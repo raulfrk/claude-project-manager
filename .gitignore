@@ -3,11 +3,15 @@ __pycache__/
 *.pyo
 .venv/
 .coverage
+.coverage.*
 *.cover
 *,cover
 pytest-of-*/
 /.mcp.json
 !plugins/**/.mcp.json
+plugins/sandbox/
+plugins/zoxide/
+*_actual.svg
 .claude/
 *.egg-info/
 dist/
