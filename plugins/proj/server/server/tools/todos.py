@@ -1200,6 +1200,9 @@ def register(app: FastMCP) -> None:
         note: str = "",
         project_name: str | None = None,
     ) -> str:
+        if todo_id is not None and todo_ids is not None:
+            return json.dumps({"error": "Provide todo_id OR todo_ids, not both."})
+
         # Route: todo_ids param → batch path (any length, including 0/1).
         # todo_id param (only) → single-complete path.
         if todo_ids is not None:
