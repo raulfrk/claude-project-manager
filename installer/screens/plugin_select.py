@@ -204,7 +204,7 @@ class PluginSelectScreen(Screen[list[str]]):
         """Show warning if router is deselected but dependents are selected."""
         warning_bar = self.query_one("#warning-bar", Static)
         if "router" not in self._selected:
-            dependents = [n for n in self._selected if n not in ("router", "analyse")]
+            dependents = [n for n in self._selected if n not in ("router",)]
             if dependents:
                 warning_bar.update(
                     f"Warning: router not selected but recommended for: "

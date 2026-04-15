@@ -40,7 +40,7 @@ def assert_all_visible(
 
 
 # ---------------------------------------------------------------------------
-# Full marketplace data (all 9 plugins)
+# Full marketplace data (all 8 plugins)
 # ---------------------------------------------------------------------------
 
 _ALL_PLUGINS = [
@@ -87,25 +87,11 @@ _ALL_PLUGINS = [
         "keywords": ["router", "hooks"],
     },
     {
-        "name": "zoxide",
-        "description": "Zoxide frecency database integration",
-        "version": "2.0.0",
-        "category": "utilities",
-        "keywords": ["zoxide", "frecency"],
-    },
-    {
         "name": "todoist",
         "description": "Todoist task and project management",
         "version": "2.0.0",
         "category": "integrations",
         "keywords": ["todoist", "tasks"],
-    },
-    {
-        "name": "analyse",
-        "description": "Guided code review skill",
-        "version": "2.0.0",
-        "category": "utilities",
-        "keywords": ["analyse", "code-review"],
     },
 ]
 
@@ -152,7 +138,7 @@ def mock_subprocess(mocker):
 
 @pytest.fixture()
 def marketplace_json(tmp_path: Path) -> Path:
-    """Write a test marketplace.json with all 9 plugins and return its path."""
+    """Write a test marketplace.json with all 8 plugins and return its path."""
     data = {"plugins": _ALL_PLUGINS}
     path = tmp_path / "marketplace.json"
     path.write_text(json.dumps(data), encoding="utf-8")

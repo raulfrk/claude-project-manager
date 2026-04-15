@@ -29,7 +29,7 @@ Project management plugins for Claude Code -- track todos, manage permissions, a
 /proj:status
 ```
 
-Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`, `zoxide`, `analyse`.
+Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`.
 
 ### Installer Wizard (recommended)
 
@@ -60,9 +60,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 | [trello](plugins/trello/) | 3.0.0 | integrations | Trello board, card, and list management via REST API |
 | [jira](plugins/jira/) | 3.0.0 | integrations | Read-only Jira Server issue and project access via REST API |
 | [router](plugins/router/) | 2.1.0 | utilities | Central MCP-to-MCP router (formerly `hooks`) with schema-based param mapping, auto-registration, and recovery |
-| [zoxide](plugins/zoxide/) | 2.0.0 | utilities | Zoxide frecency database integration -- boost, remove, and query paths |
 | [todoist](plugins/todoist/) | 2.0.0 | integrations | Todoist task and project management via REST API |
-| [analyse](plugins/analyse/) | 2.0.0 | utilities | Guided code review that walks through features, explains code, and creates todos |
 <!-- AUTO:plugins-end -->
 
 ---

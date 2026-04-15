@@ -24,7 +24,6 @@ class TestClassifyCategory:
 
     def test_utility_plugins(self):
         assert _classify_category("worktree", "utilities") == "utilities"
-        assert _classify_category("zoxide", "utilities") == "utilities"
 
     def test_integration_plugins(self):
         assert _classify_category("trello", "integrations") == "integrations"
@@ -80,7 +79,6 @@ class TestCheckDependencyWarnings:
 
     def test_no_warning_for_standalone_plugins(self, mock_console):
         """Standalone plugins without router should not trigger a dependency warning."""
-        _check_dependency_warnings(["analyse"], mock_console)
         _check_dependency_warnings(["worktree"], mock_console)
 
 

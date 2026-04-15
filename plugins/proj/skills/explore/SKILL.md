@@ -10,7 +10,7 @@ argument-hint: "[<todo-id> | <path> | <description>] (any combination)"
 
 Walk through codebase feature/section in guided chapters. Explain structure/logic, answer questions inline.
 
-Todos or in-depth review → `/analyse:review`.
+Todos or in-depth review → `/proj:review`.
 
 
 ## Step 1 — Parse $ARGUMENTS
@@ -78,7 +78,7 @@ Confirmed → step 5.
 
 Present one chapter at time. Do NOT advance until user explicitly continues.
 
-Todos or in-depth review → `/analyse:review`.
+Todos or in-depth review → `/proj:review`.
 
 
 ### Chapter 1 — Overview

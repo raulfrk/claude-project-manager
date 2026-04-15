@@ -3,7 +3,7 @@
 ---
 name: init-plugin
 desc: First-time setup wizard for proj plugin. Run this before via any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__zoxide_query, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
@@ -67,13 +67,14 @@ Check each plugin:
 - **todoist**: `mcp__plugin_todoist_todoist__todoist_find_projects` w/ `name=""`
 - **trello**: `mcp__plugin_trello_trello__list_boards`
 - **jira**: `mcp__plugin_jira_jira__jira_list_projects`
-- **zoxide**: `mcp__plugin_zoxide_zoxide__zoxide_query` w/ `query=""`
+
+Note: zoxide tools (`zoxide_boost`, `zoxide_query`, `zoxide_remove`) are part of worktree plugin. No separate zoxide plugin detection needed.
 
 Tool call fail → plugin not installed. Continue silently.
 
 Report detection results:
 ```
-Detected plugins: sandbox, worktree, router, todoist, zoxide
+Detected plugins: sandbox, worktree, router, todoist
 Not found: trello, jira
 ```
 
@@ -194,7 +195,7 @@ Configuration summary:
   Core:
     tracking_dir: ~/projects/tracking
     projects_base_dir: ~/projects
-  Detected plugins: sandbox, worktree, router, todoist, zoxide
+  Detected plugins: sandbox, worktree, router, todoist
   Permissions:
     auto_grant: yes
     auto_allow_mcps: yes
@@ -249,9 +250,8 @@ Build server list, call `mcp__plugin_sandbox_sandbox__sandbox_batch_setup(mcp_se
 - + todoist enabled: `todoist_mcp_server` val + `"plugin_todoist_todoist"`
 - + trello enabled: `"plugin_trello_trello"`
 - + jira enabled: `"plugin_jira_jira"`
-- + zoxide detected: `"plugin_zoxide_zoxide"`
 - Filter out servers w/ wildcard rule `f"mcp__{server}__*"` already in `existing_allow` — report each as `"<rule> already present, skipping"`. Call only if filtered list non-empty.
-- `zoxide_integration: true` + `"Bash(zoxide *)"` not in `existing_allow` → `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` w/ `entry="Bash(zoxide *)"`.
+- `zoxide_integration: true` + `"Bash(zoxide *)"` not in `existing_allow` → `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` w/ `entry="Bash(zoxide *)"`. (zoxide tools are part of worktree plugin)
 
 ### 7b. Verify MCP rules
 Re-read sandbox state via `mcp__plugin_sandbox_sandbox__sandbox_list` w/ `scope="user"`, `format="json"` (fresh; 7a may have mutated).
@@ -288,11 +288,10 @@ Each detected+enabled plugin: register default hooks via `mcp__plugin_router_rou
 - **proj**: `git_tracking.enabled` (tracking flush) or `sandbox_integration` (sandbox sync)
 - **todoist**: `todoist_enabled`
 - **trello**: `trello_enabled`
-- **zoxide**: `zoxide_integration`
 - **worktree**: `worktree_integration` (sandbox hooks) or `zoxide_integration` (zoxide hooks)
 - **sandbox**: `sandbox_integration`
 
-Report: "Registered N default hooks for: proj, todoist, zoxide"
+Report: "Registered N default hooks for: proj, todoist, worktree"
 
 ### 8c. Validate hook condition paths
 Inspect `condition` field of each hook. Known fixes:
@@ -314,7 +313,7 @@ Summary of what was set up:
 ```
 Setup complete:
   Config: ~/.claude/proj.yaml
-  Plugins: sandbox, worktree, router, todoist, zoxide
+  Plugins: sandbox, worktree, router, todoist
   MCP rules: 7 servers auto-allowed
   Sandbox: initialized (3 paths)
   Hooks: 12 registered

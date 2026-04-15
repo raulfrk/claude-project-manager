@@ -68,25 +68,11 @@ _ALL_PLUGINS = [
         "keywords": ["router", "hooks"],
     },
     {
-        "name": "zoxide",
-        "description": "Zoxide frecency database integration",
-        "version": "2.0.0",
-        "category": "utilities",
-        "keywords": ["zoxide"],
-    },
-    {
         "name": "todoist",
         "description": "Todoist task and project management",
         "version": "2.0.0",
         "category": "integrations",
         "keywords": ["todoist"],
-    },
-    {
-        "name": "analyse",
-        "description": "Guided code review skill",
-        "version": "2.0.0",
-        "category": "utilities",
-        "keywords": ["analyse"],
     },
 ]
 

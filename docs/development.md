@@ -13,7 +13,7 @@ Guide for developing and contributing to claude-project-manager.
 - **ruff** -- Linter and formatter (installed as dev dependency)
 
 Optional:
-- **zoxide** -- Required if developing/testing the zoxide plugin
+- **zoxide** -- Required if using worktree plugin's zoxide frecency tools (`zoxide_boost`, `zoxide_query`, `zoxide_remove`)
 - Todoist API token -- Required for todoist plugin testing
 - Trello API key/token -- Required for trello plugin testing
 - Jira credentials -- Required for jira plugin testing
@@ -37,7 +37,6 @@ cd plugins/router/server && uv sync && cd -
 cd plugins/todoist/server && uv sync && cd -
 cd plugins/trello/server && uv sync && cd -
 cd plugins/jira/server && uv sync && cd -
-cd plugins/zoxide/server && uv sync && cd -
 
 # Install shared dependency dev deps
 cd plugins/_shared && uv sync && cd -
@@ -90,7 +89,6 @@ claude-project-manager/
     todoist/                    # Same structure as sandbox
     trello/                     # Same structure as sandbox
     jira/                       # Same structure as sandbox
-    zoxide/                     # Same structure as sandbox
 
 ```
 
@@ -117,7 +115,6 @@ cd plugins/router/server && uv run pytest -q
 cd plugins/todoist/server && uv run pytest -q
 cd plugins/trello/server && uv run pytest -q
 cd plugins/jira/server && uv run pytest -q
-cd plugins/zoxide/server && uv run pytest -q
 
 # Run shared library tests
 cd plugins/_shared && uv run pytest -q
@@ -238,7 +235,6 @@ All three must match. Forgetting one will cause inconsistencies.
 | todoist | 2.0.0 |
 | trello | 3.0.0 |
 | jira | 3.0.0 |
-| zoxide | 2.0.0 |
 
 | _shared | 0.3.3 |
 

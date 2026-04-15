@@ -1,6 +1,6 @@
 # Plugins
 
-Detailed reference for all 8 plugins in the claude-project-manager marketplace.
+Detailed reference for all 7 plugins in the claude-project-manager marketplace.
 
 ---
 
@@ -13,7 +13,6 @@ Detailed reference for all 8 plugins in the claude-project-manager marketplace.
 - [todoist](#todoist)
 - [trello](#trello)
 - [jira](#jira)
-- [zoxide](#zoxide)
 
 ---
 
@@ -97,6 +96,9 @@ Registry-based git worktree management. Register a repository once with a label,
 | `wt_prune(repo?)` | Clean up stale worktree admin files |
 | `wt_merge(path, target?)` | Merge a worktree branch |
 | `wt_config_get()` | Get worktree plugin configuration |
+| `zoxide_boost(path, times?)` | Boost a path's frecency score in zoxide |
+| `zoxide_query(keyword, max_results?)` | Query zoxide for matching paths |
+| `zoxide_remove(path)` | Remove a path from the zoxide database |
 
 ### Skills
 
@@ -602,38 +604,4 @@ None. Jira sync is managed through `/proj:jira-sync`.
 ### Config
 
 Requires Jira base URL, email, and API token, configured via `jira_init`. Integration enabled in `~/.claude/proj.yaml`.
-
----
-
-## zoxide
-
-**Version**: 1.3.1 | **Category**: utilities | **License**: MIT
-
-Zoxide frecency database integration for fast directory jumping in Claude Code workflows. Boost, remove, and query paths using zoxide's frecency algorithm.
-
-### Install
-
-```console
-/plugin install raulfrk/claude-project-manager:zoxide
-```
-
-### MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `zoxide_query(query)` | Query zoxide for matching paths |
-| `zoxide_boost(path)` | Boost a path's frecency score |
-| `zoxide_remove(path)` | Remove a path from the zoxide database |
-
-### Skills
-
-None.
-
-### Config
-
-Requires zoxide to be installed on the system. Integration flag in `~/.claude/proj.yaml`:
-
-```yaml
-zoxide_integration: true
-```
 

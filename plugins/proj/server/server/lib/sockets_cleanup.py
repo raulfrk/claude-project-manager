@@ -29,7 +29,6 @@ KNOWN_MANAGED_PLUGINS = frozenset(
         "trello",
         "jira",
         "todoist",
-        "zoxide",
     }
 )
 

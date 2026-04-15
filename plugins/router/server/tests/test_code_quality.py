@@ -113,8 +113,7 @@ class TestSharedDefaultPorts:
     def test_constants_module_has_expected_ports(self):
         assert DEFAULT_SERVER_PORTS["hooks"] == 19100
         assert DEFAULT_SERVER_PORTS["proj"] == 19102
-        assert DEFAULT_SERVER_PORTS["zoxide"] == 19107
-        assert len(DEFAULT_SERVER_PORTS) == 8
+        assert len(DEFAULT_SERVER_PORTS) == 7
 
     def test_fire_uses_shared_constant(self):
         from server.tools.fire import _DEFAULT_SERVER_PORTS

@@ -22,6 +22,7 @@ from server.tools import (
     perms_grant,
     perms_sync,
     projects,
+    sandbox,
     sync,
     todoist_full_sync,
     todos,
@@ -52,6 +53,7 @@ knowledge.register(mcp)
 decisions.register(mcp)
 digest.register(mcp)
 tracking_git.register(mcp)
+sandbox.register(mcp)
 
 
 def main() -> None:

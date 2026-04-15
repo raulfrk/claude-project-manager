@@ -10,5 +10,4 @@ DEFAULT_SERVER_PORTS: dict[str, int] = {
     "trello": 19104,
     "jira": 19105,
     "todoist": 19106,
-    "zoxide": 19107,
 }

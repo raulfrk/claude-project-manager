@@ -121,23 +121,6 @@
       ]
     },
     {
-      "name": "zoxide",
-      "source": "./plugins/zoxide",
-      "description": "Zoxide frecency database integration \u2014 boost, remove, and query paths",
-      "version": "2.0.0",
-      "author": {
-        "name": "raulfrk"
-      },
-      "license": "MIT",
-      "category": "utilities",
-      "keywords": [
-        "zoxide",
-        "frecency",
-        "navigation",
-        "paths"
-      ]
-    },
-    {
       "name": "todoist",
       "source": "./plugins/todoist",
       "description": "Todoist task and project management via REST API \u2014 create, complete, update, find, and delete tasks and projects",
@@ -153,23 +136,6 @@
         "sync",
         "productivity",
         "project-management"
-      ]
-    },
-    {
-      "name": "analyse",
-      "source": "./plugins/analyse",
-      "description": "Guided code review skill that walks users through features, explains the code, and creates todos for improvements.",
-      "version": "2.0.0",
-      "author": {
-        "name": "raulfrk"
-      },
-      "license": "MIT",
-      "category": "utilities",
-      "keywords": [
-        "analyse",
-        "code-review",
-        "todos",
-        "workflow"
       ]
     }
   ]

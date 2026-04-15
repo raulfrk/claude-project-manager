@@ -5,16 +5,15 @@
 
 ## Overview
 
-Claude Code plugin marketplace for project management workflows. Nine plugins:
+Claude Code plugin marketplace for project management workflows. Eight plugins:
 - `sandbox` — manage sandbox-mode `settings.json` (write paths, MCP allow rules, network domains, deny rules)
 - `worktree` — git worktree management
-- `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync)
+- `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync); includes `review` and `explore` skills
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
 - `jira` — Jira MCP server (issues, projects, epics, bulk operations)
 - `router` — central MCP-to-MCP router (formerly `hooks`); schema-based param mapping, auto-registration, and recovery
 - `todoist` — Todoist task and project management via REST API
 - `zoxide` — zoxide frecency database integration (boost, remove, query paths)
-- `analyse` — guided code review skill (walk through features, explain code, create todos)
 
 ## Overhaul Plan
 

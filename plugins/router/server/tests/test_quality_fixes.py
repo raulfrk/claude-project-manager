@@ -118,7 +118,7 @@ class TestSharedPortConstant:
         assert _DEFAULT_SERVER_PORTS is DEFAULT_SERVER_PORTS
 
     def test_constant_has_expected_keys(self):
-        expected = {"hooks", "sandbox", "proj", "worktree", "trello", "jira", "todoist", "zoxide"}
+        expected = {"hooks", "sandbox", "proj", "worktree", "trello", "jira", "todoist"}
         assert set(DEFAULT_SERVER_PORTS.keys()) == expected
 
 

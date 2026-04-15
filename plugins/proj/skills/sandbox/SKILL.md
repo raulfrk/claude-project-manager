@@ -55,7 +55,7 @@ Full sandbox init. Idempotent.
 
 `mcp__plugin_sandbox_sandbox__sandbox_batch_setup()` single atomic call:
 
-- `mcp_servers`: `["plugin_router_router", "plugin_proj_proj", "plugin_sandbox_sandbox", "plugin_worktree_worktree", "plugin_trello_trello", "plugin_jira_jira", "plugin_todoist_todoist", "plugin_zoxide_zoxide"]`
+- `mcp_servers`: `["plugin_router_router", "plugin_proj_proj", "plugin_sandbox_sandbox", "plugin_worktree_worktree", "plugin_trello_trello", "plugin_jira_jira", "plugin_todoist_todoist"]`
 - `paths`: `["//home/raul/projects/**", "//home/raul/projects/tracking/**", "//home/raul/worktrees/**", "//home/raul/.claude/skills/**", "//home/raul/.claude/plugins/**", "//tmp/**"]`
 - `skill_prefixes`: `["proj:", "worktree:", "router:", "review:"]`
 - `target`: `"settings"`

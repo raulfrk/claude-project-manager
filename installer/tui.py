@@ -23,7 +23,7 @@ CATEGORY_ORDER: list[tuple[str, str]] = [
 # Map marketplace categories to installer categories.
 # "productivity" (proj) is core; "utilities" is split by name.
 _CORE_PLUGINS = {"sandbox", "router", "proj"}
-_UTILITY_PLUGINS = {"worktree", "zoxide", "analyse"}
+_UTILITY_PLUGINS = {"worktree"}
 # Everything else falls into integrations.
 
 # Plugins pre-selected by default (core set)
@@ -166,7 +166,7 @@ def _build_selection_table(
 def _check_dependency_warnings(selected_names: list[str], console: Console) -> None:
     """Warn if router is deselected but other core plugins are selected."""
     if "router" not in selected_names:
-        hook_dependents = [n for n in selected_names if n not in ("router", "analyse")]
+        hook_dependents = [n for n in selected_names if n not in ("router",)]
         if hook_dependents:
             console.print(
                 f"\n[yellow]Warning:[/yellow] [bold]router[/bold] is not selected but "

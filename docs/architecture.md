@@ -6,18 +6,17 @@ This document describes the system architecture of claude-project-manager, a Cla
 
 ## System Overview
 
-The marketplace contains 9 plugins that work independently or together:
+The marketplace contains 8 plugins that work independently or together:
 
 | Plugin | Version | Category | Type | Description |
 |--------|---------|----------|------|-------------|
 | **sandbox** | 1.0.0 | utilities | MCP server | Manage sandbox-mode `settings.json` (write paths, MCP/Skill allow rules, network domains, deny rules) |
-| **worktree** | 3.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories |
+| **worktree** | 3.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories (includes zoxide frecency tools) |
 | **proj** | 4.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) |
 | **router** | 2.1.0 | utilities | MCP server + skills | Central MCP-to-MCP router with condition evaluation, auto-registration, and recovery |
 | **todoist** | 2.0.0 | integrations | MCP server | Todoist task and project management via REST API |
 | **trello** | 3.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
 | **jira** | 3.0.0 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
-| **zoxide** | 2.0.0 | utilities | MCP server | Zoxide frecency database integration (boost, remove, query paths) |
 ### Marketplace Structure
 
 ```
@@ -33,7 +32,6 @@ claude-project-manager/
     todoist/                  # MCP server plugin
     trello/                   # MCP server plugin
     jira/                     # MCP server plugin
-    zoxide/                   # MCP server plugin
   docs/                       # Documentation
 ```
 
@@ -137,7 +135,7 @@ Hook definitions live in `hooks.yaml` files. Conditions are boolean expressions 
 | Condition | `proj.yaml` path | Used by |
 |-----------|------------------|---------|
 | `sandbox_integration` | top-level bool | sandbox, proj, worktree |
-| `zoxide_integration` | top-level bool | worktree, zoxide |
+| `zoxide_integration` | top-level bool | worktree |
 | `git_tracking.enabled` | `git_tracking.enabled` | proj |
 | `sync.todoist.enabled` | `sync.todoist.enabled` | todoist |
 | `sync.todoist.auto_sync` | `sync.todoist.auto_sync` | todoist |
@@ -188,7 +186,6 @@ Set `HOOK_TRANSPORT=tcp` to fall back to TCP on `127.0.0.1` with the following p
 | trello | 19104 |
 | jira | 19105 |
 | todoist | 19106 |
-| zoxide | 19107 |
 
 ---
 
