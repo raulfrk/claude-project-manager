@@ -94,3 +94,47 @@ async def test_todo_update_blocked_by_set_empty_clears_blockers(cfg: ProjConfig,
 
     assert todo_map["A"].blocked_by == []
     assert "A" not in todo_map["B"].blocks
+
+
+@pytest.mark.asyncio
+async def test_todo_update_blocked_by_set_unknown_id_error(cfg: ProjConfig, tmp_path: Path):
+    """blocked_by_set with nonexistent blocker ID returns error."""
+    from server.tools import config, projects, todos
+
+    setup_project(cfg, "myapp", str(tmp_path))
+
+    a = _make_todo("A")
+    storage.save_todos(cfg, "myapp", [a])
+    state.set_session_active("myapp")
+
+    app = FastMCP("test-proj")
+    config.register(app)
+    projects.register(app)
+    todos.register(app)
+
+    result = await call_tool(app, "todo_update", todo_id="A", blocked_by_set=["nonexistent-999"])
+    data = json.loads(result)
+    assert "error" in data
+    assert "nonexistent-999" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_todo_update_blocked_by_set_self_blocking_error(cfg: ProjConfig, tmp_path: Path):
+    """blocked_by_set with self-reference returns error."""
+    from server.tools import config, projects, todos
+
+    setup_project(cfg, "myapp", str(tmp_path))
+
+    a = _make_todo("A")
+    storage.save_todos(cfg, "myapp", [a])
+    state.set_session_active("myapp")
+
+    app = FastMCP("test-proj")
+    config.register(app)
+    projects.register(app)
+    todos.register(app)
+
+    result = await call_tool(app, "todo_update", todo_id="A", blocked_by_set=["A"])
+    data = json.loads(result)
+    assert "error" in data
+    assert "cannot block itself" in data["error"]

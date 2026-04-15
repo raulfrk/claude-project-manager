@@ -844,6 +844,13 @@ def register(app: FastMCP) -> None:
             todo.due_date = due_date
         if blocked_by_set is not None:
             todo_map = {t.id: t for t in todos}
+            # Validate all blocker IDs exist
+            unknown = [bid for bid in blocked_by_set if bid not in todo_map]
+            if unknown:
+                return json.dumps({"error": f"Unknown blocker IDs: {unknown}"})
+            # Self-blocking guard
+            if todo_id in blocked_by_set:
+                return json.dumps({"error": f"Todo cannot block itself: {todo_id}"})
             today = _now()
             # Remove this todo from blocks lists of currently blocking todos
             for blocker_id in todo.blocked_by:

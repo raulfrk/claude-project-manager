@@ -254,11 +254,10 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 | `todo_list` | List todos with filters and pagination. |
 | `todo_list_all` | List todos including archived items. |
 | `todo_get` | Get a single todo by ID. |
-| `todo_update` | Update a todo's fields. |
+| `todo_update` | Update todo fields; use `blocked_by_set` to replace blocking relationships. |
 | `todo_complete` | Mark a todo done and archive it. |
 | `todo_check_executable` | Guard for the `manual` tag. |
 | `todo_delete` | Delete a todo. |
-| `todo_update` (w/ `blocked_by_set=`) | Set/replace blocking relationships. |
 | `todo_ready` | List pending unblocked todos. |
 | `todo_tree` | Return todos as a nested JSON tree. |
 | `todo_set_content_flag` | Set `has_requirements` or `has_research` flags. |
