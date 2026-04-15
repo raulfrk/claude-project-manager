@@ -1,7 +1,7 @@
-"""Wiring tests for todo_batch_complete integration hooks (518.9).
+"""Wiring tests for todo_complete integration hooks (518.9).
 
 These tests validate that the three plugin default-hooks.yaml files
-declare the expected `todo_batch_complete` trigger and map params
+declare the expected `todo_complete` trigger and map params
 against the Phase 3 pre-enriched source payload. The full dispatch
 cascade is exercised by end-to-end integration tests against a running
 hooks server — these tests assert the static contract only.
@@ -24,13 +24,19 @@ def _load_hooks(plugin: str) -> list[dict]:
 
 
 def test_dispatches_to_todoist() -> None:
-    """todoist default-hooks.yaml has a hook mapping todo_batch_complete
+    """todoist default-hooks.yaml has a hook mapping todo_complete
     → todoist_complete_tasks with ids=${todoist_task_ids}."""
     hooks = _load_hooks("todoist")
-    match = [h for h in hooks if h.get("trigger_tool") == "todo_batch_complete"]
-    assert len(match) == 1, "expected exactly one todo_batch_complete hook in todoist"
+    match = [
+        h
+        for h in hooks
+        if h.get("trigger_tool") == "todo_complete"
+        and h.get("target_tool") == "todoist_complete_tasks"
+    ]
+    assert len(match) == 1, (
+        "expected exactly one todo_complete→todoist_complete_tasks hook in todoist"
+    )
     hook = match[0]
-    assert hook["target_tool"] == "todoist_complete_tasks"
     assert hook["server"] == "todoist"
     # Blocking so the dispatch wrapper waits for the aggregated result.
     assert hook.get("blocking") is True
@@ -42,13 +48,19 @@ def test_dispatches_to_todoist() -> None:
 
 
 def test_dispatches_to_trello() -> None:
-    """trello default-hooks.yaml has a hook mapping todo_batch_complete
+    """trello default-hooks.yaml has a hook mapping todo_complete
     → trello_batch_archive_cards with card_ids=${trello_card_ids}."""
     hooks = _load_hooks("trello")
-    match = [h for h in hooks if h.get("trigger_tool") == "todo_batch_complete"]
-    assert len(match) == 1, "expected exactly one todo_batch_complete hook in trello"
+    match = [
+        h
+        for h in hooks
+        if h.get("trigger_tool") == "todo_complete"
+        and h.get("target_tool") == "trello_batch_archive_cards"
+    ]
+    assert len(match) == 1, (
+        "expected exactly one todo_complete→trello_batch_archive_cards hook in trello"
+    )
     hook = match[0]
-    assert hook["target_tool"] == "trello_batch_archive_cards"
     assert hook["server"] == "trello"
     assert hook.get("blocking") is True
     assert "sync.trello" in hook["condition"]
@@ -57,15 +69,22 @@ def test_dispatches_to_trello() -> None:
 
 
 def test_dispatches_to_jira_with_updates_json() -> None:
-    """jira default-hooks.yaml has a hook mapping todo_batch_complete
+    """jira default-hooks.yaml has a hook mapping todo_complete
     → jira_bulk_update_issues with updates_json=${jira_updates_json}.
     The pre-built JSON blob comes from Phase 3 enrichment so the hook
     template engine (which cannot iterate lists) can pass it verbatim."""
     hooks = _load_hooks("jira")
-    match = [h for h in hooks if h.get("trigger_tool") == "todo_batch_complete"]
-    assert len(match) == 1, "expected exactly one todo_batch_complete hook in jira"
+    match = [
+        h
+        for h in hooks
+        if h.get("trigger_tool") == "todo_complete"
+        and h.get("target_tool") == "jira_bulk_update_issues"
+        and h.get("param_mapping", {}) == {"updates_json": "${jira_updates_json}"}
+    ]
+    assert len(match) == 1, (
+        "expected exactly one todo_complete→jira_bulk_update_issues (batch) hook in jira"
+    )
     hook = match[0]
-    assert hook["target_tool"] == "jira_bulk_update_issues"
     assert hook["server"] == "jira"
     assert hook.get("blocking") is True
     assert "sync.jira" in hook["condition"]

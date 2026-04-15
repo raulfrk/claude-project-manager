@@ -394,7 +394,7 @@ class TestConcurrentBatchComplete:
                 tmod.register(app)
                 import asyncio
 
-                result = asyncio.run(call_tool(app, "todo_batch_complete", todo_ids=ids))
+                result = asyncio.run(call_tool(app, "todo_complete", todo_ids=ids))
                 results[name] = result
             except Exception as e:
                 errors.append(e)
@@ -445,7 +445,7 @@ class TestConcurrentBatchComplete:
                 tmod.register(app)
                 import asyncio
 
-                raw = asyncio.run(call_tool(app, "todo_batch_complete", todo_ids=ids))
+                raw = asyncio.run(call_tool(app, "todo_complete", todo_ids=ids))
                 results.append(json.loads(raw))
             except Exception as e:
                 errors.append(e)

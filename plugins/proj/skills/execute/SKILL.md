@@ -262,7 +262,7 @@ Persist each to `todos/<id>/verification-report.md`.
 ### Shared: Satisfaction Phase
 
 Each completed todo (excl manual-skipped + failed): satisfaction loop (§5a-5d) before `todo_complete`.
-Batch: collect satisfied IDs → 2+ → `todo_batch_complete`. 1 → `todo_complete`.
+Batch: collect satisfied IDs → 2+ → `todo_complete(todo_ids=[...])`. 1 → `todo_complete(todo_id=...)`.
 Report summary incl skipped/failed.
 
 ## Pattern A — Parallel exec

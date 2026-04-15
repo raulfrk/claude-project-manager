@@ -29,7 +29,7 @@ def _normalize_title(title: str) -> str:
     return " ".join(title.split()).lower()
 
 
-# Module-level lock serializes todo_batch_complete across threads. Acquired
+# Module-level lock serializes batch completions across threads. Acquired
 # BEFORE the Phase 2 loop and released after, so concurrent batches with
 # overlapping parents cannot interleave saves and produce a partial family
 # archive.
@@ -856,47 +856,10 @@ def register(app: FastMCP) -> None:
             result_dict["_skip_hooks"] = True
         return json.dumps(result_dict)
 
-    @app.tool(
-        description=(
-            "Mark a single todo as done. For 2+ ids, use todo_batch_complete "
-            "instead — atomic save + single hook dispatch."
-        )
-    )
-    def todo_complete(todo_id: str, project_name: str | None = None) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-        todos = storage.load_todos(cfg, name)
-        todo = next((t for t in todos if t.id == todo_id), None)
-        if not todo:
-            return f"Todo '{todo_id}' not found."
-        today = _now()
-        meta = storage.load_meta(cfg, name)
-
-        if todo.parent:
-            result_str = _complete_child(cfg, name, todo, todos, today)
-        elif todo.children:
-            result_str = _complete_parent(cfg, name, todo, todos, today)
-        else:
-            result_str = _complete_leaf(cfg, name, todo, todos, today)
-
-        result_data = json.loads(result_str)
-        result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
-        return json.dumps(result_data)
-
-    @app.tool(
-        description=(
-            "Batch-complete multiple todos in a validated transaction. "
-            "Fires aggregated blocking hook chain to integrations with the full "
-            "id list. Use whenever completing 2 or more todos; prefer over "
-            "looping todo_complete."
-        )
-    )
-    def todo_batch_complete(
+    def _batch_complete(
         todo_ids: list[str],
-        note: str = "",
-        project_name: str | None = None,
+        note: str,
+        project_name: str | None,
     ) -> str:
         _ = note  # reserved for future completion-note annotation
         # ── Phase 0 — empty check ──────────────────────────────────────────
@@ -1221,6 +1184,54 @@ def register(app: FastMCP) -> None:
             result_data["truncation_notes"] = truncation_notes
 
         return json.dumps(result_data, ensure_ascii=True)
+
+    @app.tool(
+        description=(
+            "Mark one or more todos as done. "
+            "Pass todo_id for a single todo, or todo_ids (list) for a batch. "
+            "Batch path (2+ ids) is atomic with a single hook dispatch. "
+            "For 1 id, either param works."
+        )
+    )
+    def todo_complete(
+        todo_id: str | None = None,
+        todo_ids: list[str] | None = None,
+        note: str = "",
+        project_name: str | None = None,
+    ) -> str:
+        # Route: todo_ids param → batch path (any length, including 0/1).
+        # todo_id param (only) → single-complete path.
+        if todo_ids is not None:
+            return _batch_complete(todo_ids, note, project_name)
+
+        if todo_id is None:
+            return json.dumps({"error": "Provide todo_id (single) or todo_ids (batch)."})
+
+        # Single-complete path.
+        single_id = todo_id
+        result = require_project(project_name)
+        if isinstance(result, str):
+            return result
+        cfg, name = result
+        todos = storage.load_todos(cfg, name)
+        todo = next((t for t in todos if t.id == single_id), None)
+        if not todo:
+            return f"Todo '{single_id}' not found."
+        today = _now()
+        meta = storage.load_meta(cfg, name)
+
+        if todo.parent:
+            result_str = _complete_child(cfg, name, todo, todos, today)
+        elif todo.children:
+            result_str = _complete_parent(cfg, name, todo, todos, today)
+        else:
+            result_str = _complete_leaf(cfg, name, todo, todos, today)
+
+        result_data = json.loads(result_str)
+        result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
+        # Add todoist_task_ids list for hook compat (hooks now use list param).
+        result_data["todoist_task_ids"] = [todo.todoist_task_id] if todo.todoist_task_id else []
+        return json.dumps(result_data)
 
     @app.tool(description="Revert a completed todo back to pending.")
     def todo_uncomplete(todo_id: str, project_name: str | None = None) -> str:

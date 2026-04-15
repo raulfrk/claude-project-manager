@@ -1,7 +1,7 @@
 ---
 name: run-batch
 description: Batch/range execution workflow for multiple todos. Extension of run skill.
-allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_batch_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_notes_append, mcp__proj__todo_notes_patch, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
+allowed-tools: mcp__proj__config_load, mcp__proj__content_get_requirements, mcp__proj__content_get_research, mcp__proj__content_set_requirements, mcp__proj__content_set_research, mcp__proj__notes_append, mcp__proj__proj_get_todo_context, mcp__proj__proj_identify_batches, mcp__proj__proj_search_knowledge, mcp__proj__todo_add, mcp__proj__todo_block, mcp__proj__todo_check_executable, mcp__proj__todo_complete, mcp__proj__todo_get, mcp__proj__todo_list, mcp__proj__todo_notes_append, mcp__proj__todo_notes_patch, mcp__proj__todo_set_content_flag, mcp__proj__todo_tree, mcp__proj__tracking_git_flush, Read, Task, TaskCreate, TaskList, EnterPlanMode, ExitPlanMode, mcp__worktree__wt_create, mcp__worktree__wt_lock, mcp__worktree__wt_unlock, mcp__worktree__wt_remove, mcp__worktree__wt_prune, mcp__worktree__wt_list_repos, mcp__worktree__wt_add_repo, mcp__proj__proj_session_context, mcp__plugin_sandbox_sandbox__sandbox_add_allow, mcp__plugin_sandbox_sandbox__sandbox_cleanup_stale, mcp__proj__proj_decision_log, AskUserQuestion
 argument-hint: "<id-range|comma-list> [--steps ...] [--fast|--careful] [--max-parallel N] [--no-verify] [--no-interactive] [--with-adversarial-review]"
 ---
 
@@ -171,7 +171,7 @@ After: `TaskUpdate(status="completed")`. Failure → `failed`.
 **Satisfaction check:**
 `TaskCreate(title="Phase SAT: Satisfaction Check — batch", metadata={"phase": "SAT"})` → `TaskUpdate(status="in_progress")`
 Mode from `effective_quality(todo_id).satisfaction`: per-batch / per-todo / skip / per-todo+re-verify.
-**Batch completion rule**: ≥2 → ALWAYS `todo_batch_complete`. Only `todo_complete` for single.
+**Batch completion rule**: ≥2 → `todo_complete(todo_ids=[...])`. Single → `todo_complete(todo_id=...)` or `todo_complete(todo_ids=["id"])`.
 Recursive → `--careful`. Max depth 2.
 All fast → post-run summary w/ `git diff HEAD~N`.
 After: `TaskUpdate(status="completed")`.

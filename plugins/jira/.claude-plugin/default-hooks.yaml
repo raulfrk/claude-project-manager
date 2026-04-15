@@ -35,7 +35,7 @@ hooks:
     condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
 
   - id: jira-on-todo-batch-complete
-    trigger_tool: todo_batch_complete
+    trigger_tool: todo_complete
     target_tool: jira_bulk_update_issues
     server: jira
     param_mapping:

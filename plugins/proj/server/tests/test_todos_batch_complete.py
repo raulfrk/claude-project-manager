@@ -16,6 +16,40 @@ from server.lib.models import ProjConfig, Todo
 from tests.conftest import call_tool, setup_project
 
 
+def test_todo_batch_complete_tool_does_not_exist():
+    """todo_batch_complete must not be registered after removal."""
+    from mcp.server.fastmcp import FastMCP
+
+    from server.tools.todos import register
+
+    app = FastMCP("test")
+    register(app)
+    tool_names = [t.name for t in app._tool_manager.list_tools()]
+    assert "todo_batch_complete" not in tool_names
+    assert "todo_complete" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_todo_complete_single_returns_todoist_task_ids_list(cfg: ProjConfig, tmp_path: Path):
+    """todo_complete with a single todo_id must return todoist_task_ids as a list."""
+    from server.tools import config, projects, todos
+
+    setup_project(cfg, "myapp", str(tmp_path))
+    todo = _make_todo("99", todoist_task_id="todoist-abc-123")
+    storage.save_todos(cfg, "myapp", [todo])
+    state.set_session_active("myapp")
+
+    app = FastMCP("test-proj")
+    config.register(app)
+    projects.register(app)
+    todos.register(app)
+
+    result = await call_tool(app, "todo_complete", todo_id="99")
+    data = json.loads(result)
+    assert "todoist_task_ids" in data
+    assert data["todoist_task_ids"] == ["todoist-abc-123"]
+
+
 def _status_str(todo: Todo) -> str:
     s = todo.status
     return s.value if isinstance(s, TodoStatus) else str(s)
@@ -72,7 +106,7 @@ def mcp_app(cfg: ProjConfig) -> FastMCP:
 
 @pytest.mark.asyncio
 async def test_empty_list_rejects(project_with_todos, mcp_app):
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=[])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=[])
     data = json.loads(result)
     assert "error" in data
     assert data["completed_ids"] == []
@@ -83,7 +117,7 @@ async def test_empty_list_rejects(project_with_todos, mcp_app):
 @pytest.mark.asyncio
 async def test_single_id_runs_batch_path(project_with_todos, mcp_app):
     cfg, name = project_with_todos
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1"])
     data = json.loads(result)
     assert data["completed_ids"] == ["1"]
     assert data["skipped_ids"] == []
@@ -103,7 +137,7 @@ async def test_mixed_skipped_active(cfg: ProjConfig, mcp_app, tmp_path: Path):
     storage.save_todos(cfg, "myapp", todos)
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "2", "3"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "2", "3"])
     data = json.loads(result)
     assert set(data["completed_ids"]) == {"1", "3"}
     assert "2" in data["skipped_ids"]
@@ -112,7 +146,7 @@ async def test_mixed_skipped_active(cfg: ProjConfig, mcp_app, tmp_path: Path):
 @pytest.mark.asyncio
 async def test_invalid_ids_no_side_effects(project_with_todos, mcp_app):
     cfg, name = project_with_todos
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "999"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "999"])
     data = json.loads(result)
     assert "error" in data
     assert "999" in data["invalid_ids"]
@@ -125,7 +159,7 @@ async def test_invalid_ids_no_side_effects(project_with_todos, mcp_app):
 @pytest.mark.asyncio
 async def test_non_existent_no_side_effects(project_with_todos, mcp_app):
     cfg, name = project_with_todos
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["x", "y"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["x", "y"])
     data = json.loads(result)
     assert "error" in data
     assert set(data["invalid_ids"]) >= {"x", "y"}
@@ -141,7 +175,7 @@ async def test_cross_project_rejects(cfg: ProjConfig, mcp_app, tmp_path: Path):
     storage.save_todos(cfg, "other", [_make_todo("42")])
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "42"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "42"])
     data = json.loads(result)
     assert "error" in data
     assert "Cross-project" in data["error"]
@@ -154,7 +188,7 @@ async def test_cross_project_rejects(cfg: ProjConfig, mcp_app, tmp_path: Path):
 @pytest.mark.asyncio
 async def test_order_preserving_dedupe(project_with_todos, mcp_app):
     _cfg, _name = project_with_todos
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["3", "1", "3", "2", "1"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["3", "1", "3", "2", "1"])
     data = json.loads(result)
     # Dedupe preserves first-seen order.
     assert data["completed_ids"] == ["3", "1", "2"]
@@ -189,7 +223,7 @@ async def test_atomic_save_single_write(project_with_todos, mcp_app, monkeypatch
     monkeypatch.setattr(todos_mod.storage, "save_todos", wrapped_save)
     monkeypatch.setattr(todos_mod.storage, "archive_and_remove_todos", wrapped_archive)
 
-    await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "2", "3"])
+    await call_tool(mcp_app, "todo_complete", todo_ids=["1", "2", "3"])
     assert len(save_calls) + len(archive_calls) == 1
 
 
@@ -218,7 +252,7 @@ def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
             tmod.register(app)
             import asyncio
 
-            result = asyncio.run(call_tool(app, "todo_batch_complete", todo_ids=ids))
+            result = asyncio.run(call_tool(app, "todo_complete", todo_ids=ids))
             _ = json.loads(result)
         except Exception as e:
             errors.append(e)
@@ -253,7 +287,7 @@ async def test_parent_family_archive_walks_full_tree(cfg: ProjConfig, mcp_app, t
     storage.save_todos(cfg, "myapp", [p, c1, c2, gc])
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1.1.1", "1.2", "1.1", "1"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1.1.1", "1.2", "1.1", "1"])
     data = json.loads(result)
     assert set(data["completed_ids"]) == {"1.1.1", "1.2", "1.1", "1"}
     assert set(data["archived_ids"]) == {"1", "1.1", "1.2", "1.1.1"}
@@ -275,7 +309,7 @@ async def test_children_across_trees_independent(cfg: ProjConfig, mcp_app, tmp_p
     storage.save_todos(cfg, "myapp", [a, a1, b, b1])
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1.1", "1"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1.1", "1"])
     data = json.loads(result)
     assert set(data["archived_ids"]) == {"1", "1.1"}
     remaining = storage.load_todos(cfg, "myapp")
@@ -297,7 +331,7 @@ async def test_unicode_titles_round_trip(cfg: ProjConfig, mcp_app, tmp_path: Pat
     storage.save_todos(cfg, "myapp", todos)
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "2"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "2"])
     # ensure_ascii=True means result is ASCII-safe; json.loads restores unicode.
     data = json.loads(result)
     assert set(data["completed_ids"]) == {"1", "2"}
@@ -313,7 +347,7 @@ async def test_large_batch_100_items(cfg: ProjConfig, mcp_app, tmp_path: Path):
     state.set_session_active("myapp")
 
     ids = [str(i) for i in range(1, 101)]
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=ids)
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=ids)
     data = json.loads(result)
     assert len(data["completed_ids"]) == 100
 
@@ -329,7 +363,7 @@ async def test_90kb_truncation_preserves_whole_fields(cfg: ProjConfig, mcp_app, 
     state.set_session_active("myapp")
 
     ids = [str(i) for i in range(1, 101)]
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=ids)
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=ids)
     # Result must still be valid JSON after truncation.
     data = json.loads(result)
     assert "truncation_notes" in data
@@ -346,7 +380,7 @@ async def test_90kb_truncation_preserves_whole_fields(cfg: ProjConfig, mcp_app, 
 async def test_depth_cascade_tracking(project_with_todos, mcp_app):
     """The tool result itself does not carry depth, but it must be a clean
     JSON object that the dispatch wrapper can inject _hooks into."""
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "2"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "2"])
     data = json.loads(result)
     # Shape check: top-level keys present for hook param mapping.
     assert "todoist_task_ids" in data
@@ -365,7 +399,7 @@ async def test_partial_hook_failure_commits_others(cfg: ProjConfig, mcp_app, tmp
     storage.save_todos(cfg, "myapp", todos)
     state.set_session_active("myapp")
 
-    result = await call_tool(mcp_app, "todo_batch_complete", todo_ids=["1", "does-not-exist", "2"])
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "does-not-exist", "2"])
     data = json.loads(result)
     assert "error" in data
     assert "does-not-exist" in data["invalid_ids"]
