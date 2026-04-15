@@ -58,7 +58,8 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
         logger.debug("Socket registry lookup failed", exc_info=True)
 
     # Fallback: glob for newest PID-tagged socket
-    prefix = f"/tmp/claude-cpm-{server_name}-"  # noqa: S108
+    tmpdir = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
+    prefix = f"{tmpdir}/claude-cpm-{server_name}-"
     candidates = sorted(
         glob.glob(f"{prefix}*.sock"),
         key=lambda p: os.path.getmtime(p),
@@ -98,7 +99,7 @@ def _evaluate_result_condition(hook: Hook, source: dict[str, JsonValue]) -> bool
 
     Returns True if no result_condition is set, or if all key==value pairs match.
     """
-    if hook.result_condition is None:
+    if hook.result_condition is None or not isinstance(hook.result_condition, dict):
         return True
     return all(source.get(k) == v for k, v in hook.result_condition.items())
 

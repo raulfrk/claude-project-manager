@@ -89,9 +89,30 @@ def test_socket_prefix_constant():
 def test_socket_path_format():
     """Socket path follows expected PID-tagged format."""
     path = _socket_path("router")
-    assert path.startswith("/tmp/claude-cpm-router-")
+    tmpdir = os.environ.get("TMPDIR", "/tmp")
+    assert path.startswith(f"{tmpdir}/claude-cpm-router-")
     assert path.endswith(".sock")
     assert str(os.getpid()) in path
+
+
+# ── Bug #13: TMPDIR socket path ──────────────────────────────────────────────
+
+
+def test_socket_path_uses_tmpdir_env(monkeypatch):
+    """_socket_path uses $TMPDIR when set, not hardcoded /tmp."""
+    monkeypatch.setenv("TMPDIR", "/custom/tmp")
+    path = _socket_path("router")
+    assert path.startswith("/custom/tmp/claude-cpm-router-")
+    assert path.endswith(".sock")
+
+
+def test_socket_path_falls_back_to_tmp_when_no_tmpdir(monkeypatch):
+    """_socket_path falls back to /tmp when $TMPDIR is not set."""
+    monkeypatch.delenv("TMPDIR", raising=False)
+    path = _socket_path("router")
+    tmpdir = os.environ.get("TMPDIR", "/tmp")
+    assert path.startswith(f"{tmpdir}/claude-cpm-router-")
+    assert path.endswith(".sock")
 
 
 # ── _cleanup_stale_socket tests ─────────────────────────────────────────────

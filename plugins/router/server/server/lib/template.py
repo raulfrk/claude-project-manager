@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from server.lib._types import JsonValue
+
+_log = logging.getLogger(__name__)
 
 _TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 
@@ -51,6 +54,7 @@ def resolve_template(template: str, source: dict[str, JsonValue]) -> JsonValue:
     def _replacer(match: re.Match[str]) -> str:
         val = _resolve_path(source, match.group(1))
         if val is None:
+            _log.warning("Template variable ${%s} not found in source", match.group(1))
             return ""
         if isinstance(val, str):
             return val

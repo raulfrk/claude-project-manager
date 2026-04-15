@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hook_transport.dual")
 
-SOCKET_DIR = "/tmp"
+SOCKET_DIR = os.environ.get("TMPDIR", "/tmp")
 SOCKET_PREFIX = "claude-cpm-"
 
 _PreRunFn = Callable[[], None] | Callable[[], Coroutine[None, None, None]]
@@ -40,7 +40,8 @@ _PreRunFn = Callable[[], None] | Callable[[], Coroutine[None, None, None]]
 def _socket_path(plugin_name: str) -> str:
     """Return the Unix domain socket path for a plugin (PID-tagged)."""
     pid = os.getpid()
-    return f"{SOCKET_DIR}/{SOCKET_PREFIX}{plugin_name}-{pid}.sock"
+    socket_dir = os.environ.get("TMPDIR", "/tmp")
+    return f"{socket_dir}/{SOCKET_PREFIX}{plugin_name}-{pid}.sock"
 
 
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"

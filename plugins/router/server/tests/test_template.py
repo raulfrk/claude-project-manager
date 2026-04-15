@@ -218,3 +218,63 @@ class TestResolveValue:
         value = {"count": 5, "enabled": True, "name": "${name}"}
         result = resolve_value(value, {"name": "test"})
         assert result == {"count": 5, "enabled": True, "name": "test"}
+
+
+# ── Bug #15: warning log for missing template variables ──────────────────────
+
+
+class TestMissingVariableWarning:
+    """resolve_template must log a warning when a ${var} can't be resolved."""
+
+    def test_missing_var_in_multi_placeholder_logs_warning(self, caplog):
+        """Multi-placeholder path: missing var emits a warning."""
+        import logging
+
+        from server.lib.template import resolve_template
+
+        with caplog.at_level(logging.WARNING, logger="server.lib.template"):
+            result = resolve_template("prefix ${missing_key} suffix", {})
+
+        assert result == "prefix  suffix"
+        assert any("missing_key" in r.message for r in caplog.records), (
+            f"Expected warning mentioning 'missing_key', got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_present_var_no_warning(self, caplog):
+        """Present variable must NOT emit a warning."""
+        import logging
+
+        from server.lib.template import resolve_template
+
+        with caplog.at_level(logging.WARNING, logger="server.lib.template"):
+            result = resolve_template("${name}", {"name": "Alice"})
+
+        assert result == "Alice"
+        assert len(caplog.records) == 0
+
+    def test_fast_path_missing_no_warning(self, caplog):
+        """Fast path: missing key — no warning (returns None, not via _replacer)."""
+        import logging
+
+        from server.lib.template import resolve_template
+
+        with caplog.at_level(logging.WARNING, logger="server.lib.template"):
+            result = resolve_template("${x}", {})
+
+        assert result is None
+        # Fast path doesn't go through _replacer — no warning expected
+        assert len(caplog.records) == 0
+
+    def test_multiple_missing_vars_warns_each(self, caplog):
+        """Each missing variable in a multi-placeholder string gets its own warning."""
+        import logging
+
+        from server.lib.template import resolve_template
+
+        with caplog.at_level(logging.WARNING, logger="server.lib.template"):
+            resolve_template("${a} ${b} ${c}", {})
+
+        warned_vars = {r.message for r in caplog.records}
+        assert any("a" in m for m in warned_vars)
+        assert any("b" in m for m in warned_vars)
+        assert any("c" in m for m in warned_vars)

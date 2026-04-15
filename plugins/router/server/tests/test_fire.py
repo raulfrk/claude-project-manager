@@ -2322,3 +2322,58 @@ class TestFeedbackSkipHooks:
         assert len(feedback_calls) == 2
         for call in feedback_calls:
             assert call["params"]["skip_hooks"] is True
+
+
+# ── Bug #16: _evaluate_result_condition type guard ──────────────────────────
+
+
+class TestEvaluateResultCondition:
+    """_evaluate_result_condition must guard against malformed result_condition."""
+
+    def _make_hook_with_result_condition(self, result_condition):
+        return _hook(
+            "h1",
+            "trigger",
+            "target",
+            result_condition=result_condition,
+        )
+
+    def test_none_condition_returns_true(self):
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition(None)
+        assert _evaluate_result_condition(hook, {"result": "ok"}) is True
+
+    def test_matching_dict_condition_returns_true(self):
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition({"result": "ok"})
+        assert _evaluate_result_condition(hook, {"result": "ok"}) is True
+
+    def test_non_matching_dict_condition_returns_false(self):
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition({"result": "ok"})
+        assert _evaluate_result_condition(hook, {"result": "fail"}) is False
+
+    def test_string_result_condition_returns_true_not_raises(self):
+        """Malformed result_condition (string) must not raise — returns True."""
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition("not-a-dict")
+        # Before fix: AttributeError from .items() on str; after fix: True
+        assert _evaluate_result_condition(hook, {"result": "ok"}) is True
+
+    def test_list_result_condition_returns_true_not_raises(self):
+        """Malformed result_condition (list) must not raise — returns True."""
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition(["result", "ok"])
+        assert _evaluate_result_condition(hook, {"result": "ok"}) is True
+
+    def test_int_result_condition_returns_true_not_raises(self):
+        """Malformed result_condition (int) must not raise — returns True."""
+        from server.tools.fire import _evaluate_result_condition
+
+        hook = self._make_hook_with_result_condition(42)
+        assert _evaluate_result_condition(hook, {}) is True
