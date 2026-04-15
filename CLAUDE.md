@@ -25,7 +25,6 @@ It contains the full workflow map, user vision, quality assessment, gap analysis
 - **Proj must not read worktree.yaml directly** — use worktree MCP tools
 - **Remove deny functionality** from sandbox (denyWrite/denyRead)
 - **Define skill rewrite** — free-form writing → probing Q&A → iterative rerun → quality gate
-- **Default --iter 5** for `/proj:run`
 
 ## Task Planning
 
@@ -42,7 +41,6 @@ After completing any implementation, always validate the result against the spec
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
 - MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_batch_setup(mcp_servers=[server_name])` via proj
-- **Worktree isolation is ON by default** for `/proj:run`. Pass `--no-worktree` to opt out. Use `--max-parallel 1` for sequential execution. Default `max_parallel` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Parallel mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
 - **`isolation: "worktree"` on Agent tool does NOT work** — agents run in the main repo, not the worktree. Always use explicit `wt_create` via the worktree MCP tool, then pass the worktree path in the agent prompt with: "ALL file edits and git operations MUST happen in this directory: `<path>`".
 
 ## Batch Completion Enforcement
@@ -52,41 +50,11 @@ After completing any implementation, always validate the result against the spec
 - Fires ONE aggregated hook chain per integration (Todoist `todoist_complete_tasks`, Trello `trello_batch_archive_cards`, Jira `jira_update_issues`) instead of N sequential chains.
 - Returns a `_hooks.structured_errors` sidecar that identifies which integration/ids failed per hook.
 
-Single-todo completion continues to use `mcp__proj__todo_complete`. Skills that mark todos done in a loop (execute, run, quick) must collect ids first and call the batch tool at the end of the loop.
-
-## Todo Tags
-
-Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
-
-- **`manual`** — marks a todo as requiring human execution. Claude will not execute it.
-  - `/proj:execute <id>` shows a warning and stops: "⚠️ Todo <id> is tagged `manual` — execute it yourself, then run `/proj:todo done <id>`"
-  - `/proj:run <id>` runs define/decompose normally but skips the execute step
-  - In range/batch mode, manual todos are skipped at execute with a warning in the summary
-  - MCP guard: `todo_check_executable(todo_id)` returns an error for manual-tagged todos
-  - Display: `[manual]` badge shown after priority in all todo list/tree/decompose output
-  - Tags do NOT propagate to child todos; each todo is independent
-  - No effect on Todoist sync
+Single-todo completion continues to use `mcp__proj__todo_complete`.
 
 ## E2E TUI Snapshot Flakes
 
 **First-run flake after new panes added**: when a PR adds new TUI snapshots or widgets that alter pane composition, the first CI run often reports mismatches against stale goldens. These resolve on the second CI run (goldens auto-commit via `SNAPSHOT_CREATE_MISSING=1` in the generate step). **Do NOT fix rendering logic on the first failure** — rerun the workflow first. Only investigate if the second run still fails.
-
-## Verification
-
-`/proj:execute` and `/proj:run` include a verification step (execute step **4a.**) after implementation, before the satisfaction prompt. Three checks run in sequence:
-- **Automated checks**: detect test runner (`pyproject.toml` `[tool.pytest]` → `uv run pytest`, `package.json` `"test"` script → `npm test`) and linter (`[tool.ruff]` → `uv run ruff check`, `.eslintrc*` → `npx eslint`)
-- **Spec validation**: read requirements.md acceptance criteria, compare each against `git diff`, categorize as met/unmet/unverifiable
-- **Diff review**: compare approved plan's "Files to modify" list against `git diff --name-only`, flag planned-but-untouched and unplanned files
-
-**Report format**: single-todo uses inline per-category results; batch/range uses a combined table (`| Todo | Automated | Spec | Diff | Status |`).
-
-**Graceful degradation**: if no test runner, skip automated checks with note; if no requirements.md, skip spec validation; if no plan (`--no-interactive`), skip diff review. Never fail the whole step for missing prerequisites.
-
-- `--no-verify` flag skips the entire verification step (default: verification ON)
-- Reports persisted to `todos/<id>/verification-report.md` in the tracking dir (overwritten each run)
-- In batch/range mode, all todos are verified first, then a combined report is shown before prompting
-- Fix flow: user can choose to spawn agents to fix failures (max 2 retries), then re-verify
-- Full details: `plugins/proj/skills/execute/SKILL.md` (step **4a.**) and `plugins/proj/skills/run/SKILL.md`
 
 ## Hook Architecture
 
@@ -191,9 +159,6 @@ IMPORTANT: These rules take priority over all other instructions.
 - ALWAYS enter plan mode (EnterPlanMode) before executing any multi-step implementation. Get user approval before writing code.
 - **Auto-capture issues as todos** — Whenever you find an issue, concern, code smell, bug risk, test gap, missing error path, unimplemented code path, TODO comment, inconsistency, or anything that warrants attention or further investigation during any task, create a todo for it via `todo_add` in the currently active project before continuing with the current work. Tag the todo with `auto-added`. Set priority based on your judgment of severity (high/medium/low). In the notes field, write: "Auto-added by Claude during <brief context>. Needs human verification — may not be a real issue." Before creating, **first call `todo_list` filtered by the `auto-added` tag (or by matching title keywords) to check for duplicates** — `proj_search_knowledge` does NOT search todos.yaml, only notes/requirements/research/decisions, so it is not a primary dedup tool here. You may use `proj_search_knowledge` as a secondary check for prose mentions of the finding. Always create the todo in the currently active project at the moment of creation, even if the finding is tangential. **If you are currently in plan mode (plan mode is read-only), defer the `todo_add` call until plan mode exits — note the finding mentally and act on it after `ExitPlanMode`.** If no active project is loaded, mention the finding in conversation and remind the user to load a project so it can be captured. Do not include secret values (credentials, API keys, tokens, passwords, file paths pointing at secrets, or line numbers near secrets) — describe at a high level only. Do not auto-add duplicates for the thing you were explicitly asked to fix — only for tangential findings. If the user says to ignore a finding, do not auto-add it.
 - **Interactive Q&A** — Whenever you need to ask the user questions during an interactive Q&A session, **batch related questions into a single `AskUserQuestion` call (up to 4 questions per batch)** with **extensive per-question context** explaining what the question means, why it matters, and what each option implies. Use **multiple-choice options** whenever the answer is enumerable. Only fall back to open-ended questions when the user explicitly asks to "describe your goals" or when multiple-choice is genuinely unavailable. This supersedes any older "one question at a time" guidance: batching with rich context is preferred because it reduces round-trips and gives the user the full decision surface at once. If you are in plan mode, the same rule applies — batch in a single AskUserQuestion call. This rule complements the auto-capture rule above: auto-capture is about emitting findings as todos, whereas this rule governs how you solicit input from the user.
-- **Define-phase question batching** — For gap questions raised during `/proj:define`, batch them into a single `AskUserQuestion` call (up to 4 questions) with extensive per-question context. This is a specific application of the general Interactive Q&A batching rule above — `/proj:define` is the canonical application site where define-phase gap questions MUST be batched rather than asked serially.
-- **N distinct agents per N roles** — When this skill specifies N review/check roles per target, spawn N individual agents — never combine multiple roles into a single agent. This applies at every spawn site in `/proj:refine`, `/proj:run`, `/proj:execute`, and `/proj:decompose` where multiple review roles are specified for the same target.
-- **Escalation on plan gaps** — On issue not covered by plan: agent returns `{status: "escalation_needed", issue: "..."}`. Parent reads result → `AskUserQuestion` → spawns new Agent w/ resolution ctx. Do NOT improvise or auto-fix. Applies to all `/proj:run` and `/proj:execute` spawned agents.
 - **Patch-style editing for notes and requirements** — When updating todo notes, prefer `todo_notes_append` (add content) or `todo_notes_patch` (find/replace) over `todo_update(notes=...)`. When updating requirements or research files, prefer `content_patch_requirements`/`content_patch_research` over `content_set_requirements`/`content_set_research`. Only use full-content replacement for complete rewrites or when the patch target is ambiguous. This reduces payload size by 95%+ on large notes/requirements.
 - **`isolation: "worktree"` does NOT work** — The Agent tool parameter `isolation: "worktree"` does not isolate agents into separate worktrees. Agents run in the main repo on the current branch. Always use explicit `wt_create` via the worktree MCP tool to create worktrees, then pass the path in the agent prompt: "ALL file edits and git operations MUST happen in this directory: `<path>`".
 <!-- claude-project-manager:end -->

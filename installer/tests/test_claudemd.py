@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from installer.claudemd import (
     MANAGED_SECTION,
@@ -154,22 +153,7 @@ class TestManagedSectionContent:
         assert "describe your goals" in MANAGED_SECTION
 
     def test_managed_section_contains_ask_user_question_batching_rule(self):
-        assert "/proj:define" in MANAGED_SECTION
-        assert "batch them into a single" in MANAGED_SECTION
-        assert "specific application" in MANAGED_SECTION
-
-    def test_n_distinct_agents_canonical_sentence_in_managed_section(self):
-        canonical = (
-            "When this skill specifies N review/check roles per target, "
-            "spawn N individual agents \u2014 never combine multiple roles "
-            "into a single agent."
-        )
-        assert canonical in MANAGED_SECTION
-
-    def test_escalation_rule_in_managed_section(self):
-        assert "escalation_needed" in MANAGED_SECTION
-        assert "AskUserQuestion" in MANAGED_SECTION
-        assert "Do NOT improvise" in MANAGED_SECTION
+        assert "batch related questions into a single" in MANAGED_SECTION
 
     def test_task_usage_during_multi_step_work(self):
         assert "Task usage during multi-step work" in MANAGED_SECTION
@@ -187,11 +171,6 @@ class TestManagedSectionContent:
         assert "execution-time progress tracking" in MANAGED_SECTION
         assert "durable project state" in MANAGED_SECTION
 
-    def test_taskcreate_during_run_and_execute(self):
-        assert "TaskCreate during /proj:run and /proj:execute" in MANAGED_SECTION
-        assert "task_id" in MANAGED_SECTION
-        assert "TaskUpdate" in MANAGED_SECTION
-
     def test_sub_task_nesting(self):
         assert "Sub-task nesting" in MANAGED_SECTION
         assert "No depth cap" in MANAGED_SECTION
@@ -203,63 +182,3 @@ class TestManagedSectionContent:
         assert "plan mode" in MANAGED_SECTION
         assert "Auto-capture" in MANAGED_SECTION
         assert "Interactive Q&A" in MANAGED_SECTION
-        assert "Define-phase question batching" in MANAGED_SECTION
-        assert "N distinct agents per N roles" in MANAGED_SECTION
-        assert "Escalation on plan gaps" in MANAGED_SECTION
-
-
-# TODO: spawn-site edits for these tests land in separate worktrees
-# (todo-522 for N-distinct-agents, todo-525 for escalation). Once all
-# three worktrees merge to dev, remove the xfail markers and verify.
-_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "plugins"
-_N_AGENTS_CANONICAL = (
-    "When this skill specifies N review/check roles per target, "
-    "spawn N individual agents \u2014 never combine multiple roles "
-    "into a single agent."
-)
-_ESCALATION_CANONICAL = (
-    "On issue not covered by the plan: (1) detect, "
-    "(2) SendMessage team-lead with issue details, "
-    "(3) team-lead escalates to user via AskUserQuestion."
-)
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason="spawn-site edits land in todo-522 worktree",
-)
-@pytest.mark.parametrize(
-    "skill_rel",
-    [
-        "proj/skills/refine/SKILL.md",
-        "proj/skills/run/SKILL.md",
-        "proj/skills/execute/SKILL.md",
-        "proj/skills/decompose/SKILL.md",
-    ],
-)
-def test_n_distinct_agents_rule_at_all_spawn_sites(skill_rel: str):
-    skill_path = _PLUGINS_DIR / skill_rel
-    content = skill_path.read_text(encoding="utf-8")
-    # decompose may declare "not applicable" via an HTML comment
-    if "decompose" in skill_rel and "<!-- N-agents rule: not applicable" in content:
-        return
-    assert _N_AGENTS_CANONICAL in content, (
-        f"Canonical N-agents sentence missing in {skill_rel}"
-    )
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason="spawn-site edits land in todo-525 worktree",
-)
-def test_escalation_canonical_sentence_at_all_spawn_sites():
-    run_path = _PLUGINS_DIR / "proj/skills/run/SKILL.md"
-    execute_path = _PLUGINS_DIR / "proj/skills/execute/SKILL.md"
-    run_content = run_path.read_text(encoding="utf-8")
-    execute_content = execute_path.read_text(encoding="utf-8")
-    assert run_content.count(_ESCALATION_CANONICAL) == 3, (
-        "Expected 3 occurrences of escalation sentence in run/SKILL.md"
-    )
-    assert execute_content.count(_ESCALATION_CANONICAL) == 2, (
-        "Expected 2 occurrences of escalation sentence in execute/SKILL.md"
-    )

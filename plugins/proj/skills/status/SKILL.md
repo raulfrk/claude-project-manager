@@ -61,4 +61,4 @@ Active project must be loaded.
 
 Structured status report: project header (name, status, priority, target date, tracking dir), sections for In Progress, Ready to Start, Blocked todos (status icons, badges), Recent Git Activity.
 
-Suggested next: `1. /proj:execute 3` -- start work on ready task | `2. /proj:todo add` -- add new task | `3. /proj:save` -- save session, reconcile git
+Suggested next: `1. /superpowers:brainstorming <id>` -- start work on ready task | `2. /proj:todo add` -- add new task | `3. /proj:save` -- save session, reconcile git

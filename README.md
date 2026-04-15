@@ -80,11 +80,6 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 **AI-powered deep work:**
 
 ```
-/proj:define <id>       # Gather requirements via iterative Q&A
-/proj:decompose <id>    # Break a todo into sub-todos with dependencies
-/proj:execute <id>      # Implement a todo (reads requirements, spawns agents)
-/proj:run <id>          # Full workflow: define -> decompose -> execute
-/proj:run-batch <ids>   # Batch/range execution for multiple todos
 /proj:explore           # Walk through codebase in guided chapters
 ```
 
@@ -103,7 +98,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 
 The marketplace contains nine plugins that work independently or together. Three form the core (`proj`, `sandbox`, `router`) while the rest add optional capabilities.
 
-**proj** is the main plugin. It provides an MCP server for todo management, notes, and git tracking, plus 25+ skills for the full project lifecycle. Todos use dot-notation IDs (`1`, `1.1`, `1.1.1`) with blocking relationships. The `run` skill chains define, decompose, and execute steps with parallel agent execution.
+**proj** is the main plugin. It provides an MCP server for todo management, notes, and git tracking, plus 25+ skills for the full project lifecycle. Todos use dot-notation IDs (`1`, `1.1`, `1.1.1`) with blocking relationships.
 
 **sandbox** is the single source of truth for Claude Code's `settings.json`. All permission changes (write paths, MCP allow rules, network domains) go through sandbox's MCP tools. Both `proj` and `worktree` delegate permission management to sandbox.
 

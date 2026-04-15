@@ -112,4 +112,4 @@ Active project must be loaded (`proj_session_context` first).
 
 Confirmation + resulting todo state. List/tree: nested bullets w/ status icons, bold IDs, titles, priority, manual/blocked badges.
 
-Suggested next: After add → `1. /proj:define <id>` | After done → `1. /proj:status`
+Suggested next: After add → `1. /superpowers:brainstorming <id>` | After done → `1. /proj:status`
