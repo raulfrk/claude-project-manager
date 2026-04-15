@@ -96,3 +96,19 @@ class TestDefaultHooksYaml:
         assert "sync.todoist.enabled" in hook["condition"]
         assert "sync.todoist.auto_sync" in hook["condition"]
         assert "project.todoist_project_id" in hook["condition"]
+
+    def test_proj_archive_hook_param_mapping(self) -> None:
+        with _HOOKS_PATH.open() as f:
+            data = yaml.safe_load(f)
+        hooks_by_id = {h["id"]: h for h in data["hooks"]}
+        hook = hooks_by_id["todoist-on-proj-archive"]
+        assert hook["trigger_tool"] == "proj_archive"
+        assert hook["target_tool"] == "todoist_find_tasks"
+        # param key must match todoist_find_tasks param name (snake_case)
+        assert "project_id" in hook["param_mapping"], (
+            f"Expected 'project_id' key, got: {list(hook['param_mapping'].keys())}"
+        )
+        # template var must match proj_archive return field
+        assert hook["param_mapping"]["project_id"] == "${todoist_project_id}", (
+            f"Expected '${{todoist_project_id}}', got: {hook['param_mapping']['project_id']}"
+        )

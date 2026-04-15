@@ -86,7 +86,7 @@ hooks:
     target_tool: todoist_find_tasks
     server: todoist
     param_mapping:
-      projectId: ${project_id}
+      project_id: ${todoist_project_id}
     blocking: true
     condition: "sync.todoist.enabled and project.todoist_project_id"
 
