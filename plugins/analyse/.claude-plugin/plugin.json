@@ -1,6 +1,0 @@
-{
-  "name": "analyse",
-  "description": "Guided code review skill that walks users through features, explains the code, and creates todos for improvements.",
-  "version": "2.0.0",
-  "author": { "name": "raulfrk" }
-}

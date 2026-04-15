@@ -91,8 +91,7 @@ claude-project-manager/
     trello/                     # Same structure as sandbox
     jira/                       # Same structure as sandbox
     zoxide/                     # Same structure as sandbox
-    analyse/                    # Skills-only (no server/)
-      skills/review/SKILL.md
+
 ```
 
 ### Key Directories
@@ -240,7 +239,7 @@ All three must match. Forgetting one will cause inconsistencies.
 | trello | 3.0.0 |
 | jira | 3.0.0 |
 | zoxide | 2.0.0 |
-| analyse | 2.0.0 |
+
 | _shared | 0.3.3 |
 
 ---

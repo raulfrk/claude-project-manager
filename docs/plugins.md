@@ -1,6 +1,6 @@
 # Plugins
 
-Detailed reference for all 9 plugins in the claude-project-manager marketplace.
+Detailed reference for all 8 plugins in the claude-project-manager marketplace.
 
 ---
 
@@ -14,7 +14,6 @@ Detailed reference for all 9 plugins in the claude-project-manager marketplace.
 - [trello](#trello)
 - [jira](#jira)
 - [zoxide](#zoxide)
-- [analyse](#analyse)
 
 ---
 
@@ -638,43 +637,3 @@ Requires zoxide to be installed on the system. Integration flag in `~/.claude/pr
 zoxide_integration: true
 ```
 
----
-
-## analyse
-
-**Version**: 1.0.0 | **Category**: utilities | **License**: MIT
-
-Guided code review skill that walks users through features or code sections in structured chapters, explains the logic, and creates improvement todos. This is a skills-only plugin with no MCP server.
-
-### Install
-
-```console
-/plugin install raulfrk/claude-project-manager:analyse
-```
-
-### MCP Tools
-
-None. This is a skills-only plugin.
-
-### Skills
-
-| Skill | Description | Arguments |
-|-------|-------------|-----------|
-| `/review:review` | Walk through code in guided chapters and create todos | `[todo-id \| path \| description]` |
-
-### Config
-
-No plugin-specific configuration.
-
-### Examples
-
-```
-# Review a specific code path
-/review:review src/auth/
-
-# Review a feature related to a todo
-/review:review 42
-
-# Free-form review
-/review:review the hook dispatch flow
-```

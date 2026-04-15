@@ -18,8 +18,6 @@ The marketplace contains 9 plugins that work independently or together:
 | **trello** | 3.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
 | **jira** | 3.0.0 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
 | **zoxide** | 2.0.0 | utilities | MCP server | Zoxide frecency database integration (boost, remove, query paths) |
-| **analyse** | 2.0.0 | utilities | Skills only | Guided code review that walks through features and creates improvement todos |
-
 ### Marketplace Structure
 
 ```
@@ -36,7 +34,6 @@ claude-project-manager/
     trello/                   # MCP server plugin
     jira/                     # MCP server plugin
     zoxide/                   # MCP server plugin
-    analyse/                  # Skills-only plugin
   docs/                       # Documentation
 ```
 
@@ -69,7 +66,7 @@ plugins/<name>/
     hooks.json                # Auto-discovered hook configuration
 ```
 
-Skills-only plugins (like `analyse`) omit the `server/` directory and `.mcp.json`.
+Skills-only plugins omit the `server/` directory and `.mcp.json`.
 
 ### Shared Dependency: `_shared`
 
