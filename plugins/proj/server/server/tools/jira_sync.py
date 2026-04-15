@@ -55,11 +55,14 @@ def _validate_jira_key(key: str) -> bool:
     return bool(_JIRA_KEY_RE.match(key))
 
 
+_MAX_SLUG_LENGTH = 80
+
+
 def _slugify(name: str) -> str:
     """Convert a name to a slug suitable for project names."""
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = slug.strip("-")
+    slug = slug.strip("-")[:_MAX_SLUG_LENGTH].rstrip("-")
     return slug or "unnamed"
 
 
@@ -1002,6 +1005,10 @@ def apply_mapping(
                     _sync_root_issue_to_notes(
                         cfg, project_name, meta, issue, comments_by_key.get(issue_key, [])
                     )
+                    # If the epic itself is resolved, mark project as done
+                    epic_status = str(issue.get("status", "")).lower()
+                    if epic_status in _DONE_STATUSES and meta.status != "complete":
+                        meta.status = "complete"
                     result.per_issue[issue_key] = "skipped"
                     storage.save_meta(cfg, meta)
                     continue
