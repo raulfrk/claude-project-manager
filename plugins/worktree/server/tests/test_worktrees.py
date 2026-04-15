@@ -103,12 +103,18 @@ class TestCreateWorktree:
         assert "Error" in data["result"]
         assert data["worktree_path"] is None
 
-    def test_error_if_path_exists(self, config_with_repo: Path, tmp_path: Path) -> None:
+    def test_git_error_when_path_exists(self, config_with_repo: Path, tmp_path: Path) -> None:
+        """Bug #14 fix: no pre-check; git is the authority. If path exists and git fails,
+        the GitError is surfaced as an error response."""
         existing = tmp_path / "existing"
         existing.mkdir()
-        result = create_worktree("myapp", "main", path=str(existing))
+        with patch(
+            "server.tools.worktrees.git.add_worktree",
+            side_effect=GitError("fatal: destination path already exists"),
+        ):
+            result = create_worktree("myapp", "main", path=str(existing))
         data = json.loads(result)
-        assert "Error" in data["result"] or "already exists" in data["result"]
+        assert "Error" in data["result"]
         assert data["worktree_path"] is None
 
     def test_git_error_propagated(self, config_with_repo: Path) -> None:
@@ -199,6 +205,38 @@ class TestCreateWorktree:
         data = json.loads(result)
         assert "Error" in data["result"]
         assert data["worktree_path"] is None
+
+    def test_toctou_race_path_created_between_check_and_add(self, real_git_repo: Path) -> None:
+        """Bug #14: if another process creates the worktree dir between check and git call,
+        git.add_worktree raises GitError which must be propagated as an error (not suppressed)."""
+        with patch(
+            "server.tools.worktrees.git.add_worktree",
+            side_effect=GitError("worktree directory already exists"),
+        ):
+            result = create_worktree("myapp", "feature/race")
+        data = json.loads(result)
+        assert "Error" in data["result"]
+        assert data["worktree_path"] is None
+
+    def test_no_precheck_path_exists_allows_git_to_decide(
+        self, real_git_repo: Path, tmp_path: Path
+    ) -> None:
+        """Bug #14 fix: create_worktree must NOT reject when path exists on disk but git succeeds.
+        (i.e. the exists() pre-check is removed so git is the authority)."""
+        # Create the target directory first to simulate a race
+        target = real_git_repo.parent / "worktrees" / "myapp" / "feature-precheck"
+        target.mkdir(parents=True, exist_ok=True)
+        # With the pre-check removed, git decides: if git succeeds, we succeed
+        with (
+            patch("server.tools.worktrees.git.add_worktree") as mock_add,
+            patch("server.tools.worktrees.git.reset_hard"),
+            patch("server.tools.worktrees.git.clean_untracked"),
+        ):
+            mock_add.return_value = None
+            result = create_worktree("myapp", "feature/precheck", path=str(target))
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert data["worktree_path"] is not None
 
 
 class TestListWorktrees:

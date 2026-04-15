@@ -78,10 +78,6 @@ def create_worktree(
         )
 
     worktree_path = _resolve_worktree_path(repo_label, branch, path)
-    if Path(worktree_path).exists():
-        return json.dumps(
-            {"result": f"Error: path already exists: {worktree_path}", "worktree_path": None}
-        )
 
     try:
         git.add_worktree(repo.path, worktree_path, branch, new_branch=new_branch)

@@ -48,6 +48,8 @@ def register(mcp: FastMCP) -> None:
                 check=False,
                 capture_output=True,
             )
+        except FileNotFoundError:
+            return json.dumps({"error": "zoxide binary not found", "path": path})
         except (OSError, subprocess.SubprocessError) as exc:
             return json.dumps({"result": f"zoxide error: {exc}", "path": path})
         return json.dumps({"result": f"Removed {path} from zoxide", "path": path})
@@ -62,6 +64,8 @@ def register(mcp: FastMCP) -> None:
                 text=True,
                 check=False,
             )
+        except FileNotFoundError:
+            return json.dumps({"error": "zoxide binary not found", "keyword": keyword})
         except (OSError, subprocess.SubprocessError):
             return json.dumps({"result": [], "paths": [], "count": 0})
         lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
