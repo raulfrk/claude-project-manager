@@ -9,8 +9,6 @@ __pycache__/
 pytest-of-*/
 /.mcp.json
 !plugins/**/.mcp.json
-plugins/sandbox/
-plugins/zoxide/
 *_actual.svg
 .claude/
 *.egg-info/
