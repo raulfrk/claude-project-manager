@@ -51,17 +51,16 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 
 ## Plugins
 
-<!-- AUTO:plugins-start -->
+<!-- AUTO:plugins-table-start -->
 | Plugin | Version | Category | Description |
 |--------|---------|----------|-------------|
-| [sandbox](plugins/sandbox/) | 1.0.0 | utilities | Manage Claude Code sandbox-mode settings.json -- write paths, MCP allow rules, network domains, deny rules |
-| [worktree](plugins/worktree/) | 3.0.0 | utilities | Git worktree management -- create, list, and remove worktrees from configured base repositories |
-| [proj](plugins/proj/) | 4.0.0 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
-| [trello](plugins/trello/) | 3.0.0 | integrations | Trello board, card, and list management via REST API |
-| [jira](plugins/jira/) | 3.0.0 | integrations | Read-only Jira Server issue and project access via REST API |
-| [router](plugins/router/) | 2.1.0 | utilities | Central MCP-to-MCP router (formerly `hooks`) with schema-based param mapping, auto-registration, and recovery |
-| [todoist](plugins/todoist/) | 2.0.0 | integrations | Todoist task and project management via REST API |
-<!-- AUTO:plugins-end -->
+| [worktree](plugins/worktree/) | 5.0.0 | utilities | Git worktree management — create, list, and remove worktrees from configured base repositories |
+| [proj](plugins/proj/) | 5.0.0 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
+| [trello](plugins/trello/) | 5.0.0 | integrations | Trello board, card, and list management via REST API — full CRUD for boards, lists, cards, labels, members, comments, checklists, attachments |
+| [jira](plugins/jira/) | 5.0.0 | integrations | Read-only Jira Server issue and project access via REST API. |
+| [router](plugins/router/) | 5.0.0 | utilities | MCP-to-MCP dispatch registry for cpm plugins. Chain tool execution across plugins via post-execution hooks on a shared socket registry. Not to be confused with Claude Code's native hooks feature in settings.json. |
+| [todoist](plugins/todoist/) | 5.0.0 | integrations | Todoist task and project management via REST API — create, complete, update, find, and delete tasks and projects |
+<!-- AUTO:plugins-table-end -->
 
 ---
 

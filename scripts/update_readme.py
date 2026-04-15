@@ -56,7 +56,9 @@ def generate_plugins_table(plugins: list[dict]) -> str:
         version = escape_pipe(p.get("version", ""))
         category = escape_pipe(p.get("category", "uncategorized"))
         description = escape_pipe(p.get("description", ""))
-        lines.append(f"| **{name}** | {version} | {category} | {description} |")
+        lines.append(
+            f"| [{name}](plugins/{name}/) | {version} | {category} | {description} |"
+        )
     return "\n".join(lines)
 
 
