@@ -35,11 +35,7 @@ class TestJiraUpdateIssuesNullFieldStripping:
         mock_jira_client.put.return_value = None
 
         payload = json.dumps(
-            {
-                "updates": [
-                    {"key": "PROJ-1", "fields": {"summary": "Updated title", "labels": None}}
-                ]
-            }
+            {"updates": [{"key": "PROJ-1", "fields": {"summary": "Updated title", "labels": None}}]}
         )
 
         result = issue_tools["jira_update_issues"](updates_json=payload)
