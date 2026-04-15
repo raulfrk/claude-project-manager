@@ -1087,8 +1087,7 @@ def apply_mapping(
                         st_key = str(st.get("key", ""))
                         st_summary = str(st.get("summary", ""))
                         st_status = str(st.get("status", ""))
-                        resolved_statuses = {"done", "resolved", "closed", "cancelled", "canceled"}
-                        st_resolved = st_status.lower() in resolved_statuses
+                        st_resolved = st_status.lower() in _DONE_STATUSES
                         if not st_key:
                             continue
 
