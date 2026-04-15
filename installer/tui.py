@@ -22,12 +22,12 @@ CATEGORY_ORDER: list[tuple[str, str]] = [
 
 # Map marketplace categories to installer categories.
 # "productivity" (proj) is core; "utilities" is split by name.
-_CORE_PLUGINS = {"sandbox", "router", "proj"}
+_CORE_PLUGINS = {"router", "proj"}
 _UTILITY_PLUGINS = {"worktree"}
 # Everything else falls into integrations.
 
 # Plugins pre-selected by default (core set)
-DEFAULT_PRESELECT = {"sandbox", "router", "proj"}
+DEFAULT_PRESELECT = {"router", "proj"}
 
 # Overridable by tests via monkeypatch.setattr("installer.tui._MARKETPLACE_PATH", path)
 _MARKETPLACE_PATH: Path | None = None

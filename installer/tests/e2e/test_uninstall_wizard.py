@@ -19,8 +19,8 @@ from .conftest import assert_all_visible
 # Helpers
 # ---------------------------------------------------------------------------
 
-_VERSIONS = {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-_INSTALLED = {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
+_VERSIONS = {"proj": "4.0.0", "hooks": "2.0.0"}
+_INSTALLED = {"proj": "4.0.0", "hooks": "2.0.0"}
 
 
 def _patch_version_lookups(monkeypatch: pytest.MonkeyPatch) -> None:

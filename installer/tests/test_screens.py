@@ -23,13 +23,6 @@ from installer.screens.wizard import WizardScreen
 _MARKETPLACE_DATA = {
     "plugins": [
         {
-            "name": "sandbox",
-            "description": "Sandbox management",
-            "version": "0.2.0",
-            "category": "core",
-            "keywords": ["sandbox"],
-        },
-        {
             "name": "router",
             "description": "Central MCP-to-MCP hook registry",
             "version": "0.3.0",
@@ -88,14 +81,13 @@ class TestPluginSelectScreen:
 
     @pytest.mark.asyncio
     async def test_initial_defaults_selected(self, mp_path: Path):
-        """Default plugins (sandbox, router, proj) are pre-selected."""
+        """Default plugins (router, proj) are pre-selected."""
         app = _TestApp()
         async with app.run_test(size=(120, 40)) as pilot:
             screen = PluginSelectScreen(marketplace_path=mp_path)
             app.push_screen(screen)
             await pilot.pause()
 
-            assert "sandbox" in screen._selected
             assert "router" in screen._selected
             assert "proj" in screen._selected
             assert "worktree" not in screen._selected
@@ -134,9 +126,8 @@ class TestPluginSelectScreen:
             await pilot.press("a")
             await pilot.pause()
 
-            assert len(screen._selected) == 5
+            assert len(screen._selected) == 4
             assert screen._selected == {
-                "sandbox",
                 "router",
                 "proj",
                 "worktree",
@@ -173,7 +164,7 @@ class TestPluginSelectScreen:
             await pilot.pause()
 
         assert len(results) == 1
-        assert set(results[0]) == {"sandbox", "router", "proj"}
+        assert set(results[0]) == {"router", "proj"}
 
     @pytest.mark.asyncio
     async def test_cancel_returns_empty(self, mp_path: Path):
@@ -224,7 +215,7 @@ class TestWizardScreen:
         results: list[dict | None] = []
 
         async with app.run_test(size=(120, 40)) as pilot:
-            screen = WizardScreen(selected_plugins=["proj", "hooks", "sandbox"])
+            screen = WizardScreen(selected_plugins=["proj", "hooks"])
             app.push_screen(screen, callback=lambda r: results.append(r))
             await pilot.pause()
 

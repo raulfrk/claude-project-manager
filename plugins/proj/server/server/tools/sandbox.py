@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.lib import storage
-from server.lib.storage import allow_entries_for_path, mcp_allow_entry, skill_allow_entry
+from server.lib.sandbox import storage
+from server.lib.sandbox.storage import allow_entries_for_path, mcp_allow_entry, skill_allow_entry
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP

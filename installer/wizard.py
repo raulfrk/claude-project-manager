@@ -600,7 +600,7 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
     console.print("\n[bold]Post-install Setup Wizard[/bold]")
     console.print("Configure your plugins. Press Enter to accept defaults.\n")
 
-    proj_plugins = {"proj", "router", "sandbox", "todoist", "trello", "jira"}
+    proj_plugins = {"proj", "router", "todoist", "trello", "jira"}
     if proj_plugins & set(selected_plugins):
         _setup_proj_yaml(console, selected_plugins)
 

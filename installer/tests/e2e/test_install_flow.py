@@ -67,7 +67,7 @@ class TestFullInstallFlow:
             # Restrict install to the core plugin set that doesn't trigger
             # integration config screens. Uses _install_only helper to mark
             # only these plugins for install on PluginStatusScreen.
-            _install_only(screen, {"sandbox", "router", "proj"})
+            _install_only(screen, {"router", "proj"})
 
             btn = screen.query_one("#btn-confirm")
             await pilot.click(btn)
@@ -114,7 +114,7 @@ class TestFullInstallFlow:
             screen = app.screen
             assert isinstance(screen, PluginStatusScreen)
             assert_all_visible(screen)
-            _install_only(screen, {"sandbox", "router", "proj"})
+            _install_only(screen, {"router", "proj"})
 
             btn = screen.query_one("#btn-confirm")
             await pilot.click(btn)
@@ -238,7 +238,7 @@ class TestFlowViaStatusScreen:
             await pilot.pause()
 
             assert isinstance(app.screen, PluginStatusScreen)
-            _install_only(app.screen, {"sandbox", "router", "proj"})
+            _install_only(app.screen, {"router", "proj"})
             btn = app.screen.query_one("#btn-confirm")
             await pilot.click(btn)
             await pilot.pause()

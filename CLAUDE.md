@@ -5,10 +5,9 @@
 
 ## Overview
 
-Claude Code plugin marketplace for project management workflows. Eight plugins:
-- `sandbox` — manage sandbox-mode `settings.json` (write paths, MCP allow rules, network domains, deny rules)
+Claude Code plugin marketplace for project management workflows. Seven plugins:
 - `worktree` — git worktree management
-- `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync); includes `review` and `explore` skills
+- `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync); includes sandbox tools for managing `settings.json`
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
 - `jira` — Jira MCP server (issues, projects, epics, bulk operations)
 - `router` — central MCP-to-MCP router (formerly `hooks`); schema-based param mapping, auto-registration, and recovery
@@ -22,7 +21,7 @@ A comprehensive overhaul requirements document exists at:
 
 It contains the full workflow map, user vision, quality assessment, gap analysis, 31 change proposals, and 35 implementation todos across 6 phases. **Read this file before starting any overhaul work.** Key architectural decisions:
 - **Router plugin** (`plugins/router/`) — central MCP→MCP registry with schema-based param mapping, auto-registration, and recovery (formerly `plugins/hooks/`)
-- **Sandbox is single source of truth** for settings.json — proj must never write settings files directly
+- **Proj is single source of truth** for settings.json — sandbox tools folded into proj MCP server; proj skills call these tools directly
 - **Proj must not read worktree.yaml directly** — use worktree MCP tools
 - **Remove deny functionality** from sandbox (denyWrite/denyRead)
 - **Define skill rewrite** — free-form writing → probing Q&A → iterative rerun → quality gate
@@ -42,7 +41,7 @@ After completing any implementation, always validate the result against the spec
 - `hooks/hooks.json` is auto-discovered — do NOT reference it in `plugin.json`
 - Source files live in `plugins/<name>/server/server/` (inner `server/` is the Python package)
 - Skills invoked as `/proj:<name>`, `/worktree:<name>`
-- MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_add_mcp_allow(server_name)`
+- MCP allow rules: `mcp__<server>__*` wildcard format; use `sandbox_batch_setup(mcp_servers=[server_name])` via proj
 - **Worktree isolation is ON by default** for `/proj:run`. Pass `--no-worktree` to opt out. Use `--max-parallel 1` for sequential execution. Default `max_parallel` is **30** (recommended cap: 10 for CPU-bound / API-rate-limited workloads). Parallel mode triggers at **2+** non-manual descendants. Never pass `--no-worktree` in default or recommended invocations when running parallel todos — worktree isolation prevents branch conflicts between concurrent agents.
 - **`isolation: "worktree"` on Agent tool does NOT work** — agents run in the main repo, not the worktree. Always use explicit `wt_create` via the worktree MCP tool, then pass the worktree path in the agent prompt with: "ALL file edits and git operations MUST happen in this directory: `<path>`".
 
@@ -99,7 +98,6 @@ Todos support a `tags: list[str]` field. The `manual` tag has special behaviour:
 | Plugin | Port |
 |--------|-------|
 | router | 19100 |
-| sandbox | 19101 |
 | proj | 19102 |
 | worktree | 19103 |
 | trello | 19104 |

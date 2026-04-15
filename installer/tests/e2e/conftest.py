@@ -45,13 +45,6 @@ def assert_all_visible(
 
 _ALL_PLUGINS = [
     {
-        "name": "sandbox",
-        "description": "Manage sandbox-mode settings.json",
-        "version": "1.0.0",
-        "category": "utilities",
-        "keywords": ["sandbox", "permissions"],
-    },
-    {
         "name": "worktree",
         "description": "Git worktree management",
         "version": "3.0.0",
@@ -138,7 +131,7 @@ def mock_subprocess(mocker):
 
 @pytest.fixture()
 def marketplace_json(tmp_path: Path) -> Path:
-    """Write a test marketplace.json with all 8 plugins and return its path."""
+    """Write a test marketplace.json with all plugins and return its path."""
     data = {"plugins": _ALL_PLUGINS}
     path = tmp_path / "marketplace.json"
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -149,11 +142,10 @@ def marketplace_json(tmp_path: Path) -> Path:
 def mock_detect(monkeypatch: pytest.MonkeyPatch) -> InstallState:
     """Mock ``installer.detect.detect_existing`` at both source and import site."""
     state = InstallState(
-        installed_plugins=["proj", "router", "sandbox"],
+        installed_plugins=["proj", "router"],
         mcp_entries=[
             "plugin_proj_proj",
             "plugin_router_router",
-            "plugin_sandbox_sandbox",
         ],
     )
     monkeypatch.setattr("installer.detect.detect_existing", lambda: state)
@@ -189,7 +181,6 @@ def mock_plugin_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
             return_value=[
                 "proj@claude-project-manager",
                 "router@claude-project-manager",
-                "sandbox@claude-project-manager",
             ]
         ),
     )

@@ -50,8 +50,8 @@ class TestBuildParser:
 
     def test_plugins_multiple(self):
         parser = build_parser()
-        args = parser.parse_args(["--plugins", "proj", "worktree", "sandbox"])
-        assert args.plugins == ["proj", "worktree", "sandbox"]
+        args = parser.parse_args(["--plugins", "proj", "worktree", "router"])
+        assert args.plugins == ["proj", "worktree", "router"]
 
     def test_skip_wizard(self):
         parser = build_parser()

@@ -16,7 +16,7 @@ from installer.wizard_specs import PROJ_YAML_PROMPTS, get_distinct_yaml_files
 
 
 # Plugins that require proj.yaml configuration
-_PROJ_PLUGINS = {"proj", "router", "sandbox", "todoist", "trello", "jira"}
+_PROJ_PLUGINS = {"proj", "router", "todoist", "trello", "jira"}
 
 
 class WizardScreen(Screen[dict[str, Any] | None]):

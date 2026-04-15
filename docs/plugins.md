@@ -1,12 +1,11 @@
 # Plugins
 
-Detailed reference for all 7 plugins in the claude-project-manager marketplace.
+Detailed reference for all 6 plugins in the claude-project-manager marketplace.
 
 ---
 
 ## Table of Contents
 
-- [sandbox](#sandbox)
 - [worktree](#worktree)
 - [proj](#proj)
 - [router](#router)
@@ -16,63 +15,11 @@ Detailed reference for all 7 plugins in the claude-project-manager marketplace.
 
 ---
 
-## sandbox
-
-**Version**: 0.2.0 | **Category**: utilities | **License**: MIT
-
-Manages Claude Code sandbox-mode `settings.json`. Provides atomic read/write access for sandbox write paths, MCP allow rules, Skill allow rules, network domains, and deny rules. Used internally by `proj` and `worktree` during setup, and can be called directly.
-
-### Install
-
-```console
-/plugin install raulfrk/claude-project-manager:sandbox
-```
-
-### MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `sandbox_add_write_path(path)` | Add directory to sandbox write allowlist and Edit rules |
-| `sandbox_remove_write_path(path)` | Remove directory from sandbox write allowlist and Edit rules |
-| `sandbox_set_deny(rules)` | Replace `permissions.deny` rules atomically |
-| `sandbox_batch_setup(paths?, mcp_servers?, domains?, skill_prefixes?)` | Add write paths, MCP rules, domains, and Skill rules in one atomic write |
-| `sandbox_batch_revoke(paths?, mcp_servers?, domains?, skill_prefixes?)` | Remove write paths, MCP rules, domains, and Skill rules in one atomic write |
-| `sandbox_list(format?)` | List current sandbox configuration |
-| `sandbox_check(path?, server?, domain?, skill?)` | Check if a path, server, domain, or skill prefix is configured |
-| `sandbox_reconcile(...)` | Sync expected vs actual MCP servers, paths, and skill prefixes |
-
-All operations are idempotent. Changes take effect immediately.
-
-### Skills
-
-None. This is an MCP-only plugin.
-
-### Config
-
-Reads and writes `~/.claude/settings.json`. No plugin-specific configuration file.
-
-### Examples
-
-```
-# Add a project directory to sandbox write paths
-sandbox_add_write_path("/home/user/projects/my-app")
-
-# Batch setup for a new project (MCP servers, domains, skill prefixes via batch tools)
-sandbox_batch_setup(
-  paths=["/home/user/projects/my-app"],
-  mcp_servers=["plugin_proj_proj", "plugin_worktree_worktree"],
-  domains=["api.github.com"],
-  skill_prefixes=["proj", "worktree"]
-)
-```
-
----
-
 ## worktree
 
 **Version**: 2.6.0 | **Category**: utilities | **License**: MIT
 
-Registry-based git worktree management. Register a repository once with a label, then create isolated worktrees for branches or parallel work. Automatically manages sandbox permissions when the sandbox plugin is installed.
+Registry-based git worktree management. Register a repository once with a label, then create isolated worktrees for branches or parallel work. Automatically manages sandbox permissions via the proj plugin's sandbox tools.
 
 ### Install
 

@@ -71,7 +71,7 @@ async def _select_todoist_and_advance(app: InstallerApp, pilot) -> None:
 
     # Restrict to todoist + core plugins that don't trigger other integration
     # config screens. Every remaining plugin gets action=skip.
-    allowed = {"todoist", "sandbox", "router", "proj"}
+    allowed = {"todoist", "router", "proj"}
     for plugin_name in list(screen._actions.keys()):
         if plugin_name not in allowed:
             screen._actions[plugin_name] = "skip"

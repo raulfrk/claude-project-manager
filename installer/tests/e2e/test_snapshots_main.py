@@ -26,13 +26,6 @@ _TERM_SIZE = (120, 40)
 
 _ALL_PLUGINS = [
     {
-        "name": "sandbox",
-        "description": "Manage sandbox-mode settings.json",
-        "version": "1.0.0",
-        "category": "utilities",
-        "keywords": ["sandbox"],
-    },
-    {
         "name": "worktree",
         "description": "Git worktree management",
         "version": "3.0.0",
@@ -129,7 +122,7 @@ async def test_plugin_select_focus_next_snapshot(marketplace_json: Path) -> None
 @pytest.mark.asyncio
 async def test_wizard_focus_next_field_snapshot() -> None:
     """Focus moves explicitly to the Submit button."""
-    selected = ["proj", "hooks", "sandbox", "worktree", "todoist"]
+    selected = ["proj", "hooks", "worktree", "todoist"]
     app = _ScreenHost()
     async with app.run_test(size=_TERM_SIZE) as pilot:
         screen = WizardScreen(selected_plugins=selected)
@@ -152,7 +145,7 @@ async def test_wizard_validation_error_snapshot() -> None:
     # WizardScreen has no _show_error() hook — use focus on Cancel to produce
     # a distinct visual variant. This is the closest deterministic "alternate
     # state" available without mutating the screen internals.
-    selected = ["proj", "hooks", "sandbox", "worktree", "todoist"]
+    selected = ["proj", "hooks", "worktree", "todoist"]
     app = _ScreenHost()
     async with app.run_test(size=_TERM_SIZE) as pilot:
         screen = WizardScreen(selected_plugins=selected)
@@ -177,11 +170,10 @@ async def test_wizard_validation_error_snapshot() -> None:
 @pytest.mark.asyncio
 async def test_detection_focus_continue_snapshot() -> None:
     state = InstallState(
-        installed_plugins=["proj", "router", "sandbox"],
+        installed_plugins=["proj", "router"],
         mcp_entries=[
             "plugin_proj_proj",
             "plugin_router_router",
-            "plugin_sandbox_sandbox",
         ],
     )
     rows = [
@@ -190,9 +182,6 @@ async def test_detection_focus_continue_snapshot() -> None:
         ),
         PluginDetectionRow(
             plugin="router", installed_version="2.0.0", available_version="2.0.0"
-        ),
-        PluginDetectionRow(
-            plugin="sandbox", installed_version="1.0.0", available_version="1.0.0"
         ),
         PluginDetectionRow(
             plugin="worktree", installed_version=None, available_version="3.0.0"
@@ -250,7 +239,7 @@ async def test_update_no_changes_snapshot() -> None:
 # ---------------------------------------------------------------------------
 
 
-_WIZARD_PLUGINS = ["proj", "hooks", "sandbox", "worktree", "todoist"]
+_WIZARD_PLUGINS = ["proj", "hooks", "worktree", "todoist"]
 
 
 @pytest.fixture()

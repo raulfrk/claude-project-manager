@@ -77,7 +77,7 @@ class TestWheelContents:
             assert len(plugins) > 0, "marketplace.json has no plugins"
             # Verify expected plugin names are present
             names = {p["name"] for p in plugins}
-            for expected in ("proj", "router", "sandbox"):
+            for expected in ("proj", "router"):
                 assert expected in names, (
                     f"Expected plugin '{expected}' in marketplace.json"
                 )

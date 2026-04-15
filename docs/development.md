@@ -30,7 +30,6 @@ git clone https://github.com/raulfrk/claude-project-manager.git
 cd claude-project-manager
 
 # Install dependencies for each plugin
-cd plugins/sandbox/server && uv sync && cd -
 cd plugins/worktree/server && uv sync && cd -
 cd plugins/proj/server && uv sync && cd -
 cd plugins/router/server && uv sync && cd -
@@ -68,7 +67,7 @@ claude-project-manager/
         http_hook_handler.py
       pyproject.toml
       tests/
-    sandbox/
+    worktree/
       .claude-plugin/plugin.json
       .mcp.json
       server/
@@ -77,18 +76,16 @@ claude-project-manager/
           main.py               # FastMCP entry point
           lib/                  # Library code
           tools/                # MCP tool implementations
-            settings.py
         tests/
-    worktree/                   # Same structure as sandbox
-    proj/                       # Same structure, plus:
+    proj/                       # Same structure as worktree, plus:
       skills/                   # Skill definitions
         <skill-name>/SKILL.md
       hooks/                    # Hook definitions
         hooks.json
-    hooks/                      # Same structure as sandbox
-    todoist/                    # Same structure as sandbox
-    trello/                     # Same structure as sandbox
-    jira/                       # Same structure as sandbox
+    router/                     # Same structure as worktree
+    todoist/                    # Same structure as worktree
+    trello/                     # Same structure as worktree
+    jira/                       # Same structure as worktree
 
 ```
 
@@ -110,7 +107,6 @@ Each plugin has its own test suite. Tests run with pytest and pytest-xdist for p
 # Run a specific plugin's tests
 cd plugins/proj/server && uv run pytest -q
 cd plugins/worktree/server && uv run pytest -q
-cd plugins/sandbox/server && uv run pytest -q
 cd plugins/router/server && uv run pytest -q
 cd plugins/todoist/server && uv run pytest -q
 cd plugins/trello/server && uv run pytest -q
@@ -228,7 +224,6 @@ All three must match. Forgetting one will cause inconsistencies.
 
 | Plugin | Version |
 |--------|---------|
-| sandbox | 1.0.0 |
 | worktree | 3.0.0 |
 | proj | 4.0.0 |
 | router | 2.1.0 |

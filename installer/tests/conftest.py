@@ -40,13 +40,6 @@ def marketplace_json(tmp_path: Path) -> Path:
     data = {
         "plugins": [
             {
-                "name": "sandbox",
-                "description": "Sandbox management",
-                "version": "0.2.0",
-                "category": "core",
-                "keywords": ["sandbox"],
-            },
-            {
                 "name": "router",
                 "description": "Central MCP-to-MCP hook registry",
                 "version": "0.3.0",

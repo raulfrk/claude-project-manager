@@ -18,7 +18,6 @@ from installer.tui import (
 
 class TestClassifyCategory:
     def test_core_plugins(self):
-        assert _classify_category("sandbox", "core") == "core"
         assert _classify_category("router", "core") == "core"
         assert _classify_category("proj", "productivity") == "core"
 
@@ -37,7 +36,7 @@ class TestLoadPlugins:
     def test_loads_from_marketplace(self, marketplace_json: Path):
         plugins = load_plugins(marketplace_json)
         names = [p.name for p in plugins]
-        assert "sandbox" in names
+        assert "router" in names
         assert "proj" in names
         assert "worktree" in names
 

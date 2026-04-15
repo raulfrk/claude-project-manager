@@ -81,7 +81,7 @@ class TestTerminalResize:
 
             screen = app.screen
             assert isinstance(screen, PluginStatusScreen)
-            _install_only(screen, {"sandbox", "router", "proj"})
+            _install_only(screen, {"router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -114,14 +114,14 @@ class TestPluginStatusKeyboardNav:
         Mixes installed and available plugins so at least two tables are
         non-empty and Tab can meaningfully advance focus between them.
         """
-        # Use the default mock_plugin_cli — it reports proj/router/sandbox installed,
+        # Use the default mock_plugin_cli — it reports proj/router installed,
         # leaving 6 available plugins so both "installed" and "available" tables are non-empty.
         monkeypatch.setattr(
             "installer.plugin_status.get_installed_plugins",
             lambda: [
                 "proj@claude-project-manager",
                 "router@claude-project-manager",
-                "sandbox@claude-project-manager",
+                "worktree@claude-project-manager",
             ],
         )
         app: InstallerApp = e2e_app(mode="install")
@@ -166,7 +166,7 @@ class TestWizardKeyboardNav:
             assert isinstance(screen, PluginStatusScreen)
 
             # Restrict to core plugins that do not trigger integration config screens.
-            _install_only(screen, {"sandbox", "router", "proj"})
+            _install_only(screen, {"router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -214,7 +214,7 @@ class TestInstallError:
 
             screen = app.screen
             assert isinstance(screen, PluginStatusScreen)
-            _install_only(screen, {"sandbox", "router", "proj"})
+            _install_only(screen, {"router", "proj"})
             await pilot.click(screen.query_one("#btn-confirm"))
             await pilot.pause()
             await pilot.pause()
@@ -338,26 +338,24 @@ class TestAllUpToDate:
         monkeypatch.setattr("installer.app.compare_versions", lambda *a, **kw: {})
         monkeypatch.setattr(
             "installer.update._read_marketplace_versions",
-            lambda *a, **kw: {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"},
+            lambda *a, **kw: {"proj": "4.0.0", "router": "2.0.0"},
         )
         monkeypatch.setattr(
             "installer.app._read_marketplace_versions",
-            lambda *a, **kw: {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"},
+            lambda *a, **kw: {"proj": "4.0.0", "router": "2.0.0"},
         )
         monkeypatch.setattr(
             "installer.update._read_installed_version",
             lambda cache_dir, name: {
                 "proj": "4.0.0",
-                "hooks": "2.0.0",
-                "sandbox": "1.0.0",
+                "router": "2.0.0",
             }.get(name),
         )
         monkeypatch.setattr(
             "installer.app._read_installed_version",
             lambda cache_dir, name: {
                 "proj": "4.0.0",
-                "hooks": "2.0.0",
-                "sandbox": "1.0.0",
+                "router": "2.0.0",
             }.get(name),
         )
 

@@ -6,13 +6,12 @@ This document describes the system architecture of claude-project-manager, a Cla
 
 ## System Overview
 
-The marketplace contains 8 plugins that work independently or together:
+The marketplace contains 7 plugins that work independently or together:
 
 | Plugin | Version | Category | Type | Description |
 |--------|---------|----------|------|-------------|
-| **sandbox** | 1.0.0 | utilities | MCP server | Manage sandbox-mode `settings.json` (write paths, MCP/Skill allow rules, network domains, deny rules) |
 | **worktree** | 3.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories (includes zoxide frecency tools) |
-| **proj** | 4.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) |
+| **proj** | 4.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) — includes sandbox tools for managing `settings.json` |
 | **router** | 2.1.0 | utilities | MCP server + skills | Central MCP-to-MCP router with condition evaluation, auto-registration, and recovery |
 | **todoist** | 2.0.0 | integrations | MCP server | Todoist task and project management via REST API |
 | **trello** | 3.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
@@ -25,7 +24,6 @@ claude-project-manager/
     marketplace.json          # Plugin registry with versions, descriptions, keywords
   plugins/
     _shared/                  # Shared dependency: claude-hook-transport
-    sandbox/                  # MCP server plugin
     worktree/                 # MCP server + skills plugin
     proj/                     # MCP server + skills plugin
     router/                   # MCP server + skills plugin (MCP-to-MCP hook router; formerly `hooks`)
@@ -180,7 +178,6 @@ Set `HOOK_TRANSPORT=tcp` to fall back to TCP on `127.0.0.1` with the following p
 | Plugin | Port |
 |--------|-------|
 | router | 19100 |
-| sandbox | 19101 |
 | proj | 19102 |
 | worktree | 19103 |
 | trello | 19104 |
@@ -230,13 +227,11 @@ Versions must be bumped in three places simultaneously:
 ### Dependency Graph
 
 ```
-proj ──── permissions mgmt ────> sandbox
-worktree ── permissions mgmt ──> sandbox
 proj ──── hook dispatch ────────> router ──> todoist, trello, jira
 worktree ── hook dispatch ──────> router
 ```
 
-**sandbox** is the single source of truth for `settings.json`. Neither `proj` nor `worktree` write settings files directly -- they call sandbox MCP tools.
+**proj** is the single source of truth for `settings.json` — sandbox tools (`sandbox_batch_setup`, `sandbox_batch_revoke`, etc.) are folded into the proj MCP server. Neither `proj` skills nor `worktree` write settings files directly -- they call these sandbox tools via proj.
 
 **router** is the central dispatcher (formerly `hooks`). All plugins with MCP servers have hook dispatch enabled, and `router_fire_tool` routes events to the correct target server.
 

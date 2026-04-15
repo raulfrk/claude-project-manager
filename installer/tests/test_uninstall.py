@@ -49,10 +49,10 @@ class TestRemovePlugins:
     def test_multiple_plugins(self, tmp_path: Path, mock_console):
         cache = tmp_path / "cache"
         (cache / "proj").mkdir(parents=True)
-        (cache / "sandbox").mkdir(parents=True)
+        (cache / "worktree").mkdir(parents=True)
         state = InstallState(cache_dir=cache)
-        results = remove_plugins(["proj", "sandbox"], state, mock_console)
-        assert results == {"proj": True, "sandbox": True}
+        results = remove_plugins(["proj", "worktree"], state, mock_console)
+        assert results == {"proj": True, "worktree": True}
 
 
 class TestCleanupConfigFiles:

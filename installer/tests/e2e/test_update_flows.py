@@ -63,12 +63,8 @@ async def test_update_flow_detection_to_progress(
         "hooks": ("1.5.0", "2.0.0"),
     }
     _patch_compare_versions(monkeypatch, diffs)
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "3.0.0", "hooks": "1.5.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "3.0.0", "hooks": "1.5.0"})
 
     app: InstallerApp = e2e_app(mode="update")
 
@@ -126,12 +122,8 @@ async def test_reinstall_flow_detection_to_progress(
     monkeypatch,
 ):
     """Reinstall mode walks through Detection -> Confirm -> Progress screens."""
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="reinstall")
 
@@ -190,12 +182,8 @@ async def test_detection_cancel_exits_app(
     monkeypatch,
 ):
     """Clicking Cancel on the DetectionScreen exits the app."""
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="update")
 
@@ -231,12 +219,8 @@ async def test_update_no_outdated_shows_message(
     """When all plugins are up to date, the placeholder shows a message."""
     # Empty diffs = nothing outdated
     _patch_compare_versions(monkeypatch, {})
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="update")
 
@@ -279,12 +263,8 @@ async def test_detection_screen_geometry(
     monkeypatch,
 ):
     """All widgets on DetectionScreen have positive dimensions."""
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="update")
 
@@ -305,12 +285,8 @@ async def test_update_screen_geometry(
     """All widgets on UpdateScreen have positive dimensions."""
     diffs = {"proj": ("3.0.0", "4.0.0")}
     _patch_compare_versions(monkeypatch, diffs)
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "3.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "3.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="update")
 
@@ -333,12 +309,8 @@ async def test_confirm_screen_geometry(
     monkeypatch,
 ):
     """All widgets on ConfirmScreen (reinstall) have positive dimensions."""
-    _patch_marketplace_versions(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
-    _patch_installed_version(
-        monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0", "sandbox": "1.0.0"}
-    )
+    _patch_marketplace_versions(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
+    _patch_installed_version(monkeypatch, {"proj": "4.0.0", "hooks": "2.0.0"})
 
     app: InstallerApp = e2e_app(mode="reinstall")
 
