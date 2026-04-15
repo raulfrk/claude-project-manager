@@ -1292,7 +1292,6 @@ def register(app: FastMCP) -> None:
             {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name, cfg=cfg)}
         )
 
-
     @app.tool(description="Delete a todo (also cleans up blocks/blocked_by references).")
     def todo_delete(todo_id: str, project_name: str | None = None) -> str:
         result = require_project(project_name)
