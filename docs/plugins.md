@@ -36,15 +36,9 @@ Manages Claude Code sandbox-mode `settings.json`. Provides atomic read/write acc
 |------|-------------|
 | `sandbox_add_write_path(path)` | Add directory to sandbox write allowlist and Edit rules |
 | `sandbox_remove_write_path(path)` | Remove directory from sandbox write allowlist and Edit rules |
-| `sandbox_add_mcp_allow(servers)` | Add MCP server wildcard allow rules |
-| `sandbox_remove_mcp_allow(servers)` | Remove MCP server wildcard allow rules |
-| `sandbox_add_skill_allow(prefixes)` | Add Skill wildcard allow rules (e.g., `Skill(proj:*)`) |
-| `sandbox_remove_skill_allow(prefixes)` | Remove Skill wildcard allow rules |
-| `sandbox_add_domain(domain)` | Add domain to sandbox network allowlist |
-| `sandbox_remove_domain(domain)` | Remove domain from sandbox allowlist |
 | `sandbox_set_deny(rules)` | Replace `permissions.deny` rules atomically |
-| `sandbox_batch_setup(...)` | Add write paths, MCP rules, domains, and Skill rules in one atomic write |
-| `sandbox_batch_revoke(...)` | Remove write paths, MCP rules, domains, and Skill rules in one atomic write |
+| `sandbox_batch_setup(paths?, mcp_servers?, domains?, skill_prefixes?)` | Add write paths, MCP rules, domains, and Skill rules in one atomic write |
+| `sandbox_batch_revoke(paths?, mcp_servers?, domains?, skill_prefixes?)` | Remove write paths, MCP rules, domains, and Skill rules in one atomic write |
 | `sandbox_list(format?)` | List current sandbox configuration |
 | `sandbox_check(path?, server?, domain?, skill?)` | Check if a path, server, domain, or skill prefix is configured |
 | `sandbox_reconcile(...)` | Sync expected vs actual MCP servers, paths, and skill prefixes |
@@ -65,15 +59,12 @@ Reads and writes `~/.claude/settings.json`. No plugin-specific configuration fil
 # Add a project directory to sandbox write paths
 sandbox_add_write_path("/home/user/projects/my-app")
 
-# Allow an MCP server
-sandbox_add_mcp_allow("plugin_proj_proj")
-
-# Batch setup for a new project
+# Batch setup for a new project (MCP servers, domains, skill prefixes via batch tools)
 sandbox_batch_setup(
-  write_paths=["/home/user/projects/my-app"],
+  paths=["/home/user/projects/my-app"],
   mcp_servers=["plugin_proj_proj", "plugin_worktree_worktree"],
   domains=["api.github.com"],
-  skill_prefixes=["proj:"]
+  skill_prefixes=["proj", "worktree"]
 )
 ```
 

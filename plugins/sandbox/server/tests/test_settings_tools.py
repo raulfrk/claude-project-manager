@@ -13,18 +13,12 @@ if TYPE_CHECKING:
     import pytest
 from server.tools.settings import (
     _resolve_path,
-    sandbox_add_domain,
-    sandbox_add_mcp_allow,
-    sandbox_add_skill_allow,
     sandbox_add_write_path,
     sandbox_batch_revoke,
     sandbox_batch_setup,
     sandbox_check,
     sandbox_list,
     sandbox_reconcile,
-    sandbox_remove_domain,
-    sandbox_remove_mcp_allow,
-    sandbox_remove_skill_allow,
     sandbox_remove_write_path,
     sandbox_set_deny,
 )
@@ -111,89 +105,6 @@ class TestRemoveWritePath:
         )
         result = json.loads(sandbox_remove_write_path("/tmp/nonexistent"))
         assert result["removed"] == 0
-
-
-class TestMcpAllow:
-    def test_add_single(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_add_mcp_allow("plugin_proj_proj"))
-        assert result["added"] == 1
-        data = read_settings(tmp_path)
-        assert "mcp__plugin_proj_proj__*" in data["permissions"]["allow"]
-
-    def test_add_list(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_add_mcp_allow(["plugin_proj_proj", "plugin_sandbox_sandbox"]))
-        assert result["added"] == 2
-
-    def test_remove(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": ["mcp__plugin_proj_proj__*"]}})
-        result = json.loads(sandbox_remove_mcp_allow("plugin_proj_proj"))
-        assert result["removed"] == 1
-
-
-class TestSkillAllow:
-    def test_add_single(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_add_skill_allow("proj"))
-        assert result["added"] == 1
-        data = read_settings(tmp_path)
-        assert "Skill(proj:*)" in data["permissions"]["allow"]
-
-    def test_add_list(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_add_skill_allow(["proj", "worktree"]))
-        assert result["added"] == 2
-        data = read_settings(tmp_path)
-        assert "Skill(proj:*)" in data["permissions"]["allow"]
-        assert "Skill(worktree:*)" in data["permissions"]["allow"]
-
-    def test_idempotent(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": ["Skill(proj:*)"]}})
-        result = json.loads(sandbox_add_skill_allow("proj"))
-        assert result["added"] == 0
-        assert result["skipped"] == 1
-
-    def test_remove_single(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": ["Skill(proj:*)", "mcp__proj__*"]}})
-        result = json.loads(sandbox_remove_skill_allow("proj"))
-        assert result["removed"] == 1
-        data = read_settings(tmp_path)
-        assert "Skill(proj:*)" not in data["permissions"]["allow"]
-
-    def test_remove_list(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": ["Skill(proj:*)", "Skill(worktree:*)"]}})
-        result = json.loads(sandbox_remove_skill_allow(["proj", "worktree"]))
-        assert result["removed"] == 2
-
-    def test_remove_missing(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_remove_skill_allow("proj"))
-        assert result["removed"] == 0
-
-
-class TestDomains:
-    def test_add_domain(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": []}}})
-        result = json.loads(sandbox_add_domain("github.com"))
-        assert result["added"] is True
-        data = read_settings(tmp_path)
-        assert "github.com" in data["sandbox"]["network"]["allowedDomains"]
-
-    def test_add_domain_idempotent(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": ["github.com"]}}})
-        result = json.loads(sandbox_add_domain("github.com"))
-        assert result["added"] is False
-
-    def test_remove_domain(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": ["github.com"]}}})
-        result = json.loads(sandbox_remove_domain("github.com"))
-        assert result["removed"] is True
-
-    def test_remove_domain_missing(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"sandbox": {"network": {"allowedDomains": []}}})
-        result = json.loads(sandbox_remove_domain("github.com"))
-        assert result["removed"] is False
 
 
 class TestBatchOps:
@@ -515,28 +426,6 @@ class TestSetDeny:
 class TestValueErrorHandling:
     """Tests that invalid mcp_allow_entry / skill_allow_entry inputs return error JSON."""
 
-    def test_sandbox_add_mcp_allow_invalid_entry(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        # server_name with '__' triggers ValueError in mcp_allow_entry
-        result = json.loads(sandbox_add_mcp_allow("bad__name"))
-        assert "error" in result
-        # Settings must not have been modified
-        data = read_settings(tmp_path)
-        assert data["permissions"]["allow"] == []
-
-    def test_sandbox_add_mcp_allow_empty_name(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": []}})
-        result = json.loads(sandbox_add_mcp_allow(""))
-        assert "error" in result
-
-    def test_sandbox_remove_mcp_allow_invalid_entry(self, tmp_path: Path) -> None:
-        write_settings(tmp_path, {"permissions": {"allow": ["mcp__proj__*"]}})
-        result = json.loads(sandbox_remove_mcp_allow("bad__name"))
-        assert "error" in result
-        # Settings must not have been modified
-        data = read_settings(tmp_path)
-        assert "mcp__proj__*" in data["permissions"]["allow"]
-
     def test_sandbox_check_invalid_entry(self, tmp_path: Path) -> None:
         write_settings(tmp_path, {"permissions": {"allow": []}})
         # server_name with '__' triggers ValueError (original line 422 bug)
@@ -636,6 +525,46 @@ class TestValueErrorHandling:
         assert "error" in result
         data = read_settings(tmp_path)
         assert data["permissions"]["allow"] == []
+
+
+class TestRemovedIndividualTools:
+    """Ensure individual add/remove tools for mcp_allow, skill_allow, domain are gone.
+
+    These are covered by sandbox_batch_setup / sandbox_batch_revoke. The MCP
+    server must not register the individual helpers.
+    """
+
+    def _registered_tool_names(self) -> set[str]:
+        from mcp.server.fastmcp import FastMCP
+
+        from server.tools.settings import register
+
+        app = FastMCP("test")
+        register(app)
+        return set(app._tool_manager._tools)
+
+    def test_sandbox_add_mcp_allow_not_registered(self) -> None:
+        assert "sandbox_add_mcp_allow" not in self._registered_tool_names()
+
+    def test_sandbox_remove_mcp_allow_not_registered(self) -> None:
+        assert "sandbox_remove_mcp_allow" not in self._registered_tool_names()
+
+    def test_sandbox_add_skill_allow_not_registered(self) -> None:
+        assert "sandbox_add_skill_allow" not in self._registered_tool_names()
+
+    def test_sandbox_remove_skill_allow_not_registered(self) -> None:
+        assert "sandbox_remove_skill_allow" not in self._registered_tool_names()
+
+    def test_sandbox_add_domain_not_registered(self) -> None:
+        assert "sandbox_add_domain" not in self._registered_tool_names()
+
+    def test_sandbox_remove_domain_not_registered(self) -> None:
+        assert "sandbox_remove_domain" not in self._registered_tool_names()
+
+    def test_batch_tools_still_registered(self) -> None:
+        names = self._registered_tool_names()
+        assert "sandbox_batch_setup" in names
+        assert "sandbox_batch_revoke" in names
 
 
 class TestCorruptSettings:

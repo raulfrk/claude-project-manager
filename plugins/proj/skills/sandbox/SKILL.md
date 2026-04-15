@@ -1,7 +1,7 @@
 ---
 name: sandbox
 description: Unified sandbox management — auto-detects state, sets up permissions, checks sync, audits configuration, and debugs issues
-allowed-tools: mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_skill_allow, mcp__plugin_sandbox_sandbox__sandbox_check, mcp__plugin_sandbox_sandbox__sandbox_reconcile, mcp__plugin_proj_proj__notes_append, mcp__plugin_proj_proj__proj_perms_sync, mcp__plugin_proj_proj__proj_session_context, Edit
+allowed-tools: mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_batch_revoke, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_check, mcp__plugin_sandbox_sandbox__sandbox_reconcile, mcp__plugin_proj_proj__notes_append, mcp__plugin_proj_proj__proj_perms_sync, mcp__plugin_proj_proj__proj_session_context, Edit
 argument-hint: "[--setup] [--debug <path|tool>] [--apply] [path_or_server] [scope]"
 ---
 
@@ -175,7 +175,7 @@ Bare args (path/server, no `--` flags).
 **A2.** Determine type:
 
 - Filesystem path (starts `/`, `~`, `.`) → `mcp__plugin_sandbox_sandbox__sandbox_add_write_path(path=<path>, scope=<scope>)`
-- MCP server (no path separators) → `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow(server_name=<name>, scope=<scope>)`
+- MCP server (no path separators) → `mcp__plugin_sandbox_sandbox__sandbox_batch_setup(mcp_servers=[<name>])`
 - No recognizable arg → ask: 1) "Grant access to what? (path or MCP server)" 2) "Scope? (user/project)" — default `user`.
 
 **A3.** Show confirmation result.

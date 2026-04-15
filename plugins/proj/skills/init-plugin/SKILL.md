@@ -3,7 +3,7 @@
 ---
 name: init-plugin
 desc: First-time setup wizard for proj plugin. Run this before via any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_zoxide_zoxide__zoxide_query, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
@@ -241,7 +241,7 @@ existing_write = set(sandbox_state.get("write_paths", [])) if sandbox_state else
 ```
 
 ### 7a. MCP auto-allow
-Build server list, call `mcp__plugin_sandbox_sandbox__sandbox_add_mcp_allow` once:
+Build server list, call `mcp__plugin_sandbox_sandbox__sandbox_batch_setup(mcp_servers=[...])` once:
 - Always: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
 - `auto_allow_mcps: true` → also: `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`
 - + worktree detected: `"plugin_worktree_worktree"`
