@@ -215,39 +215,6 @@ class TestUpdateTasksUnexpectedResponse:
         assert result["failures"][1]["id"] == "2"
 
 
-# -- todoist_update_task_hook: unexpected response type ----------------------
-
-
-class TestUpdateTaskHookUnexpectedResponse:
-    def test_non_dict_response(self, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = "oops"
-
-        app = _make_task_app()
-        tool = app._tool_manager._tools["todoist_update_task_hook"]
-        result = json.loads(tool.fn(id="u1", content="X"))
-
-        assert result["successes"] == []
-        assert len(result["failures"]) == 1
-        assert result["failures"][0]["id"] == "u1"
-        assert result["failures"][0]["error"] == "Unexpected response type"
-
-
-# -- todoist_add_child_task_hook: unexpected response type -------------------
-
-
-class TestAddChildTaskHookUnexpectedResponse:
-    def test_non_dict_response(self, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = None
-
-        app = _make_task_app()
-        tool = app._tool_manager._tools["todoist_add_child_task_hook"]
-        result = json.loads(tool.fn(content="Child", projectId="p1", parentId="par1"))
-
-        assert result["successes"] == []
-        assert len(result["failures"]) == 1
-        assert result["failures"][0]["error"] == "Unexpected response type"
-
-
 # -- todoist_find_tasks: edge cases ------------------------------------------
 
 

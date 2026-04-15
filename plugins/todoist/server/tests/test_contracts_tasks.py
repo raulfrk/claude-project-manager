@@ -310,38 +310,6 @@ class TestUpdateTasksContract:
         assert_response_parses(result["successes"][0], UPDATE_TASK)
 
 
-# -- todoist_update_task_hook (POST /api/v1/tasks/{id}) ---------------------
-
-
-class TestUpdateTaskHookContract:
-    @respx.mock
-    def test_hook_update_request_shape(self, mock_client: TodoistClient) -> None:
-        route = respx.post(f"{BASE_URL}/tasks/h1").mock(
-            return_value=build_success_response(UPDATE_TASK, _api_task(id="h1", content="Hooked"))
-        )
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_update_task_hook")
-        json.loads(tool.fn(id="h1", content="Hooked"))
-
-        assert route.called
-        request = route.calls[0].request
-        assert_request_matches_contract(request, UPDATE_TASK, path_params={"task_id": "h1"})
-
-    @respx.mock
-    def test_hook_update_response_parses(self, mock_client: TodoistClient) -> None:
-        respx.post(f"{BASE_URL}/tasks/h1").mock(
-            return_value=build_success_response(UPDATE_TASK, _api_task(id="h1"))
-        )
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_update_task_hook")
-        result = json.loads(tool.fn(id="h1", content="Updated"))
-
-        assert len(result["successes"]) == 1
-        assert_response_parses(result["successes"][0], UPDATE_TASK)
-
-
 # -- todoist_complete_tasks (POST /api/v1/tasks/{id}/close) -----------------
 
 
@@ -368,34 +336,6 @@ class TestCompleteTasksContract:
         result = json.loads(tool.fn(ids=["t1", "t2"]))
 
         assert len(result["successes"]) == 2
-        assert result["failures"] == []
-
-
-# -- todoist_complete_task_hook (POST /api/v1/tasks/{id}/close) -------------
-
-
-class TestCompleteTaskHookContract:
-    @respx.mock
-    def test_hook_close_request_shape(self, mock_client: TodoistClient) -> None:
-        route = respx.post(f"{BASE_URL}/tasks/h1/close").mock(return_value=httpx.Response(204))
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_complete_task_hook")
-        json.loads(tool.fn(id="h1"))
-
-        assert route.called
-        request = route.calls[0].request
-        assert_request_matches_contract(request, CLOSE_TASK, path_params={"task_id": "h1"})
-
-    @respx.mock
-    def test_hook_close_response_shape(self, mock_client: TodoistClient) -> None:
-        respx.post(f"{BASE_URL}/tasks/h1/close").mock(return_value=httpx.Response(204))
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_complete_task_hook")
-        result = json.loads(tool.fn(id="h1"))
-
-        assert result["successes"] == [{"id": "h1"}]
         assert result["failures"] == []
 
 
@@ -498,57 +438,6 @@ class TestVerifyCompleteContract:
 
         assert result["verified"] is False
         assert result["status"] == "open"
-
-
-# -- todoist_add_child_task_hook (POST /api/v1/tasks) -----------------------
-
-
-class TestAddChildTaskHookContract:
-    @respx.mock
-    def test_child_task_request_shape(self, mock_client: TodoistClient) -> None:
-        route = respx.post(f"{BASE_URL}/tasks").mock(
-            return_value=build_success_response(
-                CREATE_TASK, _api_task(id="child1", content="Sub-task")
-            )
-        )
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_add_child_task_hook")
-        json.loads(
-            tool.fn(
-                content="Sub-task",
-                projectId="proj1",
-                parentId="parent1",
-            )
-        )
-
-        assert route.called
-        request = route.calls[0].request
-        assert_request_matches_contract(request, CREATE_TASK)
-        body = json.loads(request.content)
-        assert body["project_id"] == "proj1"
-        assert body["parent_id"] == "parent1"
-
-    @respx.mock
-    def test_child_task_response_parses(self, mock_client: TodoistClient) -> None:
-        respx.post(f"{BASE_URL}/tasks").mock(
-            return_value=build_success_response(CREATE_TASK, _api_task(id="child1"))
-        )
-
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_add_child_task_hook")
-        result = json.loads(tool.fn(content="Sub-task", projectId="proj1", parentId="parent1"))
-
-        assert len(result["successes"]) == 1
-        assert_response_parses(result["successes"][0], CREATE_TASK)
-
-    def test_child_task_skips_without_parent(self, mock_client: TodoistClient) -> None:
-        """No HTTP call should be made when parentId is missing."""
-        app = _register_task_tools()
-        tool = _get_tool(app, "todoist_add_child_task_hook")
-        result = json.loads(tool.fn(content="Task", projectId="proj1", parentId=None))
-
-        assert "warning" in result
 
 
 # -- Error contract tests ----------------------------------------------------

@@ -166,29 +166,3 @@ class TestFindProjects:
 
         # get_paginated returns list; non-dict items filtered by tool
         assert len(result) == 1
-
-
-# -- todoist_add_project_hook ------------------------------------------------
-
-
-class TestAddProjectHook:
-    def test_success(self, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _api_project(id="h1", name="Hook Project")
-
-        app = _make_app()
-        tool = app._tool_manager._tools["todoist_add_project_hook"]
-        result = json.loads(tool.fn(name="Hook Project"))
-
-        assert len(result["successes"]) == 1
-        assert result["failures"] == []
-
-    def test_api_error_returns_failure(self, mock_client: MagicMock) -> None:
-        mock_client.post.side_effect = RuntimeError("Server error")
-
-        app = _make_app()
-        tool = app._tool_manager._tools["todoist_add_project_hook"]
-        result = json.loads(tool.fn(name="Bad"))
-
-        assert result["successes"] == []
-        assert len(result["failures"]) == 1
-        assert "Server error" in result["failures"][0]["error"]

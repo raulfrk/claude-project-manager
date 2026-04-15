@@ -349,7 +349,7 @@ Exact structure below. All CSS/JS inline or CDN — no external file deps.
 {
   "id": "hook-id-string",
   "trigger_tool": "mcp__plugin_proj_proj__todo_complete",
-  "target_tool": "mcp__plugin_todoist_todoist__todoist_complete_task_hook",
+  "target_tool": "mcp__plugin_todoist_todoist__todoist_complete_tasks",
   "server": "todoist",
   "blocking": false,
   "verification": false,

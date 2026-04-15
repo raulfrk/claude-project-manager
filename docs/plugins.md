@@ -444,9 +444,6 @@ Local Todoist MCP server providing task and project management via the Todoist R
 | `todoist_find_tasks(project_id?, filter?)` | Search for tasks |
 | `todoist_add_projects(projects)` | Create projects |
 | `todoist_find_projects(name?)` | Search for projects |
-| `todoist_add_project_hook(...)` | Hook target: create project |
-| `todoist_complete_task_hook(...)` | Hook target: complete task |
-| `todoist_update_task_hook(...)` | Hook target: update task |
 | `todoist_verify_complete(...)` | Verification hook: confirm completion |
 
 ### Skills
