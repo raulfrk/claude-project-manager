@@ -168,6 +168,15 @@ class TestDirectToolMapping:
         assert hook["target_tool"] == "move_card"
         assert hook["blocking"] is False
 
+    def test_todo_complete_excludes_batch(self) -> None:
+        """trello-on-todo-complete must not fire for batch results."""
+        hooks = {h["id"]: h for h in self._load_hooks()}
+        hook = hooks["trello-on-todo-complete"]
+        assert hook.get("result_condition") == {"is_batch": False}, (
+            "trello-on-todo-complete must have result_condition: {is_batch: false} "
+            "to prevent firing on batch completions"
+        )
+
     def test_no_checklist_hooks_remain(self) -> None:
         """Verify no hooks reference checklist-based tools."""
         hooks = self._load_hooks()

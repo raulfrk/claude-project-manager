@@ -48,7 +48,7 @@ async def test_todo_complete_single_returns_todoist_task_ids_list(cfg: ProjConfi
     data = json.loads(result)
     assert "todoist_task_ids" in data
     assert data["todoist_task_ids"] == ["todoist-abc-123"]
-    assert "is_batch" not in data  # single path must not set is_batch
+    assert data.get("is_batch") is False  # single path sets is_batch=False to exclude batch hooks
 
 
 def _status_str(todo: Todo) -> str:

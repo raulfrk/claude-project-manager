@@ -1265,6 +1265,7 @@ def register(app: FastMCP) -> None:
         result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
         # Add todoist_task_ids list for hook compat (hooks now use list param).
         result_data["todoist_task_ids"] = [todo.todoist_task_id] if todo.todoist_task_id else []
+        result_data["is_batch"] = False
         return json.dumps(result_data)
 
     @app.tool(description="Revert a completed todo back to pending.")

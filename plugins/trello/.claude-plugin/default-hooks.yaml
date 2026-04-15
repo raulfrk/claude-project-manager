@@ -67,6 +67,8 @@ hooks:
     param_mapping:
       card_id: "${trello_card_id}"
       list_id: "${trello_done_list_id}"
+    result_condition:
+      is_batch: false
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
