@@ -105,14 +105,14 @@ def register(app: FastMCP) -> None:
                     },
                 )
                 if not isinstance(data, dict):
-                    break
+                    return json.dumps({"issues": all_issues, "total": len(all_issues), "warning": "Unexpected response format, pagination stopped early"})
                 issues = data.get("issues", [])
                 if not isinstance(issues, list):
-                    break
+                    return json.dumps({"issues": all_issues, "total": len(all_issues), "warning": "Unexpected issues format, pagination stopped early"})
                 all_issues.extend(issues)
                 total = data.get("total", 0)
                 if not isinstance(total, int):
-                    break
+                    total = len(all_issues)
                 start_at += len(issues)
                 if start_at >= total or not issues:
                     break
