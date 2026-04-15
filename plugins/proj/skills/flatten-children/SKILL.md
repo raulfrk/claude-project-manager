@@ -1,7 +1,7 @@
 ---
 name: flatten-children
 description: Migrate nested child todos of a parent to flat top-level todos with group:<parent-id> tag, then delete originals. Use when the user says "flatten children", "migrate children to flat", or "flatten <id>".
-allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_notes_append, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_todoist_todoist__todoist_find_tasks, mcp__plugin_trello_trello__get_card, mcp__plugin_trello_trello__archive_card, mcp__plugin_jira_jira__jira_get_issue, mcp__plugin_jira_jira__jira_bulk_update_issues
+allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_add, mcp__plugin_proj_proj__todo_delete, mcp__plugin_proj_proj__todo_update, mcp__plugin_proj_proj__todo_notes_append, mcp__plugin_proj_proj__tracking_git_flush, mcp__plugin_todoist_todoist__todoist_find_tasks, mcp__plugin_trello_trello__get_card, mcp__plugin_trello_trello__archive_card, mcp__plugin_jira_jira__jira_get_issue, mcp__plugin_jira_jira__jira_update_issues
 argument-hint: "<parent-id>"
 ---
 
@@ -107,7 +107,7 @@ Mark completed.
 - Jira not in integrations → skip (mark completed, continue)
 - Each `id` in `created_ids`: `jira_get_issue` → confirm issue exists
   - Missing → WARN: "Jira issue missing for todo <id>. Skipping Jira transition for originals." → continue
-- Transition original child issues to Done/Closed: `jira_bulk_update_issues` w/ status transition
+- Transition original child issues to Done/Closed: `jira_update_issues` w/ status transition
   - Failure → WARN inline, continue (do not abort)
 
 Mark completed.

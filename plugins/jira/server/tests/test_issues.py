@@ -493,7 +493,7 @@ class TestJiraBulkCreateIssues:
         assert "500" in parsed["error"]
 
 
-class TestJiraBulkUpdateIssues:
+class TestJiraUpdateIssues:
     def test_updates_multiple_issues(self, mock_jira_client: MagicMock, issue_tools: dict) -> None:
         mock_jira_client.put.return_value = None
 
@@ -506,7 +506,7 @@ class TestJiraBulkUpdateIssues:
             }
         )
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["successes"]) == 2
@@ -527,7 +527,7 @@ class TestJiraBulkUpdateIssues:
     def test_invalid_json_returns_error(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        result = issue_tools["jira_bulk_update_issues"](updates_json="bad json")
+        result = issue_tools["jira_update_issues"](updates_json="bad json")
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -536,7 +536,7 @@ class TestJiraBulkUpdateIssues:
     def test_missing_updates_returns_error(
         self, mock_jira_client: MagicMock, issue_tools: dict
     ) -> None:
-        result = issue_tools["jira_bulk_update_issues"](updates_json=json.dumps({"foo": "bar"}))
+        result = issue_tools["jira_update_issues"](updates_json=json.dumps({"foo": "bar"}))
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -553,7 +553,7 @@ class TestJiraBulkUpdateIssues:
             }
         )
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 1
@@ -570,7 +570,7 @@ class TestJiraBulkUpdateIssues:
             }
         )
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 1
@@ -593,7 +593,7 @@ class TestJiraBulkUpdateIssues:
             }
         )
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 1
@@ -606,7 +606,7 @@ class TestJiraBulkUpdateIssues:
     ) -> None:
         payload = json.dumps({"updates": []})
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert "error" in parsed
@@ -631,7 +631,7 @@ class TestJiraBulkUpdateIssues:
             }
         )
 
-        result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+        result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 3

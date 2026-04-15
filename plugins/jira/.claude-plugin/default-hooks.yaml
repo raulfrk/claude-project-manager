@@ -18,7 +18,7 @@ hooks:
 
   - id: jira-on-todo-complete
     trigger_tool: todo_complete
-    target_tool: jira_bulk_update_issues
+    target_tool: jira_update_issues
     server: jira
     param_mapping:
       updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"resolution": {"name": "Done"}}}]}'
@@ -27,16 +27,16 @@ hooks:
 
   - id: jira-on-todo-update
     trigger_tool: todo_update
-    target_tool: jira_bulk_update_issues
+    target_tool: jira_update_issues
     server: jira
     param_mapping:
       updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"summary": "${title}", "description": "${notes}"}}]}'
     blocking: true
     condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
 
-  - id: jira-on-todo-complete-batch
+  - id: jira-on-todo-batch-complete
     trigger_tool: todo_complete
-    target_tool: jira_bulk_update_issues
+    target_tool: jira_update_issues
     server: jira
     param_mapping:
       updates_json: "${jira_updates_json}"
@@ -47,7 +47,7 @@ hooks:
 
   - id: jira-on-todo-delete
     trigger_tool: todo_delete
-    target_tool: jira_bulk_update_issues
+    target_tool: jira_update_issues
     server: jira
     param_mapping:
       updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"resolution": {"name": "Won''t Do"}}}]}'

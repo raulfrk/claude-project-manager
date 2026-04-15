@@ -253,13 +253,13 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Bulk-update Jira issues. updates_json is a JSON string with an 'updates' array. "
-            "Each entry has 'key' (issue key, required) and 'fields' (dict of fields to update). "
-            "Loops PUT /rest/api/2/issue/{key} internally with rate limiting. "
+            "Update one or more Jira issues. updates_json is a JSON string with an 'updates' "
+            "array. Each entry has 'key' (issue key, required) and 'fields' (dict of fields "
+            "to update). Loops PUT /rest/api/2/issue/{key} for each entry. "
             "Returns {successes: [...], failures: [...]}."
         ),
     )
-    def jira_bulk_update_issues(updates_json: str) -> str:
+    def jira_update_issues(updates_json: str) -> str:
         client = get_client()
         try:
             payload = json.loads(updates_json)

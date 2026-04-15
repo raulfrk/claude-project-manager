@@ -332,11 +332,11 @@ class TestBulkCreateContract:
 
 
 # ---------------------------------------------------------------------------
-# jira_bulk_update_issues
+# jira_update_issues
 # ---------------------------------------------------------------------------
 
 
-class TestBulkUpdateContract:
+class TestUpdateIssuesContract:
     @respx.mock
     def test_request_and_response(self, issue_tools: dict, client: JiraClient) -> None:
         # bulk_update loops PUT per issue; mock both with JSON body
@@ -359,7 +359,7 @@ class TestBulkUpdateContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+            result = issue_tools["jira_update_issues"](updates_json=payload)
 
         assert route1.called
         assert route2.called
@@ -398,7 +398,7 @@ class TestBulkUpdateContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+            result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 1
@@ -416,7 +416,7 @@ class TestBulkUpdateContract:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("server.tools.issues.get_client", lambda: client)
-            result = issue_tools["jira_bulk_update_issues"](updates_json=payload)
+            result = issue_tools["jira_update_issues"](updates_json=payload)
 
         parsed = json.loads(result)
         assert len(parsed["failures"]) == 1
