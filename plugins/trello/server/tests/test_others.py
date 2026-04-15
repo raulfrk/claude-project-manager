@@ -443,13 +443,12 @@ class TestAddAttachment:
         assert kwargs["params"]["name"] == "My File"
         assert kwargs["params"]["url"] == "https://x.com/f"
 
-    def test_empty_url_omitted(self, mock_trello_client: MagicMock) -> None:
+    def test_empty_url_returns_error(self, mock_trello_client: MagicMock) -> None:
         tools = _collect_tools(register_attachments, mock_trello_client)
-        mock_trello_client.post.return_value = {"id": "att2"}
-        tools["add_attachment"]("c1")
-        _, kwargs = mock_trello_client.post.call_args
-        assert "url" not in kwargs["params"]
-        assert "name" not in kwargs["params"]
+        result = json.loads(tools["add_attachment"]("c1"))
+        assert "error" in result
+        assert "url" in result["error"].lower()
+        mock_trello_client.post.assert_not_called()
 
 
 class TestDeleteAttachment:

@@ -18,12 +18,12 @@ def register(app: FastMCP) -> None:
         attachments = client.get(f"/cards/{card_id}/attachments")
         return json.dumps(attachments)
 
-    @app.tool(description="Add an attachment to a card. At least url must be provided.")
+    @app.tool(description="Add an attachment to a card. url is required.")
     def add_attachment(card_id: str, url: str = "", name: str = "") -> str:
+        if not url:
+            return json.dumps({"error": "url is required"})
         client = get_client()
-        params: dict[str, str] = {}
-        if url:
-            params["url"] = url
+        params: dict[str, str] = {"url": url}
         if name:
             params["name"] = name
         attachment = client.post(f"/cards/{card_id}/attachments", params=params)
