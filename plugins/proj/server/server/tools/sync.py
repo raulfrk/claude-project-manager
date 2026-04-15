@@ -9,6 +9,10 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from . import jira_sync as _jira_mod
+from . import todoist_full_sync as _todoist_mod
+from . import trello_full_sync as _trello_mod
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
@@ -33,10 +37,6 @@ def register(app: FastMCP) -> None:
         retry_failures: str | None = None,
         confirmed_links: str | None = None,
     ) -> str:
-        import server.tools.jira_sync as _jira_mod
-        import server.tools.todoist_full_sync as _todoist_mod
-        import server.tools.trello_full_sync as _trello_mod
-
         dispatch = {
             "todoist": lambda: _todoist_mod._run_todoist_full_sync(
                 project_name=project_name,
@@ -57,4 +57,7 @@ def register(app: FastMCP) -> None:
             return json.dumps(
                 {"error": (f"Unknown integration '{integration}'. Use: todoist, trello, jira.")}
             )
-        return fn()
+        try:
+            return fn()
+        except Exception as exc:
+            return json.dumps({"status": "error", "integration": integration, "error": str(exc)})
