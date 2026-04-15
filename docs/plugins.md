@@ -17,7 +17,7 @@ Detailed reference for all 6 plugins in the claude-project-manager marketplace.
 
 ## worktree
 
-**Version**: 2.6.0 | **Category**: utilities | **License**: MIT
+**Version**: 5.0.0 | **Category**: utilities | **License**: MIT
 
 Registry-based git worktree management. Register a repository once with a label, then create isolated worktrees for branches or parallel work. Automatically manages sandbox permissions via the proj plugin's sandbox tools.
 
@@ -86,7 +86,7 @@ Key fields:
 
 ## proj
 
-**Version**: 3.0.1 | **Category**: productivity | **License**: MIT
+**Version**: 5.0.0 | **Category**: productivity | **License**: MIT
 
 The core plugin. Tracks project metadata, todos with nested dependencies and blocking relationships, timestamped notes, and git activity across multiple repositories. Supports bidirectional Todoist, Trello, and Jira sync.
 
@@ -122,8 +122,6 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | Tool | Description |
 |------|-------------|
 | `todo_add(title, priority?, parent?)` | Add a new todo |
-| `todo_add_child(parent_id, title, ...)` | Add a child todo |
-| `todo_batch_add_children(parent_id, children)` | Batch-add child todos |
 | `todo_get(id)` | Get a specific todo |
 | `todo_list(status?)` | List todos with optional status filter |
 | `todo_list_all()` | List all todos across all projects |
@@ -132,8 +130,6 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `todo_complete(id)` | Mark a todo as done |
 | `todo_uncomplete(id)` | Re-open a completed todo |
 | `todo_delete(id)` | Delete a todo |
-| `todo_block(id, blocked_by)` | Set a blocking dependency |
-| `todo_unblock(id, blocked_by)` | Remove a blocking dependency |
 | `todo_ready()` | List todos ready for work (unblocked) |
 | `todo_set_content_flag(id, flag, value)` | Set content flags (has_requirements, has_research) |
 
@@ -191,11 +187,11 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 
 | Tool | Description |
 |------|-------------|
-| `proj_todoist_full_sync()` | Full bidirectional Todoist sync |
-| `proj_trello_full_sync()` | Full bidirectional Trello sync |
+| `proj_sync(integration="todoist")` | Full bidirectional Todoist sync |
+| `proj_sync(integration="trello")` | Full bidirectional Trello sync |
 | `proj_trello_diff()` | Compute Trello sync diff |
 | `proj_trello_apply(operations)` | Apply Trello sync operations |
-| `proj_jira_full_sync()` | Full Jira sync |
+| `proj_sync(integration="jira")` | Full Jira sync |
 | `proj_jira_map()` | Compute Jira-to-local mapping |
 | `proj_jira_apply(mapping)` | Apply Jira mapping |
 | `proj_identify_batches()` | Identify independent todo batches for parallel work |

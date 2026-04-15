@@ -6,16 +6,16 @@ This document describes the system architecture of claude-project-manager, a Cla
 
 ## System Overview
 
-The marketplace contains 7 plugins that work independently or together:
+The marketplace contains 6 plugins that work independently or together:
 
 | Plugin | Version | Category | Type | Description |
 |--------|---------|----------|------|-------------|
-| **worktree** | 3.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories (includes zoxide frecency tools) |
-| **proj** | 4.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) — includes sandbox tools for managing `settings.json` |
-| **router** | 2.1.0 | utilities | MCP server + skills | Central MCP-to-MCP router with condition evaluation, auto-registration, and recovery |
-| **todoist** | 2.0.0 | integrations | MCP server | Todoist task and project management via REST API |
-| **trello** | 3.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
-| **jira** | 3.0.0 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
+| **worktree** | 5.0.0 | utilities | MCP server + skills | Git worktree management from registered base repositories (includes zoxide frecency tools) |
+| **proj** | 5.0.0 | productivity | MCP server + skills + hooks | Full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync) — includes sandbox tools for managing `settings.json` |
+| **router** | 5.0.0 | utilities | MCP server + skills | Central MCP-to-MCP router with condition evaluation, auto-registration, and recovery |
+| **todoist** | 5.0.0 | integrations | MCP server | Todoist task and project management via REST API |
+| **trello** | 5.0.0 | integrations | MCP server | Trello board, card, checklist, label, comment, and attachment management via REST API |
+| **jira** | 5.0.0 | integrations | MCP server | Read-only Jira Server issue and project access via REST API |
 ### Marketplace Structure
 
 ```
