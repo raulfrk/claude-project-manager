@@ -3,7 +3,7 @@
 Project management plugins for Claude Code -- track todos, manage permissions, and orchestrate workflows from inside your conversations.
 
 <!-- AUTO:badges-start -->
-[![version](https://img.shields.io/badge/version-4.0.0-blue?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-5.0.0-blue?style=flat-square)](CHANGELOG.md)
 [![tests](https://img.shields.io/badge/tests-752%20passing-brightgreen?style=flat-square)](#contributing)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 <!-- AUTO:badges-end -->

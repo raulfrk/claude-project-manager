@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [5.0.0] - 2026-04-15
+
+Breaking changes. No backward-compat shims. Update skill files and hook configs on upgrade.
+
+### Removed tools (use replacement)
+
+**proj plugin:**
+- `todo_add_child(parent_id, title)` → `todo_add(title=..., parent=parent_id)`
+- `todo_batch_add_children(parent_id, children)` → `todo_add(parent=parent_id, children=<json>)`
+- `todo_batch_complete(todo_ids)` → `todo_complete(todo_ids=[...])`
+- `todo_block(todo_id, blocks_ids)` → `todo_update(todo_id=blocked_id, blocked_by_set=[blocker_id])`
+- `todo_unblock(todo_id)` → `todo_update(todo_id=todo_id, blocked_by_set=[])`
+- `proj_todoist_full_sync()` → `proj_sync(integration="todoist")`
+- `proj_trello_full_sync()` → `proj_sync(integration="trello")`
+- `proj_jira_full_sync()` → `proj_sync(integration="jira")`
+
+**trello plugin:**
+- `batch_add_checklist_items(checklist_id, items)` → `add_checklist_item(checklist_id, items=[...])`
+- `batch_update_checklist_items(card_id, updates)` → `update_checklist_item(card_id, updates=[...])`
+
+**jira plugin:**
+- `jira_bulk_update_issues(issues)` → `jira_update_issues(issues=[...])`
+
+**todoist plugin:**
+- `todoist_complete_task_hook`, `todoist_update_task_hook`, `todoist_add_child_task_hook`, `todoist_add_project_hook` — removed (dead hook-variant wrappers)
+
+**sandbox plugin (now in proj):**
+- `sandbox_add_mcp_allow`, `sandbox_remove_mcp_allow`, `sandbox_add_skill_allow`, `sandbox_remove_skill_allow`, `sandbox_add_domain`, `sandbox_remove_domain` — removed (use `sandbox_batch_setup` / `sandbox_batch_revoke`)
+
+### Removed plugins (functionality folded)
+
+- **analyse** → skills now available as `proj:review`, `proj:explore`
+- **zoxide** → tools (`zoxide_boost`, `zoxide_query`, `zoxide_remove`) moved into `worktree` MCP server (names unchanged)
+- **sandbox** → tools moved into `proj` MCP server (names unchanged); `mcp__plugin_sandbox_sandbox__*` allow rule now covered by `mcp__plugin_proj_proj__*`
+
+### Storage changes
+
+- YAML fallback removed from storage layer — `data.db` missing now raises `FileNotFoundError`
+- `archive.yaml.bak` disaster-recovery path in `load_archived_todos` retained
+
+### Hook migration
+
+Hooks with renamed trigger/target tools must be updated in `~/.claude/hooks.yaml`:
+- `trigger_tool: todo_add_child` → `todo_add`
+- `trigger_tool: todo_batch_add_children` → `todo_add`
+- `trigger_tool: todo_batch_complete` → `todo_complete`
+- `target_tool: proj_todoist_full_sync` → `proj_sync` (add `integration: "todoist"` param)
+- `target_tool: proj_jira_full_sync` → `proj_sync` (add `integration: "jira"` param)
+- `target_tool: jira_bulk_update_issues` → `jira_update_issues`
+
+### Upgrade path
+
+1. Re-run installer to update MCP server entries (removes zoxide/sandbox standalone servers)
+2. Run `python scripts/migrate_hooks.py --dry-run` then without `--dry-run` to update hooks
+3. Update any custom skill files that call removed tool names
+
 ## [Unreleased]
 
 ### Breaking changes

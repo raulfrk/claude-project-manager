@@ -133,6 +133,7 @@ def make_todo_source(**overrides: Any) -> dict[str, Any]:
         "notes": "",
         "due_date": None,
         "todoist_task_id": "td-task-100",
+        "todoist_task_ids": ["td-task-100"],
         "trello_project_card_id": "card-tr-proj-1",
         "trello_card_id": "card-tr-todo-1",
         "jira_issue_key": None,

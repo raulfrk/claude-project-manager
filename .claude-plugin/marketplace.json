@@ -19,7 +19,7 @@
       "name": "worktree",
       "source": "./plugins/worktree",
       "description": "Git worktree management \u2014 create, list, and remove worktrees from configured base repositories",
-      "version": "3.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
@@ -36,7 +36,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "4.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
@@ -53,7 +53,7 @@
       "name": "trello",
       "source": "./plugins/trello",
       "description": "Trello board, card, and list management via REST API \u2014 full CRUD for boards, lists, cards, labels, members, comments, checklists, attachments",
-      "version": "3.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
@@ -71,7 +71,7 @@
       "name": "jira",
       "source": "./plugins/jira",
       "description": "Read-only Jira Server issue and project access via REST API.",
-      "version": "3.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
@@ -88,7 +88,7 @@
       "name": "router",
       "source": "./plugins/router",
       "description": "MCP-to-MCP dispatch registry for cpm plugins. Chain tool execution across plugins via post-execution hooks on a shared socket registry. Not to be confused with Claude Code's native hooks feature in settings.json.",
-      "version": "2.2.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
@@ -105,7 +105,7 @@
       "name": "todoist",
       "source": "./plugins/todoist",
       "description": "Todoist task and project management via REST API \u2014 create, complete, update, find, and delete tasks and projects",
-      "version": "2.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "raulfrk"
       },
