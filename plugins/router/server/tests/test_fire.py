@@ -1364,7 +1364,7 @@ class TestParentTodoistTaskIdGuard:
             [
                 _hook(
                     "hook-parent",
-                    "todo_add_child",
+                    "todo_add",
                     "todoist_add_child_task_hook",
                     condition=(
                         "sync.todoist.enabled and sync.todoist.auto_sync"
@@ -1392,7 +1392,7 @@ class TestParentTodoistTaskIdGuard:
             ),
         ):
             source = json.dumps({"parent_todoist_task_id": "abc123", "todoist_task_id": "child1"})
-            result = await hooks_fire("todo_add_child", source_result=source)
+            result = await hooks_fire("todo_add", source_result=source)
 
         data = json.loads(result)
         # Should fire — all conditions met including parent_todoist_task_id
@@ -1410,7 +1410,7 @@ class TestParentTodoistTaskIdGuard:
             [
                 _hook(
                     "hook-parent",
-                    "todo_add_child",
+                    "todo_add",
                     "todoist_add_child_task_hook",
                     condition=(
                         "sync.todoist.enabled and sync.todoist.auto_sync"
@@ -1434,7 +1434,7 @@ class TestParentTodoistTaskIdGuard:
         ):
             # source_result does NOT contain parent_todoist_task_id
             source = json.dumps({"todoist_task_id": "child1"})
-            result = await hooks_fire("todo_add_child", source_result=source)
+            result = await hooks_fire("todo_add", source_result=source)
 
         data = json.loads(result)
         # Should skip — parent_todoist_task_id missing evaluates to False
@@ -1452,7 +1452,7 @@ class TestParentTodoistTaskIdGuard:
             [
                 _hook(
                     "hook-parent",
-                    "todo_add_child",
+                    "todo_add",
                     "todoist_add_child_task_hook",
                     condition="todo.parent_todoist_task_id",
                 ),
@@ -1466,7 +1466,7 @@ class TestParentTodoistTaskIdGuard:
             patch("server.lib.conditions._PROJ_CONFIG_PATH", proj_yaml),
         ):
             source = json.dumps({"parent_todoist_task_id": ""})
-            result = await hooks_fire("todo_add_child", source_result=source)
+            result = await hooks_fire("todo_add", source_result=source)
 
         data = json.loads(result)
         assert data["hooks_fired"] == 0

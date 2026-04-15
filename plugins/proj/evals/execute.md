@@ -78,7 +78,7 @@ This is a TRUE end-to-end eval. The agent MUST:
   - The execute flow begins for the first ready todo
 
 ### Scenario 4: Range execute with independent todos runs parallel agents
-- **Prompt**: First decompose `TODO_ID` into sub-todos (or manually create 2 independent children via `todo_add_child`). Store child IDs as `CHILD_1` and `CHILD_2`. Pre-populate requirements and research for each. Then follow the skill instructions as if user said `/proj:execute <CHILD_1>-<CHILD_2>` (range syntax). Simulate plan approval and satisfaction for each.
+- **Prompt**: First decompose `TODO_ID` into sub-todos (or manually create 2 independent children via `todo_add(parent=TODO_ID)`). Store child IDs as `CHILD_1` and `CHILD_2`. Pre-populate requirements and research for each. Then follow the skill instructions as if user said `/proj:execute <CHILD_1>-<CHILD_2>` (range syntax). Simulate plan approval and satisfaction for each.
 - **Expected**: Per SKILL.md range-with-independent-todos flow:
   - Phase 1 (Plan): For each todo, calls `todo_check_executable`, `proj_get_todo_context`, `EnterPlanMode`, `ExitPlanMode` sequentially
   - Phase 2 (Execute): Spawns parallel Task agents for independent todos

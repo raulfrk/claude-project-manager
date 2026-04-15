@@ -296,7 +296,7 @@ class TestNormalizeTitle:
 
 @pytest.mark.asyncio
 class TestTodoAddDedup:
-    """Dedup guard tests for todo_add, todo_add_child, and todo_batch_add_children."""
+    """Dedup guard tests for todo_add and todo_batch_add_children."""
 
     @pytest.fixture()
     def app(self, cfg_with_project: tuple[ProjConfig, str]) -> Any:
@@ -464,7 +464,7 @@ class TestTodoAddDedup:
         )
         assert "todo_id" in r2
 
-    async def test_todo_add_child_rejects_duplicate(
+    async def test_todo_add_with_parent_rejects_duplicate(
         self,
         app: Any,
         cfg_with_project: tuple[ProjConfig, str],

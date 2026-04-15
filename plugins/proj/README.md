@@ -261,7 +261,6 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 | `todo_block` | Set blocking relationships. |
 | `todo_unblock` | Remove blocking relationships. |
 | `todo_ready` | List pending unblocked todos. |
-| `todo_add_child` | Add a child todo. |
 | `todo_tree` | Return todos as a nested JSON tree. |
 | `todo_set_content_flag` | Set `has_requirements` or `has_research` flags. |
 

@@ -56,7 +56,7 @@ This is a TRUE end-to-end eval. The agent MUST:
   - Step 4.5: Analyzes shared-file conflicts and adds `blocked_by` relationships
   - Step 5: Presents proposed breakdown as indented bullet points
   - Step 6: Asks for confirmation (simulated: "yes")
-  - Step 7: Calls `todo_add_child` for each sub-todo (parents before children), calls `todo_block` for dependency relationships
+  - Step 7: Calls `todo_add` (with `parent=` param) for each sub-todo (parents before children), calls `todo_block` for dependency relationships
   - Step 8: Calls `todo_tree` to display final structure
   - Step 9: Calls `tracking_git_flush` with `commit_message="Decompose: <TODO_ID>"`
 - **Assert**:
@@ -71,7 +71,7 @@ This is a TRUE end-to-end eval. The agent MUST:
   - Steps 2-3: Calls `content_get_requirements` and `content_get_research` (if available)
   - Step 3.5: Assesses atomicity — single focused operation (edit one file), so it IS atomic
   - Output contains `Skipping decompose for <ATOMIC_ID> — already atomic`
-  - Does NOT proceed to steps 4-9, does NOT call `todo_add_child`
+  - Does NOT proceed to steps 4-9, does NOT call `todo_add` with `parent=`
 - **Assert**:
   - `todo_get(todo_id=<ATOMIC_ID>)` has no children
 
