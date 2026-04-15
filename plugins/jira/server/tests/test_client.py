@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from server.lib.client import JiraClient, _MAX_RETRIES
+from server.lib.client import _MAX_RETRIES, JiraClient
 from server.lib.config import JiraConfig
 
 
@@ -127,7 +127,12 @@ class TestRateLimit:
 
 
 class TestRetry:
-    def _make_response(self, status_code: int, text: str = "", json_data: object = None) -> MagicMock:
+    def _make_response(
+        self,
+        status_code: int,
+        text: str = "",
+        json_data: object = None,
+    ) -> MagicMock:
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = status_code < 400
         resp.status_code = status_code
@@ -168,7 +173,11 @@ class TestRetry:
         assert mock_get.call_count == 1
         assert len(sleep_calls) == 0
 
-    def test_exhausted_retries_raises(self, client: JiraClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_exhausted_retries_raises(
+        self,
+        client: JiraClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """After max retries, last error is raised."""
         fail_resp = self._make_response(503, "Service Unavailable")
         mock_get = MagicMock(return_value=fail_resp)

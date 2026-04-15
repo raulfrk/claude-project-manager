@@ -105,10 +105,22 @@ def register(app: FastMCP) -> None:
                     },
                 )
                 if not isinstance(data, dict):
-                    return json.dumps({"issues": all_issues, "total": len(all_issues), "warning": "Unexpected response format, pagination stopped early"})
+                    return json.dumps(
+                        {
+                            "issues": all_issues,
+                            "total": len(all_issues),
+                            "warning": "Unexpected response format, pagination stopped early",
+                        }
+                    )
                 issues = data.get("issues", [])
                 if not isinstance(issues, list):
-                    return json.dumps({"issues": all_issues, "total": len(all_issues), "warning": "Unexpected issues format, pagination stopped early"})
+                    return json.dumps(
+                        {
+                            "issues": all_issues,
+                            "total": len(all_issues),
+                            "warning": "Unexpected issues format, pagination stopped early",
+                        }
+                    )
                 all_issues.extend(issues)
                 total = data.get("total", 0)
                 if not isinstance(total, int):

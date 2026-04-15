@@ -76,17 +76,24 @@ class JiraClient:
         for attempt in range(_MAX_RETRIES):
             self._rate_limit()
             try:
-                resp = getattr(self._http, method)(
-                    path, **kwargs
-                )
+                resp = getattr(self._http, method)(path, **kwargs)
                 return self._handle_response(resp)
             except RuntimeError as exc:
                 if not any(f"error {code}:" in str(exc) for code in _RETRYABLE_STATUS_CODES):
                     raise
                 last_exc = exc
                 if attempt < _MAX_RETRIES - 1:
-                    delay = min(_RETRY_BASE_DELAY * (2 ** attempt) + random.random(), 30.0)
-                    _log.warning("Jira API retryable error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, exc)
+                    jitter = random.random()  # noqa: S311
+                    delay = min(
+                        _RETRY_BASE_DELAY * (2**attempt) + jitter,
+                        30.0,
+                    )
+                    _log.warning(
+                        "Jira API retryable error (attempt %d/%d): %s",
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        exc,
+                    )
                     time.sleep(delay)
         raise last_exc  # type: ignore[misc]
 
