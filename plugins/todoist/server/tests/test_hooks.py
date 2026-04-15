@@ -112,3 +112,13 @@ class TestDefaultHooksYaml:
         assert hook["param_mapping"]["project_id"] == "${todoist_project_id}", (
             f"Expected '${{todoist_project_id}}', got: {hook['param_mapping']['project_id']}"
         )
+
+    def test_verify_todoist_complete_excludes_batch(self) -> None:
+        with _HOOKS_PATH.open() as f:
+            data = yaml.safe_load(f)
+        hooks_by_id = {h["id"]: h for h in data["hooks"]}
+        hook = hooks_by_id["verify-todoist-complete"]
+        assert hook.get("result_condition") == {"is_batch": False}, (
+            "verify-todoist-complete must have result_condition: {is_batch: false} "
+            "to prevent firing on batch completions (singular todoist_task_id not in batch results)"
+        )

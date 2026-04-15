@@ -96,6 +96,8 @@ hooks:
     server: todoist
     param_mapping:
       todoist_task_id: "${todoist_task_id}"
+    result_condition:
+      is_batch: false
     blocking: true
     verification: true
     condition: "sync.todoist.enabled and sync.todoist.auto_sync"
