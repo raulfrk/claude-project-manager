@@ -284,6 +284,6 @@ def register(app: FastMCP) -> None:
                     continue
                 client.put(f"/rest/api/2/issue/{key}", json_body={"fields": fields})
                 successes.append({"key": key, "status": "updated"})
-            except Exception as exc:
+            except RuntimeError as exc:
                 failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
         return json.dumps({"successes": successes, "failures": failures})
