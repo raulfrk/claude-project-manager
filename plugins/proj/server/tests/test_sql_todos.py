@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
+from unittest.mock import MagicMock
+
 import pytest
 
 from server.lib.db import ensure_db
 from server.lib.models import ProjConfig, Todo, TodoGit, TrelloSyncState
 from server.lib.sql_todos import (
+    _row_to_todo,
+    _safe_json_loads,
     compute_next_todo_id,
     load_archived_todos,
     load_todos,
@@ -180,3 +185,106 @@ class TestLoadArchivedTodos:
     def test_returns_empty_when_db_missing(self, cfg: ProjConfig) -> None:
         result = load_archived_todos(cfg, "nonexistent")
         assert result == []
+
+
+class TestSafeJsonLoads:
+    def test_valid_json_returns_parsed(self) -> None:
+        assert _safe_json_loads('["a", "b"]', []) == ["a", "b"]
+
+    def test_none_returns_default(self) -> None:
+        assert _safe_json_loads(None, []) == []
+
+    def test_empty_string_returns_default(self) -> None:
+        assert _safe_json_loads("", []) == []
+
+    def test_malformed_json_returns_default(self) -> None:
+        assert _safe_json_loads("{bad json}", []) == []
+
+    def test_malformed_json_returns_list_default(self) -> None:
+        sentinel: list[object] = ["sentinel"]
+        assert _safe_json_loads("{bad json}", sentinel) is sentinel
+
+
+class TestRowToTodoCorruptJson:
+    def _make_row(self, overrides: dict) -> sqlite3.Row:  # type: ignore[type-arg]
+        defaults: dict[str, object] = {
+            "id": "1",
+            "title": "Test",
+            "status": "pending",
+            "priority": "medium",
+            "created": "2026-01-01",
+            "updated": None,
+            "parent": None,
+            "children": "[]",
+            "next_child_id": None,
+            "tags": "[]",
+            "git_branch": None,
+            "git_commits": "[]",
+            "blocks": "[]",
+            "blocked_by": "[]",
+            "notes": None,
+            "has_requirements": 0,
+            "has_research": 0,
+            "todoist_task_id": None,
+            "todoist_desc_synced": None,
+            "trello_card_id": None,
+            "trello_checklist_id": None,
+            "trello_checklist_item_id": None,
+            "jira_issue_key": None,
+            "jira_comment_ids": "[]",
+            "due_date": None,
+            "trello_sync_state": None,
+        }
+        defaults.update(overrides)
+        row = MagicMock(spec=sqlite3.Row)
+        row.__getitem__ = lambda self_, key: defaults[key]
+        return row
+
+    def test_corrupt_children_returns_empty_list(self) -> None:
+        row = self._make_row({"children": "{not valid json"})
+        todo = _row_to_todo(row)
+        assert todo.children == []
+
+    def test_corrupt_tags_returns_empty_list(self) -> None:
+        row = self._make_row({"tags": "!!!"})
+        todo = _row_to_todo(row)
+        assert todo.tags == []
+
+    def test_corrupt_git_commits_returns_empty_list(self) -> None:
+        row = self._make_row({"git_commits": "not-json"})
+        todo = _row_to_todo(row)
+        assert todo.git.commits == []
+
+    def test_corrupt_blocks_returns_empty_list(self) -> None:
+        row = self._make_row({"blocks": "["})
+        todo = _row_to_todo(row)
+        assert todo.blocks == []
+
+    def test_corrupt_blocked_by_returns_empty_list(self) -> None:
+        row = self._make_row({"blocked_by": "["})
+        todo = _row_to_todo(row)
+        assert todo.blocked_by == []
+
+    def test_corrupt_jira_comment_ids_returns_empty_list(self) -> None:
+        row = self._make_row({"jira_comment_ids": "bad"})
+        todo = _row_to_todo(row)
+        assert todo.jira_synced_comment_ids == []
+
+    def test_multiple_corrupt_fields_returns_all_defaults(self) -> None:
+        row = self._make_row(
+            {
+                "children": "bad",
+                "tags": "bad",
+                "git_commits": "bad",
+                "blocks": "bad",
+                "blocked_by": "bad",
+                "jira_comment_ids": "bad",
+            }
+        )
+        todo = _row_to_todo(row)
+        assert todo.children == []
+        assert todo.tags == []
+        assert todo.git.commits == []
+        assert todo.blocks == []
+        assert todo.blocked_by == []
+        assert todo.jira_synced_comment_ids == []

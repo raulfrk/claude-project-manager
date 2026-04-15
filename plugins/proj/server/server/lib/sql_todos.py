@@ -6,13 +6,16 @@ import dataclasses
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from server.lib.db import ensure_db, get_connection
 from server.lib.models import ProjConfig, Todo, TodoGit, TrelloSyncState
 
 if TYPE_CHECKING:
     import sqlite3
+
+
+_log = logging.getLogger(__name__)
 
 
 def _todo_to_row(todo: Todo) -> dict[str, object]:
@@ -56,6 +59,22 @@ def _todo_to_row(todo: Todo) -> dict[str, object]:
     }
 
 
+def _safe_json_loads(data: str | None, default: list[Any]) -> list[Any]:
+    """Deserialize JSON string, returning *default* on any parse error.
+
+    Protects _row_to_todo from crashing when a SQLite cell contains
+    malformed JSON (e.g. due to DB corruption or manual edits).
+    """
+    if not data:
+        return default
+    try:
+        result = json.loads(data)
+        return result if isinstance(result, list) else default
+    except (json.JSONDecodeError, TypeError):
+        _log.warning("Malformed JSON in database field: %.100s", data)
+        return default
+
+
 def _row_to_todo(row: sqlite3.Row) -> Todo:
     """Deserialize a sqlite3.Row into a Todo dataclass.
 
@@ -77,15 +96,15 @@ def _row_to_todo(row: sqlite3.Row) -> Todo:
         created=row["created"],
         updated=row["updated"],
         parent=row["parent"],
-        children=json.loads(row["children"]),
+        children=_safe_json_loads(row["children"], []),
         next_child_id=row["next_child_id"],
-        tags=json.loads(row["tags"]),
+        tags=_safe_json_loads(row["tags"], []),
         git=TodoGit(
             branch=row["git_branch"],
-            commits=json.loads(row["git_commits"]),
+            commits=_safe_json_loads(row["git_commits"], []),
         ),
-        blocks=json.loads(row["blocks"]),
-        blocked_by=json.loads(row["blocked_by"]),
+        blocks=_safe_json_loads(row["blocks"], []),
+        blocked_by=_safe_json_loads(row["blocked_by"], []),
         notes=row["notes"],
         has_requirements=bool(row["has_requirements"]),
         has_research=bool(row["has_research"]),
@@ -95,7 +114,7 @@ def _row_to_todo(row: sqlite3.Row) -> Todo:
         trello_checklist_id=row["trello_checklist_id"],
         trello_checklist_item_id=row["trello_checklist_item_id"],
         jira_issue_key=row["jira_issue_key"],
-        jira_synced_comment_ids=json.loads(row["jira_comment_ids"]),
+        jira_synced_comment_ids=_safe_json_loads(row["jira_comment_ids"], []),
         due_date=row["due_date"],
         trello_sync_state=tss,
     )
@@ -188,9 +207,6 @@ def compute_next_todo_id(cfg: ProjConfig, project_name: str) -> int:
 
 
 # ── Archive todos ─────────────────────────────────────────────────────────────
-
-
-_log = logging.getLogger(__name__)
 
 
 def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
