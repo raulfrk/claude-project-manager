@@ -356,20 +356,196 @@ def todo_export_yaml(project_name: str | None = None) -> str:
         return json.dumps({"error": str(e), "project": name})
 
 
+def _batch_add_children(
+    cfg: ProjConfig,
+    name: str,
+    parent_todo: Todo,
+    child_specs: list[dict[str, JsonValue]],
+    blocking_pairs: list[list[int]],
+    today: str,
+    todos: list[Todo],
+    meta: ProjectMeta,
+) -> str:
+    """Core batch-add logic: create child todos under parent_todo atomically.
+
+    Returns JSON result string. Caller must ensure todos/meta are already loaded.
+    This function mutates todos and meta in place and performs the atomic save.
+    """
+    created: list[dict[str, str]] = []
+    skipped_duplicates: list[str] = []
+    _batch_titles: dict[str, set[str]] = {}
+
+    def _flatten(
+        specs: list[dict[str, JsonValue]],
+        parent: Todo,
+    ) -> None:
+        for spec in specs:
+            title = spec.get("title")
+            if not isinstance(title, str) or not title.strip():
+                continue
+
+            norm_title = _normalize_title(title)
+            existing_siblings = [
+                t for t in todos if t.parent == parent.id and t.status not in ("done", "cancelled")
+            ]
+            existing_match = next(
+                (t for t in existing_siblings if _normalize_title(t.title) == norm_title),
+                None,
+            )
+            if existing_match:
+                skipped_duplicates.append(f"{title} (exists: {existing_match.id})")
+                continue
+            batch_key = parent.id
+            if batch_key not in _batch_titles:
+                _batch_titles[batch_key] = set()
+            if norm_title in _batch_titles[batch_key]:
+                skipped_duplicates.append(f"{title} (duplicate in batch)")
+                continue
+            _batch_titles[batch_key].add(norm_title)
+
+            prio_raw = spec.get("priority")
+            priority = str(prio_raw) if isinstance(prio_raw, str) else cfg.default_priority
+            tags_raw = spec.get("tags")
+            tags = list(tags_raw) if isinstance(tags_raw, list) else []
+            notes_raw = spec.get("notes")
+            notes = str(notes_raw) if isinstance(notes_raw, str) else ""
+
+            child = Todo(
+                id=next_todo_id(meta, parent=parent),
+                title=title,
+                priority=priority,
+                tags=[str(t) for t in tags],
+                parent=parent.id,
+                notes=notes,
+                created=today,
+                updated=today,
+            )
+            if child.id not in parent.children:
+                parent.children.append(child.id)
+            parent.updated = today
+            todos.append(child)
+            created.append({"id": child.id, "title": child.title, "parent": parent.id})
+
+            nested_raw = spec.get("children")
+            if isinstance(nested_raw, list) and nested_raw:
+                _flatten([x for x in nested_raw if isinstance(x, dict)], child)
+
+    _flatten(child_specs, parent_todo)
+
+    # Resolve blocking pairs
+    pair_errors: list[str] = []
+    for pair in blocking_pairs:
+        if not isinstance(pair, list) or len(pair) != 2:
+            pair_errors.append(f"Invalid pair (expected [int, int]): {pair}")
+            continue
+        blocker_idx, blocked_idx = pair
+        if not isinstance(blocker_idx, int) or not isinstance(blocked_idx, int):
+            pair_errors.append(f"Indices must be integers: {pair}")
+            continue
+        if blocker_idx < 0 or blocker_idx >= len(created):
+            pair_errors.append(f"blocker_idx {blocker_idx} out of range (0..{len(created) - 1})")
+            continue
+        if blocked_idx < 0 or blocked_idx >= len(created):
+            pair_errors.append(f"blocked_idx {blocked_idx} out of range (0..{len(created) - 1})")
+            continue
+        if blocker_idx == blocked_idx:
+            pair_errors.append(f"Self-blocking not allowed: {pair}")
+            continue
+        blocker_id = created[blocker_idx]["id"]
+        blocked_id = created[blocked_idx]["id"]
+        todo_map = {t.id: t for t in todos}
+        blocker_todo = todo_map[blocker_id]
+        blocked_todo = todo_map[blocked_id]
+        if blocked_id not in blocker_todo.blocks:
+            blocker_todo.blocks.append(blocked_id)
+        if blocker_id not in blocked_todo.blocked_by:
+            blocked_todo.blocked_by.append(blocker_id)
+
+    # Single atomic save
+    storage.save_todos(cfg, name, todos)
+    storage.save_meta(cfg, meta)
+
+    # Build todoist_tasks for hook-053 param mapping
+    created_index: dict[str, int] = {c["id"]: i for i, c in enumerate(created)}
+    todoist_tasks: list[dict[str, JsonValue]] = []
+    for c in created:
+        if c["parent"] == parent_todo.id:
+            todoist_tasks.append(
+                {
+                    "content": c["title"],
+                    "projectId": meta.todoist_project_id,
+                    "parentId": parent_todo.todoist_task_id,
+                    "_parent_index": -1,
+                    "_local_id": c["id"],
+                }
+            )
+        else:
+            todoist_tasks.append(
+                {
+                    "content": c["title"],
+                    "projectId": meta.todoist_project_id,
+                    "_parent_index": created_index[c["parent"]],
+                    "_local_id": c["id"],
+                }
+            )
+    # Resolve Trello list IDs for hook dispatch
+    trello_list_ids = _resolve_trello_list_ids(cfg)
+    trello_dict = _enrich_trello_dict(cfg.trello.to_dict(), trello_list_ids)
+    tasks_list_id = trello_list_ids.get("tasks", "")
+
+    trello_batch_cards: list[dict[str, str]] = []
+    if tasks_list_id:
+        for c in created:
+            trello_batch_cards.append({"list_id": tasks_list_id, "name": c["title"]})
+
+    # Also expose created_ids for convenient access
+    created_ids = [c["id"] for c in created]
+
+    result_data: dict[str, JsonValue] = {
+        "created": created,
+        "created_ids": created_ids,
+        "count": len(created),
+        "project_name": name,
+        "todoist_project_id": meta.todoist_project_id,
+        "trello_project_card_id": meta.trello_card_id,
+        "trello_card_id": parent_todo.trello_card_id,
+        "parent_todoist_task_id": parent_todo.todoist_task_id,
+        "todoist_tasks": todoist_tasks,
+        "trello_batch_cards": trello_batch_cards,
+        "sync": {
+            "trello": trello_dict,
+            "todoist": cfg.todoist.to_dict(),
+        },
+    }
+    if pair_errors:
+        result_data["blocking_errors"] = pair_errors
+    if skipped_duplicates:
+        result_data["skipped_duplicates"] = skipped_duplicates
+    return json.dumps(result_data)
+
+
 def register(app: FastMCP) -> None:
     """Register todo management tools with the MCP app.
 
     Registers todo_add, todo_list, todo_get, todo_update,
     todo_complete, todo_block, todo_unblock, todo_delete, todo_ready,
-    todo_batch_add_children, todo_tree,
-    todo_set_content_flag, todo_check_executable,
+    todo_tree, todo_set_content_flag, todo_check_executable,
     proj_identify_batches, todo_analyze_graph, and
     proj_find_archived_by_title.
     """
 
-    @app.tool(description="Add a new todo to a project.")
+    @app.tool(
+        description=(
+            "Add a new todo to a project. "
+            "Pass children= (JSON array of child specs) to batch-add children atomically. "
+            "Children-only mode: omit title and pass parent= + children= to add children to an "
+            "existing parent without creating a new root todo. "
+            "blocking_pairs= is a JSON array of [blocker_idx, blocked_idx] pairs (0-based, "
+            "depth-first) to set blocking relationships among the created children."
+        )
+    )
     def todo_add(
-        title: str,
+        title: str = "",
         priority: str | None = None,
         tags: list[str] | None = None,
         blocked_by: list[str] | None = None,
@@ -379,7 +555,40 @@ def register(app: FastMCP) -> None:
         todoist_task_id: str | None = None,
         project_name: str | None = None,
         force_create: bool = False,
+        children: str = "[]",
+        blocking_pairs: str = "[]",
     ) -> str:
+        import json as _json
+
+        _child_specs_raw = children.strip() if children else "[]"
+        _bp_raw = blocking_pairs.strip() if blocking_pairs else "[]"
+
+        # Children-only mode: no title, add children to existing parent
+        if not title or not title.strip():
+            if parent:
+                result = require_project(project_name)
+                if isinstance(result, str):
+                    return result
+                cfg, name = result
+                meta = storage.load_meta(cfg, name)
+                todos = storage.load_todos(cfg, name)
+                today = _now()
+                _parent_todo = next((t for t in todos if t.id == parent), None)
+                if not _parent_todo:
+                    return _json.dumps({"error": f"Parent todo '{parent}' not found."})
+                try:
+                    _specs = _json.loads(_child_specs_raw)
+                except _json.JSONDecodeError as e:
+                    return _json.dumps({"error": f"Invalid JSON for children: {e}"})
+                if not isinstance(_specs, list) or not _specs:
+                    return _json.dumps({"error": "children must be a non-empty JSON array."})
+                try:
+                    _bp = _json.loads(_bp_raw)
+                except _json.JSONDecodeError as e:
+                    return _json.dumps({"error": f"Invalid JSON for blocking_pairs: {e}"})
+                return _batch_add_children(cfg, name, _parent_todo, _specs, _bp, today, todos, meta)
+            return _json.dumps({"error": "title is required when not using children-only mode."})
+
         result = require_project(project_name)
         if isinstance(result, str):
             return result
@@ -452,6 +661,38 @@ def register(app: FastMCP) -> None:
             parent_todo.children.append(todo.id)
             parent_todo.updated = today
         todos.append(todo)
+
+        # If children specified, batch-add them under the newly created todo
+        if _child_specs_raw != "[]":
+            try:
+                _specs = _json.loads(_child_specs_raw)
+            except _json.JSONDecodeError as e:
+                return json.dumps({"error": f"Invalid children JSON: {e}"})
+            if isinstance(_specs, list) and _specs:
+                try:
+                    _bp = _json.loads(_bp_raw)
+                except _json.JSONDecodeError as e:
+                    return json.dumps({"error": f"Invalid blocking_pairs JSON: {e}"})
+                # Save root todo first so children can reference it
+                storage.save_todos(cfg, name, todos)
+                storage.save_meta(cfg, meta)
+                # Reload to pick up saved state
+                todos = storage.load_todos(cfg, name)
+                meta = storage.load_meta(cfg, name)
+                new_todo = next(t for t in todos if t.id == todo.id)
+                batch_result_str = _batch_add_children(
+                    cfg, name, new_todo, _specs, _bp, today, todos, meta
+                )
+                batch_data = json.loads(batch_result_str)
+                return json.dumps(
+                    {
+                        "result": f"Added todo {todo.id}: {title}",
+                        "todo_id": todo.id,
+                        **_todo_hook_fields(todo, meta, name, todos=todos, cfg=cfg),
+                        "children_result": batch_data,
+                    }
+                )
+
         storage.save_todos(cfg, name, todos)
         storage.save_meta(cfg, meta)
         return json.dumps(
@@ -1156,231 +1397,6 @@ def register(app: FastMCP) -> None:
         if not ready:
             return "No todos ready to start."
         return json.dumps([t.to_dict() for t in ready], indent=2)
-
-    @app.tool(
-        description=(
-            "Batch-add multiple children (with optional nesting) under a parent todo. "
-            "Accepts a JSON array of child specs and optional blocking pairs. "
-            "All children are created atomically in a single save."
-        )
-    )
-    def todo_batch_add_children(
-        parent_id: str,
-        children: str,
-        blocking_pairs: str = "[]",
-        project_name: str | None = None,
-    ) -> str:
-        """Add multiple children under a parent in one atomic operation.
-
-        Parameters
-        ----------
-        parent_id : str
-            ID of the existing parent todo.
-        children : str
-            JSON array of child specs. Each spec is an object with:
-              - title (str, required)
-              - priority (str, optional)
-              - tags (list[str], optional)
-              - notes (str, optional)
-              - children (list[spec], optional — nested sub-children)
-        blocking_pairs : str
-            JSON array of [blocker_idx, blocked_idx] pairs where each index
-            refers to the 0-based position in the depth-first flattened list
-            of created children.
-        project_name : str | None
-            Project name override.
-        """
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-
-        # --- Validate parent ---
-        meta = storage.load_meta(cfg, name)
-        todos = storage.load_todos(cfg, name)
-        parent = next((t for t in todos if t.id == parent_id), None)
-        if not parent:
-            return json.dumps({"error": f"Parent todo '{parent_id}' not found."})
-
-        # --- Parse JSON inputs ---
-        try:
-            child_specs: list[dict[str, JsonValue]] = json.loads(children)
-        except json.JSONDecodeError as exc:
-            return json.dumps({"error": f"Invalid JSON for children: {exc}"})
-        if not isinstance(child_specs, list) or not child_specs:
-            return json.dumps({"error": "children must be a non-empty JSON array."})
-
-        try:
-            pairs: list[list[int]] = json.loads(blocking_pairs)
-        except json.JSONDecodeError as exc:
-            return json.dumps({"error": f"Invalid JSON for blocking_pairs: {exc}"})
-        if not isinstance(pairs, list):
-            return json.dumps({"error": "blocking_pairs must be a JSON array."})
-
-        today = _now()
-        created: list[dict[str, str]] = []  # {id, title, parent}
-        skipped_duplicates: list[str] = []
-        # Track normalized titles created in this batch per parent
-        _batch_titles: dict[str, set[str]] = {}
-
-        def _flatten(
-            specs: list[dict[str, JsonValue]],
-            parent_todo: Todo,
-        ) -> None:
-            """Depth-first walk: create Todo for each spec, recurse into nested children."""
-            for spec in specs:
-                title = spec.get("title")
-                if not isinstance(title, str) or not title.strip():
-                    continue  # skip specs without a valid title
-
-                # Dedup guard: check existing children + earlier batch children
-                norm_title = _normalize_title(title)
-                existing_siblings = [
-                    t
-                    for t in todos
-                    if t.parent == parent_todo.id and t.status not in ("done", "cancelled")
-                ]
-                existing_match = next(
-                    (t for t in existing_siblings if _normalize_title(t.title) == norm_title),
-                    None,
-                )
-                if existing_match:
-                    skipped_duplicates.append(f"{title} (exists: {existing_match.id})")
-                    continue
-                batch_key = parent_todo.id
-                if batch_key not in _batch_titles:
-                    _batch_titles[batch_key] = set()
-                if norm_title in _batch_titles[batch_key]:
-                    skipped_duplicates.append(f"{title} (duplicate in batch)")
-                    continue
-                _batch_titles[batch_key].add(norm_title)
-
-                prio_raw = spec.get("priority")
-                priority = str(prio_raw) if isinstance(prio_raw, str) else cfg.default_priority
-                tags_raw = spec.get("tags")
-                tags = list(tags_raw) if isinstance(tags_raw, list) else []
-                notes_raw = spec.get("notes")
-                notes = str(notes_raw) if isinstance(notes_raw, str) else ""
-
-                child = Todo(
-                    id=next_todo_id(meta, parent=parent_todo),
-                    title=title,
-                    priority=priority,
-                    tags=[str(t) for t in tags],
-                    parent=parent_todo.id,
-                    notes=notes,
-                    created=today,
-                    updated=today,
-                )
-                if child.id not in parent_todo.children:
-                    parent_todo.children.append(child.id)
-                parent_todo.updated = today
-                todos.append(child)
-                created.append({"id": child.id, "title": child.title, "parent": parent_todo.id})
-
-                # Recurse into nested children
-                nested_raw = spec.get("children")
-                if isinstance(nested_raw, list) and nested_raw:
-                    _flatten([x for x in nested_raw if isinstance(x, dict)], child)
-
-        _flatten(child_specs, parent)
-
-        # --- Resolve blocking pairs ---
-        pair_errors: list[str] = []
-        for pair in pairs:
-            if not isinstance(pair, list) or len(pair) != 2:
-                pair_errors.append(f"Invalid pair (expected [int, int]): {pair}")
-                continue
-            blocker_idx, blocked_idx = pair
-            if not isinstance(blocker_idx, int) or not isinstance(blocked_idx, int):
-                pair_errors.append(f"Indices must be integers: {pair}")
-                continue
-            if blocker_idx < 0 or blocker_idx >= len(created):
-                pair_errors.append(
-                    f"blocker_idx {blocker_idx} out of range (0..{len(created) - 1})"
-                )
-                continue
-            if blocked_idx < 0 or blocked_idx >= len(created):
-                pair_errors.append(
-                    f"blocked_idx {blocked_idx} out of range (0..{len(created) - 1})"
-                )
-                continue
-            if blocker_idx == blocked_idx:
-                pair_errors.append(f"Self-blocking not allowed: {pair}")
-                continue
-            blocker_id = created[blocker_idx]["id"]
-            blocked_id = created[blocked_idx]["id"]
-            todo_map = {t.id: t for t in todos}
-            blocker_todo = todo_map[blocker_id]
-            blocked_todo = todo_map[blocked_id]
-            if blocked_id not in blocker_todo.blocks:
-                blocker_todo.blocks.append(blocked_id)
-            if blocker_id not in blocked_todo.blocked_by:
-                blocked_todo.blocked_by.append(blocker_id)
-
-        # --- Single atomic save ---
-        storage.save_todos(cfg, name, todos)
-        storage.save_meta(cfg, meta)
-
-        # Pre-build todoist_tasks for hook-053 param mapping (template resolver
-        # doesn't support JMESPath iteration, so we build the array here).
-        # Build an index so grandchildren can reference their parent's Todoist
-        # task ID (resolved at creation time by todoist_add_tasks).
-        created_index: dict[str, int] = {c["id"]: i for i, c in enumerate(created)}
-        todoist_tasks: list[dict[str, JsonValue]] = []
-        for c in created:
-            if c["parent"] == parent.id:
-                # Direct child of root parent — use root's Todoist task ID
-                todoist_tasks.append(
-                    {
-                        "content": c["title"],
-                        "projectId": meta.todoist_project_id,
-                        "parentId": parent.todoist_task_id,
-                        "_parent_index": -1,
-                        "_local_id": c["id"],
-                    }
-                )
-            else:
-                # Grandchild+ — parent ID resolved at creation time
-                todoist_tasks.append(
-                    {
-                        "content": c["title"],
-                        "projectId": meta.todoist_project_id,
-                        "_parent_index": created_index[c["parent"]],
-                        "_local_id": c["id"],
-                    }
-                )
-        # Resolve Trello list IDs for hook dispatch
-        trello_list_ids = _resolve_trello_list_ids(cfg)
-        trello_dict = _enrich_trello_dict(cfg.trello.to_dict(), trello_list_ids)
-        tasks_list_id = trello_list_ids.get("tasks", "")
-
-        # Build batch cards array for trello batch_create_cards hook
-        trello_batch_cards: list[dict[str, str]] = []
-        if tasks_list_id:
-            for c in created:
-                trello_batch_cards.append({"list_id": tasks_list_id, "name": c["title"]})
-
-        result_data: dict[str, JsonValue] = {
-            "created": created,
-            "count": len(created),
-            "project_name": name,
-            "todoist_project_id": meta.todoist_project_id,
-            "trello_project_card_id": meta.trello_card_id,
-            "trello_card_id": parent.trello_card_id,
-            "parent_todoist_task_id": parent.todoist_task_id,
-            "todoist_tasks": todoist_tasks,
-            "trello_batch_cards": trello_batch_cards,
-            "sync": {
-                "trello": trello_dict,
-                "todoist": cfg.todoist.to_dict(),
-            },
-        }
-        if pair_errors:
-            result_data["blocking_errors"] = pair_errors
-        if skipped_duplicates:
-            result_data["skipped_duplicates"] = skipped_duplicates
-        return json.dumps(result_data)
 
     def _has_active_descendant(todo_dict: dict[str, JsonValue]) -> bool:
         """Return True if this node or any descendant has a status other than 'done'."""

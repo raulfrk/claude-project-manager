@@ -668,50 +668,30 @@ class TestAdvancedChains:
     fan-out, error handling, depth limits."""
 
     @pytest.mark.asyncio
-    async def test_batch_add_children_array_feedback(
+    async def test_todo_add_trello_hook_fires(
         self,
         mock_post_hook: AsyncMock,
         proj_config: Path,
         tmp_path: Path,
     ) -> None:
-        """Fire todo_batch_add_children -- verify trello batch hook
-        fires and array feedback maps per-child card IDs."""
+        """Fire todo_add — verify trello-on-todo-add fires add_card_to_list."""
         registry = load_real_hooks()
         hooks_yaml = tmp_path / "hooks.yaml"
 
-        # batch_create_cards returns per-card results with IDs
         source = make_todo_source(
             trello_card_id="card-tr-parent-1",
             trello_project_card_id="card-tr-proj-1",
         )
-        source["created"] = [
-            {"id": "child-1", "title": "Sub-task 1"},
-            {"id": "child-2", "title": "Sub-task 2"},
-        ]
-        source["trello_batch_cards"] = [
-            {"list_id": "list-tasks-id", "name": "Sub-task 1"},
-            {"list_id": "list-tasks-id", "name": "Sub-task 2"},
-        ]
 
-        result = await fire_with_config(
-            "todo_batch_add_children", source, proj_config, registry, hooks_yaml
-        )
+        result = await fire_with_config("todo_add", source, proj_config, registry, hooks_yaml)
 
         assert result["errors"] == []
         by_tool = _calls_by_tool(mock_post_hook)
 
-        # Trello batch_create_cards hook fires
-        assert "batch_create_cards" in by_tool
-        tr_params = by_tool["batch_create_cards"][0]["params"]
-        assert isinstance(tr_params["cards"], list)
-        assert len(tr_params["cards"]) == 2
-
-        # Feedback writeback calls todo_update for each child
-        assert "todo_update" in by_tool
-        fb_calls = by_tool["todo_update"]
-        fb_todo_ids = [call["params"].get("todo_id") for call in fb_calls]
-        assert "child-1" in fb_todo_ids
-        assert "child-2" in fb_todo_ids
+        # trello-on-todo-add fires add_card_to_list (not batch_create_cards)
+        assert "add_card_to_list" in by_tool
+        tr_params = by_tool["add_card_to_list"][0]["params"]
+        assert "list_id" in tr_params
 
     @pytest.mark.asyncio
     async def test_condition_gating_todoist_disabled(

@@ -513,8 +513,8 @@ class TestTodoAddDedup:
         )
         r = await self._call(
             app,
-            "todo_batch_add_children",
-            parent_id=p["todo_id"],
+            "todo_add",
+            parent=p["todo_id"],
             children=children,
             project_name="myapp",
         )
@@ -546,8 +546,8 @@ class TestTodoAddDedup:
         children = json.dumps([{"title": "X"}, {"title": "Y"}])
         r = await self._call(
             app,
-            "todo_batch_add_children",
-            parent_id=p["todo_id"],
+            "todo_add",
+            parent=p["todo_id"],
             children=children,
             project_name="myapp",
         )

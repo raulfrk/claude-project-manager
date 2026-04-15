@@ -2244,7 +2244,7 @@ class TestFeedbackSkipHooks:
             "hooks": [
                 {
                     "id": "h-batch-skip",
-                    "trigger_tool": "todo_batch_add_children",
+                    "trigger_tool": "todo_add",
                     "target_tool": "todoist_add_tasks",
                     "server": "todoist",
                     "blocking": True,
@@ -2285,7 +2285,7 @@ class TestFeedbackSkipHooks:
             patch("server.tools.fire.post_hook", side_effect=mock_post_hook),
         ):
             await hooks_fire(
-                "todo_batch_add_children",
+                "todo_add",
                 source_result=source,
                 depth=0,
             )

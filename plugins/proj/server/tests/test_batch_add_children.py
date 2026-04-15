@@ -1,4 +1,4 @@
-"""Tests for todo_batch_add_children MCP tool."""
+"""Tests for batch-add children via todo_add(parent=, children=) (children-only mode)."""
 
 from __future__ import annotations
 
@@ -100,9 +100,7 @@ async def test_flat_children_created_atomically(project_with_parent):
         ]
     )
 
-    result = await call_tool(
-        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
-    )
+    result = await call_tool(app, "todo_add", parent=parent_id, children=children_json)
     data = json.loads(result)
 
     assert data["count"] == 3
@@ -151,9 +149,7 @@ async def test_nested_children_correct_ids(project_with_parent):
         ]
     )
 
-    result = await call_tool(
-        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
-    )
+    result = await call_tool(app, "todo_add", parent=parent_id, children=children_json)
     data = json.loads(result)
 
     # Depth-first: Child A, Grandchild A1, Grandchild A2, Child B
@@ -214,8 +210,8 @@ async def test_blocking_pairs_link_created_todos(project_with_parent):
 
     result = await call_tool(
         app,
-        "todo_batch_add_children",
-        parent_id=parent_id,
+        "todo_add",
+        parent=parent_id,
         children=children_json,
         blocking_pairs=blocking_json,
     )
@@ -244,7 +240,7 @@ async def test_blocking_pairs_link_created_todos(project_with_parent):
 
 @pytest.mark.asyncio
 async def test_invalid_parent_id_returns_error(project_with_parent):
-    """Invalid parent_id returns an error message."""
+    """Invalid parent returns an error message."""
     from mcp.server.fastmcp import FastMCP
 
     from server.tools import config, projects
@@ -258,9 +254,7 @@ async def test_invalid_parent_id_returns_error(project_with_parent):
 
     children_json = json.dumps([{"title": "Orphan"}])
 
-    result = await call_tool(
-        app, "todo_batch_add_children", parent_id="nonexistent-99", children=children_json
-    )
+    result = await call_tool(app, "todo_add", parent="nonexistent-99", children=children_json)
     assert "not found" in result.lower()
 
     # Verify nothing was written
@@ -282,7 +276,7 @@ async def test_empty_children_list_returns_error(project_with_parent):
     projects.register(app)
     todos_mod.register(app)
 
-    result = await call_tool(app, "todo_batch_add_children", parent_id=parent_id, children="[]")
+    result = await call_tool(app, "todo_add", parent=parent_id, children="[]")
     assert "non-empty" in result.lower()
 
     # Verify nothing changed
@@ -328,9 +322,7 @@ async def test_nested_todoist_tasks_parent_index(project_with_parent):
         ]
     )
 
-    result = await call_tool(
-        app, "todo_batch_add_children", parent_id=parent_id, children=children_json
-    )
+    result = await call_tool(app, "todo_add", parent=parent_id, children=children_json)
     data = json.loads(result)
 
     todoist_tasks = data["todoist_tasks"]
@@ -366,17 +358,15 @@ async def test_invalid_json_returns_error(project_with_parent):
     projects.register(app)
     todos_mod.register(app)
 
-    result = await call_tool(
-        app, "todo_batch_add_children", parent_id=parent_id, children="{not valid json"
-    )
+    result = await call_tool(app, "todo_add", parent=parent_id, children="{not valid json")
     assert "invalid json" in result.lower()
 
     # Also test invalid blocking_pairs JSON
     children_json = json.dumps([{"title": "Valid child"}])
     result2 = await call_tool(
         app,
-        "todo_batch_add_children",
-        parent_id=parent_id,
+        "todo_add",
+        parent=parent_id,
         children=children_json,
         blocking_pairs="{bad}",
     )
