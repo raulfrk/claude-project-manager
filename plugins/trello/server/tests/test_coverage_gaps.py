@@ -186,31 +186,31 @@ class TestDeleteChecklistNon404:
             tools["delete_checklist"]("cl1")
 
 
-# ========== batch_update_checklist_items: empty list ==========
+# ========== update_checklist_item (batch mode): empty list ==========
 
 
-class TestBatchUpdateChecklistItemsEmpty:
+class TestUpdateChecklistItemBatchEmpty:
     def test_empty_updates_list(self, mock_trello_client: MagicMock) -> None:
         tools = _collect_tools(register_checklists, mock_trello_client)
 
-        result = json.loads(tools["batch_update_checklist_items"]("c1", []))
+        result = json.loads(tools["update_checklist_item"]("c1", updates=[]))
 
         assert result["successes"] == []
         assert result["failures"] == []
 
 
-# ========== batch_add_checklist_items: missing 'name' key entirely ==========
+# ========== add_checklist_item (batch mode): missing 'name' key entirely ==========
 
 
-class TestBatchAddChecklistItemsMissingNameKey:
+class TestAddChecklistItemBatchMissingNameKey:
     def test_no_name_key_recorded_as_failure(self, mock_trello_client: MagicMock) -> None:
         tools = _collect_tools(register_checklists, mock_trello_client)
         mock_trello_client.post.return_value = {"id": "ci1", "name": "Good"}
 
         result = json.loads(
-            tools["batch_add_checklist_items"](
+            tools["add_checklist_item"](
                 "cl1",
-                [{"checked": True}, {"name": "Good"}],
+                items=[{"checked": True}, {"name": "Good"}],
             )
         )
 
@@ -265,10 +265,10 @@ class TestListBoardsEdgeCases:
         assert result[0]["id"] == "b1"
 
 
-# ========== batch_add_checklist_items: exception paths ==========
+# ========== add_checklist_item (batch mode): exception paths ==========
 
 
-class TestBatchAddChecklistItemsExceptionPaths:
+class TestAddChecklistItemBatchExceptionPaths:
     def test_runtime_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
         """RuntimeError mid-batch is captured; subsequent items still process."""
         tools = _collect_tools(register_checklists, mock_trello_client)
@@ -278,9 +278,9 @@ class TestBatchAddChecklistItemsExceptionPaths:
         ]
 
         result = json.loads(
-            tools["batch_add_checklist_items"](
+            tools["add_checklist_item"](
                 "cl1",
-                [{"name": "Item 1"}, {"name": "Item 2"}],
+                items=[{"name": "Item 1"}, {"name": "Item 2"}],
             )
         )
 
@@ -294,16 +294,16 @@ class TestBatchAddChecklistItemsExceptionPaths:
         tools = _collect_tools(register_checklists, mock_trello_client)
         mock_trello_client.post.side_effect = httpx.ConnectError("connection refused")
 
-        result = json.loads(tools["batch_add_checklist_items"]("cl1", [{"name": "Item 1"}]))
+        result = json.loads(tools["add_checklist_item"]("cl1", items=[{"name": "Item 1"}]))
 
         assert len(result["failures"]) == 1
         assert "connection refused" in result["failures"][0]["error"]
 
 
-# ========== batch_update_checklist_items: exception paths ==========
+# ========== update_checklist_item (batch mode): exception paths ==========
 
 
-class TestBatchUpdateChecklistItemsExceptionPaths:
+class TestUpdateChecklistItemBatchExceptionPaths:
     def test_runtime_error_captured_in_failures(self, mock_trello_client: MagicMock) -> None:
         """RuntimeError mid-batch is captured; subsequent items still process."""
         tools = _collect_tools(register_checklists, mock_trello_client)
@@ -313,9 +313,9 @@ class TestBatchUpdateChecklistItemsExceptionPaths:
         ]
 
         result = json.loads(
-            tools["batch_update_checklist_items"](
+            tools["update_checklist_item"](
                 "c1",
-                [
+                updates=[
                     {"checklist_id": "cl1", "item_id": "ci1", "state": "complete"},
                     {"checklist_id": "cl1", "item_id": "ci2", "state": "complete"},
                 ],
@@ -333,9 +333,9 @@ class TestBatchUpdateChecklistItemsExceptionPaths:
         mock_trello_client.put.side_effect = httpx.TimeoutException("request timed out")
 
         result = json.loads(
-            tools["batch_update_checklist_items"](
+            tools["update_checklist_item"](
                 "c1",
-                [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+                updates=[{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
             )
         )
 
@@ -397,7 +397,7 @@ class TestBatchOpProgrammingErrorPropagates:
         with pytest.raises(ValueError, match="bad value"):
             tools["batch_create_cards"]([{"list_id": "l1", "name": "Card 1"}])
 
-    def test_key_error_propagates_from_batch_add_checklist(
+    def test_key_error_propagates_from_add_checklist_item_batch(
         self, mock_trello_client: MagicMock
     ) -> None:
         """KeyError from client is NOT caught — it propagates."""
@@ -405,9 +405,9 @@ class TestBatchOpProgrammingErrorPropagates:
         mock_trello_client.post.side_effect = KeyError("missing key")
 
         with pytest.raises(KeyError, match="missing key"):
-            tools["batch_add_checklist_items"]("cl1", [{"name": "Item 1"}])
+            tools["add_checklist_item"]("cl1", items=[{"name": "Item 1"}])
 
-    def test_attribute_error_propagates_from_batch_update_checklist(
+    def test_attribute_error_propagates_from_update_checklist_item_batch(
         self, mock_trello_client: MagicMock
     ) -> None:
         """AttributeError from client is NOT caught — it propagates."""
@@ -415,7 +415,7 @@ class TestBatchOpProgrammingErrorPropagates:
         mock_trello_client.put.side_effect = AttributeError("no such attr")
 
         with pytest.raises(AttributeError, match="no such attr"):
-            tools["batch_update_checklist_items"](
+            tools["update_checklist_item"](
                 "c1",
-                [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+                updates=[{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
             )

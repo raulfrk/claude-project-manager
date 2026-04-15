@@ -26,18 +26,105 @@ def register(app: FastMCP) -> None:
         checklist = client.post("/checklists", params={"idCard": card_id, "name": name})
         return json.dumps(checklist)
 
-    @app.tool(description="Add an item to a checklist.")
-    def add_checklist_item(checklist_id: str, name: str) -> str:
+    @app.tool(
+        description=(
+            "Add one or more items to a checklist. "
+            "Single: provide 'name' (required) and optional 'checked' (bool). "
+            "Batch: provide 'items' list; each dict has 'name' (required) and optional 'checked'. "
+            "Batch returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def add_checklist_item(
+        checklist_id: str,
+        name: str | None = None,
+        checked: bool = False,
+        items: list[dict[str, str | bool]] | None = None,
+    ) -> str:
         client = get_client()
-        item = client.post(f"/checklists/{checklist_id}/checkItems", params={"name": name})
-        return json.dumps(item)
+        if items is not None:
+            # Batch mode
+            successes: list[JsonValue] = []
+            failures: list[dict[str, JsonValue]] = []
+            for idx, item in enumerate(items):
+                try:
+                    item_name = str(item.get("name", ""))
+                    if not item_name:
+                        failures.append({"index": idx, "error": "Missing 'name' field"})
+                        continue
+                    params: dict[str, str] = {"name": item_name}
+                    if item.get("checked"):
+                        params["checked"] = "true"
+                    created = client.post(f"/checklists/{checklist_id}/checkItems", params=params)
+                    successes.append(created)
+                except (RuntimeError, httpx.HTTPError) as exc:
+                    failures.append(
+                        {"index": idx, "name": str(item.get("name", "")), "error": str(exc)}
+                    )
+            return json.dumps({"successes": successes, "failures": failures})
+        # Single mode
+        if not name:
+            return json.dumps({"error": "Missing 'name' parameter"})
+        single_params: dict[str, str] = {"name": name}
+        if checked:
+            single_params["checked"] = "true"
+        result = client.post(f"/checklists/{checklist_id}/checkItems", params=single_params)
+        return json.dumps(result)
 
-    @app.tool(description="Update a checklist item's state (complete or incomplete).")
-    def update_checklist_item(card_id: str, checklist_id: str, item_id: str, state: str) -> str:
+    @app.tool(
+        description=(
+            "Update one or more checklist items. "
+            "Single: provide 'card_id', 'checklist_id', 'item_id', 'state' (complete/incomplete). "
+            "Batch: provide 'card_id' and 'updates' list; each dict needs "
+            "'checklist_id', 'item_id', and optional 'name'/'state'. "
+            "Batch returns {successes: [...], failures: [...]}."
+        ),
+    )
+    def update_checklist_item(
+        card_id: str,
+        checklist_id: str | None = None,
+        item_id: str | None = None,
+        state: str | None = None,
+        updates: list[dict[str, str]] | None = None,
+    ) -> str:
         client = get_client()
+        if updates is not None:
+            # Batch mode
+            successes: list[JsonValue] = []
+            failures: list[dict[str, JsonValue]] = []
+            for idx, update in enumerate(updates):
+                it_id = ""
+                try:
+                    cl_id = update.get("checklist_id", "")
+                    it_id = update.get("item_id", "")
+                    if not cl_id or not it_id:
+                        failures.append(
+                            {
+                                "index": idx,
+                                "error": "Missing 'checklist_id' or 'item_id'",
+                            }
+                        )
+                        continue
+                    params: dict[str, str] = {}
+                    if "name" in update:
+                        params["name"] = update["name"]
+                    if "state" in update:
+                        params["state"] = update["state"]
+                    if not params:
+                        failures.append({"index": idx, "error": "No fields to update"})
+                        continue
+                    result = client.put(
+                        f"/cards/{card_id}/checklist/{cl_id}/checkItem/{it_id}",
+                        params=params,
+                    )
+                    successes.append(result)
+                except (RuntimeError, httpx.HTTPError) as exc:
+                    failures.append({"index": idx, "item_id": it_id, "error": str(exc)})
+            return json.dumps({"successes": successes, "failures": failures})
+        # Single mode
+        single_state = state or ""
         item = client.put(
             f"/cards/{card_id}/checklist/{checklist_id}/checkItem/{item_id}",
-            params={"state": state},
+            params={"state": single_state},
         )
         return json.dumps(item)
 
@@ -77,34 +164,6 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
-            "Add multiple items to a checklist in one call. "
-            "Each item dict has 'name' (required) and 'checked' (optional bool, default false). "
-            "Returns {successes: [...], failures: [...]}."
-        ),
-    )
-    def batch_add_checklist_items(checklist_id: str, items: list[dict[str, str | bool]]) -> str:
-        client = get_client()
-        successes: list[JsonValue] = []
-        failures: list[dict[str, JsonValue]] = []
-        for idx, item in enumerate(items):
-            try:
-                name = str(item.get("name", ""))
-                if not name:
-                    failures.append({"index": idx, "error": "Missing 'name' field"})
-                    continue
-                params: dict[str, str] = {"name": name}
-                if item.get("checked"):
-                    params["checked"] = "true"
-                created = client.post(f"/checklists/{checklist_id}/checkItems", params=params)
-                successes.append(created)
-            except (RuntimeError, httpx.HTTPError) as exc:
-                failures.append(
-                    {"index": idx, "name": str(item.get("name", "")), "error": str(exc)}
-                )
-        return json.dumps({"successes": successes, "failures": failures})
-
-    @app.tool(
-        description=(
             "Verify a checklist item's current state on a card. "
             "Returns the item's verified status, state, and name."
         ),
@@ -139,45 +198,3 @@ def register(app: FastMCP) -> None:
                 "name": "",
             }
         )
-
-    @app.tool(
-        description=(
-            "Update multiple checklist items in one call. "
-            "Each update dict has 'checklist_id', 'item_id' (both required), "
-            "and optional 'name' and 'state' ('complete' or 'incomplete'). "
-            "Returns {successes: [...], failures: [...]}."
-        ),
-    )
-    def batch_update_checklist_items(card_id: str, updates: list[dict[str, str]]) -> str:
-        client = get_client()
-        successes: list[JsonValue] = []
-        failures: list[dict[str, JsonValue]] = []
-        for idx, update in enumerate(updates):
-            it_id = ""
-            try:
-                cl_id = update.get("checklist_id", "")
-                it_id = update.get("item_id", "")
-                if not cl_id or not it_id:
-                    failures.append(
-                        {
-                            "index": idx,
-                            "error": "Missing 'checklist_id' or 'item_id'",
-                        }
-                    )
-                    continue
-                params: dict[str, str] = {}
-                if "name" in update:
-                    params["name"] = update["name"]
-                if "state" in update:
-                    params["state"] = update["state"]
-                if not params:
-                    failures.append({"index": idx, "error": "No fields to update"})
-                    continue
-                result = client.put(
-                    f"/cards/{card_id}/checklist/{cl_id}/checkItem/{it_id}",
-                    params=params,
-                )
-                successes.append(result)
-            except (RuntimeError, httpx.HTTPError) as exc:
-                failures.append({"index": idx, "item_id": it_id, "error": str(exc)})
-        return json.dumps({"successes": successes, "failures": failures})

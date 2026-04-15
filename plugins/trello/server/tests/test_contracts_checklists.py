@@ -236,7 +236,7 @@ class TestRenameChecklist:
         assert_response_parses(parsed, RENAME_CHECKLIST)
 
 
-class TestBatchAddChecklistItems:
+class TestAddChecklistItemBatchMode:
     @respx.mock
     def test_contract(self, tools: dict) -> None:
         route = respx.post(f"{BASE}/checklists/cl1/checkItems").mock(
@@ -250,9 +250,9 @@ class TestBatchAddChecklistItems:
             ],
         )
 
-        result = tools["batch_add_checklist_items"](
+        result = tools["add_checklist_item"](
             "cl1",
-            [{"name": "A"}, {"name": "B"}],
+            items=[{"name": "A"}, {"name": "B"}],
         )
 
         assert route.call_count == 2
@@ -272,7 +272,7 @@ class TestBatchAddChecklistItems:
             ),
         )
 
-        tools["batch_add_checklist_items"]("cl1", [{"name": "Done", "checked": True}])
+        tools["add_checklist_item"]("cl1", items=[{"name": "Done", "checked": True}])
 
         url_str = str(route.calls[0].request.url)
         assert "checked=true" in url_str
@@ -316,7 +316,7 @@ class TestVerifyChecklistItem:
         assert parsed["state"] == "unknown"
 
 
-class TestBatchUpdateChecklistItems:
+class TestUpdateChecklistItemBatchMode:
     @respx.mock
     def test_contract(self, tools: dict) -> None:
         route = respx.put(f"{BASE}/cards/c1/checklist/cl1/checkItem/ci1").mock(
@@ -325,9 +325,9 @@ class TestBatchUpdateChecklistItems:
             ),
         )
 
-        result = tools["batch_update_checklist_items"](
+        result = tools["update_checklist_item"](
             "c1",
-            [{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
+            updates=[{"checklist_id": "cl1", "item_id": "ci1", "state": "complete"}],
         )
 
         assert route.called
