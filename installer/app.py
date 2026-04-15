@@ -111,7 +111,7 @@ class InstallerApp(App):
     ]
 
     # Plugins that need proj.yaml
-    _PROJ_PLUGINS = {"proj", "router", "sandbox", "todoist", "trello", "jira"}
+    _PROJ_PLUGINS = {"proj", "router", "todoist", "trello", "jira"}
 
     def __init__(self, mode: str = "install", args: object = None) -> None:
         super().__init__()

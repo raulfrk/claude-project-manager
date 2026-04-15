@@ -169,7 +169,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         default_factory=_d("projects_base_dir"),
     ),
     PromptSpec(
-        label="Enable sandbox integration",
+        label="Enable settings.json management (sandbox tools)",
         dotted_key="sandbox_integration",
         type="bool",
         group="Integrations",
@@ -177,7 +177,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
         default_factory=_d("sandbox_integration"),
     ),
     PromptSpec(
-        label="Enable zoxide integration",
+        label="Enable zoxide frecency tracking",
         dotted_key="zoxide_integration",
         type="bool",
         group="Integrations",

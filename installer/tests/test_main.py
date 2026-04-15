@@ -604,7 +604,7 @@ class TestInstallerAppHelpers:
 
         assert "proj" in InstallerApp._PROJ_PLUGINS
         assert "router" in InstallerApp._PROJ_PLUGINS
-        assert "sandbox" in InstallerApp._PROJ_PLUGINS
+        assert "sandbox" not in InstallerApp._PROJ_PLUGINS
         assert "worktree" not in InstallerApp._PROJ_PLUGINS
 
     def test_on_status_actions_empty_exits(self):
