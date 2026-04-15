@@ -361,7 +361,7 @@ def register(app: FastMCP) -> None:
 
     Registers todo_add, todo_list, todo_get, todo_update,
     todo_complete, todo_block, todo_unblock, todo_delete, todo_ready,
-    todo_add_child, todo_batch_add_children, todo_tree,
+    todo_batch_add_children, todo_tree,
     todo_set_content_flag, todo_check_executable,
     proj_identify_batches, todo_analyze_graph, and
     proj_find_archived_by_title.
@@ -1156,72 +1156,6 @@ def register(app: FastMCP) -> None:
         if not ready:
             return "No todos ready to start."
         return json.dumps([t.to_dict() for t in ready], indent=2)
-
-    @app.tool(description="Add a child todo under a parent todo.")
-    def todo_add_child(
-        parent_id: str,
-        title: str,
-        priority: str | None = None,
-        tags: list[str] | None = None,
-        blocked_by: list[str] | None = None,
-        project_name: str | None = None,
-        force_create: bool = False,
-    ) -> str:
-        result = require_project(project_name)
-        if isinstance(result, str):
-            return result
-        cfg, name = result
-        meta = storage.load_meta(cfg, name)
-        todos = storage.load_todos(cfg, name)
-        parent = next((t for t in todos if t.id == parent_id), None)
-        if not parent:
-            return json.dumps({"error": f"Parent todo '{parent_id}' not found."})
-
-        # Dedup guard: reject if same normalized title exists among parent's children
-        if not force_create:
-            norm_title = _normalize_title(title)
-            siblings = [
-                t for t in todos if t.parent == parent_id and t.status not in ("done", "cancelled")
-            ]
-            existing = next(
-                (t for t in siblings if _normalize_title(t.title) == norm_title),
-                None,
-            )
-            if existing:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"Child todo with same title already exists"
-                            f" under {parent_id}: {existing.id}"
-                        ),
-                        "existing_id": existing.id,
-                    }
-                )
-
-        today = _now()
-        child = Todo(
-            id=next_todo_id(meta, parent=parent),
-            title=title,
-            priority=priority or cfg.default_priority,
-            tags=tags or [],
-            blocked_by=blocked_by or [],
-            parent=parent_id,
-            created=today,
-            updated=today,
-        )
-        if child.id not in parent.children:
-            parent.children.append(child.id)
-        parent.updated = today
-        todos.append(child)
-        storage.save_todos(cfg, name, todos)
-        storage.save_meta(cfg, meta)
-        return json.dumps(
-            {
-                "result": f"Added child todo {child.id} under {parent_id}: {title}",
-                "todo_id": child.id,
-                **_todo_hook_fields(child, meta, name, todos=todos, cfg=cfg),
-            }
-        )
 
     @app.tool(
         description=(

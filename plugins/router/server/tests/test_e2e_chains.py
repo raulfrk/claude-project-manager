@@ -366,12 +366,13 @@ class TestCrudChains:
         assert "todoist_task_id" in fb_params_all or "trello_card_id" in fb_params_all
 
     @pytest.mark.asyncio
-    async def test_todo_add_child_fires_with_parent_ids(
+    async def test_todo_add_with_parent_fires_todoist_with_parent_id(
         self,
         mock_post_hook: AsyncMock,
         proj_config: Path,
         tmp_path: Path,
     ) -> None:
+        """todo_add_child removed — todo_add(parent=) fires todoist-on-todo-add with parentId."""
         registry = load_real_hooks()
         hooks_yaml = tmp_path / "hooks.yaml"
         source = make_todo_source(
@@ -380,22 +381,16 @@ class TestCrudChains:
             parent_trello_card_id="card-tr-parent-1",
             todoist_project_id="proj-td-1",
         )
-        result = await fire_with_config("todo_add_child", source, proj_config, registry, hooks_yaml)
+        result = await fire_with_config("todo_add", source, proj_config, registry, hooks_yaml)
 
         assert result["errors"] == []
         by_tool = _calls_by_tool(mock_post_hook)
 
-        # Todoist child add with parentId
+        # Todoist child add with parentId via todoist-on-todo-add hook
         assert "todoist_add_tasks" in by_tool
         td_params = by_tool["todoist_add_tasks"][0]["params"]
         assert td_params["tasks"][0]["parentId"] == "td-parent-1"
         assert td_params["tasks"][0]["content"] == "Child task"
-
-        # Trello child card (add_card_to_list with resolved list ID)
-        assert "add_card_to_list" in by_tool
-        tr_params = by_tool["add_card_to_list"][0]["params"]
-        assert tr_params["list_id"] == "list-tasks-id"
-        assert tr_params["name"] == "Child task"
 
     @pytest.mark.asyncio
     async def test_todo_complete_fires_four_hooks(

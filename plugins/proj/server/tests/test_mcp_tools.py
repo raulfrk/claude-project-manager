@@ -333,7 +333,7 @@ class TestTodosMCPTools:
 
     async def test_todo_add_child(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
-        result = await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child task")
+        result = await call_tool(mcp_app, "todo_add", parent="1", title="Child task")
         data = _json.loads(result)
         assert data.get("todo_id") == "1.1"
         todos = storage.load_todos(project[0], "myapp")
@@ -350,7 +350,7 @@ class TestTodosMCPTools:
         parent.trello_checklist_id = "checklist-abc"
         storage.save_todos(cfg, name, todos)
 
-        result = await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        result = await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         data = _json.loads(result)
         assert data.get("parent_trello_checklist_id") == "checklist-abc"
 
@@ -380,7 +380,7 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         result = await call_tool(mcp_app, "todo_add", title="Grandchild", parent="1.1")
         data = _json.loads(result)
         assert data.get("todo_id") == "1.1.1"
@@ -398,7 +398,7 @@ class TestTodosMCPTools:
 
     async def test_todo_tree(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         result = await call_tool(mcp_app, "todo_tree", include_done=True)
         data = _json.loads(result)
         assert len(data) == 1
@@ -410,7 +410,7 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
@@ -422,7 +422,7 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         result = await call_tool(mcp_app, "todo_tree", include_done=True)
         data = _json.loads(result)
@@ -435,7 +435,7 @@ class TestTodosMCPTools:
         # Use todo_update to set parent status=done directly (bypasses archive logic)
         # to test tree filtering behaviour: done parent with pending child stays visible
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_update", todo_id="1", status="done")
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
@@ -448,12 +448,12 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child-A")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child-B")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child-C")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child-A")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child-B")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child-C")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         await call_tool(mcp_app, "todo_complete", todo_id="1.2")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1.2", title="Grandchild-B1")
+        await call_tool(mcp_app, "todo_add", parent="1.2", title="Grandchild-B1")
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
         root = data[0]
@@ -468,7 +468,7 @@ class TestTodosMCPTools:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         await call_tool(mcp_app, "todo_complete", todo_id="1")
         result = await call_tool(mcp_app, "todo_tree")
@@ -698,7 +698,7 @@ class TestTodoUncomplete:
         cfg, name = project
         # Add a parent so completing child keeps it in active (not archived)
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         # Now uncomplete it
         result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1.1")
@@ -883,7 +883,7 @@ class TestTodoArchive:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         assert "done" in result.lower()
         active = storage.load_todos(project[0], "myapp")
@@ -896,8 +896,8 @@ class TestTodoArchive:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child-A")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child-B")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child-A")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child-B")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         await call_tool(mcp_app, "todo_complete", todo_id="1.2")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1")
@@ -912,8 +912,8 @@ class TestTodoArchive:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Done-child")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Pending-child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Done-child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Pending-child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1")
         assert "not done" in result.lower() or "cannot complete" in result.lower()
@@ -952,8 +952,8 @@ class TestTodoArchive:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="L1")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="L2")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1.1", title="L3")
+        await call_tool(mcp_app, "todo_add", parent="1", title="L2")
+        await call_tool(mcp_app, "todo_add", parent="1.1", title="L3")
         # Complete bottom-up: L3 (child), L2 (parent of L3, child of L1), L1 (root)
         await call_tool(mcp_app, "todo_complete", todo_id="1.1.1")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
@@ -1105,7 +1105,7 @@ class TestTodoTreeMerge:
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         await call_tool(mcp_app, "todo_complete", todo_id="1")
         result = await call_tool(mcp_app, "todo_tree", include_done=True)
@@ -1159,7 +1159,7 @@ class TestTodoTreeMerge:
     ) -> None:
         """No __orphaned__ node appears when all parent references are valid."""
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         result = await call_tool(mcp_app, "todo_tree", include_done=True)
         data = _json.loads(result)
         orphaned_roots = [node for node in data if node.get("id") == "__orphaned__"]
@@ -1240,9 +1240,7 @@ class TestManualTagDisplay:
         """todo_tree includes 'manual' in tags for a manual-tagged child node
         nested inside _children."""
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(
-            mcp_app, "todo_add_child", parent_id="1", title="Manual child", tags=["manual"]
-        )
+        await call_tool(mcp_app, "todo_add", parent="1", title="Manual child", tags=["manual"])
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
         assert len(data) == 1
@@ -1259,10 +1257,8 @@ class TestManualTagDisplay:
         """In a tree with mixed manual/non-manual nodes, 'manual' appears only
         in the tags of the manually-tagged node."""
         await call_tool(mcp_app, "todo_add", title="Root")
-        await call_tool(mcp_app, "todo_add_child", parent_id="1", title="Regular child")
-        await call_tool(
-            mcp_app, "todo_add_child", parent_id="1", title="Manual child", tags=["manual"]
-        )
+        await call_tool(mcp_app, "todo_add", parent="1", title="Regular child")
+        await call_tool(mcp_app, "todo_add", parent="1", title="Manual child", tags=["manual"])
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
         assert len(data) == 1

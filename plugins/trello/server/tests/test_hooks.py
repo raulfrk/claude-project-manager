@@ -141,13 +141,10 @@ class TestDirectToolMapping:
         assert hook["param_mapping"]["card_id"] == "${trello_card_id}"
         assert hook["verification"] is True
 
-    def test_todo_add_child_uses_add_card_to_list(self) -> None:
+    def test_todo_add_child_hook_removed(self) -> None:
+        """trello-on-todo-add-child hook was removed — use todo_add(parent=) instead."""
         hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-add-child"]
-        assert hook["target_tool"] == "add_card_to_list"
-        assert hook["param_mapping"]["list_id"] == "${trello_list_id}"
-        assert hook["param_mapping"]["name"] == "${title}"
-        assert hook["feedback_mapping"]["id"] == "trello_card_id"
+        assert "trello-on-todo-add-child" not in hooks
 
     def test_batch_add_children_uses_batch_create_cards(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}

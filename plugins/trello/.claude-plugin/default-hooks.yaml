@@ -110,19 +110,6 @@ hooks:
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
-  - id: trello-on-todo-add-child
-    trigger_tool: todo_add_child
-    target_tool: add_card_to_list
-    server: trello
-    param_mapping:
-      list_id: "${trello_list_id}"
-      name: "${title}"
-    feedback_tool: todo_update
-    feedback_mapping:
-      id: trello_card_id
-    blocking: true
-    condition: "sync.trello.enabled and sync.trello.auto_sync"
-
   - id: trello-on-todo-batch-add-children
     trigger_tool: todo_batch_add_children
     target_tool: batch_create_cards

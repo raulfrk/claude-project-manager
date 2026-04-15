@@ -477,16 +477,16 @@ class TestTodoAddDedup:
         )
         r1 = await self._call(
             app,
-            "todo_add_child",
-            parent_id=p["todo_id"],
+            "todo_add",
+            parent=p["todo_id"],
             title="Sub",
             project_name="myapp",
         )
         assert "todo_id" in r1
         r2 = await self._call(
             app,
-            "todo_add_child",
-            parent_id=p["todo_id"],
+            "todo_add",
+            parent=p["todo_id"],
             title="Sub",
             project_name="myapp",
         )
@@ -538,8 +538,8 @@ class TestTodoAddDedup:
         )
         await self._call(
             app,
-            "todo_add_child",
-            parent_id=p["todo_id"],
+            "todo_add",
+            parent=p["todo_id"],
             title="X",
             project_name="myapp",
         )
