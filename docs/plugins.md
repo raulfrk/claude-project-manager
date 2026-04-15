@@ -597,7 +597,7 @@ Read-only Jira Server issue and project access via REST API. Supports issues, pr
 | `jira_get_issue_comments(issue_key)` | Get issue comments |
 | `jira_create_issue(project, summary, ...)` | Create an issue |
 | `jira_bulk_create_issues(issues)` | Batch-create issues |
-| `jira_bulk_update_issues(issues)` | Batch-update issues |
+| `jira_update_issues(issues)` | Batch-update issues |
 
 #### Projects and Epics
 

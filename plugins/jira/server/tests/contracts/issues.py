@@ -2,7 +2,7 @@
 
 Covers: jira_search, jira_get_issue, jira_get_issue_comments,
 jira_get_epic_issues, jira_get_user_issues, jira_create_issue,
-jira_bulk_create_issues, jira_bulk_update_issues.
+jira_bulk_create_issues, jira_update_issues.
 """
 
 from __future__ import annotations
