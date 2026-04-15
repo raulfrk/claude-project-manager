@@ -90,6 +90,28 @@ def get_installed_plugins(
     ]
 
 
+def get_installed_plugin_versions(
+    marketplace: str = _MARKETPLACE_NAME,
+) -> dict[str, str]:
+    """Return {plugin_name: version} for plugins installed from *marketplace*."""
+    result = _run(["claude", "plugin", "list", "--json"])
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    plugins = data.get("installed", []) if isinstance(data, dict) else data
+    versions: dict[str, str] = {}
+    for p in plugins:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("id", "")
+        ver = p.get("version")
+        if pid.endswith(f"@{marketplace}") and ver:
+            name = pid.split("@")[0]
+            versions[name] = ver
+    return versions
+
+
 def get_available_plugins(
     marketplace: str = _MARKETPLACE_NAME,
 ) -> list[str]:

@@ -1,6 +1,6 @@
 """End-to-end tests for hook fire chain.
 
-Starts a real sandbox MCP server as a subprocess with dual transport,
+Starts a real proj MCP server as a subprocess with dual transport,
 registers hooks in a temp hooks.yaml, fires via hooks_fire(), and verifies
 target tools actually execute via HTTP POST.  No mocking of HTTP anywhere.
 """
@@ -23,7 +23,7 @@ from server.lib.models import Hook, HookRegistry
 from server.tools.fire import hooks_fire
 
 _PLUGINS_DIR = Path(__file__).resolve().parents[3]
-_SANDBOX_SERVER_DIR = _PLUGINS_DIR / "sandbox" / "server"
+_PROJ_SERVER_DIR = _PLUGINS_DIR / "proj" / "server"
 
 # Atomic port counter — each xdist worker gets a separate range to avoid collisions.
 _port_counter_lock = threading.Lock()
@@ -94,13 +94,13 @@ def _strip_proxy(monkeypatch):
 
 @pytest.fixture()
 def sandbox_port():
-    """Start a real sandbox MCP server subprocess and yield its HTTP port."""
+    """Start a real proj MCP server subprocess and yield its HTTP port."""
     port = _next_port()
     env = _clean_env(HOOK_HTTP_PORT=str(port))
 
     proc = subprocess.Popen(
         ["uv", "run", "python", "-m", "server.main"],
-        cwd=str(_SANDBOX_SERVER_DIR),
+        cwd=str(_PROJ_SERVER_DIR),
         env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -141,12 +141,12 @@ class TestE2EHookFire:
                     id="e2e-001",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_list",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -177,12 +177,12 @@ class TestE2EHookFire:
                     id="e2e-002",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_list",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{dead_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{dead_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -215,12 +215,12 @@ class TestE2EHookFire:
                     id="e2e-003",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_list",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=False,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -248,12 +248,12 @@ class TestE2EHookFire:
                     id="e2e-004",
                     trigger_tool="test_trigger",
                     target_tool="nonexistent_tool",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -285,12 +285,12 @@ class TestE2EHookFire:
                     id="e2e-005",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_list",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={"format": "${format}"},
                     blocking=True,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 
@@ -322,7 +322,7 @@ class TestE2EHookFire:
                     id="e2e-006a",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_list",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=True,
                 ),
@@ -330,12 +330,12 @@ class TestE2EHookFire:
                     id="e2e-006b",
                     trigger_tool="test_trigger",
                     target_tool="sandbox_check",
-                    server="sandbox",
+                    server="proj",
                     param_mapping={},
                     blocking=True,
                 ),
             ],
-            servers={"sandbox": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
+            servers={"proj": {"url": f"http://127.0.0.1:{sandbox_port}/hook"}},
         )
         storage.save(registry, path=hooks_yaml)
 

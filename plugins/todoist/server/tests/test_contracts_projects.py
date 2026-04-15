@@ -233,56 +233,6 @@ class TestAddProjectsContract:
         assert body["is_favorite"] is True
 
 
-# -- todoist_add_project_hook (POST /api/v1/projects) -----------------------
-
-
-class TestAddProjectHookContract:
-    @respx.mock
-    def test_hook_create_request_shape(self, mock_client: TodoistClient) -> None:
-        route = respx.post(f"{BASE_URL}/projects").mock(
-            return_value=build_success_response(
-                CREATE_PROJECT, _api_project(id="hook1", name="Hook Project")
-            )
-        )
-
-        app = _register_project_tools()
-        tool = _get_tool(app, "todoist_add_project_hook")
-        json.loads(tool.fn(name="Hook Project"))
-
-        assert route.called
-        request = route.calls[0].request
-        assert_request_matches_contract(request, CREATE_PROJECT)
-        body = json.loads(request.content)
-        assert body["name"] == "Hook Project"
-
-    @respx.mock
-    def test_hook_create_response_shape(self, mock_client: TodoistClient) -> None:
-        respx.post(f"{BASE_URL}/projects").mock(
-            return_value=build_success_response(
-                CREATE_PROJECT, _api_project(id="hook1", name="Hook")
-            )
-        )
-
-        app = _register_project_tools()
-        tool = _get_tool(app, "todoist_add_project_hook")
-        result = json.loads(tool.fn(name="Hook"))
-
-        assert len(result["successes"]) == 1
-        assert result["failures"] == []
-
-    @respx.mock
-    def test_hook_create_error_returns_failure(self, mock_client: TodoistClient) -> None:
-        respx.post(f"{BASE_URL}/projects").mock(return_value=build_error_response(SERVER_ERROR_500))
-
-        app = _register_project_tools()
-        tool = _get_tool(app, "todoist_add_project_hook")
-        result = json.loads(tool.fn(name="Fail"))
-
-        assert result["successes"] == []
-        assert len(result["failures"]) == 1
-        assert "500" in result["failures"][0]["error"]
-
-
 # -- Error contract tests ----------------------------------------------------
 
 

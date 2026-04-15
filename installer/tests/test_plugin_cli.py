@@ -16,6 +16,7 @@ from installer.plugin_cli import (
     check_marketplace_registered,
     format_output,
     get_available_plugins,
+    get_installed_plugin_versions,
     get_installed_plugins,
     install_plugin,
     remove_marketplace,
@@ -472,3 +473,58 @@ class TestGetInstalledPluginsEdgeCases:
         with patch(_PATCH_TARGET, return_value=result):
             plugins = get_installed_plugins()
             assert plugins == [f"proj@{_MARKETPLACE_NAME}"]
+
+
+# ============================================================================
+# get_installed_plugin_versions
+# ============================================================================
+
+
+class TestGetInstalledPluginVersions:
+    def test_parses_versions(self):
+        data = {
+            "installed": [
+                {"id": f"proj@{_MARKETPLACE_NAME}", "version": "4.0.0"},
+                {"id": f"router@{_MARKETPLACE_NAME}", "version": "2.2.0"},
+                {"id": "other@different", "version": "1.0.0"},
+            ]
+        }
+        result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(data), stderr=""
+        )
+        with patch(_PATCH_TARGET, return_value=result):
+            versions = get_installed_plugin_versions()
+            assert versions == {"proj": "4.0.0", "router": "2.2.0"}
+
+    def test_missing_version_skipped(self):
+        data = {
+            "installed": [
+                {"id": f"proj@{_MARKETPLACE_NAME}", "version": "4.0.0"},
+                {"id": f"router@{_MARKETPLACE_NAME}"},
+            ]
+        }
+        result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(data), stderr=""
+        )
+        with patch(_PATCH_TARGET, return_value=result):
+            versions = get_installed_plugin_versions()
+            assert versions == {"proj": "4.0.0"}
+
+    def test_invalid_json_returns_empty(self):
+        result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="not json", stderr=""
+        )
+        with patch(_PATCH_TARGET, return_value=result):
+            assert get_installed_plugin_versions() == {}
+
+    def test_list_format_data(self):
+        data = [
+            {"id": f"proj@{_MARKETPLACE_NAME}", "version": "3.0.0"},
+            {"id": "other@different", "version": "1.0.0"},
+        ]
+        result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(data), stderr=""
+        )
+        with patch(_PATCH_TARGET, return_value=result):
+            versions = get_installed_plugin_versions()
+            assert versions == {"proj": "3.0.0"}

@@ -58,8 +58,6 @@ jobs:
             path: plugins/proj/server
           - plugin: worktree
             path: plugins/worktree/server
-          - plugin: sandbox
-            path: plugins/sandbox/server
           - plugin: router
             path: plugins/router/server
           - plugin: trello
@@ -68,8 +66,6 @@ jobs:
             path: plugins/jira/server
           - plugin: todoist
             path: plugins/todoist/server
-          - plugin: zoxide
-            path: plugins/zoxide/server
           - plugin: _shared
             path: plugins/_shared
     name: test (${{ matrix.plugin }})

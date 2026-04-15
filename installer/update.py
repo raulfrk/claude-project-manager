@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from installer.detect import InstallState
+from installer.plugin_cli import get_installed_plugin_versions
 
 
 # Overridable by tests via monkeypatch.setattr("installer.update._MARKETPLACE_PATH", path)
@@ -33,17 +34,31 @@ def _read_marketplace_versions(marketplace_path: Path | None = None) -> dict[str
 
 
 def _read_installed_version(cache_dir: Path, plugin_name: str) -> str | None:
-    """Read the version from an installed plugin's plugin.json in the cache."""
-    plugin_json = cache_dir / plugin_name / "plugin.json"
-    if not plugin_json.exists():
-        plugin_json = cache_dir / plugin_name / ".claude-plugin" / "plugin.json"
-    if not plugin_json.exists():
-        return None
+    """Read version for an installed plugin. CLI primary, disk fallback."""
     try:
-        data = json.loads(plugin_json.read_text(encoding="utf-8"))
-        return data.get("version")
-    except (OSError, json.JSONDecodeError):
+        versions = get_installed_plugin_versions()
+        if plugin_name in versions:
+            return versions[plugin_name]
+    except Exception:
+        pass
+
+    plugin_dir = cache_dir / plugin_name
+    if not plugin_dir.is_dir():
         return None
+    for version_dir in sorted(plugin_dir.iterdir(), reverse=True):
+        if not version_dir.is_dir() or version_dir.name.startswith("."):
+            continue
+        for candidate in (
+            version_dir / ".claude-plugin" / "plugin.json",
+            version_dir / "plugin.json",
+        ):
+            if candidate.exists():
+                try:
+                    data = json.loads(candidate.read_text(encoding="utf-8"))
+                    return data.get("version")
+                except (OSError, json.JSONDecodeError):
+                    continue
+    return None
 
 
 def compare_versions(

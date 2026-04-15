@@ -67,6 +67,10 @@ def test_build_status_list_same_version(
         "installer.plugin_status.get_installed_plugins",
         lambda: ["router@claude-project-manager"],
     )
+    monkeypatch.setattr(
+        "installer.update.get_installed_plugin_versions",
+        lambda: {"router": "2.0.0"},
+    )
     result = build_plugin_status_list(marketplace_path=marketplace, cache_dir=cache_dir)
 
     router = next(s for s in result if s.name == "router")
@@ -84,6 +88,10 @@ def test_build_status_list_different_version(
         "installer.plugin_status.get_installed_plugins",
         lambda: ["proj@claude-project-manager"],
     )
+    monkeypatch.setattr(
+        "installer.update.get_installed_plugin_versions",
+        lambda: {"proj": "3.5.0"},
+    )
     result = build_plugin_status_list(marketplace_path=marketplace, cache_dir=cache_dir)
 
     proj = next(s for s in result if s.name == "proj")
@@ -100,6 +108,10 @@ def test_build_status_list_corrupt_plugin_version(
     monkeypatch.setattr(
         "installer.plugin_status.get_installed_plugins",
         lambda: ["proj@claude-project-manager"],
+    )
+    monkeypatch.setattr(
+        "installer.update.get_installed_plugin_versions",
+        lambda: {},
     )
 
     with warnings.catch_warnings(record=True) as caught:
