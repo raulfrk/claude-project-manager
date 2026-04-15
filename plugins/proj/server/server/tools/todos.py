@@ -434,6 +434,7 @@ def _batch_add_children(
 
     # Resolve blocking pairs
     pair_errors: list[str] = []
+    todo_map = {t.id: t for t in todos}
     for pair in blocking_pairs:
         if not isinstance(pair, list) or len(pair) != 2:
             pair_errors.append(f"Invalid pair (expected [int, int]): {pair}")
@@ -453,7 +454,6 @@ def _batch_add_children(
             continue
         blocker_id = created[blocker_idx]["id"]
         blocked_id = created[blocked_idx]["id"]
-        todo_map = {t.id: t for t in todos}
         blocker_todo = todo_map[blocker_id]
         blocked_todo = todo_map[blocked_id]
         if blocked_id not in blocker_todo.blocks:
@@ -558,9 +558,7 @@ def register(app: FastMCP) -> None:
         children: str = "[]",
         blocking_pairs: str = "[]",
     ) -> str:
-        import json as _json
-
-        _child_specs_raw = children.strip() if children else "[]"
+        _child_specs_raw = children.strip() if children and children.strip() != "[]" else "[]"
         _bp_raw = blocking_pairs.strip() if blocking_pairs else "[]"
 
         # Children-only mode: no title, add children to existing parent
@@ -575,19 +573,19 @@ def register(app: FastMCP) -> None:
                 today = _now()
                 _parent_todo = next((t for t in todos if t.id == parent), None)
                 if not _parent_todo:
-                    return _json.dumps({"error": f"Parent todo '{parent}' not found."})
+                    return json.dumps({"error": f"Parent todo '{parent}' not found."})
                 try:
-                    _specs = _json.loads(_child_specs_raw)
-                except _json.JSONDecodeError as e:
-                    return _json.dumps({"error": f"Invalid JSON for children: {e}"})
+                    _specs = json.loads(_child_specs_raw)
+                except json.JSONDecodeError as e:
+                    return json.dumps({"error": f"Invalid JSON for children: {e}"})
                 if not isinstance(_specs, list) or not _specs:
-                    return _json.dumps({"error": "children must be a non-empty JSON array."})
+                    return json.dumps({"error": "children must be a non-empty JSON array."})
                 try:
-                    _bp = _json.loads(_bp_raw)
-                except _json.JSONDecodeError as e:
-                    return _json.dumps({"error": f"Invalid JSON for blocking_pairs: {e}"})
+                    _bp = json.loads(_bp_raw)
+                except json.JSONDecodeError as e:
+                    return json.dumps({"error": f"Invalid JSON for blocking_pairs: {e}"})
                 return _batch_add_children(cfg, name, _parent_todo, _specs, _bp, today, todos, meta)
-            return _json.dumps({"error": "title is required when not using children-only mode."})
+            return json.dumps({"error": "title is required when not using children-only mode."})
 
         result = require_project(project_name)
         if isinstance(result, str):
@@ -665,23 +663,17 @@ def register(app: FastMCP) -> None:
         # If children specified, batch-add them under the newly created todo
         if _child_specs_raw != "[]":
             try:
-                _specs = _json.loads(_child_specs_raw)
-            except _json.JSONDecodeError as e:
+                _specs = json.loads(_child_specs_raw)
+            except json.JSONDecodeError as e:
                 return json.dumps({"error": f"Invalid children JSON: {e}"})
             if isinstance(_specs, list) and _specs:
                 try:
-                    _bp = _json.loads(_bp_raw)
-                except _json.JSONDecodeError as e:
+                    _bp = json.loads(_bp_raw)
+                except json.JSONDecodeError as e:
                     return json.dumps({"error": f"Invalid blocking_pairs JSON: {e}"})
-                # Save root todo first so children can reference it
-                storage.save_todos(cfg, name, todos)
-                storage.save_meta(cfg, meta)
-                # Reload to pick up saved state
-                todos = storage.load_todos(cfg, name)
-                meta = storage.load_meta(cfg, name)
-                new_todo = next(t for t in todos if t.id == todo.id)
+                # Pass in-memory todos/meta (already contain root todo) — single atomic save
                 batch_result_str = _batch_add_children(
-                    cfg, name, new_todo, _specs, _bp, today, todos, meta
+                    cfg, name, todo, _specs, _bp, today, todos, meta
                 )
                 batch_data = json.loads(batch_result_str)
                 return json.dumps(

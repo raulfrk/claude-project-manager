@@ -121,6 +121,22 @@ async def test_todo_add_children_only_mode(
     created = r_batch.get("created_ids") or [c["id"] for c in r_batch.get("created", [])]
     assert len(created) == 2, f"Expected 2 children created, got: {created}"
 
+    # Assert created IDs use dot-notation format {parent_id}.1, {parent_id}.2
+    assert created[0] == f"{parent_id}.1", (
+        f"Expected first child ID '{parent_id}.1', got '{created[0]}'"
+    )
+    assert created[1] == f"{parent_id}.2", (
+        f"Expected second child ID '{parent_id}.2', got '{created[1]}'"
+    )
+
+    # Assert created_ids field present and matches
+    assert "created_ids" in r_batch, (
+        f"Expected 'created_ids' key in response, got keys: {list(r_batch.keys())}"
+    )
+    assert r_batch["created_ids"] == created, (
+        f"created_ids mismatch: {r_batch['created_ids']} != {created}"
+    )
+
     # Assert parent's children list now has 2 entries
     cfg, name = project
     todos = storage.load_todos(cfg, name)
