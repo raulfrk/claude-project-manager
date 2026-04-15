@@ -121,6 +121,8 @@ def register(app: FastMCP) -> None:
                     failures.append({"index": idx, "item_id": it_id, "error": str(exc)})
             return json.dumps({"successes": successes, "failures": failures})
         # Single mode
+        if not checklist_id or not item_id:
+            return json.dumps({"error": "checklist_id and item_id required for single-item update"})
         single_state = state or ""
         item = client.put(
             f"/cards/{card_id}/checklist/{checklist_id}/checkItem/{item_id}",

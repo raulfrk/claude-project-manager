@@ -21,10 +21,10 @@ class TestDefaultHooksYaml:
         assert isinstance(data, dict)
         assert "hooks" in data
 
-    def test_has_12_hooks(self) -> None:
+    def test_has_10_hooks(self) -> None:
         with _HOOKS_PATH.open() as f:
             data = yaml.safe_load(f)
-        assert len(data["hooks"]) == 12
+        assert len(data["hooks"]) == 10
 
     def test_all_hooks_have_required_fields(self) -> None:
         with _HOOKS_PATH.open() as f:
@@ -69,9 +69,7 @@ class TestDefaultHooksYaml:
             "verify-trello-todo-card",
             "trello-on-todo-update",
             "trello-on-todo-delete",
-            "trello-on-todo-add-child",
-            "trello-on-todo-batch-add-children",
-            "trello-on-todo-batch-complete",
+            "trello-on-todo-complete-batch",
         }
         assert ids == expected
 
@@ -146,12 +144,10 @@ class TestDirectToolMapping:
         hooks = {h["id"]: h for h in self._load_hooks()}
         assert "trello-on-todo-add-child" not in hooks
 
-    def test_batch_add_children_uses_batch_create_cards(self) -> None:
+    def test_batch_add_children_hook_removed(self) -> None:
+        """trello-on-todo-batch-add-children removed — batch child adds use todo_add instead."""
         hooks = {h["id"]: h for h in self._load_hooks()}
-        hook = hooks["trello-on-todo-batch-add-children"]
-        assert hook["target_tool"] == "batch_create_cards"
-        assert hook["param_mapping"]["cards"] == "${trello_batch_cards}"
-        assert hook["feedback_mapping"]["successes[*].id"] == "trello_card_id"
+        assert "trello-on-todo-batch-add-children" not in hooks
 
     def test_todo_update_uses_update_card_details(self) -> None:
         hooks = {h["id"]: h for h in self._load_hooks()}
