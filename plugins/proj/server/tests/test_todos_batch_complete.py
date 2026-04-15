@@ -228,6 +228,7 @@ async def test_atomic_save_single_write(project_with_todos, mcp_app, monkeypatch
     assert len(save_calls) + len(archive_calls) == 1
 
 
+@pytest.mark.xdist_group("serial")
 def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
     """Two threads calling todo_batch_complete must serialize under _BATCH_COMPLETE_LOCK."""
     from server.tools import todos as todos_mod

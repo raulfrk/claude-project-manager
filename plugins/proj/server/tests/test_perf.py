@@ -105,6 +105,7 @@ def perf_db(tmp_cfg: ProjConfig) -> ProjConfig:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xdist_group("perf")
 def test_load_todos_1000_under_50ms(perf_db: ProjConfig) -> None:
     """Load of 1000 todos must complete in <100ms.
 
@@ -125,6 +126,7 @@ def test_load_todos_1000_under_50ms(perf_db: ProjConfig) -> None:
     assert elapsed < 0.20, f"load_todos too slow: {elapsed * 1000:.2f}ms (limit 200ms)"
 
 
+@pytest.mark.xdist_group("perf")
 def test_save_todos_1000_under_200ms(perf_db: ProjConfig) -> None:
     """Saving 1000 todos must complete in <200ms."""
     todos = sql_todos.load_todos(perf_db, "perf")
@@ -138,6 +140,7 @@ def test_save_todos_1000_under_200ms(perf_db: ProjConfig) -> None:
     assert elapsed < 0.20, f"save_todos too slow: {elapsed * 1000:.2f}ms (limit 200ms)"
 
 
+@pytest.mark.xdist_group("perf")
 def test_load_repeated_10x_all_under_50ms(perf_db: ProjConfig) -> None:
     """10 sequential load_todos calls; median <100ms, each call <150ms.
 
@@ -172,6 +175,7 @@ def test_load_repeated_10x_all_under_50ms(perf_db: ProjConfig) -> None:
     assert median < 0.20, f"median too slow: {median * 1000:.2f}ms (limit 200ms)"
 
 
+@pytest.mark.xdist_group("perf")
 def test_yaml_baseline(perf_db: ProjConfig) -> None:
     """Compare SQLite load time vs YAML baseline; SQLite should be faster."""
     # Locate the .bak file written by migration
