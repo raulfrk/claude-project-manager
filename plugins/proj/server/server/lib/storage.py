@@ -90,7 +90,6 @@ def load_meta(cfg: ProjConfig, project_name: str) -> ProjectMeta:
 
 
 def save_meta(cfg: ProjConfig, meta: ProjectMeta) -> None:
-    _ensure_migrated(cfg, meta.name)
     sql_meta.save_meta(cfg, meta)
 
 
@@ -107,7 +106,6 @@ def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
 
 
 def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
-    _ensure_migrated(cfg, project_name)
     sql_todos.save_todos(cfg, project_name, todos)
 
 
@@ -119,19 +117,18 @@ def archive_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    _ensure_migrated(cfg, project_name)
+    # No _ensure_migrated — sql_todos.load_archived_todos handles the
+    # archive.yaml.bak disaster-recovery fallback when data.db is missing.
     return sql_todos.load_archived_todos(cfg, project_name)
 
 
 def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[Todo]) -> None:
     """Append todos to archive, creating it if needed."""
-    _ensure_migrated(cfg, project_name)
     sql_todos.save_archived_todos_append(cfg, project_name, todos_to_add)
 
 
 def replace_archived_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
     """Replace all archived todos for a project atomically (DELETE + INSERT)."""
-    _ensure_migrated(cfg, project_name)
     sql_todos.replace_archived_todos(cfg, project_name, todos)
 
 
@@ -142,13 +139,11 @@ def archive_and_remove_todos(
     to_archive: list[Todo],
 ) -> None:
     """Move todos to archive atomically."""
-    _ensure_migrated(cfg, project_name)
     sql_archive.archive_and_remove_todos(cfg, project_name, remaining, to_archive)
 
 
 def migrate_done_to_archive(cfg: ProjConfig, project_name: str) -> dict[str, int]:
     """Move terminal-status todos to archive based on tree rules."""
-    _ensure_migrated(cfg, project_name)
     return sql_archive.migrate_done_to_archive(cfg, project_name)
 
 
@@ -191,13 +186,11 @@ def _write_yaml_list(path: Path, data: list[dict[str, JsonValue]]) -> None:
 
 def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, JsonValue]]:
     """Read decisions for project from SQLite."""
-    _ensure_migrated(cfg, project_name)
     return sql_decisions.load_decisions(cfg, project_name)  # type: ignore[return-value]
 
 
 def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, JsonValue]) -> None:
     """Append a single decision entry to SQLite."""
-    _ensure_migrated(cfg, project_name)
     sql_decisions.append_decision(cfg, project_name, entry)  # type: ignore[arg-type]
 
 
@@ -205,7 +198,6 @@ def replace_decisions(
     cfg: ProjConfig, project_name: str, entries: list[dict[str, JsonValue]]
 ) -> None:
     """Replace all decisions for a project atomically (DELETE + INSERT)."""
-    _ensure_migrated(cfg, project_name)
     sql_decisions.replace_decisions(cfg, project_name, entries)  # type: ignore[arg-type]
 
 

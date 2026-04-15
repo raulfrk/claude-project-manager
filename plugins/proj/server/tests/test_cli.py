@@ -367,12 +367,15 @@ class TestCliArgParsing:
         # Write todos and notes
         (proj_dir / "NOTES.md").write_text("# myapp\n")
 
-        # Write meta.yaml (will be migrated to SQLite on first access)
-        (proj_dir / "meta.yaml").write_text(
-            f"name: myapp\nstatus: active\npriority: medium\n"
-            f"repos:\n  - label: code\n    path: {tmp_path}\n"
-            f"dates:\n  created: '{today}'\n  last_updated: '{today}'\n"
+        # Seed meta directly into SQLite (no YAML migration fallback)
+        from server.lib.models import ProjectDates, ProjectMeta, RepoEntry
+
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[RepoEntry(label="code", path=str(tmp_path))],
+            dates=ProjectDates(created=today, last_updated=today),
         )
+        storage.save_meta(cfg, meta)
 
         result = _run_cli(
             "session-start",

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
 from server.lib.models import (
     ContextInjectionConfig,
     ContextInjectionSectionsConfig,
@@ -39,8 +37,20 @@ def _write_notes(tracking: Path, content: str) -> None:
 
 
 def _write_decisions(tracking: Path, entries: list[dict]) -> None:
+    """Seed decisions into SQLite for the project located at *tracking*.
+
+    tracking is expected to be ``<tracking_dir>/<project_name>``.
+    """
+    from server.lib import storage as _storage
+    from server.lib.models import ProjConfig as _ProjConfig
+
     tracking.mkdir(parents=True, exist_ok=True)
-    (tracking / "decisions.yaml").write_text(yaml.dump(entries, default_flow_style=False))
+    # Derive cfg + project_name from the tracking path
+    tracking_dir = str(tracking.parent)
+    project_name = tracking.name
+    cfg = _ProjConfig(tracking_dir=tracking_dir)
+    for entry in entries:
+        _storage.append_decision(cfg, project_name, entry)
 
 
 def _write_knowledge(tracking: Path, content: str) -> None:

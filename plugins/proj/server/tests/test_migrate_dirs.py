@@ -60,10 +60,23 @@ def _write_legacy_meta(cfg: ProjConfig, name: str, path: str) -> None:
 
 @pytest.fixture()
 def legacy_project(cfg: ProjConfig, tmp_path: Path) -> tuple[str, ProjConfig]:
-    """Create a project with legacy single-path format."""
+    """Create a project with legacy single-path format, seeded in SQLite."""
     name = "legacy-proj"
     legacy_path = "/home/user/projects/legacy-proj"
     _write_legacy_meta(cfg, name, legacy_path)
+
+    # Seed DB with the legacy-format meta (path key + empty repos) so
+    # _ensure_migrated finds data.db and storage operations succeed.
+    meta = ProjectMeta.from_dict(
+        {
+            "name": name,
+            "description": "A legacy project",
+            "path": legacy_path,
+            "repos": [],
+            "dates": {"created": "2026-01-01", "last_updated": "2026-01-01"},
+        }
+    )
+    storage.save_meta(cfg, meta)
 
     # Register in index
     tracking = Path(cfg.tracking_dir) / name

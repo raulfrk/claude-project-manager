@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from server.lib import state, storage
 from server.lib.models import (
@@ -69,63 +68,49 @@ def _make_active_project(
 
 
 class TestLoadTodosCorruption:
-    """Direct storage.load_todos tests for various forms of file corruption."""
+    """Direct storage.load_todos tests for various storage conditions.
 
-    def test_empty_todos_file_returns_empty_list(self, cfg: ProjConfig) -> None:
-        """An empty todos.yaml (None after yaml.safe_load) returns []."""
+    SQLite is the source of truth — YAML files are not read by load_todos.
+    When data.db is missing, load_todos raises FileNotFoundError (no YAML fallback).
+    """
+
+    def test_missing_db_raises_file_not_found(self, cfg: ProjConfig) -> None:
+        """When data.db is absent, load_todos raises FileNotFoundError (no YAML fallback)."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text("")
+        # Write todos.yaml — should be ignored since SQLite is the source of truth
+        (proj_dir / "todos.yaml").write_text("todos: []\n")
 
-        todos = storage.load_todos(cfg, "myapp")
-        assert todos == []
+        with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+            storage.load_todos(cfg, "myapp")
 
-    def test_todos_key_missing_returns_empty_list(self, cfg: ProjConfig) -> None:
-        """YAML dict without a 'todos' key returns []."""
+    def test_stale_yaml_is_ignored_when_db_exists(self, cfg: ProjConfig) -> None:
+        """Stale/corrupt todos.yaml has no effect — DB is the source of truth."""
+        from server.lib.models import Todo
+
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text("other_key: 42\n")
-
-        todos = storage.load_todos(cfg, "myapp")
-        assert todos == []
-
-    def test_todos_value_not_a_list_returns_empty_list(self, cfg: ProjConfig) -> None:
-        """When 'todos' key exists but value is not a list, returns []."""
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text("todos: not-a-list\n")
-
-        todos = storage.load_todos(cfg, "myapp")
-        assert todos == []
-
-    def test_invalid_yaml_in_todos_returns_empty(self, cfg: ProjConfig) -> None:
-        """A syntactically invalid todos.yaml is swallowed by _load_yaml and returns [].
-
-        _load_yaml catches yaml.YAMLError and returns {}, so load_todos returns [].
-        """
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
+        # Seed the DB first
+        storage.save_todos(
+            cfg,
+            "myapp",
+            [Todo(id="T1", title="DB todo", created="2026-01-01", updated="2026-01-01")],
+        )
+        # Write a different/corrupt todos.yaml — should be ignored
         (proj_dir / "todos.yaml").write_text("todos:\n  - id: 1\n  bad: [unclosed\n")
 
-        assert storage.load_todos(cfg, "myapp") == []
+        todos = storage.load_todos(cfg, "myapp")
+        assert len(todos) == 1
+        assert todos[0].id == "T1"
 
-    @pytest.mark.parametrize(
-        "content",
-        ["this is just a plain string\n", "- id: T001\n  title: Foo\n"],
-        ids=["scalar", "bare_list"],
-    )
-    def test_todos_file_non_dict_top_level_returns_empty(
-        self, cfg: ProjConfig, content: str
-    ) -> None:
-        """When todos.yaml top-level is not a mapping, load_todos returns [].
-
-        _load_yaml returns {} for non-dict content; load_todos returns [].
-        """
+    def test_empty_project_returns_empty_list(self, cfg: ProjConfig) -> None:
+        """When data.db exists but has no todos, load_todos returns []."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "todos.yaml").write_text(content)
+        storage.save_todos(cfg, "myapp", [])
 
-        assert storage.load_todos(cfg, "myapp") == []
+        todos = storage.load_todos(cfg, "myapp")
+        assert todos == []
 
 
 # ---------------------------------------------------------------------------
@@ -183,94 +168,85 @@ class TestLoadIndexCorruption:
 
 
 class TestLoadMetaCorruption:
-    """Direct storage.load_meta tests for malformed meta.yaml files."""
+    """Direct storage.load_meta tests.
 
-    def test_missing_meta_file_raises_file_not_found(self, cfg: ProjConfig) -> None:
-        """Missing meta.yaml raises FileNotFoundError (expected and caught by CLI)."""
+    SQLite is the source of truth — YAML files are not read by load_meta.
+    When data.db is missing, load_meta raises FileNotFoundError (no YAML fallback).
+    """
+
+    def test_missing_db_raises_file_not_found(self, cfg: ProjConfig) -> None:
+        """Missing data.db raises FileNotFoundError — no YAML fallback."""
+        with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+            storage.load_meta(cfg, "myapp")
+
+    def test_missing_meta_row_raises_file_not_found(self, cfg: ProjConfig) -> None:
+        """DB exists but has no meta row — load_meta raises FileNotFoundError."""
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        # Seed DB with a todo (creates data.db) but no meta row
+        storage.save_todos(cfg, "myapp", [])
         with pytest.raises(FileNotFoundError, match="myapp"):
             storage.load_meta(cfg, "myapp")
 
-    def test_empty_meta_file_returns_meta_with_empty_name(self, cfg: ProjConfig) -> None:
-        """An empty meta.yaml cannot be migrated to SQLite — load_meta raises FileNotFoundError.
-
-        With the SQLite backend, _ensure_migrated reads meta.yaml via _yaml_safe_load.
-        An empty file yields None (not a dict), so no meta row is inserted.
-        sql_meta.load_meta then raises FileNotFoundError.
-        """
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text("")
-
-        with pytest.raises(FileNotFoundError):
-            storage.load_meta(cfg, "myapp")
-
-    def test_meta_missing_name_returns_empty_string(self, cfg: ProjConfig) -> None:
-        """meta.yaml without 'name' is migrated to SQLite with name='' default.
-
-        _yaml_safe_load returns a dict (valid YAML), so migration inserts a row via
-        ProjectMeta.from_dict which defaults name to ''. load_meta returns it.
-        """
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text(
-            "status: active\npriority: medium\ndescription: No name here\n"
-        )
-
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == ""
-        assert meta.status == "active"
-        assert meta.priority == "medium"
-
-    def test_invalid_yaml_in_meta_returns_empty_meta(self, cfg: ProjConfig) -> None:
-        """Syntactically invalid meta.yaml cannot be migrated — load_meta raises FileNotFoundError.
-
-        _yaml_safe_load catches yaml.YAMLError and returns None, so migration skips
-        inserting a meta row. sql_meta.load_meta then raises FileNotFoundError.
-        """
-        proj_dir = Path(cfg.tracking_dir) / "myapp"
-        proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text("name: myapp\nrepos: [unclosed\n")
-
-        with pytest.raises(FileNotFoundError):
-            storage.load_meta(cfg, "myapp")
-
     def test_meta_missing_optional_fields_uses_defaults(self, cfg: ProjConfig) -> None:
-        """meta.yaml with only the required 'name' field fills optional fields with defaults."""
+        """ProjectMeta saved with minimal fields loads with defaults intact."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text("name: myapp\n")
+        meta = ProjectMeta(name="myapp")
+        storage.save_meta(cfg, meta)
 
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == "myapp"
-        assert meta.status == "active"
-        assert meta.priority == "medium"
-        assert meta.description == ""
-        assert meta.repos == []
-        assert meta.tags == []
+        loaded = storage.load_meta(cfg, "myapp")
+        assert loaded.name == "myapp"
+        assert loaded.description == ""
+        assert loaded.repos == []
 
-    def test_meta_repos_not_a_list_uses_empty_repos(self, cfg: ProjConfig) -> None:
-        """When 'repos' is not a list, ProjectMeta.from_dict falls back to []."""
+    def test_meta_repos_preserved_on_roundtrip(self, cfg: ProjConfig) -> None:
+        """Repos saved to DB are returned correctly on load."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text("name: myapp\nrepos: not-a-list\n")
+        today = str(date.today())
+        meta = ProjectMeta(
+            name="myapp",
+            repos=[RepoEntry(label="code", path="/some/path")],
+            dates=ProjectDates(created=today, last_updated=today),
+        )
+        storage.save_meta(cfg, meta)
 
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == "myapp"
-        assert meta.repos == []
+        loaded = storage.load_meta(cfg, "myapp")
+        assert loaded.name == "myapp"
+        assert len(loaded.repos) == 1
+        assert loaded.repos[0].label == "code"
 
-    def test_meta_dates_not_a_dict_uses_empty_dates(self, cfg: ProjConfig) -> None:
-        """When 'dates' is not a dict, ProjectDates.from_dict falls back to empty strings."""
+    def test_stale_yaml_ignored_when_db_has_meta(self, cfg: ProjConfig) -> None:
+        """Writing meta.yaml after save_meta has no effect — DB is source of truth."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "meta.yaml").write_text("name: myapp\ndates: not-a-dict\n")
+        meta = ProjectMeta(name="myapp", description="original")
+        storage.save_meta(cfg, meta)
+        # Overwrite meta.yaml — should be ignored
+        (proj_dir / "meta.yaml").write_text("name: myapp\ndescription: stale yaml\n")
 
-        meta = storage.load_meta(cfg, "myapp")
-        assert meta.name == "myapp"
-        assert meta.dates.created == ""
-        # last_updated is bumped to today by migration (not empty)
+        loaded = storage.load_meta(cfg, "myapp")
+        assert loaded.description == "original"
+
+    def test_meta_dates_roundtrip_through_db(self, cfg: ProjConfig) -> None:
+        """ProjectMeta with custom dates roundtrips through DB correctly."""
         from datetime import date as _date
 
-        assert meta.dates.last_updated == str(_date.today())
+        proj_dir = Path(cfg.tracking_dir) / "myapp"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        today = str(_date.today())
+        meta = ProjectMeta(
+            name="myapp",
+            dates=ProjectDates(created="2026-01-01", last_updated="2000-01-01"),
+        )
+        storage.save_meta(cfg, meta)
+
+        loaded = storage.load_meta(cfg, "myapp")
+        assert loaded.name == "myapp"
+        assert loaded.dates.created == "2026-01-01"
+        # save_meta bumps last_updated to today
+        assert loaded.dates.last_updated == today
 
 
 # ---------------------------------------------------------------------------
@@ -303,52 +279,45 @@ class TestCmdSessionStartCorruption:
         # Should not raise — graceful degradation
         cmd_session_start(cwd=str(tmp_path), compact=False)
 
-    def test_corrupted_todos_yaml_returns_context_with_empty_todos(
+    def test_corrupted_todos_yaml_has_no_effect_on_context(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When todos.yaml is syntactically invalid, cmd_session_start completes gracefully.
+        """Corrupted todos.yaml has no effect — SQLite is source of truth.
 
-        _load_yaml catches yaml.YAMLError and returns {}, so load_todos returns [].
-        cmd_session_start produces context output with no todos listed.
+        cmd_session_start reads todos from DB, ignoring any YAML files.
+        It completes gracefully and produces normal project context.
         """
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        # Overwrite todos.yaml with invalid YAML
+        # Overwrite todos.yaml with invalid YAML — DB is untouched, so no effect
         (proj_dir / "todos.yaml").write_text("todos:\n  - id: 1\n  bad: [unclosed\n")
 
         from server.cli import cmd_session_start
 
-        # Should not raise — graceful degradation
+        # Should not raise — DB is source of truth, YAML corruption is irrelevant
         cmd_session_start(cwd=str(tmp_path), compact=False)
 
-    def test_malformed_meta_yaml_missing_name_produces_output(
+    def test_stale_meta_yaml_has_no_effect_on_context(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When meta.yaml has no 'name' field, cmd_session_start no longer raises KeyError.
+        """Overwriting meta.yaml has no effect — SQLite is source of truth.
 
-        ProjectMeta.from_dict now falls back to name='' via data.get('name', ''),
-        so the command completes without an unhandled exception.
+        cmd_session_start reads meta from DB, not from meta.yaml.
+        The project name in DB is 'myapp', so output still contains 'myapp'.
         """
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        # Overwrite meta.yaml with one missing the required 'name' field
+        # Overwrite meta.yaml — DB has the real meta, this is ignored
         (proj_dir / "meta.yaml").write_text("status: active\npriority: medium\n")
 
         from server.cli import cmd_session_start
 
-        # Should not raise — graceful degradation
+        # Should not raise — DB is source of truth
         cmd_session_start(cwd=str(tmp_path), compact=False)
 
-    def test_missing_fields_in_meta_with_defaults_produces_context(
+    def test_valid_meta_in_db_produces_context(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """meta.yaml with only 'name' (all optional fields missing) still produces context output.
-
-        This is the happy path for missing optional fields — graceful degradation.
-        """
-        proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        # Overwrite meta.yaml with minimal fields (keep repos so cwd detection works)
-        (proj_dir / "meta.yaml").write_text(
-            f"name: myapp\nrepos:\n  - label: code\n    path: {tmp_path}\n"
-        )
+        """When meta is in DB, cmd_session_start produces project context output."""
+        _make_active_project(cfg, "myapp", str(tmp_path), active=True)
 
         from server.cli import cmd_session_start
 
@@ -383,31 +352,28 @@ class TestCmdSessionEndCorruption:
         # Should not raise — graceful degradation
         cmd_session_end(cwd=str(tmp_path))
 
-    def test_malformed_meta_yaml_missing_name_does_not_raise_in_session_end(
+    def test_stale_meta_yaml_has_no_effect_on_session_end(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When meta.yaml has no 'name' field, cmd_session_end no longer raises KeyError.
+        """Overwriting meta.yaml has no effect — SQLite is source of truth.
 
-        ProjectMeta.from_dict now falls back to name='' via data.get('name', '').
+        cmd_session_end reads meta from DB, not from meta.yaml. Project 'myapp'
+        is in DB so the command completes without error.
         """
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
+        # Overwrite meta.yaml — DB has the real meta, this is ignored
         (proj_dir / "meta.yaml").write_text("status: active\npriority: medium\n")
 
         from server.cli import cmd_session_end
 
-        # Should not raise — graceful degradation
+        # Should not raise — DB is source of truth
         cmd_session_end(cwd=str(tmp_path))
 
-    def test_meta_with_defaults_only_does_not_crash_session_end(
+    def test_valid_meta_in_db_does_not_crash_session_end(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """meta.yaml with only 'name' present completes session-end without error."""
-        proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        today = str(date.today())
-        # Minimal but valid meta — only required field + dates to avoid KeyError in save_meta
-        (proj_dir / "meta.yaml").write_text(
-            f"name: myapp\ndates:\n  created: '{today}'\n  last_updated: '2000-01-01'\n"
-        )
+        """Valid meta in DB — cmd_session_end completes without error."""
+        _make_active_project(cfg, "myapp", str(tmp_path), active=True)
 
         from server.cli import cmd_session_end
 
@@ -439,52 +405,46 @@ class TestMCPContextToolsCorruption:
     an error-indicating string return value when documenting a gap scenario.
     """
 
-    async def test_session_start_corrupted_todos_does_not_succeed(
+    async def test_session_start_stale_todos_yaml_has_no_effect(
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
-        """ctx_session_start does not produce project context when todos.yaml is invalid.
+        """Corrupted todos.yaml has no effect — SQLite is source of truth.
 
-        Only FileNotFoundError is guarded in the tool; yaml.YAMLError from
-        load_todos propagates to FastMCP, which may raise or return an error string.
-        The key assertion: normal project context is NOT returned.
+        ctx_session_start reads todos from DB, so a corrupt YAML file is ignored.
+        Normal project context is returned.
         """
         setup_project(cfg, "myapp", str(tmp_path))
         state.set_session_active("myapp")
         proj_dir = Path(cfg.tracking_dir) / "myapp"
+        # Overwrite todos.yaml with corrupt content — DB is untouched
         (proj_dir / "todos.yaml").write_text("todos:\n  - id: 1\n  bad: [unclosed\n")
 
-        try:
-            result = await call_tool(mcp_app, "ctx_session_start")
-            # If FastMCP converts the exception to a string, it should look like an error,
-            # not normal project context ("myapp" with status/priority lines).
-            # We allow an empty result too (tool returned "" on error path).
-            assert "myapp" not in result or _is_error_result(result), (
-                f"Expected error or empty, got: {result!r}"
-            )
-        except (yaml.YAMLError, KeyError, AttributeError, Exception):
-            # Exception propagating is also acceptable behaviour.
-            pass
+        result = await call_tool(mcp_app, "ctx_session_start")
+        # DB has valid data, so session_start succeeds normally
+        assert "myapp" in result
 
-    async def test_session_start_meta_missing_optional_fields_returns_context(
+    async def test_session_start_meta_in_db_returns_context(
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
-        """ctx_session_start works when meta.yaml has only the required 'name' field."""
+        """ctx_session_start works when meta is in DB (stale YAML is irrelevant)."""
         setup_project(cfg, "myapp", str(tmp_path))
         state.set_session_active("myapp")
         proj_dir = Path(cfg.tracking_dir) / "myapp"
+        # Overwrite meta.yaml — DB has the real meta, this is ignored
         (proj_dir / "meta.yaml").write_text("name: myapp\n")
 
         result = await call_tool(mcp_app, "ctx_session_start")
         assert "myapp" in result
 
-    async def test_session_end_meta_missing_optional_fields_returns_updated(
+    async def test_session_end_meta_in_db_returns_updated(
         self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path
     ) -> None:
-        """ctx_session_end completes when meta.yaml has only the required 'name' field."""
+        """ctx_session_end completes when meta is in DB (stale YAML is irrelevant)."""
         setup_project(cfg, "myapp", str(tmp_path))
         state.set_session_active("myapp")
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         today = str(date.today())
+        # Overwrite meta.yaml — DB has the real meta, this is ignored
         (proj_dir / "meta.yaml").write_text(
             f"name: myapp\ndates:\n  created: '{today}'\n  last_updated: '2000-01-01'\n"
         )
@@ -520,23 +480,22 @@ class TestMCPContextToolsCorruption:
 
 
 class TestLoadTodosFileNotExist:
-    """load_todos returns [] when the todos.yaml file does not exist at all."""
+    """load_todos raises FileNotFoundError when data.db is missing."""
 
-    def test_missing_todos_file_returns_empty(self, cfg: ProjConfig) -> None:
-        """When the project dir exists but todos.yaml does not, returns []."""
+    def test_missing_db_with_project_dir_raises(self, cfg: ProjConfig) -> None:
+        """When the project dir exists but data.db does not, load_todos raises FileNotFoundError."""
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
-        # Do NOT create todos.yaml
-        assert not (proj_dir / "todos.yaml").exists()
+        # No data.db created
 
-        todos = storage.load_todos(cfg, "myapp")
-        assert todos == []
+        with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+            storage.load_todos(cfg, "myapp")
 
-    def test_missing_project_dir_returns_empty(self, cfg: ProjConfig) -> None:
-        """When the entire project directory doesn't exist, returns []."""
+    def test_missing_project_dir_raises(self, cfg: ProjConfig) -> None:
+        """When the entire project directory doesn't exist, load_todos raises FileNotFoundError."""
         # Do NOT create the project directory at all
-        todos = storage.load_todos(cfg, "nonexistent-project")
-        assert todos == []
+        with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+            storage.load_todos(cfg, "nonexistent-project")
 
 
 # ---------------------------------------------------------------------------
@@ -547,20 +506,19 @@ class TestLoadTodosFileNotExist:
 class TestLoadYamlPermissionError:
     """_load_yaml does not catch PermissionError -- it propagates."""
 
-    def test_permission_error_propagates_from_load_yaml(
-        self, cfg: ProjConfig, tmp_path: Path
-    ) -> None:
-        """PermissionError from _load_yaml propagates (not swallowed)."""
+    def test_load_todos_raises_when_db_missing(self, cfg: ProjConfig, tmp_path: Path) -> None:
+        """load_todos raises FileNotFoundError when data.db is missing (no YAML fallback).
+
+        YAML files (even unreadable ones) are irrelevant — SQLite is source of truth.
+        """
         proj_dir = Path(cfg.tracking_dir) / "myapp"
         proj_dir.mkdir(parents=True, exist_ok=True)
+        # Write a todos.yaml to confirm it's ignored
         todos_file = proj_dir / "todos.yaml"
         todos_file.write_text("todos: []\n")
-        todos_file.chmod(0o000)
-        try:
-            with pytest.raises(PermissionError):
-                storage.load_todos(cfg, "myapp")
-        finally:
-            todos_file.chmod(0o644)
+
+        with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+            storage.load_todos(cfg, "myapp")
 
     def test_permission_error_on_index(self, cfg: ProjConfig, tmp_path: Path) -> None:
         """load_index reads from SQLite — YAML permission errors no longer affect it.
@@ -589,20 +547,20 @@ class TestLoadYamlPermissionError:
 class TestCmdSessionEndCorruptedTodos:
     """cmd_session_end edge cases specifically with corrupted todos."""
 
-    def test_corrupted_todos_yaml_does_not_crash_session_end(
+    def test_stale_yaml_files_do_not_affect_session_end(
         self, cfg: ProjConfig, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """When todos.yaml is corrupted, cmd_session_end still completes."""
+        """Stale/corrupt YAML files have no effect — SQLite is source of truth.
+
+        cmd_session_end reads from DB, so overwritten YAML files are ignored.
+        The command completes without error.
+        """
         proj_dir = _make_active_project(cfg, "myapp", str(tmp_path), active=True)
-        today = str(date.today())
-        (proj_dir / "meta.yaml").write_text(
-            f"name: myapp\nrepos:\n  - label: code\n    path: {tmp_path}\n"
-            f"dates:\n  created: '{today}'\n  last_updated: '2000-01-01'\n"
-        )
-        # Corrupt the todos file
+        # Overwrite YAML files with stale/corrupt content — DB is untouched
+        (proj_dir / "meta.yaml").write_text("stale: content\n")
         (proj_dir / "todos.yaml").write_text("todos:\n  - id: 1\n  bad: [unclosed\n")
 
         from server.cli import cmd_session_end
 
-        # Should not raise
+        # Should not raise — DB is source of truth
         cmd_session_end(cwd=str(tmp_path))

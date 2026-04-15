@@ -198,16 +198,16 @@ def test_export_round_trip(tmp_cfg: ProjConfig) -> None:
     assert data["todos"][0]["title"] == "Round-trip todo"
 
 
-def test_ensure_migrated_creates_db(tmp_cfg: ProjConfig) -> None:
+def test_ensure_migrated_raises_when_db_missing(tmp_cfg: ProjConfig) -> None:
+    """_ensure_migrated raises FileNotFoundError when data.db is absent (no YAML fallback)."""
     tdir = Path(tmp_cfg.tracking_dir) / PROJECT
     tdir.mkdir(parents=True, exist_ok=True)
 
     db = db_path(tmp_cfg, PROJECT)
     assert not db.exists()
 
-    _ensure_migrated(tmp_cfg, PROJECT)
-
-    assert db.exists()
+    with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+        _ensure_migrated(tmp_cfg, PROJECT)
 
 
 def test_ensure_migrated_noop_when_exists(tmp_cfg: ProjConfig) -> None:
@@ -222,6 +222,55 @@ def test_ensure_migrated_noop_when_exists(tmp_cfg: ProjConfig) -> None:
     _ensure_migrated(tmp_cfg, PROJECT)
 
     assert _count(tmp_cfg, PROJECT, "todos") == 1
+
+
+def test_load_todos_raises_when_db_missing(tmp_cfg: ProjConfig) -> None:
+    """sql_todos.load_todos raises FileNotFoundError when data.db absent — no YAML fallback."""
+    from server.lib import sql_todos
+
+    tdir = Path(tmp_cfg.tracking_dir) / PROJECT
+    tdir.mkdir(parents=True, exist_ok=True)
+    # Write a todos.yaml to confirm it is NOT used as a fallback
+    (tdir / "todos.yaml").write_text("todos: [{id: '1', title: 'should not load'}]\n")
+
+    with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+        sql_todos.load_todos(tmp_cfg, PROJECT)
+
+
+def test_load_archived_todos_falls_back_to_yaml_bak(tmp_cfg: ProjConfig) -> None:
+    """load_archived_todos falls back to archive.yaml.bak when data.db missing.
+
+    Disaster recovery path must be preserved.
+    """
+    import yaml as _yaml
+
+    from server.lib import sql_todos
+
+    tdir = Path(tmp_cfg.tracking_dir) / PROJECT
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    # Write archive.yaml.bak (disaster recovery backup)
+    archived = [_make_todo("3", "Archived from bak")]
+    bak_data = {"todos": archived}
+    (tdir / "archive.yaml.bak").write_text(_yaml.dump(bak_data))
+
+    # No data.db — should fall back to archive.yaml.bak
+    result = sql_todos.load_archived_todos(tmp_cfg, PROJECT)
+
+    assert len(result) == 1
+    assert result[0].id == "3"
+    assert result[0].title == "Archived from bak"
+
+
+def test_load_archived_todos_returns_empty_when_neither_db_nor_bak(tmp_cfg: ProjConfig) -> None:
+    """load_archived_todos returns [] when both data.db and archive.yaml.bak are absent."""
+    from server.lib import sql_todos
+
+    tdir = Path(tmp_cfg.tracking_dir) / PROJECT
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    result = sql_todos.load_archived_todos(tmp_cfg, PROJECT)
+    assert result == []
 
 
 def test_partial_migration_recovery(tmp_cfg: ProjConfig) -> None:

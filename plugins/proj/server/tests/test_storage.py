@@ -411,11 +411,14 @@ def test_save_load_todos_sqlite(tmp_cfg: ProjConfig) -> None:
     assert loaded_titles == {f"Todo number {i}" for i in range(1, 6)}
 
 
-def test_load_todos_empty_fresh_project(tmp_cfg: ProjConfig) -> None:
-    """Brand-new project dir — load_todos returns []."""
+def test_load_todos_missing_db_raises(tmp_cfg: ProjConfig) -> None:
+    """Brand-new project dir with no data.db — load_todos raises FileNotFoundError.
+
+    No YAML fallback.
+    """
     (Path(tmp_cfg.tracking_dir) / "brand_new").mkdir(parents=True)
-    result = storage.load_todos(tmp_cfg, "brand_new")
-    assert result == []
+    with pytest.raises(FileNotFoundError, match=r"data\.db not found"):
+        storage.load_todos(tmp_cfg, "brand_new")
 
 
 def test_archive_atomicity(tmp_cfg: ProjConfig) -> None:

@@ -105,12 +105,17 @@ def _row_to_todo(row: sqlite3.Row) -> Todo:
 
 
 def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    """Load active todos from SQLite. Returns [] if project has no todos yet."""
+    """Load active todos from SQLite. Returns [] if project has no todos yet.
+
+    Raises FileNotFoundError if data.db is missing — run /proj:init to initialize.
+    """
     from server.lib.db import db_path
 
     path = db_path(cfg, project_name)
     if not path.exists():
-        return []
+        raise FileNotFoundError(
+            f"data.db not found for project {project_name!r} — run /proj:init to initialize"
+        )
 
     db_file = ensure_db(cfg, project_name)
     conn = get_connection(db_file)

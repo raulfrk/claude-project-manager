@@ -297,10 +297,10 @@ def export_sqlite_to_yaml(cfg: ProjConfig, project_name: str) -> list[Path]:
 
 
 def _ensure_migrated(cfg: ProjConfig, project_name: str) -> None:
-    """Auto-migration hook — call at start of load_todos/load_meta.
+    """Guard — verifies data.db exists before storage operations.
 
-    If data.db doesn't exist: run migrate_yaml_to_sqlite.
     If data.db exists: no-op.
+    If data.db missing: raises FileNotFoundError — run /proj:init to initialize.
     Uses module-level set to avoid re-checking on every call.
     The cache key includes tracking_dir to avoid false hits across
     different cfg instances (e.g. separate test fixtures).
@@ -311,6 +311,8 @@ def _ensure_migrated(cfg: ProjConfig, project_name: str) -> None:
 
     path = db_path(cfg, project_name)
     if not path.exists():
-        migrate_yaml_to_sqlite(cfg, project_name)
+        raise FileNotFoundError(
+            f"data.db not found for project {project_name!r} — run /proj:init to initialize"
+        )
 
     _migrated_projects.add(cache_key)
