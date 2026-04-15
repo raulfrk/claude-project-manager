@@ -34,7 +34,7 @@ hooks:
     blocking: true
     condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
 
-  - id: jira-on-todo-batch-complete
+  - id: jira-on-todo-complete-batch
     trigger_tool: todo_complete
     target_tool: jira_bulk_update_issues
     server: jira
@@ -42,6 +42,8 @@ hooks:
       updates_json: "${jira_updates_json}"
     blocking: true
     condition: "sync.jira.enabled and sync.jira.auto_sync"
+    result_condition:
+      is_batch: true
 
   - id: jira-on-todo-delete
     trigger_tool: todo_delete

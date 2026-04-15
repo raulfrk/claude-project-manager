@@ -1164,6 +1164,7 @@ def register(app: FastMCP) -> None:
             "todoist_project_id": todoist_project_id_val,
             "trello_card_id": trello_card_id_val,
             "jira_project_key": jira_project_key_val,
+            "is_batch": True,
         }
 
         if _estimate_size(result_data) > _MAX_SOURCE_BYTES:

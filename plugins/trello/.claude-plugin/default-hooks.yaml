@@ -110,7 +110,7 @@ hooks:
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync and todo.trello_card_id"
 
-  - id: trello-on-todo-batch-complete
+  - id: trello-on-todo-complete-batch
     trigger_tool: todo_complete
     target_tool: trello_batch_archive_cards
     server: trello
@@ -118,3 +118,5 @@ hooks:
       card_ids: "${trello_card_ids}"
     blocking: true
     condition: "sync.trello.enabled and sync.trello.auto_sync"
+    result_condition:
+      is_batch: true
