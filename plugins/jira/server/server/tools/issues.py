@@ -290,7 +290,10 @@ def register(app: FastMCP) -> None:
                 if not key:
                     failures.append({"index": idx, "error": "Missing 'key' field"})
                     continue
-                fields = update.get("fields", {})
+                raw_fields = update.get("fields", {})
+                # Strip null-valued fields: hook templates like "labels": ${tags}
+                # resolve to null when tags is absent, which would clear Jira fields.
+                fields = {k: v for k, v in raw_fields.items() if v is not None}
                 if not fields:
                     failures.append({"index": idx, "key": key, "error": "No fields to update"})
                     continue

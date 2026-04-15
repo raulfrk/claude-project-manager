@@ -157,6 +157,17 @@ def remove_worktree(path: str, force: bool = False) -> str:
             {"result": f"No managed worktree found at: {path}", "worktree_path": None}
         )
     abs_path, repo_path = result
+    if not force:
+        for entry in git.list_worktrees(repo_path):
+            if entry.path == abs_path and entry.locked:
+                return json.dumps(
+                    {
+                        "result": "error",
+                        "message": f"Worktree is locked: {abs_path}. "
+                        "Unlock first with wt_unlock, or use force=true.",
+                        "worktree_path": abs_path,
+                    }
+                )
     try:
         git.remove_worktree(repo_path, abs_path, force=force)
         return json.dumps({"result": f"Removed worktree at {abs_path}.", "worktree_path": abs_path})
