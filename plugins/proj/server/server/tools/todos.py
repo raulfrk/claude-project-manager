@@ -873,7 +873,7 @@ def register(app: FastMCP) -> None:
         # Scope guard: only honour skip_hooks when the update contains
         # exclusively sync-ID fields (no real user-facing fields changed).
         _non_sync_fields_present = any(
-            v is not None for v in (title, status, priority, tags, notes, due_date)
+            v is not None for v in (title, status, priority, tags, notes, due_date, blocked_by_set)
         )
         honour_skip = skip_hooks and not _non_sync_fields_present
 
