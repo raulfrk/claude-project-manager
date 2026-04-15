@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import random
 import time
 from collections import deque
 from pathlib import Path
@@ -13,6 +15,11 @@ from server.lib.config import JiraConfig, load_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_log = logging.getLogger(__name__)
+_RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0
 
 # Recursive JSON value type — no Any needed.
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
@@ -63,14 +70,33 @@ class JiraClient:
         msg = f"Jira API error {resp.status_code}: {resp.text}"
         raise RuntimeError(msg)
 
+    def _request_with_retry(self, method: str, path: str, **kwargs: object) -> JsonValue:
+        """Execute HTTP request with retry on transient errors."""
+        last_exc: RuntimeError | None = None
+        for attempt in range(_MAX_RETRIES):
+            self._rate_limit()
+            try:
+                resp = getattr(self._http, method)(
+                    path, **kwargs
+                )
+                return self._handle_response(resp)
+            except RuntimeError as exc:
+                if not any(f"error {code}:" in str(exc) for code in _RETRYABLE_STATUS_CODES):
+                    raise
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    delay = min(_RETRY_BASE_DELAY * (2 ** attempt) + random.random(), 30.0)
+                    _log.warning("Jira API retryable error (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES, exc)
+                    time.sleep(delay)
+        raise last_exc  # type: ignore[misc]
+
     def get(
         self,
         path: str,
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a GET request to the Jira REST API."""
-        self._rate_limit()
-        return self._handle_response(self._http.get(path, params=params or {}))
+        return self._request_with_retry("get", path, params=params or {})
 
     def post(
         self,
@@ -79,8 +105,7 @@ class JiraClient:
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a POST request to the Jira REST API."""
-        self._rate_limit()
-        return self._handle_response(self._http.post(path, json=json_body, params=params or {}))
+        return self._request_with_retry("post", path, json=json_body, params=params or {})
 
     def put(
         self,
@@ -89,8 +114,7 @@ class JiraClient:
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a PUT request to the Jira REST API."""
-        self._rate_limit()
-        return self._handle_response(self._http.put(path, json=json_body, params=params or {}))
+        return self._request_with_retry("put", path, json=json_body, params=params or {})
 
     def delete(
         self,
@@ -98,8 +122,7 @@ class JiraClient:
         params: Mapping[str, ParamValue] | None = None,
     ) -> JsonValue:
         """Send a DELETE request to the Jira REST API."""
-        self._rate_limit()
-        return self._handle_response(self._http.delete(path, params=params or {}))
+        return self._request_with_retry("delete", path, params=params or {})
 
     def post_multipart(
         self,

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
 
-from server.lib.client import JiraClient
+from server.lib.client import JiraClient, _MAX_RETRIES
 from server.lib.config import JiraConfig
 
 
@@ -124,3 +124,74 @@ class TestRateLimit:
         assert elapsed < 1.0
         # Old timestamps should be evicted, only the new one remains
         assert len(c._request_timestamps) == 1
+
+
+class TestRetry:
+    def _make_response(self, status_code: int, text: str = "", json_data: object = None) -> MagicMock:
+        resp = MagicMock(spec=httpx.Response)
+        resp.is_success = status_code < 400
+        resp.status_code = status_code
+        resp.text = text or str(status_code)
+        if json_data is not None:
+            resp.json.return_value = json_data
+        return resp
+
+    def test_retries_on_503(self, client: JiraClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Client retries on transient 503 errors."""
+        fail_resp = self._make_response(503, "Service Unavailable")
+        ok_resp = self._make_response(200, json_data={"key": "PROJ-1"})
+
+        mock_get = MagicMock(side_effect=[fail_resp, fail_resp, ok_resp])
+        monkeypatch.setattr(client._http, "get", mock_get)
+
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("server.lib.client.time.sleep", lambda s: sleep_calls.append(s))
+
+        result = client.get("/rest/api/2/issue/PROJ-1")
+
+        assert result == {"key": "PROJ-1"}
+        assert mock_get.call_count == 3
+        assert len(sleep_calls) == 2
+
+    def test_no_retry_on_400(self, client: JiraClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Client does not retry on 400 client errors."""
+        fail_resp = self._make_response(400, "Bad Request")
+        mock_get = MagicMock(return_value=fail_resp)
+        monkeypatch.setattr(client._http, "get", mock_get)
+
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("server.lib.client.time.sleep", lambda s: sleep_calls.append(s))
+
+        with pytest.raises(RuntimeError, match="Jira API error 400"):
+            client.get("/rest/api/2/issue/PROJ-1")
+
+        assert mock_get.call_count == 1
+        assert len(sleep_calls) == 0
+
+    def test_exhausted_retries_raises(self, client: JiraClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After max retries, last error is raised."""
+        fail_resp = self._make_response(503, "Service Unavailable")
+        mock_get = MagicMock(return_value=fail_resp)
+        monkeypatch.setattr(client._http, "get", mock_get)
+
+        monkeypatch.setattr("server.lib.client.time.sleep", lambda s: None)
+
+        with pytest.raises(RuntimeError, match="Jira API error 503"):
+            client.get("/rest/api/2/issue/PROJ-1")
+
+        assert mock_get.call_count == _MAX_RETRIES
+
+    def test_retries_on_429(self, client: JiraClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Client retries on 429 rate limit errors."""
+        fail_resp = self._make_response(429, "Too Many Requests")
+        ok_resp = self._make_response(200, json_data={"total": 0})
+
+        mock_get = MagicMock(side_effect=[fail_resp, ok_resp])
+        monkeypatch.setattr(client._http, "get", mock_get)
+
+        monkeypatch.setattr("server.lib.client.time.sleep", lambda s: None)
+
+        result = client.get("/rest/api/2/search")
+
+        assert result == {"total": 0}
+        assert mock_get.call_count == 2
