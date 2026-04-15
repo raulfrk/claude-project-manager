@@ -88,7 +88,7 @@ Key fields:
 
 **Version**: 3.0.1 | **Category**: productivity | **License**: MIT
 
-The core plugin. Tracks project metadata, todos with nested dependencies and blocking relationships, timestamped notes, and git activity across multiple repositories. Supports bidirectional Todoist, Trello, and Jira sync. Provides AI-powered workflows (define, decompose, execute).
+The core plugin. Tracks project metadata, todos with nested dependencies and blocking relationships, timestamped notes, and git activity across multiple repositories. Supports bidirectional Todoist, Trello, and Jira sync.
 
 ### Install
 
@@ -135,7 +135,6 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `todo_block(id, blocked_by)` | Set a blocking dependency |
 | `todo_unblock(id, blocked_by)` | Remove a blocking dependency |
 | `todo_ready()` | List todos ready for work (unblocked) |
-| `todo_check_executable(id)` | Check if a todo can be executed (not manual-tagged) |
 | `todo_set_content_flag(id, flag, value)` | Set content flags (has_requirements, has_research) |
 
 #### Content and Context
@@ -207,15 +206,8 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 |-------|-------------|-----------|
 | `/proj:init-plugin` | First-time setup wizard | -- |
 | `/proj:init` | Initialize project tracking | `[project-name]` |
-| `/proj:quick` | Create project and launch full workflow | `[project-name]` |
 | `/proj:status` | Show project status, todos, git activity | -- |
 | `/proj:todo` | Manage todos (add/done/list/tree/block/delete) | `[operation] [args]` |
-| `/proj:define` | Gather requirements via iterative Q&A | `<todo-id>` |
-| `/proj:refine` | Stress-test requirements with 3 review agents | `<todo-id>` |
-| `/proj:decompose` | Break todo into sub-todos with dependencies | `<todo-id>` |
-| `/proj:execute` | Execute a todo (implement changes) | `<todo-id>` |
-| `/proj:run` | Full workflow: define, decompose, execute | `<id \| range>` `[--steps]` `[--from]` `[--iter N]` |
-| `/proj:run-batch` | Batch/range execution workflow for multiple todos | `<id-range\|comma-list>` `[--steps]` `[--fast\|--careful]` `[--trust N]` |
 | `/proj:save` | Save session notes and reconcile git | -- |
 | `/proj:load` | Load project for session (cross-directory) | `[project-name]` |
 | `/proj:switch` | Switch active project context | `[project-name]` |
@@ -252,7 +244,6 @@ These skills are invoked by parent skills, not directly by users:
 | `/proj:trello-setup` | trello-sync | Ensure Trello board, label, and project card exist |
 | `/proj:jira-map` | jira-sync | Compute Jira-to-local mapping |
 | `/proj:jira-apply` | jira-sync | Apply Jira mapping |
-| `/proj:refine` | run | Stress-test requirements |
 
 ### Config
 
@@ -287,9 +278,8 @@ Stored in `~/.claude/proj.yaml`. Created during `/proj:init-plugin`.
 # Create and track a new project
 /proj:init my-app
 
-# Add a todo and run the full workflow
+# Add a todo
 /proj:todo add Build authentication system
-/proj:run 1
 
 # Sync with Todoist
 /proj:todoist-sync

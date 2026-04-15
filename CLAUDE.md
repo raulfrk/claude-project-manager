@@ -148,7 +148,7 @@ Add `context: fork` and `agent: general-purpose` to skills that can run autonomo
 - No interactive Q&A during exec
 - No plan mode approval mid-exec
 - Examples: hooks-*, status, todo, todoist-sync, trello-sync, jira-sync, jira-sync-trello
-- NOT for: interactive skills (define, init, load), sub-skills, or plan-approval skills (execute, run, quick)
+- NOT for: interactive skills (init, load) or sub-skills
 
 <!-- claude-project-manager:start -->
 ## Claude Project Manager Rules

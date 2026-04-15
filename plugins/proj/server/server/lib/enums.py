@@ -18,5 +18,3 @@ class Priority(StrEnum):
 
 
 TERMINAL_STATUSES = frozenset({"done", "cancelled"})
-
-MANUAL_TAG = "manual"

@@ -1,5 +1,14 @@
 # Changelog — proj
 
+## [5.0.0] — 2026-04-15
+### Removed
+- Superseded workflow skills: define, execute, run, run-batch, refine, decompose, quick, _shared
+- `todo_check_executable` MCP tool
+- `plugins/proj/agents/` directory (20 agent definitions)
+- Eval files for removed skills (define, decompose, execute, run, quick)
+- `MANUAL_TAG` constant from enums (dead code)
+- Docs: `plan-execute-patterns.md`, `pattern-a-implementation.md`, `bidirectional-sync-design.md`
+
 ## [0.51.0] — 2026-03-07
 ### Changed
 - **Merged define + research** into a single `/proj:define` skill (Q&A + codebase research in one step)

@@ -28,7 +28,7 @@ The `proj` plugin provides a complete project management workflow inside Claude 
 
 - **Project tracking** — each project has a tracking directory (`~/projects/tracking/<name>/`) containing a `todos.yaml`, `NOTES.md`, and per-todo `requirements.md` / `research.md` files.
 - **Todo lifecycle** — add, prioritize, block/unblock, complete, and archive todos with hierarchical dot-notation IDs (`1`, `1.1`, `1.2.3`).
-- **Full workflow** — structured skills for defining requirements + researching approaches, decomposing into sub-todos, and executing them — individually or in parallel batches.
+- **Full workflow** — structured skills for defining requirements, decomposing into sub-todos, and executing them.
 - **Git integration** — detect recent commits across all project repos, suggest todo completions, and link commits to specific todos.
 - **Todoist sync** — bidirectional sync with a Todoist project (optional).
 - **CLAUDE.md management** — write and update per-project `CLAUDE.md` files to keep Claude's context current.
@@ -117,8 +117,8 @@ tracking/my-project/
   archive.yaml       # completed todos
   NOTES.md           # freeform dated notes
   <todo-id>/
-    requirements.md  # structured requirements (from /proj:define)
-    research.md      # implementation research (from /proj:define)
+    requirements.md  # structured requirements
+    research.md      # implementation research
 ```
 
 ### todos.yaml
@@ -138,7 +138,7 @@ Todos are stored as plain YAML — no frontmatter, no markdown. Each todo has:
 
 ### CLAUDE.md per project
 
-Each project's content directory can have a `CLAUDE.md` that gives Claude context about the codebase. The `/proj:init` skill creates one automatically; `/proj:save` and `/proj:execute` keep it current.
+Each project's content directory can have a `CLAUDE.md` that gives Claude context about the codebase. The `/proj:init` skill creates one automatically; `/proj:save` keeps it current.
 
 ### Active project
 
@@ -179,17 +179,6 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 |-------|-------|-------------|
 | `todo` | `/proj:todo <subcommand>` | All todo CRUD: add, done, update, list, tree, block, delete. |
 | `prioritize` | `/proj:prioritize` | Analyze all open todos, propose optimal execution order and blocking relationships via plan mode. |
-
-### Workflow
-
-| Skill | Usage | Description |
-|-------|-------|-------------|
-| `define` | `/proj:define <id>` | Gather requirements through Q&A and research implementation approaches. Writes `requirements.md` and `research.md`. Background codebase exploration runs in parallel with Q&A. |
-| `decompose` | `/proj:decompose <id>` | Break a large todo into sub-todos with dependency analysis. Detects shared-file conflicts for safe parallel execution. Supports `worktree_candidate` annotations for worktree-aware conflict resolution. |
-| `refine` | `/proj:refine <id>` | Stress-test requirements with 3 review agents (Skeptic, Edge-Case Finder, Architecture Reviewer). Sub-skill invoked by `run` with `--refine` flag. Produces a Refinement Report with Apply/Edit/Skip/Stop options. |
-| `execute` | `/proj:execute [id\|range]` | Implement todos with smart-gate scoring, quality levels, and pipeline execution. Supports team mode, trust levels, verification, worktree isolation, and batch plan approval. |
-| `run` | `/proj:run <id> [--steps ...] [--from ...] [--iter N]` | Full workflow: define → preflight → decompose → refine → execute. Supports `--fast/--balanced/--careful/--paranoid` quality levels, `--no-worktree` to opt out of default worktree isolation, `--refine` stress-testing, `--batch-approve` speculative planning, and `--no-pipeline` sequential mode. |
-| `quick` | `/proj:quick [description]` | Quick-start: creates a new project (if none active) or a new todo (if active project exists), then launches `/proj:run`. |
 
 ### Sync
 
@@ -256,7 +245,6 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 | `todo_get` | Get a single todo by ID. |
 | `todo_update` | Update todo fields; use `blocked_by_set` to replace blocking relationships. |
 | `todo_complete` | Mark a todo done and archive it. |
-| `todo_check_executable` | Guard for the `manual` tag. |
 | `todo_delete` | Delete a todo. |
 | `todo_ready` | List pending unblocked todos. |
 | `todo_tree` | Return todos as a nested JSON tree. |
@@ -304,18 +292,7 @@ All tools are exposed under the `proj` MCP server (tool names prefixed with `mcp
 
 ## Todo tags
 
-Todos support a `tags` list. Tags are free-form strings except for `manual`, which has built-in behavior.
-
-### The `manual` tag
-
-Mark a todo as requiring human execution:
-
-- **`/proj:execute <id>`** — shows a warning and stops.
-- **`/proj:run <id>`** — runs define/decompose normally but skips execute.
-- **Batch modes** — manual todos are skipped at execute with a warning.
-- **MCP guard** — `todo_check_executable` returns an error for manual-tagged todos.
-- **Display** — `[manual]` badge shown after priority.
-- **Tags do not propagate** — child todos are independent.
+Todos support a `tags` list. Tags are free-form strings. The `manual` tag marks a todo as requiring human execution — `[manual]` badge shown after priority, tags do not propagate to child todos.
 
 ---
 
@@ -342,21 +319,6 @@ Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`).
 | `todoist.enabled` | `false` | Enable Todoist sync |
 | `todoist.auto_sync` | `true` | Auto-sync on status/load commands |
 | `team_mode.max_agents` | `30` | Hard ceiling on concurrent parallel agents. Recommended cap: **10** for CPU-bound or API-rate-limited workloads. |
-
-### Parallel execution defaults
-
-`/proj:run` is tuned for ultra-parallel execution with worktree isolation by default:
-
-| Quality level | `max_parallel` | Worktree |
-|---------------|---------------|----------|
-| `--fast`      | 30 | on (unless `--no-worktree`) |
-| `--balanced`  | 30 | on (unless `--no-worktree`) |
-| `--careful` (default) | 10 | on (unless `--no-worktree`) |
-| `--paranoid`  | 1  | off (sequential) |
-
-- **Team mode trigger**: 2+ non-manual descendants (down from 3+).
-- **Worktree isolation is on by default** for all quality levels except `--paranoid`. Pass `--no-worktree` to opt out — useful when the batch is fully sequential or worktree setup costs outweigh isolation benefits.
-- The `max_parallel` ceiling can be lowered per-project via `team_mode.max_agents` in `~/.claude/proj.yaml`.
 
 ---
 
