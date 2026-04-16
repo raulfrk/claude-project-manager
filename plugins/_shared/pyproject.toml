@@ -50,4 +50,4 @@ reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov-fail-under=80"]
+addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov-fail-under=80"]
