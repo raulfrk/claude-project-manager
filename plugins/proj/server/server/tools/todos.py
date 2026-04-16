@@ -508,7 +508,11 @@ def _batch_add_children(
             notes = str(notes_raw) if isinstance(notes_raw, str) else ""
 
             if flat:
-                group_tag = f"group:{parent_todo.id}"
+                # Each child's group tag references its IMMEDIATE parent
+                # (`parent`, not `parent_todo`), preserving tree structure for
+                # nested specs. Legacy mode uses `parent.id` for the same reason:
+                # grandchildren point at their direct parent, not the batch root.
+                group_tag = f"group:{parent.id}"
                 if group_tag not in tags:
                     tags.append(group_tag)
                 child_parent: str | None = None

@@ -255,3 +255,40 @@ async def test_legacy_mode_batch_path_sets_parent_field(app, project):
     assert created[0]["parent"] == parent_id
     # No auto-tag in legacy mode
     assert f"group:{parent_id}" not in created[0].get("tags", [])
+
+
+@pytest.mark.asyncio
+async def test_flat_mode_nested_specs_tag_immediate_parent(app, project):
+    """Nested children in a flat batch get their immediate parent's group tag,
+    not the batch root's. Preserves tree structure via tag references."""
+    cfg, name = project
+    _set_schema_version(cfg, name, 2)
+    r_parent = json.loads(await call_tool(app, "todo_add", title="parent", project_name=name))
+    parent_id = r_parent["todo_id"]
+    result = json.loads(
+        await call_tool(
+            app,
+            "todo_add",
+            title="",
+            parent=parent_id,
+            children=json.dumps(
+                [
+                    {
+                        "title": "mid",
+                        "children": [{"title": "leaf"}],
+                    },
+                ]
+            ),
+            project_name=name,
+        ),
+    )
+    assert result.get("error") is None
+    created = result["created"]
+    assert len(created) == 2
+    mid = next(c for c in created if c["title"] == "mid")
+    leaf = next(c for c in created if c["title"] == "leaf")
+    # mid is under the batch root
+    assert f"group:{parent_id}" in mid["tags"]
+    # leaf is under mid (NOT under batch root)
+    assert f"group:{mid['id']}" in leaf["tags"]
+    assert f"group:{parent_id}" not in leaf["tags"]
