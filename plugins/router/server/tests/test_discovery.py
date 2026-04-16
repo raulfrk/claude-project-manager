@@ -732,3 +732,32 @@ class TestVersionSelection:
 
         files = find_default_hooks_files(root=tmp_path)
         assert len(files) == 1
+
+
+class TestRunDiscoveryActivePlugins:
+    def test_accepts_active_plugins_arg(self, tmp_path, monkeypatch):
+        """run_discovery accepts active_plugins kwarg and passes to discover_and_register."""
+        from server.lib import storage
+        from server.lib.discovery import run_discovery
+        from server.lib.models import HookRegistry
+
+        monkeypatch.setattr(storage, "load", lambda: HookRegistry())
+        saved = []
+        monkeypatch.setattr(storage, "save", lambda r: saved.append(r))
+
+        for name in ("proj", "sandbox"):
+            d = tmp_path / name / "5.0.0" / ".claude-plugin"
+            d.mkdir(parents=True)
+            (d / "default-hooks.yaml").write_text(
+                f"hooks:\n  - trigger_tool: t\n    target_tool: u\n    server: {name}\n"
+            )
+
+        summary = run_discovery(
+            root=tmp_path,
+            glob_pattern="*/*/.claude-plugin",
+            active_plugins={"proj"},
+        )
+        registry = saved[-1] if saved else HookRegistry()
+        names = {h.server for h in registry.hooks}
+        assert "proj" in names
+        assert "sandbox" not in names

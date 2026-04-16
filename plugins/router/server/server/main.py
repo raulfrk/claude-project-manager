@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -19,6 +20,25 @@ from server.tools import sync as sync_tools
 from server.tools import verify as verify_tools
 
 logger = logging.getLogger("router")
+
+
+def _resolve_active_plugins() -> set[str] | None:
+    """Load active plugin names from the nearest marketplace.json.
+
+    Returns None if the file cannot be found/parsed (disables orphan filter).
+    """
+    current = Path(__file__).resolve()
+    for _ in range(8):
+        current = current.parent
+        candidate = current / ".claude-plugin" / "marketplace.json"
+        if candidate.is_file():
+            try:
+                data = json.loads(candidate.read_text())
+                plugins = data.get("plugins", [])
+                return {p["name"] for p in plugins if isinstance(p, dict) and "name" in p}
+            except (json.JSONDecodeError, OSError, KeyError):
+                return None
+    return None
 
 mcp = FastMCP("router")
 enable_hook_dispatch(
@@ -47,10 +67,11 @@ def _run_startup_discovery() -> None:
     glob_env = os.environ.get("HOOKS_DISCOVERY_GLOB")
 
     try:
+        active_plugins = _resolve_active_plugins()
         if glob_env:
-            summary = run_discovery(root=root, glob_pattern=glob_env)
+            summary = run_discovery(root=root, glob_pattern=glob_env, active_plugins=active_plugins)
         else:
-            summary = run_discovery(root=root)
+            summary = run_discovery(root=root, active_plugins=active_plugins)
         logger.info(summary)
     except Exception:
         logger.warning(

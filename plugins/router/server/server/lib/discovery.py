@@ -198,6 +198,7 @@ def discover_and_register(
     registry: HookRegistry,
     root: Path | None = None,
     glob_pattern: str = _DEFAULT_PLUGIN_GLOB,
+    active_plugins: set[str] | None = None,
 ) -> dict[str, dict[str, int]]:
     """Scan for default-hooks.yaml files and auto-register hooks.
 
@@ -216,7 +217,7 @@ def discover_and_register(
     Returns:
         A dict mapping plugin name to stats: {"registered": N, "updated": M}.
     """
-    files = find_default_hooks_files(root=root, glob_pattern=glob_pattern)
+    files = find_default_hooks_files(root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
     stats: dict[str, dict[str, int]] = {}
 
     for path in files:
@@ -314,6 +315,7 @@ def populate_server_urls(
 def run_discovery(
     root: Path | None = None,
     glob_pattern: str = _DEFAULT_PLUGIN_GLOB,
+    active_plugins: set[str] | None = None,
 ) -> str:
     """Run the full discovery cycle: load registry, discover, save, return summary.
 
@@ -332,7 +334,7 @@ def run_discovery(
             ", ".join(deduped_ids),
         )
 
-    stats = discover_and_register(registry, root=root, glob_pattern=glob_pattern)
+    stats = discover_and_register(registry, root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
     urls_added = populate_server_urls(registry)
 
     total_registered = sum(s["registered"] for s in stats.values())
