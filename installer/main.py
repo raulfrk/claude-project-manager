@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import IO
 
 from rich.console import Console
@@ -133,7 +132,6 @@ def _install(args) -> int:
         )
 
     return EXIT_ERROR if n_failed > 0 else EXIT_SUCCESS
-
 
 
 def _reinstall(args) -> int:

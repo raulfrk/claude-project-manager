@@ -9,7 +9,14 @@ from typing import Any
 
 import pytest
 
-from installer.cleanup import _parse_live_plugins, cleanup_orphaned_plugin_caches
+from installer.cleanup import (
+    PruneReport,
+    _parse_live_plugins,
+    cleanup_orphaned_plugin_caches,
+    prune_orphaned_plugins,
+    prune_stale_versions,
+    scan_stale_cache,
+)
 
 
 def _write_installed_json(path: Path, plugins: dict[str, Any]) -> None:
@@ -242,17 +249,6 @@ def test_prune_permission_error_logs_and_continues(
     assert any("failed to remove" in r.message for r in caplog.records)
 
 
-import json
-
-import pytest
-
-from installer.cleanup import (
-    PruneReport,
-    prune_stale_versions,
-    scan_stale_cache,
-)
-
-
 def _write_marketplace(tmp_path: Path, plugin_names: list[str]) -> Path:
     mp = tmp_path / "marketplace.json"
     mp.write_text(
@@ -312,7 +308,10 @@ class TestScanStaleCache:
 
         report = scan_stale_cache(cache, mp)
 
-        assert "proj" not in report.stale_versions or "92f892f2b997" not in report.stale_versions.get("proj", [])
+        assert (
+            "proj" not in report.stale_versions
+            or "92f892f2b997" not in report.stale_versions.get("proj", [])
+        )
 
     def test_missing_marketplace_json(self, tmp_path):
         cache = tmp_path / "cache"
@@ -359,9 +358,6 @@ class TestPruneStaleVersions:
 
         assert deleted == []
         assert (cache / "proj" / "5.0.0").is_dir()
-
-
-from installer.cleanup import prune_orphaned_plugins
 
 
 class TestPruneOrphanedPlugins:
