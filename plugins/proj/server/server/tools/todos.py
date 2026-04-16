@@ -90,16 +90,24 @@ def _enforce_flat_args(
     *,
     title: str,
     parent: str | None,
+    children_list: list[dict[str, JsonValue]],
 ) -> None:
     """Raise ValueError when arg shape is disallowed under schema_version >= 2.
 
     Rejected (post-enforcement):
       * title non-empty AND parent non-empty (single-child creation w/ parent field)
+      * title non-empty AND parent non-empty AND children non-empty (ambiguous —
+        title means "create root too", parent means "nest it"; not allowed in flat mode)
 
     Allowed:
-      * title non-empty, parent None  → flat top-level todo
-      * title empty, parent non-empty, children non-empty  → canonical batch path
+      * title non-empty, parent None                        → flat top-level todo
+      * title empty,     parent non-empty, children non-empty → canonical batch path
+
+    `children_list` is accepted for signature completeness; the guard condition
+    folds both rejection shapes into a single `title + parent` check since any
+    title+parent combination is already disallowed regardless of children.
     """
+    del children_list  # reserved for future extension points
     if parent and title and title.strip():
         raise ValueError(_FLAT_MODE_ERROR)
 
@@ -645,7 +653,17 @@ def register(app: FastMCP) -> None:
         _project_name = _state.resolve_project(project_name)
         if _project_name and schema_version.flat_only(_cfg, _project_name):
             try:
-                _enforce_flat_args(title=title, parent=parent)
+                _child_specs_for_gate = (
+                    json.loads(children) if children and children.strip() else []
+                )
+            except json.JSONDecodeError:
+                _child_specs_for_gate = []
+            try:
+                _enforce_flat_args(
+                    title=title,
+                    parent=parent,
+                    children_list=_child_specs_for_gate,
+                )
             except ValueError as e:
                 return json.dumps({"error": str(e)})
 
