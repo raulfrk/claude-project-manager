@@ -42,10 +42,16 @@ WORKDIR /build
 # Copy dependency manifests first to leverage Docker layer caching.
 COPY pyproject.toml uv.lock* ./
 
-# Install test dependencies without installing the local project itself.
-# --no-install-project skips the hatchling build (which would need
-# installer/ source) and the uv.sources path dep (plugins/_shared), both of
-# which are absent at build time. Runtime bind-mount provides the source.
+# Copy the _shared workspace package — the root project declares
+# claude-hook-transport (path = plugins/_shared) as a runtime dependency,
+# so uv must be able to resolve and build its metadata at install time
+# even with --no-install-project (which only skips the *root* project).
+COPY plugins/_shared ./plugins/_shared
+
+# Install test dependencies without installing the root installer project.
+# --no-install-project skips the root hatchling build (which would need
+# the installer/ source). claude-hook-transport (above) is built normally.
+# Runtime bind-mount provides the installer source on /app.
 RUN uv sync --frozen --no-install-project --group test \
     || uv sync --no-install-project --group test
 
