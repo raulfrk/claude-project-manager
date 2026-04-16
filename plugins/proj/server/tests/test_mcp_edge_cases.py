@@ -295,6 +295,61 @@ class TestTodoListFilters:
 
 
 # ---------------------------------------------------------------------------
+# Gap tests: todo_ready compact mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestTodoReadyCompact:
+    @pytest.fixture()
+    def project(self, cfg: ProjConfig, tmp_path: Path) -> tuple[ProjConfig, str]:
+        setup_project(cfg, "myapp", str(tmp_path))
+        state.set_session_active("myapp")
+        return cfg, "myapp"
+
+    async def test_todo_ready_compact_with_results(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact=True returns pipe-delimited lines wrapped in a JSON envelope."""
+        await call_tool(mcp_app, "todo_add", title="Ready A", priority="high")
+        await call_tool(mcp_app, "todo_add", title="Ready B", tags=["review"])
+        result = await call_tool(mcp_app, "todo_ready", compact=True)
+        data = _json.loads(result)
+        assert data["count"] == 2
+        assert data["truncated"] == 0
+        assert "Ready A" in data["result"]
+        assert "Ready B" in data["result"]
+        assert "|" in data["result"]
+        # Each line shape: "<id> | <status> | <title> | <priority> | <tags>"
+        assert data["result"].count("\n") == 1  # 2 todos -> 1 newline
+
+    async def test_todo_ready_compact_empty(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact=True with no ready todos returns the plain string, not JSON."""
+        result = await call_tool(mcp_app, "todo_ready", compact=True)
+        assert result == "No todos ready to start."
+
+    async def test_todo_ready_compact_parity(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact and non-compact responses cover the same set of todo IDs."""
+        await call_tool(mcp_app, "todo_add", title="Alpha")
+        await call_tool(mcp_app, "todo_add", title="Beta")
+        await call_tool(mcp_app, "todo_add", title="Gamma")
+
+        raw = await call_tool(mcp_app, "todo_ready")
+        compact_raw = await call_tool(mcp_app, "todo_ready", compact=True)
+
+        full_ids = {t["id"] for t in _json.loads(raw)}
+        compact_data = _json.loads(compact_raw)
+        compact_ids = {line.split(" | ", 1)[0] for line in compact_data["result"].split("\n")}
+
+        assert full_ids == compact_ids
+        assert compact_data["count"] == len(full_ids)
+
+
+# ---------------------------------------------------------------------------
 # Gap tests: todo_add / todo_update empty due_date validation
 # ---------------------------------------------------------------------------
 

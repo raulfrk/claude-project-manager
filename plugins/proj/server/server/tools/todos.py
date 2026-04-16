@@ -1324,13 +1324,15 @@ def register(app: FastMCP) -> None:
     @app.tool(
         description=(
             "List todos that are ready to start (pending, no blockers). "
-            "Use limit and offset for pagination (limit=0 means no limit)."
+            "Use limit and offset for pagination (limit=0 means no limit). "
+            "Set compact=True for one-line summaries to reduce context usage."
         )
     )
     def todo_ready(
         project_name: str | None = None,
         limit: int = 0,
         offset: int = 0,
+        compact: bool = False,
     ) -> str:
         result = require_project(project_name)
         if isinstance(result, str):
@@ -1347,6 +1349,12 @@ def register(app: FastMCP) -> None:
         )
         if not ready:
             return "No todos ready to start."
+        if compact:
+            lines: list[str] = []
+            for t in ready:
+                tags_str = ",".join(t.tags) if t.tags else ""
+                lines.append(f"{t.id} | {t.status} | {t.title} | {t.priority} | {tags_str}")
+            return json.dumps({"result": "\n".join(lines), "truncated": 0, "count": len(ready)})
         return json.dumps([t.to_dict() for t in ready], indent=2)
 
     def _has_active_descendant(todo_dict: dict[str, JsonValue]) -> bool:
