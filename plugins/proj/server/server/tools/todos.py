@@ -219,15 +219,18 @@ def _todo_hook_fields(
         "project_name": name,
         "todoist_project_id": meta.todoist_project_id,
     }
-    # Resolve parent's Todoist task ID for child todos so hooks can set parentId.
-    if todo.parent and todos:
-        parent_todo = next((t for t in todos if t.id == todo.parent), None)
-        if parent_todo and parent_todo.todoist_task_id:
-            fields["parent_todoist_task_id"] = parent_todo.todoist_task_id
-        if parent_todo and parent_todo.trello_card_id:
-            fields["parent_trello_card_id"] = parent_todo.trello_card_id
-        if parent_todo and parent_todo.trello_checklist_id:
-            fields["parent_trello_checklist_id"] = parent_todo.trello_checklist_id
+    # Resolve parent integration IDs for hook dispatch.
+    # Supports both legacy nested model (todo.parent) and flat model (group:<id> tag).
+    if todos:
+        parent_links = _resolve_parent_for_hooks(todo, todos)
+        if parent_links.todoist_task_id:
+            fields["parent_todoist_task_id"] = parent_links.todoist_task_id
+        if parent_links.trello_card_id:
+            fields["parent_trello_card_id"] = parent_links.trello_card_id
+        if parent_links.trello_checklist_id:
+            fields["parent_trello_checklist_id"] = parent_links.trello_checklist_id
+        if parent_links.jira_issue_key:
+            fields["parent_jira_issue_key"] = parent_links.jira_issue_key
     # Inject sync config and resolved list IDs so hooks can use direct Trello tools.
     # The list_mappings values are overwritten with resolved IDs (instead of names)
     # so ${sync.trello.list_mappings.done} etc. resolve to actual Trello list IDs.

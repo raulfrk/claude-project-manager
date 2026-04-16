@@ -5,12 +5,18 @@ import logging
 
 import pytest
 
-from server.lib.models import Todo
+from server.lib.models import ProjectMeta, Todo
 from server.tools.todos import (
     ParentLinks,
     _parent_id_from_tag,
     _resolve_parent_for_hooks,
+    _todo_hook_fields,
 )
+
+
+def _meta() -> ProjectMeta:
+    """Minimal ProjectMeta for hook-field tests."""
+    return ProjectMeta(name="demo")
 
 
 def _todo(id_: str, **kwargs) -> Todo:
@@ -117,3 +123,61 @@ def test_resolve_handles_parent_with_no_integrations():
     child = _todo("2", tags=["group:1"])
     result = _resolve_parent_for_hooks(child, [parent, child])
     assert result == ParentLinks()
+
+
+def test_hook_fields_flat_child_injects_todoist_id():
+    parent = _todo("1", todoist_task_id="PAR-T")
+    child = _todo("2", tags=["group:1"])
+    fields = _todo_hook_fields(
+        child,
+        _meta(),
+        name="demo",
+        todos=[parent, child],
+    )
+    assert fields["parent_todoist_task_id"] == "PAR-T"
+
+
+def test_hook_fields_flat_child_injects_jira_key():
+    parent = _todo("1", jira_issue_key="CPM-100")
+    child = _todo("2", tags=["group:1"])
+    fields = _todo_hook_fields(
+        child,
+        _meta(),
+        name="demo",
+        todos=[parent, child],
+    )
+    assert fields["parent_jira_issue_key"] == "CPM-100"
+
+
+def test_hook_fields_flat_child_injects_trello_card_id():
+    parent = _todo("1", trello_card_id="CARD-1")
+    child = _todo("2", tags=["group:1"])
+    fields = _todo_hook_fields(
+        child,
+        _meta(),
+        name="demo",
+        todos=[parent, child],
+    )
+    assert fields["parent_trello_card_id"] == "CARD-1"
+
+
+def test_hook_fields_top_level_has_no_parent_fields():
+    todo = _todo("1")
+    fields = _todo_hook_fields(todo, _meta(), name="demo", todos=[todo])
+    assert "parent_todoist_task_id" not in fields
+    assert "parent_jira_issue_key" not in fields
+    assert "parent_trello_card_id" not in fields
+    assert "parent_trello_checklist_id" not in fields
+
+
+def test_hook_fields_legacy_nested_child_still_works():
+    parent = _todo("9", todoist_task_id="T", jira_issue_key="CPM-9")
+    child = _todo("9.1", parent="9")  # legacy — no group tag
+    fields = _todo_hook_fields(
+        child,
+        _meta(),
+        name="demo",
+        todos=[parent, child],
+    )
+    assert fields["parent_todoist_task_id"] == "T"
+    assert fields["parent_jira_issue_key"] == "CPM-9"
