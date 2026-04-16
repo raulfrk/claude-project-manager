@@ -195,3 +195,23 @@ def cleanup_orphaned_plugin_caches(
         except (PermissionError, FileNotFoundError, OSError) as exc:
             logger.warning("cleanup: failed to remove %s: %s", path, exc)
     return removed
+
+
+def prune_orphaned_plugins(cache_dir: Path, orphans: list[str]) -> list[str]:
+    """Delete the listed orphan plugin dirs.
+
+    Caller is responsible for user confirmation before calling. Returns list
+    of deleted paths (as strings).
+    """
+    deleted: list[str] = []
+    for name in orphans:
+        target = cache_dir / name
+        if not target.is_dir():
+            continue
+        try:
+            shutil.rmtree(target)
+            deleted.append(str(target))
+            logger.info("Pruned orphaned plugin: %s", target)
+        except OSError as exc:
+            logger.warning("Failed to remove %s: %s", target, exc)
+    return deleted

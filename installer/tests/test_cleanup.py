@@ -361,6 +361,39 @@ class TestPruneStaleVersions:
         assert (cache / "proj" / "5.0.0").is_dir()
 
 
+from installer.cleanup import prune_orphaned_plugins
+
+
+class TestPruneOrphanedPlugins:
+    def test_removes_listed_orphans(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        (cache / "sandbox" / "1.0.0").mkdir(parents=True)
+        (cache / "zoxide" / "1.0.0").mkdir(parents=True)
+        (cache / "proj" / "5.0.0").mkdir(parents=True)
+
+        deleted = prune_orphaned_plugins(cache, ["sandbox", "zoxide"])
+
+        assert set(deleted) == {str(cache / "sandbox"), str(cache / "zoxide")}
+        assert not (cache / "sandbox").exists()
+        assert not (cache / "zoxide").exists()
+        assert (cache / "proj").is_dir()
+
+    def test_handles_missing_dir(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        deleted = prune_orphaned_plugins(cache, ["nonexistent"])
+        assert deleted == []
+
+    def test_empty_list_noop(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        (cache / "proj" / "5.0.0").mkdir(parents=True)
+        deleted = prune_orphaned_plugins(cache, [])
+        assert deleted == []
+        assert (cache / "proj").is_dir()
+
+
 def test_parse_live_plugins_shape() -> None:
     data = {
         "plugins": {
