@@ -232,6 +232,7 @@ def _todo_hook_fields(
             fields["parent_trello_checklist_id"] = parent_links.trello_checklist_id
         if parent_links.jira_issue_key:
             fields["parent_jira_issue_key"] = parent_links.jira_issue_key
+    fields["synced_tags"] = [t for t in todo.tags if not t.startswith("group:")]
     # Inject sync config and resolved list IDs so hooks can use direct Trello tools.
     # The list_mappings values are overwritten with resolved IDs (instead of names)
     # so ${sync.trello.list_mappings.done} etc. resolve to actual Trello list IDs.
