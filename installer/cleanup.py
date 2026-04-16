@@ -215,3 +215,17 @@ def prune_orphaned_plugins(cache_dir: Path, orphans: list[str]) -> list[str]:
         except OSError as exc:
             logger.warning("Failed to remove %s: %s", target, exc)
     return deleted
+
+
+def _cache_dir_for_reinstall() -> Path:
+    """Resolve cache dir for reinstall — overridable in tests."""
+    return Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
+
+
+def _marketplace_path_for_reinstall() -> Path:
+    """Resolve marketplace.json path — overridable in tests."""
+    here = Path(__file__).resolve().parent
+    bundled = here / "marketplace.json"
+    if bundled.is_file():
+        return bundled
+    return here.parent / ".claude-plugin" / "marketplace.json"

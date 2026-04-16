@@ -12,7 +12,14 @@ from textual.app import App, ComposeResult
 from textual.widgets import Footer, Static
 
 from installer._config_loader import ConfigLoadError, load_existing_yaml
-from installer.cleanup import cleanup_orphaned_plugin_caches
+from installer.cleanup import (
+    _cache_dir_for_reinstall,
+    _marketplace_path_for_reinstall,
+    cleanup_orphaned_plugin_caches,
+    prune_orphaned_plugins,
+    prune_stale_versions,
+    scan_stale_cache,
+)
 from installer.detect import InstallState, detect_existing
 from installer.errors import InstallerError
 from installer.plugin_status import (
@@ -638,6 +645,30 @@ class InstallerApp(App):
 
     # -- Reinstall flow callbacks --
 
+    async def _confirm_orphans(self, orphan_names: list[str]) -> bool:
+        """Show ConfirmScreen for orphan removal; returns True if user confirmed."""
+        future: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
+
+        def _cb(result: ConfirmResult) -> None:
+            if not future.done():
+                future.set_result(bool(result.confirmed))
+
+        self.push_screen(
+            ConfirmScreen(
+                title="Remove Orphaned Plugins",
+                message=(
+                    f"Found {len(orphan_names)} orphaned plugin dir(s) in cache:\n"
+                    f"  {', '.join(orphan_names)}\n\n"
+                    "These plugins are no longer in the marketplace. Remove them?"
+                ),
+                options=[],
+                confirm_label="Remove",
+                confirm_variant="warning",
+            ),
+            callback=_cb,
+        )
+        return await future
+
     def _on_reinstall_confirmed(self, result: ConfirmResult) -> None:
         """Handle the reinstall confirmation result."""
         if not result.confirmed or self._state is None:
@@ -651,6 +682,25 @@ class InstallerApp(App):
 
     async def _prepare_and_reinstall(self, reset_configs: bool) -> None:
         """Query authoritative plugin list, push progress screen, run worker."""
+        cache_dir = _cache_dir_for_reinstall()
+        marketplace_path = _marketplace_path_for_reinstall()
+
+        if cache_dir.is_dir() and marketplace_path.is_file():
+            try:
+                report = await asyncio.to_thread(
+                    scan_stale_cache, cache_dir, marketplace_path
+                )
+            except (FileNotFoundError, OSError):
+                report = None
+
+            if report is not None:
+                await asyncio.to_thread(prune_stale_versions, cache_dir, report)
+                if report.orphans:
+                    if await self._confirm_orphans(report.orphans):
+                        await asyncio.to_thread(
+                            prune_orphaned_plugins, cache_dir, report.orphans
+                        )
+
         try:
             plugins = await asyncio.to_thread(get_installed_plugins)
         except InstallerError as exc:

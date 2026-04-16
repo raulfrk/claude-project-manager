@@ -311,3 +311,69 @@ class TestStatusInstallWorker:
         assert by_name["proj"].status == "ok"
         assert by_name["trello"].status == "ok"
         assert by_name["jira"].status == "ok"
+
+
+class TestPrepareAndReinstallPrunesStaleCache:
+    """_prepare_and_reinstall runs scan + prune before calling install worker."""
+
+    @pytest.mark.asyncio
+    async def test_prepare_and_reinstall_prunes_stale_cache(self, monkeypatch, tmp_path):
+        from installer.app import InstallerApp
+
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        for v in ("3.0.0", "5.0.0"):
+            (cache / "proj" / v).mkdir(parents=True)
+        (cache / "sandbox" / "1.0.0").mkdir(parents=True)
+        mp = tmp_path / "marketplace.json"
+        mp.write_text('{"plugins": [{"name": "proj"}]}')
+
+        monkeypatch.setattr(
+            "installer.cleanup._cache_dir_for_reinstall", lambda: cache, raising=False
+        )
+        monkeypatch.setattr(
+            "installer.cleanup._marketplace_path_for_reinstall", lambda: mp, raising=False
+        )
+        monkeypatch.setattr(
+            "installer.app._cache_dir_for_reinstall", lambda: cache, raising=False
+        )
+        monkeypatch.setattr(
+            "installer.app._marketplace_path_for_reinstall", lambda: mp, raising=False
+        )
+
+        # Stub install worker
+        async def _stub_worker(self, plugins, progress, reset_configs):
+            return None
+
+        monkeypatch.setattr(InstallerApp, "_run_reinstall_worker", _stub_worker, raising=True)
+        monkeypatch.setattr(
+            "installer.app.get_installed_plugins",
+            lambda: ["proj@claude-project-manager"],
+            raising=False,
+        )
+
+        # Auto-confirm orphan removal
+        async def _confirm_yes(self, names):
+            return True
+
+        monkeypatch.setattr(InstallerApp, "_confirm_orphans", _confirm_yes, raising=False)
+
+        # Stub push_screen + state
+        app = InstallerApp(mode="reinstall")
+        app._state = type("S", (), {})()
+        app.push_screen = lambda *a, **kw: None
+
+        # Stub wait_ready on any progress screen
+        from installer.screens.progress import ProgressScreen
+
+        async def _stub_wait_ready(self):
+            return None
+
+        monkeypatch.setattr(ProgressScreen, "wait_ready", _stub_wait_ready, raising=False)
+
+        await app._prepare_and_reinstall(reset_configs=False)
+
+        # Stale version 3.0.0 removed; live version 5.0.0 kept; orphan sandbox removed
+        assert not (cache / "proj" / "3.0.0").exists()
+        assert (cache / "proj" / "5.0.0").is_dir()
+        assert not (cache / "sandbox").exists()

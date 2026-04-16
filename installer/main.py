@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 from installer.cleanup import (
+    _cache_dir_for_reinstall,
+    _marketplace_path_for_reinstall,
     prune_orphaned_plugins,
     prune_stale_versions,
     scan_stale_cache,
@@ -132,19 +134,6 @@ def _install(args) -> int:
 
     return EXIT_ERROR if n_failed > 0 else EXIT_SUCCESS
 
-
-def _cache_dir_for_reinstall() -> Path:
-    """Resolve cache dir for reinstall — overridable in tests."""
-    return Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
-
-
-def _marketplace_path_for_reinstall() -> Path:
-    """Resolve marketplace.json path — overridable in tests."""
-    here = Path(__file__).resolve().parent
-    bundled = here / "marketplace.json"
-    if bundled.is_file():
-        return bundled
-    return here.parent / ".claude-plugin" / "marketplace.json"
 
 
 def _reinstall(args) -> int:
