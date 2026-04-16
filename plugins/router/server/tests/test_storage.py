@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -551,7 +552,7 @@ class TestSaveDeduplicatesByHookId:
                 ),
             ]
         )
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(logging.WARNING):
             save(registry, hooks_yaml)
 
         # File on disk contains only one entry.
@@ -574,6 +575,6 @@ class TestSaveDeduplicatesByHookId:
                 Hook(id="b-hook", trigger_tool="t", target_tool="v", server="proj"),
             ]
         )
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(logging.WARNING):
             save(registry, hooks_yaml)
         assert not any("hooks.yaml dedup-by-id" in r.message for r in caplog.records)
