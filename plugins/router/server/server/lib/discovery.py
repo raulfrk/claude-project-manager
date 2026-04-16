@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from packaging.version import InvalidVersion, Version
 
 from server.lib.constants import DEFAULT_SERVER_PORTS
 from server.lib.models import Hook, HookRegistry
@@ -144,13 +145,34 @@ def load_hooks_from_file(path: Path) -> list[dict[str, JsonValue]]:
     return result
 
 
+def _is_version_string(s: str) -> bool:
+    """Heuristic: looks like a semver or version-ish token."""
+    try:
+        Version(s)
+        return True
+    except InvalidVersion:
+        return False
+
+
+def _path_version(path: Path) -> Version | None:
+    """Extract version from path if cache layout, else None (dev layout)."""
+    candidate = path.parent.parent.name
+    try:
+        return Version(candidate)
+    except InvalidVersion:
+        return None
+
+
 def _plugin_name_from_path(path: Path) -> str:
     """Extract plugin name from a default-hooks.yaml path.
 
-    Path looks like: .../plugins/<name>/.claude-plugin/default-hooks.yaml
+    Dev layout:   .../plugins/<name>/.claude-plugin/default-hooks.yaml
+    Cache layout: .../cache/.../<name>/<version>/.claude-plugin/default-hooks.yaml
     """
-    # parent = .claude-plugin, parent.parent = <plugin-name>
-    return path.parent.parent.name
+    grandparent = path.parent.parent
+    if _is_version_string(grandparent.name):
+        return grandparent.parent.name
+    return grandparent.name
 
 
 _DEFAULT_SERVER_PORTS = DEFAULT_SERVER_PORTS

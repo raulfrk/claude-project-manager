@@ -9,6 +9,9 @@ import yaml
 from server.lib.discovery import (
     _DEFAULT_SERVER_PORTS,
     _hook_content_differs,
+    _is_version_string,
+    _path_version,
+    _plugin_name_from_path,
     discover_and_register,
     find_default_hooks_files,
     load_hooks_from_file,
@@ -627,3 +630,46 @@ class TestPopulateServerUrls:
         assert second == 0
         # No duplicates — same count of servers
         assert len(registry.servers) == len(_DEFAULT_SERVER_PORTS)
+
+
+class TestIsVersionString:
+    def test_semver(self):
+        assert _is_version_string("5.0.0")
+        assert _is_version_string("3.0.1")
+
+    def test_pre_release(self):
+        assert _is_version_string("1.0.0rc1")
+
+    def test_not_version(self):
+        assert not _is_version_string("proj")
+        assert not _is_version_string("92f892f2b997")
+
+
+class TestPluginNameFromPath:
+    def test_dev_layout(self):
+        path = Path("/repo/plugins/proj/.claude-plugin/default-hooks.yaml")
+        assert _plugin_name_from_path(path) == "proj"
+
+    def test_cache_layout_semver(self):
+        path = Path("/home/u/.claude/plugins/cache/cpm/proj/5.0.0/.claude-plugin/default-hooks.yaml")
+        assert _plugin_name_from_path(path) == "proj"
+
+    def test_cache_layout_version_with_pre_release(self):
+        path = Path("/cache/worktree/2.6.0rc1/.claude-plugin/default-hooks.yaml")
+        assert _plugin_name_from_path(path) == "worktree"
+
+
+class TestPathVersion:
+    def test_cache_layout_returns_version(self):
+        from packaging.version import Version
+
+        path = Path("/cache/proj/5.0.0/.claude-plugin/default-hooks.yaml")
+        assert _path_version(path) == Version("5.0.0")
+
+    def test_dev_layout_returns_none(self):
+        path = Path("/repo/plugins/proj/.claude-plugin/default-hooks.yaml")
+        assert _path_version(path) is None
+
+    def test_unparseable_returns_none(self):
+        path = Path("/cache/something/not-a-version/.claude-plugin/default-hooks.yaml")
+        assert _path_version(path) is None
