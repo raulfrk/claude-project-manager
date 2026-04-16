@@ -367,16 +367,9 @@ git status --short
 ```
 Expected: empty output.
 
-- [ ] **Step 5: Mark todo 648 complete via the MCP tool**
+- [ ] **Step 5: Stop and hand off**
 
-Call `mcp__plugin_proj_proj__todo_complete`:
-```json
-{"project": "claude-project-manager", "todo_id": "648"}
-```
-
-- [ ] **Step 6: Stop**
-
-Hand off to the reviewer / merge flow. Do NOT merge to `dev` automatically.
+Do NOT call `todo_complete` and do NOT merge to `dev`. Both are controller-owned steps that happen AFTER spec review + code review have passed. Report back with the final commit SHAs and let the controller (or user) handle archive + merge.
 
 ---
 
