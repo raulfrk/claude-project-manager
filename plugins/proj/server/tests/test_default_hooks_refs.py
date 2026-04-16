@@ -8,7 +8,7 @@ import yaml
 
 # adjust path-parents count if the layout differs when running from repo root:
 # this file lives at plugins/proj/server/tests/ — 4 parents up is the repo root
-REPO_ROOT = Path(__file__).parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 JIRA_HOOKS = REPO_ROOT / "plugins" / "jira" / ".claude-plugin" / "default-hooks.yaml"
 TODOIST_HOOKS = REPO_ROOT / "plugins" / "todoist" / ".claude-plugin" / "default-hooks.yaml"
