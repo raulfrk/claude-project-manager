@@ -8,8 +8,10 @@ hooks:
       summary: "${title}"
       description: "${notes}"
       priority: "${priority}"
-      labels: "${tags}"
-      parent_key: "${jira_issue_key}"
+      labels: "${synced_tags}"
+      parent_key:
+        value: "${parent_jira_issue_key}"
+        omit_if_empty: true
     feedback_tool: todo_update
     feedback_mapping:
       key: jira_issue_key

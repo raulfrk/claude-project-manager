@@ -31,3 +31,23 @@ def test_todoist_on_todo_add_labels_uses_synced_tags():
     tasks = hook["param_mapping"]["tasks"]
     assert isinstance(tasks, list)
     assert tasks[0]["labels"] == "${synced_tags}"
+
+
+def test_jira_on_todo_add_labels_uses_synced_tags():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
+    assert hook["param_mapping"]["labels"] == "${synced_tags}"
+
+
+def test_jira_on_todo_add_parent_key_references_parent_jira_issue_key():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
+    pk = hook["param_mapping"]["parent_key"]
+    assert isinstance(pk, dict)
+    assert pk["value"] == "${parent_jira_issue_key}"
+    assert pk["omit_if_empty"] is True
+
+
+def test_jira_on_todo_add_condition_unchanged():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
+    assert "sync.jira.enabled" in hook["condition"]
+    assert "sync.jira.auto_sync" in hook["condition"]
+    assert "project.jira_issue_key" in hook["condition"]
