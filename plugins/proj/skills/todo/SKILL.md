@@ -36,11 +36,11 @@ Manage project todos. Parse $ARGUMENTS for operation.
 **done** `<id>` — mark complete (e.g. "done 2")
  - `mcp__plugin_proj_proj__todo_complete`
 
-**list** [all|pending|ready|blocked] [--prio|--priorities] [--full] — list w/ optional filter
+**list** [all|ready|blocked] [--prio|--priorities] [--full] — list w/ optional filter
 
 Parse flags:
- - `--full` present → `full_mode=True`, pass `compact=False` to underlying tool
- - `--full` absent → `full_mode=False`, pass `compact=True` to underlying tool (default behavior)
+ - `--full` present → `full_mode=True`, pass `compact=False`
+ - `--full` absent → `full_mode=False`, pass `compact=True` (default)
  - `--prio`/`--priorities` → `prio_mode=True` (overrides `--full`; always uses structured JSON internally)
 
 Subcommand → tool map (set `C = not full_mode` except for `--prio` which always uses False):
@@ -49,7 +49,7 @@ Subcommand → tool map (set `C = not full_mode` except for `--prio` which alway
  - `ready`: `mcp__plugin_proj_proj__todo_ready` w/ `compact=C` — no-blocker todos
  - `blocked`: `mcp__plugin_proj_proj__todo_list` w/ `status="pending", blocked=True, compact=C` — server-side blocked filter (no prose post-filter needed)
 
-`--prio`/`--priorities` (combinable w/ `all`, ignores `--full`):
+`--prio`/`--priorities` (combinable w/ `all` only; `ready`/`blocked` filters ignored when combined; ignores `--full`):
  1. `mcp__plugin_proj_proj__todo_tree` w/ `include_done=False, compact=False` (or `include_done=True` if `all` also present)
  2. Flatten tree → collect all todo objects + nested `_children`
  3. Build open set: all IDs from flattened tree
@@ -73,7 +73,7 @@ Compact-mode rendering (default for non-`--prio` paths):
  - If `truncated > 0`, the `result` string already ends with `... N more items`.
 
 Full-mode rendering (when `--full` given):
- - Tools return indented JSON. Render as nested bullets w/ icons using the existing formatting rules in the bullet list below.
+ - Tools return indented JSON. Render as nested bullets w/ icons (rules below).
 
 Rendering rules (apply to full-mode + `--prio` mode):
  - Nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Tag matching `group:*` → extract value after `group:` → append `[group:<value>]` at end. Order: `_(priority)_ [manual] [blocked by X] [blocks Y] [group:X]`.
@@ -99,7 +99,7 @@ Examples:
 
 Parse flag:
  - `--full` absent (default) → call `mcp__plugin_proj_proj__todo_tree` w/ `compact=True`; print the returned `result` string verbatim (tree-indented one-liners).
- - `--full` present → call `mcp__plugin_proj_proj__todo_tree` w/ `compact=False`; render as nested bullets w/ 2-space indent using the rendering rules from the `list` section (icons, bold ID, inline metadata incl `[manual]`, `[blocked by X]`/`[blocks Y]`, `[group:X]`).
+ - `--full` present → call `mcp__plugin_proj_proj__todo_tree` w/ `compact=False`; render as nested bullets w/ 2-space indent (rules from `list` section: icons, bold ID, inline metadata incl `[manual]`, `[blocked by X]`/`[blocks Y]`, `[group:X]`).
 
 Example (full-mode):
     ```
