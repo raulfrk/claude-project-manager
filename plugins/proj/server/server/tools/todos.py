@@ -6,7 +6,9 @@ import contextlib
 import fcntl
 import json
 import logging
+import re
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +24,33 @@ if TYPE_CHECKING:
 
 _UTC = UTC
 logger = logging.getLogger(__name__)
+
+_GROUP_TAG_RE = re.compile(r"^group:(?P<id>.+)$")
+
+
+@dataclass(frozen=True)
+class ParentLinks:
+    todoist_task_id: str | None = None
+    trello_card_id: str | None = None
+    trello_checklist_id: str | None = None
+    jira_issue_key: str | None = None
+
+
+def _parent_id_from_tag(tags: list[str]) -> str | None:
+    """Return parent id from first `group:<id>` tag, or None.
+
+    A `group:` tag with no id is ignored (treated as a normal tag).
+    Multiple `group:*` tags → first wins + DEBUG log for diagnosability.
+    """
+    matches = [m for m in (_GROUP_TAG_RE.match(t) for t in tags) if m]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        logger.debug(
+            "todo has multiple group:* tags: %s — using first",
+            [m.group(0) for m in matches],
+        )
+    return matches[0].group("id")
 
 
 def _normalize_title(title: str) -> str:
