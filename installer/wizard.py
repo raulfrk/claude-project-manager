@@ -18,7 +18,7 @@ from installer._config_loader import (
     get_nested,
     load_existing_yaml,
 )
-from installer.claudemd import ensure_managed_section
+from claudemd import ensure_managed_section
 from installer.hooks_diff import apply_diffs, compute_hooks_diff
 from installer.prompts import int_in_range, prompt_choice
 from installer.wizard_specs import PROJ_YAML_PROMPTS, PromptSpec
