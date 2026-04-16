@@ -421,7 +421,7 @@ def register(app: FastMCP) -> None:
             " without re-running the installer wizard."
         )
     )
-    def claudemd_refresh_managed() -> dict[str, object]:
+    def claudemd_refresh_managed() -> dict[str, str | bool]:
         from claudemd import ensure_managed_section
 
         target = Path.home() / ".claude" / "CLAUDE.md"
