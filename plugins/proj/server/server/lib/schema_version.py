@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 if TYPE_CHECKING:
-    from .models import ProjConfig
+    from server.lib.models import ProjConfig
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def current(cfg: ProjConfig, project_name: str) -> int:
     for migrated projects. Keeping it out of SQL also avoids needing a
     SQL schema migration for this one field.
     """
-    path = Path(cfg.tracking_dir) / project_name / "proj.yaml"
+    path = Path(cfg.tracking_dir).expanduser() / project_name / "proj.yaml"
     try:
         raw = path.read_text()
     except FileNotFoundError:
@@ -34,6 +34,10 @@ def current(cfg: ProjConfig, project_name: str) -> int:
         log.warning("proj.yaml for %s is corrupted; treating as schema_version=1", project_name)
         return 1
     if not isinstance(data, dict):
+        log.warning(
+            "proj.yaml for %s has non-dict root; treating as schema_version=1",
+            project_name,
+        )
         return 1
     v = data.get("schema_version")
     if v is None:
@@ -41,6 +45,11 @@ def current(cfg: ProjConfig, project_name: str) -> int:
     try:
         return int(v)
     except (TypeError, ValueError):
+        log.warning(
+            "proj.yaml for %s has malformed schema_version=%r; treating as 1",
+            project_name,
+            v,
+        )
         return 1
 
 

@@ -75,3 +75,14 @@ def test_no_caching_between_calls(fake_cfg, tmp_path):
     _write_proj_yaml(tmp_path, "demo", {"schema_version": 2})
     # Second call must pick up the new value — no cache.
     assert schema_version.flat_only(fake_cfg, "demo") is True
+
+
+def test_current_expands_tilde_in_tracking_dir(tmp_path, monkeypatch):
+    # Regression guard: tracking_dir may contain ~ (e.g. ~/projects/tracking).
+    # Path() alone does NOT expand it — must call .expanduser().
+    from server.lib.models import ProjConfig
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = ProjConfig(tracking_dir="~/tracking")
+    _write_proj_yaml(tmp_path / "tracking", "demo", {"schema_version": 2})
+    assert schema_version.current(cfg, "demo") == 2
