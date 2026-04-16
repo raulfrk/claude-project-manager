@@ -48,3 +48,16 @@ def test_synced_tags_empty_list_for_todo_with_no_tags():
     todo = _todo(tags=[])
     fields = _todo_hook_fields(todo, _meta(), name="demo", todos=[todo])
     assert fields["synced_tags"] == []
+
+
+def test_synced_tags_keeps_bare_group_tag():
+    # `group:` (no id) is NOT a parent pointer per _GROUP_TAG_RE — keep it in synced_tags.
+    todo = _todo(tags=["manual", "group:"])
+    fields = _todo_hook_fields(todo, _meta(), name="demo", todos=[todo])
+    assert fields["synced_tags"] == ["manual", "group:"]
+
+
+def test_synced_tags_strips_multiple_group_entries():
+    todo = _todo(tags=["group:5", "real", "group:7"])
+    fields = _todo_hook_fields(todo, _meta(), name="demo", todos=[todo])
+    assert fields["synced_tags"] == ["real"]
