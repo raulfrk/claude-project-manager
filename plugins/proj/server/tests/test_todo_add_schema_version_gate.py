@@ -181,3 +181,77 @@ async def test_gate_reads_schema_version_fresh_each_call(app, project):
         await call_tool(app, "todo_add", title="b", parent=parent_id, project_name=name)
     )
     assert "error" in result_flat
+
+
+@pytest.mark.asyncio
+async def test_flat_mode_batch_path_auto_tags_children(app, project):
+    cfg, name = project
+    _set_schema_version(cfg, name, 2)
+    r_parent = json.loads(await call_tool(app, "todo_add", title="parent", project_name=name))
+    parent_id = r_parent["todo_id"]
+    result = json.loads(
+        await call_tool(
+            app,
+            "todo_add",
+            title="",
+            parent=parent_id,
+            children=json.dumps([{"title": "child_a"}, {"title": "child_b"}]),
+            project_name=name,
+        ),
+    )
+    assert result.get("error") is None
+    created = result.get("created", [])
+    assert len(created) == 2
+    for child in created:
+        assert f"group:{parent_id}" in child.get("tags", [])
+        assert child.get("parent") is None
+
+
+@pytest.mark.asyncio
+async def test_flat_mode_batch_path_dedups_existing_group_tag(app, project):
+    cfg, name = project
+    _set_schema_version(cfg, name, 2)
+    r_parent = json.loads(await call_tool(app, "todo_add", title="parent", project_name=name))
+    parent_id = r_parent["todo_id"]
+    result = json.loads(
+        await call_tool(
+            app,
+            "todo_add",
+            title="",
+            parent=parent_id,
+            children=json.dumps(
+                [
+                    {"title": "c", "tags": [f"group:{parent_id}", "keep"]},
+                ]
+            ),
+            project_name=name,
+        ),
+    )
+    assert result.get("error") is None
+    created = result["created"]
+    tags = created[0]["tags"]
+    assert tags.count(f"group:{parent_id}") == 1
+    assert "keep" in tags
+
+
+@pytest.mark.asyncio
+async def test_legacy_mode_batch_path_sets_parent_field(app, project):
+    cfg, name = project
+    _set_schema_version(cfg, name, 1)
+    r_parent = json.loads(await call_tool(app, "todo_add", title="parent", project_name=name))
+    parent_id = r_parent["todo_id"]
+    result = json.loads(
+        await call_tool(
+            app,
+            "todo_add",
+            title="",
+            parent=parent_id,
+            children=json.dumps([{"title": "c"}]),
+            project_name=name,
+        ),
+    )
+    assert result.get("error") is None
+    created = result["created"]
+    assert created[0]["parent"] == parent_id
+    # No auto-tag in legacy mode
+    assert f"group:{parent_id}" not in created[0].get("tags", [])

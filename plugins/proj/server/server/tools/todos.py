@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from server.lib import schema_version, storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
@@ -26,6 +26,13 @@ _UTC = UTC
 logger = logging.getLogger(__name__)
 
 _GROUP_TAG_RE = re.compile(r"^group:(?P<id>.+)$")
+
+
+class _CreatedEntry(TypedDict):
+    id: str
+    title: str
+    parent: str | None
+    tags: list[str]
 
 
 @dataclass(frozen=True)
@@ -453,13 +460,15 @@ def _batch_add_children(
     today: str,
     todos: list[Todo],
     meta: ProjectMeta,
+    *,
+    flat: bool = False,
 ) -> str:
     """Core batch-add logic: create child todos under parent_todo atomically.
 
     Returns JSON result string. Caller must ensure todos/meta are already loaded.
     This function mutates todos and meta in place and performs the atomic save.
     """
-    created: list[dict[str, str]] = []
+    created: list[_CreatedEntry] = []
     skipped_duplicates: list[str] = []
     _batch_titles: dict[str, set[str]] = {}
 
@@ -498,12 +507,20 @@ def _batch_add_children(
             notes_raw = spec.get("notes")
             notes = str(notes_raw) if isinstance(notes_raw, str) else ""
 
+            if flat:
+                group_tag = f"group:{parent_todo.id}"
+                if group_tag not in tags:
+                    tags.append(group_tag)
+                child_parent: str | None = None
+            else:
+                child_parent = parent.id
+
             child = Todo(
                 id=next_todo_id(meta, parent=parent),
                 title=title,
                 priority=priority,
                 tags=[str(t) for t in tags],
-                parent=parent.id,
+                parent=child_parent,
                 notes=notes,
                 created=today,
                 updated=today,
@@ -512,7 +529,14 @@ def _batch_add_children(
                 parent.children.append(child.id)
             parent.updated = today
             todos.append(child)
-            created.append({"id": child.id, "title": child.title, "parent": parent.id})
+            created.append(
+                {
+                    "id": child.id,
+                    "title": child.title,
+                    "parent": child_parent,
+                    "tags": [str(t) for t in tags],
+                }
+            )
 
             nested_raw = spec.get("children")
             if isinstance(nested_raw, list) and nested_raw:
@@ -554,10 +578,11 @@ def _batch_add_children(
     storage.save_meta(cfg, meta)
 
     # Build todoist_tasks for hook-053 param mapping
-    created_index: dict[str, int] = {c["id"]: i for i, c in enumerate(created)}
+    created_index: dict[str, int] = {str(c["id"]): i for i, c in enumerate(created)}
     todoist_tasks: list[dict[str, JsonValue]] = []
     for c in created:
-        if c["parent"] == parent_todo.id:
+        c_parent = c["parent"]
+        if not isinstance(c_parent, str) or c_parent == parent_todo.id:
             todoist_tasks.append(
                 {
                     "content": c["title"],
@@ -572,7 +597,7 @@ def _batch_add_children(
                 {
                     "content": c["title"],
                     "projectId": meta.todoist_project_id,
-                    "_parent_index": created_index[c["parent"]],
+                    "_parent_index": created_index[c_parent],
                     "_local_id": c["id"],
                 }
             )
@@ -590,7 +615,7 @@ def _batch_add_children(
     created_ids = [c["id"] for c in created]
 
     result_data: dict[str, JsonValue] = {
-        "created": created,
+        "created": cast("list[JsonValue]", created),
         "created_ids": created_ids,
         "count": len(created),
         "project_name": name,
@@ -693,7 +718,17 @@ def register(app: FastMCP) -> None:
                     _bp = json.loads(_bp_raw)
                 except json.JSONDecodeError as e:
                     return json.dumps({"error": f"Invalid JSON for blocking_pairs: {e}"})
-                return _batch_add_children(cfg, name, _parent_todo, _specs, _bp, today, todos, meta)
+                return _batch_add_children(
+                    cfg,
+                    name,
+                    _parent_todo,
+                    _specs,
+                    _bp,
+                    today,
+                    todos,
+                    meta,
+                    flat=schema_version.flat_only(cfg, name),
+                )
             return json.dumps({"error": "title is required when not using children-only mode."})
 
         result = require_project(project_name)
@@ -782,7 +817,15 @@ def register(app: FastMCP) -> None:
                     return json.dumps({"error": f"Invalid blocking_pairs JSON: {e}"})
                 # Pass in-memory todos/meta (already contain root todo) — single atomic save
                 batch_result_str = _batch_add_children(
-                    cfg, name, todo, _specs, _bp, today, todos, meta
+                    cfg,
+                    name,
+                    todo,
+                    _specs,
+                    _bp,
+                    today,
+                    todos,
+                    meta,
+                    flat=schema_version.flat_only(cfg, name),
                 )
                 batch_data = json.loads(batch_result_str)
                 return json.dumps(
