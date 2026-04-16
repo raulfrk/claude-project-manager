@@ -4,13 +4,15 @@ These tests exercise the full payload chain:
   todo_add → _todo_hook_fields → hook dispatch source_result
 
 The hook dispatch layer (router) is not running in the test environment, so we
-monkeypatch `hook_dispatch.dispatch._dispatch_hook` to capture the serialized
-source_result that would be POSTed to the router. Assertions then verify that:
+monkeypatch `hook_dispatch.dispatch._dispatch_hook` to prevent the Unix-socket
+POST. Assertions then verify what fields appear in the `todo_add` return JSON
+(which is exactly the `source_result` the router would consume):
 
 - Task 3: parent_jira_issue_key is emitted for flat children
 - Task 4: synced_tags strips group:* entries
-- Task 5: omit_if_empty — top-level todo has no parent_jira_issue_key field
-           (meaning the router's omit_if_empty DSL would drop parent_key)
+- Task 5: asserts absence of parent_jira_issue_key for top-level todos; the
+         router's omit_if_empty directive then drops parent_key from the Jira
+         call. (Router DSL behavior itself is covered by router unit tests.)
 - Task 6: Jira hook param_mapping references correct parent field name
 - Task 7: Todoist hook param_mapping uses synced_tags (not raw tags)
 """
@@ -126,34 +128,18 @@ def cfg_with_integrations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pr
 
 
 @pytest.fixture()
-def app_with_hooks(cfg_with_integrations: ProjConfig) -> tuple[FastMCP, list[dict[str, Any]]]:
-    """FastMCP app with hook_dispatch enabled; captures dispatched payloads."""
+def app_with_hooks(cfg_with_integrations: ProjConfig) -> FastMCP:
+    """FastMCP app with hook_dispatch enabled. The actual dispatch is patched
+    out per-test via `patch("hook_dispatch.dispatch._dispatch_hook", ...)`
+    because the Unix socket transport is not live in the test runner."""
     from server.tools import config, projects, todos
 
-    dispatched: list[dict[str, Any]] = []
-
-    async def _fake_dispatch(
-        tool_name: str,
-        result: Any,
-        hooks_port: int = 19100,
-    ) -> dict[str, Any] | None:
-        # Serialize the result exactly as the real dispatcher would, then capture it.
-        from hook_dispatch.dispatch import _serialize_result  # type: ignore[import-not-found]
-
-        serialized = _serialize_result(result)
-        dispatched.append({"tool_name": tool_name, "source_result": json.loads(serialized)})
-        return {"hooks_fired": 0, "errors": [], "results": []}
-
     app = FastMCP("test-proj-hooks")
-    # Patch _dispatch_hook before enable_hook_dispatch wraps the tools, so the
-    # wrapper calls our fake instead of the real httpx call.
-    with patch("hook_dispatch.dispatch._dispatch_hook", new=_fake_dispatch):
-        enable_hook_dispatch(app)
-        config.register(app)
-        projects.register(app)
-        todos.register(app)
-
-    return app, dispatched
+    enable_hook_dispatch(app)
+    config.register(app)
+    projects.register(app)
+    todos.register(app)
+    return app
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +147,10 @@ def app_with_hooks(cfg_with_integrations: ProjConfig) -> tuple[FastMCP, list[dic
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_e2e_flat_child_fires_todoist_hook_with_parent_id(
     cfg_with_integrations: ProjConfig,
-    app_with_hooks: tuple[FastMCP, list[dict[str, Any]]],
+    app_with_hooks: FastMCP,
     tmp_path: Path,
 ) -> None:
     """Flat child todo_add result carries parent_todoist_task_id + synced_tags strips group:*.
@@ -175,7 +161,7 @@ async def test_e2e_flat_child_fires_todoist_hook_with_parent_id(
       Task 7 — Todoist hook mapping references synced_tags (not raw tags)
     """
     cfg = cfg_with_integrations
-    app, dispatched = app_with_hooks
+    app = app_with_hooks
     name = "myapp"
     _setup_integration_project(cfg, name, tmp_path, todoist_project_id="PROJ-T")
 
@@ -184,8 +170,7 @@ async def test_e2e_flat_child_fires_todoist_hook_with_parent_id(
     _save_todos(cfg, name, [parent])
     state.set_session_active(name)
 
-    # Patch _dispatch_hook at the module level so the wrapped tool calls our fake.
-    dispatched.clear()
+    # Patch _dispatch_hook so the wrapped tool doesn't try to POST to a socket.
     with patch("hook_dispatch.dispatch._dispatch_hook") as mock_dispatch:
         mock_dispatch.return_value = {"hooks_fired": 0, "errors": [], "results": []}
 
@@ -215,10 +200,10 @@ async def test_e2e_flat_child_fires_todoist_hook_with_parent_id(
     assert "group:1" in data.get("tags", []), "raw tags field must preserve group:1"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_e2e_flat_child_fires_jira_hook_with_epic_parent_key(
     cfg_with_integrations: ProjConfig,
-    app_with_hooks: tuple[FastMCP, list[dict[str, Any]]],
+    app_with_hooks: FastMCP,
     tmp_path: Path,
 ) -> None:
     """Flat child todo_add result carries parent_jira_issue_key + synced_tags strips group:*.
@@ -229,7 +214,7 @@ async def test_e2e_flat_child_fires_jira_hook_with_epic_parent_key(
       Task 6 — Jira hook param_mapping can resolve parent_key from parent_jira_issue_key
     """
     cfg = cfg_with_integrations
-    app, _dispatched = app_with_hooks
+    app = app_with_hooks
     name = "myapp2"
     _setup_integration_project(cfg, name, tmp_path, jira_issue_key="CPM-0")
 
@@ -252,8 +237,8 @@ async def test_e2e_flat_child_fires_jira_hook_with_epic_parent_key(
     data = json.loads(result_str)
     assert "error" not in data, f"todo_add returned error: {data}"
 
-    # Task 3 / Task 6: parent_jira_issue_key present → router resolves ${parent_jira_issue_key}
-    # into parent_key in jira_create_issue call.
+    # Task 3 / Task 6: parent_jira_issue_key present → router would resolve
+    # ${parent_jira_issue_key} into parent_key in the Jira hook's param_mapping.
     assert data.get("parent_jira_issue_key") == "CPM-100", (
         f"parent_jira_issue_key not emitted; got: {data}"
     )
@@ -264,27 +249,25 @@ async def test_e2e_flat_child_fires_jira_hook_with_epic_parent_key(
     assert group_entries == [], f"synced_tags still contains group:* entries: {synced}"
     assert "backend" in synced, f"non-group tag 'backend' missing from synced_tags: {synced}"
 
-    # Task 6: Jira hook param_mapping `parent_key` uses ${parent_jira_issue_key}.
-    # Validate the contract: if data has parent_jira_issue_key, the omit_if_empty directive
-    # in jira-on-todo-add would NOT drop parent_key — it would pass "CPM-100" through.
-    assert data["parent_jira_issue_key"]  # truthy → omit_if_empty would keep the field
 
-
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_e2e_top_level_flat_todo_fires_jira_hook_without_parent_key(
     cfg_with_integrations: ProjConfig,
-    app_with_hooks: tuple[FastMCP, list[dict[str, Any]]],
+    app_with_hooks: FastMCP,
     tmp_path: Path,
 ) -> None:
-    """Top-level todo result has no parent_jira_issue_key → omit_if_empty drops parent_key.
+    """Top-level todo result has no parent_jira_issue_key — meaning the router's
+    omit_if_empty DSL would drop parent_key from the Jira call. This test covers
+    the source_result contract; router-side DSL resolution is covered by the
+    router's own test_template_omit_if_empty tests.
 
     Chain validated:
-      Task 5 — omit_if_empty: true on jira-on-todo-add's parent_key mapping
-               When parent_jira_issue_key is absent from source_result, the router's
-               omit_if_empty DSL drops parent_key from the jira_create_issue call entirely.
+      Task 3 — parent_jira_issue_key absent when no group:* parent resolution
+      Task 5 — omit_if_empty contract holds at the source (the router-side
+               directive is unit-tested separately in plugins/router/)
     """
     cfg = cfg_with_integrations
-    app, _ = app_with_hooks
+    app = app_with_hooks
     name = "myapp3"
     _setup_integration_project(cfg, name, tmp_path, jira_issue_key="CPM-0")
     state.set_session_active(name)
@@ -302,15 +285,14 @@ async def test_e2e_top_level_flat_todo_fires_jira_hook_without_parent_key(
     data = json.loads(result_str)
     assert "error" not in data, f"todo_add returned error: {data}"
 
-    # Task 5 / Task 6: top-level todo must NOT have parent_jira_issue_key in source_result.
-    # When this field is absent (or None/empty), the router's omit_if_empty: true directive
-    # on jira-on-todo-add param_mapping.parent_key drops the field entirely — so the Jira
-    # create request has no parent_key, preventing an invalid Jira subtask linkage.
+    # Task 3: no parent_jira_issue_key emitted when no group:* tag is present.
+    # Task 5: this absence is what triggers the router's omit_if_empty: true
+    # directive to drop parent_key from the jira_create_issue call downstream.
     assert "parent_jira_issue_key" not in data, (
         f"top-level todo must not emit parent_jira_issue_key; got: {data}"
     )
 
-    # Also verify: no parent_todoist_task_id (same omit logic applies to Todoist).
+    # Same omit logic applies to Todoist's parent_todoist_task_id.
     assert "parent_todoist_task_id" not in data, (
         f"top-level todo must not emit parent_todoist_task_id; got: {data}"
     )
