@@ -673,3 +673,62 @@ class TestPathVersion:
     def test_unparseable_returns_none(self):
         path = Path("/cache/something/not-a-version/.claude-plugin/default-hooks.yaml")
         assert _path_version(path) is None
+
+
+class TestVersionSelection:
+    def test_picks_highest_semver_per_plugin(self, tmp_path):
+        from server.lib.discovery import find_default_hooks_files
+
+        # Cache layout: <name>/<version>/.claude-plugin/default-hooks.yaml
+        for name, version in [("proj", "3.0.1"), ("proj", "5.0.0"), ("worktree", "2.6.0")]:
+            d = tmp_path / name / version / ".claude-plugin"
+            d.mkdir(parents=True)
+            (d / "default-hooks.yaml").write_text("hooks: []\n")
+
+        files = find_default_hooks_files(root=tmp_path, glob_pattern="*/*/.claude-plugin")
+        assert len(files) == 2
+        paths_str = [str(p) for p in files]
+        assert any("proj/5.0.0" in p for p in paths_str)
+        assert not any("proj/3.0.1" in p for p in paths_str)
+
+    def test_active_plugins_filters_orphans(self, tmp_path):
+        from server.lib.discovery import find_default_hooks_files
+
+        for name in ("proj", "sandbox"):
+            d = tmp_path / name / "1.0.0" / ".claude-plugin"
+            d.mkdir(parents=True)
+            (d / "default-hooks.yaml").write_text("hooks: []\n")
+
+        files = find_default_hooks_files(
+            root=tmp_path,
+            glob_pattern="*/*/.claude-plugin",
+            active_plugins={"proj"},
+        )
+        assert len(files) == 1
+        assert "proj" in str(files[0])
+        assert "sandbox" not in str(files[0])
+
+    def test_none_active_plugins_means_no_filter(self, tmp_path):
+        from server.lib.discovery import find_default_hooks_files
+
+        for name in ("proj", "sandbox"):
+            d = tmp_path / name / "1.0.0" / ".claude-plugin"
+            d.mkdir(parents=True)
+            (d / "default-hooks.yaml").write_text("hooks: []\n")
+
+        files = find_default_hooks_files(
+            root=tmp_path,
+            glob_pattern="*/*/.claude-plugin",
+            active_plugins=None,
+        )
+        assert len(files) == 2
+
+    def test_dev_layout_single_file_preserved(self, tmp_path):
+        from server.lib.discovery import find_default_hooks_files
+
+        d = tmp_path / "plugins" / "proj" / ".claude-plugin"
+        d.mkdir(parents=True)
+        (d / "default-hooks.yaml").write_text("hooks: []\n")
+
+        files = find_default_hooks_files(root=tmp_path)
+        assert len(files) == 1

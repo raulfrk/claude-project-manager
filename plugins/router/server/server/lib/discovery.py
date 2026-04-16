@@ -82,28 +82,44 @@ def _default_discovery_root() -> Path:
 def find_default_hooks_files(
     root: Path | None = None,
     glob_pattern: str = _DEFAULT_PLUGIN_GLOB,
+    active_plugins: set[str] | None = None,
 ) -> list[Path]:
-    """Find all default-hooks.yaml files in sibling plugins.
+    """Find default-hooks.yaml files, one per plugin, preferring highest version.
 
     Supports two directory layouts:
     - Dev layout:   <project>/plugins/<name>/.claude-plugin/default-hooks.yaml
-                    (glob: plugins/*/.claude-plugin/default-hooks.yaml)
     - Cache layout: <cache>/<name>/<version>/.claude-plugin/default-hooks.yaml
-                    (glob: */*/.claude-plugin/default-hooks.yaml)
 
-    Tries the provided glob_pattern first; if nothing is found, falls back to
-    the cache-layout glob so that installed (non-dev) deployments work correctly.
+    When multiple versions of the same plugin exist (cache layout), returns
+    only the path with the highest semver version.
 
-    Returns a list of Paths to default-hooks.yaml files found.
+    When active_plugins is provided, plugins not in that set are filtered
+    out (used to exclude orphaned plugin dirs after a plugin is removed
+    from the marketplace).
+
+    Returns a list of Paths, one per plugin.
     """
     discovery_root = root or _default_discovery_root()
     pattern = f"{glob_pattern}/{_DEFAULT_HOOKS_FILENAME}"
     found = sorted(discovery_root.glob(pattern))
     if not found:
-        # Fallback: installed cache layout — <name>/<version>/.claude-plugin/
         cache_pattern = f"*/*/.claude-plugin/{_DEFAULT_HOOKS_FILENAME}"
         found = sorted(discovery_root.glob(cache_pattern))
-    return found
+
+    by_plugin: dict[str, list[tuple[Version, Path]]] = {}
+    for path in found:
+        name = _plugin_name_from_path(path)
+        if not name:
+            continue
+        if active_plugins is not None and name not in active_plugins:
+            continue
+        version = _path_version(path) or Version("0.0.0")
+        by_plugin.setdefault(name, []).append((version, path))
+
+    return [
+        max(candidates, key=lambda vp: vp[0])[1]
+        for candidates in by_plugin.values()
+    ]
 
 
 def load_hooks_from_file(path: Path) -> list[dict[str, JsonValue]]:
