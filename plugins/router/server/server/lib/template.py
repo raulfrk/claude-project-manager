@@ -82,6 +82,40 @@ def resolve_mapping(
 ) -> dict[str, JsonValue]:
     """Resolve every value in *param_mapping* against *source*.
 
-    Returns a new dict with the same keys and resolved values.
+    Dict values of the shape ``{"value": ..., "omit_if_empty": True}`` are
+    resolved specially: when the resolved value is falsy (None, "", 0, [], {}),
+    the key is omitted from the output dict. All other values resolve normally.
     """
-    return {key: resolve_value(value, source) for key, value in param_mapping.items()}
+    out: dict[str, JsonValue] = {}
+    for key, value in param_mapping.items():
+        if _is_omit_if_empty_directive(value):
+            directive: dict[str, JsonValue] = value  # type: ignore[assignment]
+            resolved = resolve_value(directive["value"], source)
+            if _is_empty(resolved):
+                continue
+            out[key] = resolved
+        elif _is_value_directive(value):
+            directive = value  # type: ignore[assignment]
+            out[key] = resolve_value(directive["value"], source)
+        else:
+            out[key] = resolve_value(value, source)
+    return out
+
+
+def _is_value_directive(value: JsonValue) -> bool:
+    """Return True if *value* is a ``{"value": ..., "omit_if_empty": ...}`` directive."""
+    return isinstance(value, dict) and "value" in value and "omit_if_empty" in value
+
+
+def _is_omit_if_empty_directive(value: JsonValue) -> bool:
+    return isinstance(value, dict) and "value" in value and value.get("omit_if_empty") is True
+
+
+def _is_empty(value: JsonValue) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (str, list, dict)):
+        return len(value) == 0
+    if isinstance(value, (int, float)):
+        return value == 0
+    return False
