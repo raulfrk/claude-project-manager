@@ -219,6 +219,7 @@ def discover_and_register(
     """
     files = find_default_hooks_files(root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
     stats: dict[str, dict[str, int]] = {}
+    discovered_keys: set[tuple[str, str, str]] = set()
 
     for path in files:
         plugin_name = _plugin_name_from_path(path)
@@ -237,6 +238,8 @@ def discover_and_register(
                     path,
                 )
                 continue
+
+            discovered_keys.add((trigger, target, server))
 
             # Check for named ID in the definition
             def_id = str(hook_def.get("id", ""))
@@ -289,6 +292,20 @@ def discover_and_register(
                 updated_count,
             )
 
+    # Remove orphaned source:auto hooks whose source file no longer exists
+    orphans_removed = 0
+    for hook in list(registry.hooks):
+        if hook.source != _AUTO_SOURCE:
+            continue
+        key = (hook.trigger_tool, hook.target_tool, hook.server)
+        if key not in discovered_keys:
+            registry.hooks.remove(hook)
+            orphans_removed += 1
+            logger.info("Removed orphaned auto hook: %s", hook.id)
+
+    if orphans_removed:
+        stats["_orphans_removed"] = {"registered": 0, "updated": 0, "orphans_removed": orphans_removed}
+
     return stats
 
 
@@ -337,19 +354,21 @@ def run_discovery(
     stats = discover_and_register(registry, root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
     urls_added = populate_server_urls(registry)
 
-    total_registered = sum(s["registered"] for s in stats.values())
-    total_updated = sum(s["updated"] for s in stats.values())
+    orphans_removed = stats.get("_orphans_removed", {}).get("orphans_removed", 0)
+    plugin_stats = {k: v for k, v in stats.items() if not k.startswith("_")}
+    total_registered = sum(s["registered"] for s in plugin_stats.values())
+    total_updated = sum(s["updated"] for s in plugin_stats.values())
 
-    if stats or urls_added or total_updated or deduped_ids:
+    if stats or urls_added or total_updated or deduped_ids or orphans_removed:
         storage.save(registry)
 
-    total_plugins = len(stats)
+    total_plugins = len(plugin_stats)
     lines = [f"Hook auto-discovery: scanned plugins, found {total_plugins} with default hooks."]
     if deduped_ids:
         lines.append(
             f"Deduplicated: removed {len(deduped_ids)} numeric hook(s): {', '.join(deduped_ids)}"
         )
-    for plugin_name, counts in stats.items():
+    for plugin_name, counts in plugin_stats.items():
         parts = []
         if counts["registered"]:
             parts.append(f"{counts['registered']} new")
@@ -360,6 +379,8 @@ def run_discovery(
     lines.append(f"Total auto-registered: {total_registered}")
     if total_updated:
         lines.append(f"Total updated: {total_updated}")
+    if orphans_removed:
+        lines.append(f"Orphaned auto hooks removed: {orphans_removed}")
     lines.append(f"Server URLs populated: {urls_added}")
     summary = "\n".join(lines)
     logger.info(summary)
