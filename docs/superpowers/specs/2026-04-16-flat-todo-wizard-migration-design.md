@@ -140,7 +140,7 @@ Plan phase checks `detect_already_flat(project) == True and schema_version < 2`.
 
 ## 6. Wizard UX
 
-Rich-only (no Textual — installer decision already made). Three screens.
+Built with Textual (matches the existing installer TUI stack — `installer/screens/` is Textual `Screen` subclasses; snapshot tests use `pytest-textual-snapshot`). Three screens added under `installer/screens/migration_*.py`.
 
 ### Screen 1 — Overview
 
@@ -388,9 +388,9 @@ Full wizard flow in a tmpdir sandbox, SaaS responses mocked, `~/.claude/` stubbe
 5. `test_e2e_dry_run.py` — `--migrate-flat-dry-run` writes report, no mutations, exit 0
 6. `test_e2e_non_tty.py` — stdin redirected; warning + exit 0 without migrating
 
-### 10.4 Snapshot tests — Rich TUI
+### 10.4 Snapshot tests — Textual TUI
 
-One golden per screen: overview, per-project review, dry-run Tab 1, dry-run Tab 2, progress, summary. Reuses the existing Rich snapshot harness. **First CI run after new goldens is expected to flake — rerun workflow before investigating** (per CLAUDE.md).
+One golden per screen: overview, per-project review, dry-run Tab 1, dry-run Tab 2, progress, summary. Reuses `pytest-textual-snapshot` (already a dev dep). **First CI run after new goldens is expected to flake — rerun workflow before investigating** (per CLAUDE.md).
 
 ### 10.5 Coverage target
 
