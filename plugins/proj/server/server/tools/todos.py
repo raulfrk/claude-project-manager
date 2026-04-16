@@ -53,6 +53,27 @@ def _parent_id_from_tag(tags: list[str]) -> str | None:
     return matches[0].group("id")
 
 
+def _resolve_parent_for_hooks(todo: Todo, todos: list[Todo]) -> ParentLinks:
+    """Resolve parent integration IDs for hook dispatch.
+
+    Resolution order: `group:<id>` tag wins over `todo.parent` when both set.
+    Returns empty ParentLinks if no parent marker, or parent not found, or
+    parent has no integration IDs.
+    """
+    parent_id = _parent_id_from_tag(todo.tags) or todo.parent
+    if not parent_id:
+        return ParentLinks()
+    parent = next((t for t in todos if t.id == parent_id), None)
+    if parent is None:
+        return ParentLinks()
+    return ParentLinks(
+        todoist_task_id=parent.todoist_task_id,
+        trello_card_id=parent.trello_card_id,
+        trello_checklist_id=parent.trello_checklist_id,
+        jira_issue_key=parent.jira_issue_key,
+    )
+
+
 def _normalize_title(title: str) -> str:
     """Collapse whitespace and lowercase for dedup comparison."""
     return " ".join(title.split()).lower()
