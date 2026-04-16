@@ -95,10 +95,13 @@ Examples:
  - `/proj:todo list all --prio` — all todos incl done, grouped by tiers, completed separate
  - `/proj:todo list --priorities` — alias for --prio
 
-**tree** — todos as hierarchy
- - `mcp__plugin_proj_proj__todo_tree`
- - Nested bullets, 2-space indent. Same icons/bold ID/inline metadata as `list` (incl `[manual]`, `[blocked by X]`/`[blocks Y]`, `[group:X]`).
- - Example:
+**tree** [--full] — todos as hierarchy
+
+Parse flag:
+ - `--full` absent (default) → call `mcp__plugin_proj_proj__todo_tree` w/ `compact=True`; print the returned `result` string verbatim (tree-indented one-liners).
+ - `--full` present → call `mcp__plugin_proj_proj__todo_tree` w/ `compact=False`; render as nested bullets w/ 2-space indent using the rendering rules from the `list` section (icons, bold ID, inline metadata incl `[manual]`, `[blocked by X]`/`[blocks Y]`, `[group:X]`).
+
+Example (full-mode):
     ```
     - ✅ **1** — Implement storage layer _(medium)_
     - 🔲 **2** — Build API _(high)_
