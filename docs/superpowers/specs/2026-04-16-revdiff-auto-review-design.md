@@ -29,17 +29,36 @@ When the `revdiff` skill is installed and enabled, the same review would be dram
 
 ## Design
 
-### Component 1 — New bullet in `MANAGED_SECTION`
+### Component 1a — Extract `MANAGED_SECTION` body to a content file
 
-**File**: `installer/claudemd.py`
+**New file**: `installer/managed_section.md`
 
-Add one bullet (appended at the end of the existing list in the `MANAGED_SECTION` string constant) with the following text:
+Today the section body is a multiline `f"""..."""` literal inside `installer/claudemd.py`. Extract the full section (markers + heading + all bullets) into a standalone Markdown file that the Python side reads at module load. This makes content edits diff-friendly, unblocks non-Python contributors from updating rules, and decouples content churn from code churn.
+
+**New file contents** (verbatim): the current `MANAGED_SECTION` string, including the `<!-- claude-project-manager:start -->` / `<!-- claude-project-manager:end -->` marker lines at top/bottom.
+
+**`installer/claudemd.py` change**: replace the string literal with a module-level load:
+
+```python
+_SECTION_PATH = Path(__file__).parent / "managed_section.md"
+MANAGED_SECTION = _SECTION_PATH.read_text(encoding="utf-8").rstrip("\n")
+```
+
+`MARKER_START` / `MARKER_END` remain as constants — `remove_managed_section` and `_has_both_markers` still use them for splitter logic, and the same marker strings happen to be the first/last lines of `managed_section.md`.
+
+**Packaging**: the `.md` file must ship with the `installer` package. Verify `pyproject.toml` (or equivalent) includes `*.md` in package data; add if missing. The plan phase will inspect the current packaging config and add one explicit step to update it if needed.
+
+**Failure mode**: if `managed_section.md` is missing at runtime (e.g. broken install), module import raises `FileNotFoundError`. That is the correct behavior — a broken install should fail loudly, not silently write an empty managed block.
+
+### Component 1b — Append the revdiff bullet
+
+Add the following bullet to the end of the bullet list inside `installer/managed_section.md`:
 
 > - **Revdiff-routed spec/plan review** — When a superpowers skill produces a spec/plan/design file and reaches the "ask user to review" step, check if revdiff is available: `enabledPlugins["revdiff@revdiff"] == true` in `~/.claude/settings.json` AND `which revdiff` returns 0. If both hold, invoke the `revdiff:revdiff` skill on the file instead of asking the user to read it manually. If either check fails, fall back silently to the skill's default text-review prompt. This rule applies only to superpowers skills; skills outside the superpowers namespace are unaffected.
 
 The bullet is phrased as a procedural directive to Claude — same style as the existing "Auto-capture issues as todos" and "Interactive Q&A" bullets. No config flag, no per-skill override; the rule is unconditional except for the revdiff-available gate.
 
-### Component 2 — New MCP tool: `claudemd_refresh_managed`
+### Component 2a — New MCP tool: `claudemd_refresh_managed`
 
 **File**: `plugins/proj/server/server/tools/context.py`
 
@@ -62,23 +81,40 @@ def claudemd_refresh_managed() -> dict:
 - If `~/.claude/CLAUDE.md`'s parent directory is missing, `ensure_managed_section` already handles it (`parent.mkdir(parents=True, exist_ok=True)` in `_atomic_write`).
 - If the file is unreadable (permission error), let the exception propagate — this is a configuration problem the user should see directly, not swallow.
 
-**Import note**: the `installer` package must be importable from the proj server. If it is not already a runtime dependency, either (a) add it to the proj server's deps, or (b) copy the small `ensure_managed_section` + constants into a shared location. The plan phase will pick one after verifying current import topology.
+**Import note**: the `installer` package must be importable from the proj server. If it is not already a runtime dependency, either (a) add it to the proj server's deps, or (b) copy the small `ensure_managed_section` + constants into a shared location. The plan phase will pick one after verifying current import topology. Note: whichever path is chosen, the content lives in `installer/managed_section.md` per Component 1a — both the installer and the refresh tool must resolve to that same file so they never drift.
+
+### Component 2b — New skill: `/proj:claudemd-refresh`
+
+**New file**: `plugins/proj/skills/claudemd-refresh/SKILL.md`
+
+User-invocable slash command wrapping the MCP tool from Component 2a. Discoverable via the `/proj:` prefix; users do not need to remember the MCP tool name.
+
+**Naming**: `/proj:claudemd-refresh` — noun-verb pattern consistent with the existing sync family (`/proj:jira-sync`, `/proj:trello-sync`, `/proj:todoist-sync`). Refreshing the managed block is operationally the same shape as those syncs: pull the latest canonical state into a local file.
+
+**Content**: caveman ultra per project conventions. Concise SKILL.md:
+- Frontmatter with `name`, `description`, `context: fork`, `agent: general-purpose` (self-contained, non-interactive).
+- Single step: call `mcp__proj__claudemd_refresh_managed`.
+- Report back to user: `updated` boolean + `path`. If `updated=True`: "Managed block refreshed at `<path>`." If `updated=False`: "Managed block already current at `<path>`."
+
+**Plugin registration**: add the skill to the proj plugin's skills index (README skill reference table + skills-by-category list per project CLAUDE.md convention). No MCP server changes — skill calls the tool registered in Component 2a.
 
 ### Component 3 — Tests
 
 **File**: `installer/tests/test_claudemd.py` (existing)
 
-Add a test that asserts the new revdiff bullet is present in `MANAGED_SECTION`. This is a cheap regression guard — if someone refactors the bullet away accidentally, the test fails.
+Three tests:
 
-```python
-def test_managed_section_contains_revdiff_rule():
-    assert "Revdiff-routed spec/plan review" in MANAGED_SECTION
-    assert 'enabledPlugins["revdiff@revdiff"]' in MANAGED_SECTION
-```
+1. `test_managed_section_loaded_from_file` — assert `MANAGED_SECTION` equals `managed_section.md` content with the trailing newline trimmed, and that markers are the first and last lines of the file.
+2. `test_managed_section_contains_revdiff_rule` — cheap regression guard on the new bullet:
+   ```python
+   assert "Revdiff-routed spec/plan review" in MANAGED_SECTION
+   assert 'enabledPlugins["revdiff@revdiff"]' in MANAGED_SECTION
+   ```
+3. `test_managed_section_file_shipped` — packaging check. Import the installer package and assert `(Path(installer.__file__).parent / "managed_section.md").is_file()`. This guards against the `.md` being stripped by a future packaging refactor.
 
 **File**: `plugins/proj/server/tests/test_context.py` (existing)
 
-Add a test for `claudemd_refresh_managed`:
+Tests for `claudemd_refresh_managed`:
 
 1. Fresh file case: file does not exist → tool call creates it → returns `{"updated": True, ...}` → file contains markers + section body.
 2. Already-current case: file contains current section → tool call returns `{"updated": False, ...}` → file unchanged.
@@ -86,52 +122,72 @@ Add a test for `claudemd_refresh_managed`:
 
 Use `tmp_path` + monkeypatch of `Path.home()` to avoid touching the real `~/.claude/CLAUDE.md`.
 
-### Component 4 — Documentation touch-ups (optional)
+**Skill-level verification** (manual, not automated): confirm `/proj:claudemd-refresh` appears in the `/proj:` skill listing and invoking it on a stale CLAUDE.md updates the block.
 
-- If `installer/claudemd.py` has a docstring summary of what `MANAGED_SECTION` contains, update it to mention the new rule.
-- If `README.md` documents the managed block bullets, add the new rule to that list.
+### Component 4 — Documentation touch-ups
 
-These are non-blocking; the plan will include them if the files already describe the managed block inventory.
+- `installer/claudemd.py` — update any docstring summary of `MANAGED_SECTION` to note the content lives in `managed_section.md`.
+- `README.md` — if it documents the managed block bullets, add the new revdiff bullet to that list, and add `/proj:claudemd-refresh` to the skills table + skills-by-category list.
+
+These are non-optional for this change set — the skills table is the canonical discovery surface, and the README's managed-block list needs to stay in sync with the content file.
 
 ## Data Flow
 
 ```
-+----------------------------+      (1) wizard runs
-| installer/claudemd.py      |---------------+
-|  ensure_managed_section()  |               |
-+----------------------------+               v
-                                  +--------------------------+
-(2) existing user runs new tool   | ~/.claude/CLAUDE.md      |
-+----------------------------+    |  (managed block with     |
-| claudemd_refresh_managed   |--->|   revdiff rule bullet)   |
-|  (proj MCP tool)           |    +--------------------------+
-+----------------------------+               |
-                                  (3) rule loaded into Claude ctx
-                                             |
-                                             v
-                               +------------------------------+
-                               | Superpowers skill reaches    |
-                               | "ask user to review" step    |
-                               +---------------+--------------+
-                                               |
-                                               v
-                               +------------------------------+
-                               | Claude checks:               |
-                               | - settings.json              |
-                               |   enabledPlugins["revdiff@   |
-                               |   revdiff"] == true?         |
-                               | - `which revdiff` == 0?      |
-                               +---------------+--------------+
-                                               |
-                       yes to both             |            either fails
-              +------------------+             |          +-------------------+
-              | Invoke revdiff:  |<------------+--------->| Default text      |
-              | revdiff skill    |                        | "please review"   |
-              | on the file      |                        | prompt            |
-              +------------------+                        +-------------------+
++---------------------------------+
+| installer/managed_section.md    |   (single source of truth for content)
++---------------------------------+
+           |
+           | read at module load
+           v
++---------------------------------+
+| installer/claudemd.py           |
+|   MANAGED_SECTION constant      |
+|   ensure_managed_section()      |
++---------------------------------+
+           |                \
+ (1) wizard/installer runs   \  (2a) MCP tool: claudemd_refresh_managed
+           |                  \      (2b) Skill: /proj:claudemd-refresh  ---> calls 2a
+           v                   v
+  +------------------------------------+
+  |   ~/.claude/CLAUDE.md              |
+  |   (managed block w/ revdiff rule)  |
+  +------------------------------------+
+           |
+ (3) rule loaded into Claude ctx
+           v
++----------------------------------------+
+| Superpowers skill reaches              |
+| "ask user to review" step              |
++-------------------+--------------------+
+                    |
+                    v
++----------------------------------------+
+| Claude checks:                         |
+| - settings.json                        |
+|   enabledPlugins["revdiff@revdiff"]    |
+|   == true?                             |
+| - `which revdiff` == 0?                |
++-------------------+--------------------+
+                    |
+   yes to both      |       either fails
+ +------------+     |     +--------------+
+ | Invoke     |<----+---->| Default text |
+ | revdiff    |           | "please      |
+ | skill on   |           | review"      |
+ | the file   |           | prompt       |
+ +------------+           +--------------+
 ```
 
 ## Alternatives Considered
+
+### Keep `MANAGED_SECTION` as a Python string literal
+Current state: the section body is inlined in `installer/claudemd.py` as an f-string.
+**Rejected** — content changes churn the Python file; diffs mix logic and prose; non-Python contributors have to edit Python source to tweak a bullet. Extracting to `managed_section.md` isolates the content surface.
+
+### MCP tool only, no slash-command skill
+Ship `claudemd_refresh_managed` without `/proj:claudemd-refresh`.
+**Rejected** — users have to remember the raw tool name; not discoverable via the `/proj:` prefix; inconsistent with the other ops shortcuts (`/proj:jira-sync`, `/proj:trello-sync`, `/proj:todoist-sync`).
 
 ### Per-skill fork
 Edit `brainstorming/SKILL.md` and `writing-plans/SKILL.md` in the cached superpowers plugin.
@@ -177,10 +233,13 @@ End-to-end verification of the rule itself (i.e. Claude actually routing to revd
 
 ## Acceptance Criteria
 
-1. `MANAGED_SECTION` in `installer/claudemd.py` contains the revdiff bullet with the specified detection logic (settings.json + `which revdiff`) and fallback behavior.
-2. `claudemd_refresh_managed` MCP tool is registered on the proj server and returns `{updated, path}` as specified.
-3. All listed tests pass on CI.
-4. Manual verification: installer wizard on a clean `~/.claude` produces a CLAUDE.md containing the new bullet; the refresh tool updates an existing stale block in place.
+1. `installer/managed_section.md` exists and contains the full managed section (markers + heading + bullets including the new revdiff bullet).
+2. `installer/claudemd.py` no longer contains the section body as a Python string literal — `MANAGED_SECTION` is loaded from `managed_section.md` at module load time.
+3. Packaging config ships `installer/managed_section.md` with the installer package.
+4. `claudemd_refresh_managed` MCP tool is registered on the proj server and returns `{updated, path}` as specified.
+5. `/proj:claudemd-refresh` skill exists at `plugins/proj/skills/claudemd-refresh/SKILL.md`, is listed in the README skills table and skills-by-category list, and invoking it calls the Component 2a tool and reports the result.
+6. All listed tests pass on CI (content-file load test, revdiff-bullet regression guard, packaging check, refresh-tool unit tests).
+7. Manual verification: installer wizard on a clean `~/.claude` produces a CLAUDE.md containing the new bullet; running `/proj:claudemd-refresh` on a stale block updates it in place.
 
 ## Open Questions
 
