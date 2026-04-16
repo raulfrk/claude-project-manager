@@ -13,11 +13,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.lib import storage
+from server.lib import schema_version, storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
-from server.tools.config import require_project
+from server.tools.config import require_config, require_project
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -77,6 +77,31 @@ def _resolve_parent_for_hooks(todo: Todo, todos: list[Todo]) -> ParentLinks:
 def _normalize_title(title: str) -> str:
     """Collapse whitespace and lowercase for dedup comparison."""
     return " ".join(title.split()).lower()
+
+
+_FLAT_MODE_ERROR = (
+    "todo_add: nested mode disabled (project schema_version >= 2).\n"
+    '  * single child:  todo_add(title="...", tags=["group:<parent-id>"])\n'
+    '  * batch:         todo_add(title="", parent="<parent-id>", children=[...])'
+)
+
+
+def _enforce_flat_args(
+    *,
+    title: str,
+    parent: str | None,
+) -> None:
+    """Raise ValueError when arg shape is disallowed under schema_version >= 2.
+
+    Rejected (post-enforcement):
+      * title non-empty AND parent non-empty (single-child creation w/ parent field)
+
+    Allowed:
+      * title non-empty, parent None  → flat top-level todo
+      * title empty, parent non-empty, children non-empty  → canonical batch path
+    """
+    if parent and title and title.strip():
+        raise ValueError(_FLAT_MODE_ERROR)
 
 
 # Module-level lock serializes batch completions across threads. Acquired
@@ -613,6 +638,17 @@ def register(app: FastMCP) -> None:
         children: str = "[]",
         blocking_pairs: str = "[]",
     ) -> str:
+        # Schema-version-gated flat-only enforcement (todo 624).
+        _cfg = require_config()
+        from server.lib import state as _state  # lazy to avoid module-level cycle
+
+        _project_name = _state.resolve_project(project_name)
+        if _project_name and schema_version.flat_only(_cfg, _project_name):
+            try:
+                _enforce_flat_args(title=title, parent=parent)
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+
         _child_specs_raw = children.strip() if children and children.strip() != "[]" else "[]"
         _bp_raw = blocking_pairs.strip() if blocking_pairs else "[]"
 
