@@ -294,15 +294,36 @@ def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, caps
     monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: True)
 
     # Stub downstream calls
-    monkeypatch.setattr(main_mod, "install_plugin", lambda *a, **kw: None, raising=False)
-    monkeypatch.setattr(main_mod, "remove_marketplace", lambda *a, **kw: None, raising=False)
-    monkeypatch.setattr(main_mod, "add_marketplace", lambda *a, **kw: None, raising=False)
-    monkeypatch.setattr(main_mod, "get_installed_plugins", lambda: ["proj@claude-project-manager"], raising=False)
-    monkeypatch.setattr(main_mod, "detect_existing", lambda: InstallState(installed_plugins=[]), raising=False)
-    monkeypatch.setattr(main_mod, "display_detection", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "install_plugin", lambda *a, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        main_mod, "remove_marketplace", lambda *a, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        main_mod, "add_marketplace", lambda *a, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        main_mod,
+        "get_installed_plugins",
+        lambda: ["proj@claude-project-manager"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main_mod,
+        "detect_existing",
+        lambda: InstallState(installed_plugins=[]),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main_mod, "display_detection", lambda *a, **kw: None, raising=False
+    )
 
     import argparse
-    args = argparse.Namespace(reinstall=True, plugins=None, skip_wizard=True, branch=None)
+
+    args = argparse.Namespace(
+        reinstall=True, plugins=None, skip_wizard=True, branch=None
+    )
     main_mod._reinstall(args)
 
     # Stale versions pruned (only newest kept)
