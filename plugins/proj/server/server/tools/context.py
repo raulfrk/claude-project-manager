@@ -416,6 +416,20 @@ def register(app: FastMCP) -> None:
 
     @app.tool(
         description=(
+            "Refresh the cpm-managed section in ~/.claude/CLAUDE.md to the"
+            " current version. Use after upgrading cpm to pick up new rules"
+            " without re-running the installer wizard."
+        )
+    )
+    def claudemd_refresh_managed() -> dict[str, object]:
+        from claudemd import ensure_managed_section
+
+        target = Path.home() / ".claude" / "CLAUDE.md"
+        updated = ensure_managed_section(target)
+        return {"updated": updated, "path": str(target)}
+
+    @app.tool(
+        description=(
             "Return structured JSON context for the active project"
             " session (config, project metadata, integrations)."
         )

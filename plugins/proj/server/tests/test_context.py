@@ -1138,3 +1138,73 @@ class TestCtxSessionStartHooksStatus:
         result = asyncio.run(_invoke())
         assert "## Active Project: myapp" in result
         assert "**Hooks**:" not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests for claudemd_refresh_managed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestClaudemdRefreshManaged:
+    """Tests for the claudemd_refresh_managed MCP tool."""
+
+    async def test_claudemd_refresh_managed_creates_file(
+        self, mcp_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Tool creates ~/.claude/CLAUDE.md with managed section when file absent."""
+        from claudemd import MANAGED_SECTION, MARKER_END, MARKER_START
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        target = tmp_path / ".claude" / "CLAUDE.md"
+
+        raw = await mcp_app.call_tool("claudemd_refresh_managed", {})
+        items = raw[0] if isinstance(raw, tuple) else raw
+        result = json.loads(items[0].text)
+
+        assert result == {"updated": True, "path": str(target)}
+        assert target.exists()
+        content = target.read_text(encoding="utf-8")
+        assert MARKER_START in content
+        assert MARKER_END in content
+        assert MANAGED_SECTION in content
+
+    async def test_claudemd_refresh_managed_noop_when_current(
+        self, mcp_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Tool returns updated=False when managed section is already current."""
+        from claudemd import MANAGED_SECTION
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        target = tmp_path / ".claude" / "CLAUDE.md"
+        target.parent.mkdir()
+        target.write_text(MANAGED_SECTION + "\n", encoding="utf-8")
+
+        raw = await mcp_app.call_tool("claudemd_refresh_managed", {})
+        items = raw[0] if isinstance(raw, tuple) else raw
+        result = json.loads(items[0].text)
+
+        assert result == {"updated": False, "path": str(target)}
+
+    async def test_claudemd_refresh_managed_replaces_stale_section(
+        self, mcp_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Tool replaces stale managed block while preserving surrounding user content."""
+        from claudemd import MANAGED_SECTION, MARKER_END, MARKER_START
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        target = tmp_path / ".claude" / "CLAUDE.md"
+        target.parent.mkdir()
+        stale = f"{MARKER_START}\n## Old Rules\n- Stale bullet\n{MARKER_END}"
+        target.write_text(f"# User header\n\n{stale}\n\n# User footer\n", encoding="utf-8")
+
+        raw = await mcp_app.call_tool("claudemd_refresh_managed", {})
+        items = raw[0] if isinstance(raw, tuple) else raw
+        result = json.loads(items[0].text)
+
+        assert result == {"updated": True, "path": str(target)}
+        content = target.read_text(encoding="utf-8")
+        assert "Stale bullet" not in content
+        assert MANAGED_SECTION in content
+        assert "# User header" in content
+        assert "# User footer" in content
