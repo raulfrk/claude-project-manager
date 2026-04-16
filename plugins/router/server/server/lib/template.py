@@ -103,7 +103,13 @@ def resolve_mapping(
 
 
 def _is_value_directive(value: JsonValue) -> bool:
-    """Return True if *value* is a ``{"value": ..., "omit_if_empty": ...}`` directive."""
+    """Return True if *value* has both ``value`` + ``omit_if_empty`` keys.
+
+    Used by `resolve_mapping` to spot the `omit_if_empty: False` explicit-opt-out
+    case, where the directive form is preserved but the key is kept even when
+    the resolved value is falsy. Distinct from `_is_omit_if_empty_directive`,
+    which is stricter and only matches `omit_if_empty: True`.
+    """
     return isinstance(value, dict) and "value" in value and "omit_if_empty" in value
 
 

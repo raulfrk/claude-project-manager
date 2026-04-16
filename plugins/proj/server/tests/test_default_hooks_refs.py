@@ -54,6 +54,14 @@ def test_jira_on_todo_add_condition_unchanged():
     )
 
 
+def test_todoist_on_todo_add_parent_id_has_omit_if_empty():
+    hook = _hook(_load(TODOIST_HOOKS), "todoist-on-todo-add")
+    parent_id = hook["param_mapping"]["tasks"][0]["parentId"]
+    assert isinstance(parent_id, dict)
+    assert parent_id["value"] == "${parent_todoist_task_id}"
+    assert parent_id["omit_if_empty"] is True
+
+
 def test_jira_on_todo_add_param_mapping_keyset_complete():
     # Guard against accidental field removal — asserts the full expected keyset.
     hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")

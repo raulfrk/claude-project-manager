@@ -529,7 +529,13 @@ def _batch_add_children(
                 created=today,
                 updated=today,
             )
-            if child.id not in parent.children:
+            # Under flat mode the parent's `children` list stays empty — the
+            # parent-child relationship is expressed via the child's group:<id>
+            # tag. Appending here would make todo_complete(parent) route
+            # through _complete_parent and demand all children complete, while
+            # the children themselves have parent=None and would be archived
+            # independently — producing inconsistent completion semantics.
+            if not flat and child.id not in parent.children:
                 parent.children.append(child.id)
             parent.updated = today
             todos.append(child)

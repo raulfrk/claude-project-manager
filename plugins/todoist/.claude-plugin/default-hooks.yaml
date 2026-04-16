@@ -7,7 +7,9 @@ hooks:
       tasks:
         - content: "${title}"
           projectId: "${todoist_project_id}"
-          parentId: "${parent_todoist_task_id}"
+          parentId:
+            value: "${parent_todoist_task_id}"
+            omit_if_empty: true
           priority: "${priority}"
           labels: "${synced_tags}"
           description: "${notes}"
