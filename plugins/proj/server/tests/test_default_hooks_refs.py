@@ -48,6 +48,20 @@ def test_jira_on_todo_add_parent_key_references_parent_jira_issue_key():
 
 def test_jira_on_todo_add_condition_unchanged():
     hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
-    assert "sync.jira.enabled" in hook["condition"]
-    assert "sync.jira.auto_sync" in hook["condition"]
-    assert "project.jira_issue_key" in hook["condition"]
+    # Exact equality guards against any mutation (incl. `and` → `or`).
+    assert hook["condition"] == (
+        "sync.jira.enabled and sync.jira.auto_sync and project.jira_issue_key"
+    )
+
+
+def test_jira_on_todo_add_param_mapping_keyset_complete():
+    # Guard against accidental field removal — asserts the full expected keyset.
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
+    assert set(hook["param_mapping"].keys()) == {
+        "project_key",
+        "summary",
+        "description",
+        "priority",
+        "labels",
+        "parent_key",
+    }
