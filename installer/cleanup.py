@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger("installer")
 
@@ -27,6 +30,94 @@ def _parse_live_plugins(data: dict) -> dict[str, set[str]]:
         plugin, marketplace = key.split("@", 1)
         live.setdefault(marketplace, set()).add(plugin)
     return live
+
+
+@dataclass
+class PruneReport:
+    """Classification of cache dirs for pruning."""
+
+    orphans: list[str] = field(default_factory=list)
+    stale_versions: dict[str, list[str]] = field(default_factory=dict)
+
+
+def _load_marketplace_plugins(marketplace_path: Path) -> set[str]:
+    """Load plugin names from marketplace.json.
+
+    Raises FileNotFoundError if the file doesn't exist.
+    """
+    if not marketplace_path.is_file():
+        raise FileNotFoundError(f"marketplace.json not found: {marketplace_path}")
+    data = json.loads(marketplace_path.read_text())
+    plugins = data.get("plugins", [])
+    return {p["name"] for p in plugins if isinstance(p, dict) and "name" in p}
+
+
+def scan_stale_cache(cache_dir: Path, marketplace_path: Path) -> PruneReport:
+    """Classify every dir in cache_dir as active, stale-version, or orphan.
+
+    - Orphans: plugin dirs whose name is not in marketplace.json.
+    - Stale versions: non-highest semver subdirs for active plugins.
+    - The highest-semver dir for each active plugin is kept out of the report.
+
+    Raises FileNotFoundError if marketplace.json is missing.
+    """
+    active = _load_marketplace_plugins(marketplace_path)
+    report = PruneReport()
+
+    if not cache_dir.is_dir():
+        return report
+
+    for plugin_dir in sorted(cache_dir.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        if plugin_dir.name.startswith("."):
+            continue
+        if plugin_dir.name == "_shared":
+            continue
+        if plugin_dir.name not in active:
+            report.orphans.append(plugin_dir.name)
+            continue
+        # Active plugin — enumerate version subdirs
+        version_dirs: list[tuple[Version, str]] = []
+        for v_dir in plugin_dir.iterdir():
+            if not v_dir.is_dir():
+                continue
+            try:
+                version_dirs.append((Version(v_dir.name), v_dir.name))
+            except InvalidVersion:
+                continue  # skip unparseable
+        if len(version_dirs) <= 1:
+            continue
+        # Keep highest semver; rest are stale
+        version_dirs.sort(key=lambda t: t[0], reverse=True)
+        stale = [name for _, name in version_dirs[1:]]
+        if stale:
+            report.stale_versions[plugin_dir.name] = stale
+
+    return report
+
+
+def prune_stale_versions(cache_dir: Path, report: PruneReport) -> list[str]:
+    """Delete the stale version dirs listed in the report.
+
+    Returns list of deleted paths (as strings) for logging.
+    """
+    deleted: list[str] = []
+    for plugin, versions in report.stale_versions.items():
+        plugin_dir = cache_dir / plugin
+        if not plugin_dir.is_dir():
+            continue
+        for version in versions:
+            v_dir = plugin_dir / version
+            if not v_dir.is_dir():
+                continue
+            try:
+                shutil.rmtree(v_dir)
+                deleted.append(str(v_dir))
+                logger.info("Pruned stale version dir: %s", v_dir)
+            except OSError as exc:
+                logger.warning("Failed to remove %s: %s", v_dir, exc)
+    return deleted
 
 
 def cleanup_orphaned_plugin_caches(

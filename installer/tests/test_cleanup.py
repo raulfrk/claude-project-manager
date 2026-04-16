@@ -242,6 +242,125 @@ def test_prune_permission_error_logs_and_continues(
     assert any("failed to remove" in r.message for r in caplog.records)
 
 
+import json
+
+import pytest
+
+from installer.cleanup import (
+    PruneReport,
+    prune_stale_versions,
+    scan_stale_cache,
+)
+
+
+def _write_marketplace(tmp_path: Path, plugin_names: list[str]) -> Path:
+    mp = tmp_path / "marketplace.json"
+    mp.write_text(
+        json.dumps({"plugins": [{"name": n, "version": "5.0.0"} for n in plugin_names]})
+    )
+    return mp
+
+
+def _make_cache_dir(tmp_path: Path, plugin: str, version: str) -> Path:
+    d = tmp_path / plugin / version
+    d.mkdir(parents=True)
+    return d
+
+
+class TestScanStaleCache:
+    def test_detects_orphan(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        _make_cache_dir(cache, "sandbox", "1.0.0")
+        _make_cache_dir(cache, "proj", "5.0.0")
+        mp = _write_marketplace(tmp_path, ["proj"])
+
+        report = scan_stale_cache(cache, mp)
+
+        assert report.orphans == ["sandbox"]
+        assert report.stale_versions == {}
+
+    def test_detects_stale_versions(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        for v in ("3.0.0", "4.0.0", "5.0.0"):
+            _make_cache_dir(cache, "proj", v)
+        mp = _write_marketplace(tmp_path, ["proj"])
+
+        report = scan_stale_cache(cache, mp)
+
+        assert report.orphans == []
+        assert set(report.stale_versions["proj"]) == {"3.0.0", "4.0.0"}
+
+    def test_ignores_current_version(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        _make_cache_dir(cache, "proj", "5.0.0")
+        mp = _write_marketplace(tmp_path, ["proj"])
+
+        report = scan_stale_cache(cache, mp)
+
+        assert report.orphans == []
+        assert report.stale_versions == {}
+
+    def test_unparseable_version_skipped(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        _make_cache_dir(cache, "proj", "92f892f2b997")
+        _make_cache_dir(cache, "proj", "5.0.0")
+        mp = _write_marketplace(tmp_path, ["proj"])
+
+        report = scan_stale_cache(cache, mp)
+
+        assert "proj" not in report.stale_versions or "92f892f2b997" not in report.stale_versions.get("proj", [])
+
+    def test_missing_marketplace_json(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        _make_cache_dir(cache, "proj", "5.0.0")
+
+        with pytest.raises(FileNotFoundError):
+            scan_stale_cache(cache, tmp_path / "nonexistent.json")
+
+    def test_ignores_shared_dir(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        (cache / "_shared").mkdir()
+        _make_cache_dir(cache, "proj", "5.0.0")
+        mp = _write_marketplace(tmp_path, ["proj"])
+
+        report = scan_stale_cache(cache, mp)
+
+        assert "_shared" not in report.orphans
+
+
+class TestPruneStaleVersions:
+    def test_removes_old_versions_keeps_newest(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        for v in ("3.0.0", "4.0.0", "5.0.0"):
+            _make_cache_dir(cache, "proj", v)
+
+        report = PruneReport(orphans=[], stale_versions={"proj": ["3.0.0", "4.0.0"]})
+        deleted = prune_stale_versions(cache, report)
+
+        assert (cache / "proj" / "5.0.0").is_dir()
+        assert not (cache / "proj" / "3.0.0").exists()
+        assert not (cache / "proj" / "4.0.0").exists()
+        assert len(deleted) == 2
+
+    def test_empty_report_noop(self, tmp_path):
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        _make_cache_dir(cache, "proj", "5.0.0")
+
+        report = PruneReport(orphans=[], stale_versions={})
+        deleted = prune_stale_versions(cache, report)
+
+        assert deleted == []
+        assert (cache / "proj" / "5.0.0").is_dir()
+
+
 def test_parse_live_plugins_shape() -> None:
     data = {
         "plugins": {
