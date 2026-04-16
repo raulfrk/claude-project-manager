@@ -23,7 +23,7 @@ plugins = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["installer"]
-force-include = { "installer/defaults.yaml" = "installer/defaults.yaml", ".claude-plugin/marketplace.json" = "installer/marketplace.json" }
+force-include = { "installer/defaults.yaml" = "installer/defaults.yaml", "installer/managed_section.md" = "installer/managed_section.md", ".claude-plugin/marketplace.json" = "installer/marketplace.json" }
 
 [dependency-groups]
 test = ["pytest>=8.0", "pytest-cov>=7.0", "pytest-mock>=3.14", "pytest-asyncio>=0.24", "textual[dev]>=0.80", "pytest-textual-snapshot>=1.0", "httpx>=0.28", "respx>=0.22"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
+import installer
 import installer.claudemd as claudemd
 from installer.claudemd import (
     MANAGED_SECTION,
@@ -191,6 +192,12 @@ def test_managed_section_loaded_from_file():
     assert section_path.is_file(), "managed_section.md must ship with installer package"
     file_content = section_path.read_text(encoding="utf-8").rstrip("\n")
     assert claudemd.MANAGED_SECTION == file_content
+
+
+def test_managed_section_file_shipped():
+    """installer/managed_section.md ships with the installer package."""
+    pkg_root = Path(installer.__file__).parent
+    assert (pkg_root / "managed_section.md").is_file()
 
 
 def test_managed_section_markers_at_boundaries():
