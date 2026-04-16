@@ -1,4 +1,14 @@
-"""Managed section CRUD for CLAUDE.md files."""
+"""Managed section CRUD for CLAUDE.md files.
+
+Canonical home of the cpm-managed section logic and content file. The
+section body lives in ``managed_section.md`` alongside this module (single
+source of truth) and is loaded into ``MANAGED_SECTION`` at import time.
+
+Consumers:
+- The installer CLI (via the ``installer.claudemd`` re-export shim).
+- The proj MCP server's ``claudemd_refresh_managed`` tool.
+- The ``/proj:claudemd-refresh`` skill (wraps the MCP tool).
+"""
 
 from __future__ import annotations
 

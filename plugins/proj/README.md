@@ -187,6 +187,12 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 | `todoist-sync` | `/proj:todoist-sync` | Manually trigger bidirectional Todoist sync. |
 | `trello-sync` | `/proj:trello-sync` | Sync root-level todos with a Trello board. |
 
+### Maintenance
+
+| Skill | Usage | Description |
+|-------|-------|-------------|
+| `claudemd-refresh` | `/proj:claudemd-refresh` | Refresh the cpm-managed block in `~/.claude/CLAUDE.md` to the current version. Use after upgrading cpm. |
+
 ### Permissions
 
 | Skill | Usage | Description |

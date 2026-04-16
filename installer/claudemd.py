@@ -1,7 +1,12 @@
 """Backwards-compatible re-exports from the ``claudemd`` shared package.
 
-Historical import sites (e.g. ``from installer.claudemd import ...``) keep
-working after the move to ``plugins/_shared/claudemd/``.
+The canonical home for the managed CLAUDE.md section logic and content is
+``plugins/_shared/claudemd/`` (packaged as ``claudemd`` under the
+``claude-hook-transport`` distribution). This module exists so that existing
+import sites inside the installer package (``from installer.claudemd import
+ensure_managed_section``) keep working unchanged after the move.
+
+New code should import from ``claudemd`` directly.
 """
 
 from claudemd.claudemd import (  # noqa: F401
