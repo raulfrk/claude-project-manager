@@ -57,3 +57,22 @@ def test_dict_without_omit_if_empty_treated_as_plain_dict():
     mapping = {"outer": {"inner": "${x}"}}
     source = {"x": "y"}
     assert resolve_mapping(mapping, source) == {"outer": {"inner": "y"}}
+
+
+def test_omit_if_empty_keeps_key_when_value_is_false():
+    # False is a valid boolean value, not "empty" — key should be kept.
+    mapping = {"flag": {"value": "${active}", "omit_if_empty": True}}
+    source = {"active": False}
+    assert resolve_mapping(mapping, source) == {"flag": False}
+
+
+def test_omit_if_empty_keeps_key_when_value_is_true():
+    mapping = {"flag": {"value": "${active}", "omit_if_empty": True}}
+    source = {"active": True}
+    assert resolve_mapping(mapping, source) == {"flag": True}
+
+
+def test_omit_if_empty_removes_key_when_value_is_zero():
+    mapping = {"count": {"value": "${n}", "omit_if_empty": True}}
+    source = {"n": 0}
+    assert resolve_mapping(mapping, source) == {}

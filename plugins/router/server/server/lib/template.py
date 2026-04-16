@@ -114,6 +114,10 @@ def _is_omit_if_empty_directive(value: JsonValue) -> bool:
 def _is_empty(value: JsonValue) -> bool:
     if value is None:
         return True
+    # bool must precede int check — bool is a subclass of int in Python.
+    # True/False are never "empty" (they are valid values, not absence of value).
+    if isinstance(value, bool):
+        return False
     if isinstance(value, (str, list, dict)):
         return len(value) == 0
     if isinstance(value, (int, float)):
