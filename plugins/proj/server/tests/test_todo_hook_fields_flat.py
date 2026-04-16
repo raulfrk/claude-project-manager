@@ -5,10 +5,20 @@ import logging
 
 import pytest
 
+from server.lib.models import Todo
 from server.tools.todos import (
     ParentLinks,
     _parent_id_from_tag,
+    _resolve_parent_for_hooks,
 )
+
+
+def _todo(id_: str, **kwargs) -> Todo:
+    """Build a Todo with `id` + `title` + caller-provided overrides.
+
+    Delegates all defaulting to `Todo` itself; tests override only what they care about.
+    """
+    return Todo(id=id_, title=f"todo {id_}", **kwargs)
 
 
 def test_parent_id_from_tag_finds_group():
@@ -50,30 +60,6 @@ def test_parent_links_is_frozen():
     pl = ParentLinks()
     with pytest.raises(dataclasses.FrozenInstanceError):
         pl.todoist_task_id = "x"  # type: ignore[misc]
-
-
-from server.lib.models import Todo  # noqa: E402
-from server.tools.todos import _resolve_parent_for_hooks  # noqa: E402
-
-
-def _todo(id_: str, **kwargs) -> Todo:
-    """Helper: build a minimal Todo with sensible defaults; overridable per test."""
-    defaults = {
-        "id": id_,
-        "title": f"todo {id_}",
-        "tags": [],
-        "parent": None,
-        "children": [],
-        "status": "pending",
-        "priority": "medium",
-        "todoist_task_id": None,
-        "trello_card_id": None,
-        "trello_checklist_id": None,
-        "trello_checklist_item_id": None,
-        "jira_issue_key": None,
-    }
-    defaults.update(kwargs)
-    return Todo(**defaults)
 
 
 def test_resolve_returns_empty_when_no_parent_marker():
