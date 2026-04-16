@@ -703,7 +703,8 @@ def register(app: FastMCP) -> None:
             "pass status=None to return all statuses including done. "
             "Use limit and offset for pagination (limit=0 means no limit). "
             "Set compact=True for one-line summaries to reduce context usage. "
-            "Set max_items>0 to truncate output."
+            "Set max_items>0 to truncate output. "
+            "Compact envelope: count = number of filtered todo items returned."
         )
     )
     def todo_list(
@@ -1325,7 +1326,9 @@ def register(app: FastMCP) -> None:
         description=(
             "List todos that are ready to start (pending, no blockers). "
             "Use limit and offset for pagination (limit=0 means no limit). "
-            "Set compact=True for one-line summaries to reduce context usage."
+            "Set compact=True for one-line summaries to reduce context usage. "
+            "Compact envelope: count = number of ready todo items returned; "
+            "truncated is hardcoded to 0 (no max_items support)."
         )
     )
     def todo_ready(
@@ -1430,7 +1433,8 @@ def register(app: FastMCP) -> None:
             "By default excludes done todos; done parents are kept when they have "
             "non-done descendants. Pass include_done=True to return all todos. "
             "Set compact=True for indented one-line summaries to reduce context usage. "
-            "Set max_items>0 to truncate output."
+            "Set max_items>0 to truncate output. "
+            "Compact envelope: count = number of root todos (children not counted)."
         )
     )
     def todo_tree(
