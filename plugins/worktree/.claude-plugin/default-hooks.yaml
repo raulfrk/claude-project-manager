@@ -2,7 +2,7 @@ hooks:
   - id: worktree-on-wt-create-sandbox
     trigger_tool: wt_create
     target_tool: sandbox_add_write_path
-    server: sandbox
+    server: proj
     param_mapping:
       path: "${worktree_path}"
     blocking: true
@@ -11,7 +11,7 @@ hooks:
   - id: worktree-on-wt-remove-sandbox
     trigger_tool: wt_remove
     target_tool: sandbox_remove_write_path
-    server: sandbox
+    server: proj
     param_mapping:
       path: "${worktree_path}"
     blocking: true
@@ -26,3 +26,48 @@ hooks:
     blocking: true
     result_condition:
       result: "merged"
+
+  - id: zoxide-on-wt-create
+    trigger_tool: wt_create
+    target_tool: zoxide_boost
+    server: worktree
+    param_mapping:
+      path: "${worktree_path}"
+    blocking: true
+    condition: "zoxide_integration"
+
+  - id: zoxide-on-wt-remove
+    trigger_tool: wt_remove
+    target_tool: zoxide_remove
+    server: worktree
+    param_mapping:
+      path: "${worktree_path}"
+    blocking: true
+    condition: "zoxide_integration"
+
+  - id: zoxide-on-proj-init
+    trigger_tool: proj_init
+    target_tool: zoxide_boost
+    server: worktree
+    param_mapping:
+      path: "${repo_path}"
+    blocking: true
+    condition: "zoxide_integration"
+
+  - id: zoxide-on-proj-add-repo
+    trigger_tool: proj_add_repo
+    target_tool: zoxide_boost
+    server: worktree
+    param_mapping:
+      path: "${path}"
+    blocking: true
+    condition: "zoxide_integration"
+
+  - id: zoxide-on-proj-archive
+    trigger_tool: proj_archive
+    target_tool: zoxide_remove
+    server: worktree
+    param_mapping:
+      path: "${repo_path}"
+    blocking: true
+    condition: "zoxide_integration"
