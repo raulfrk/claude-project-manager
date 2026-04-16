@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 import pytest
@@ -46,8 +47,6 @@ def test_parent_links_default_is_all_none():
 
 
 def test_parent_links_is_frozen():
-    import dataclasses
-
     pl = ParentLinks()
     with pytest.raises(dataclasses.FrozenInstanceError):
         pl.todoist_task_id = "x"  # type: ignore[misc]
