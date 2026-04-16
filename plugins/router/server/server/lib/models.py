@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from server.lib.constants import DEFAULT_SERVER_PORTS
+
 if TYPE_CHECKING:
     from server.lib._types import JsonValue
 
@@ -239,6 +241,44 @@ class HookRegistry:
             remove_set = set(removed_ids)
             self.hooks = [h for h in self.hooks if h.id not in remove_set]
 
+        return removed_ids
+
+    def deduplicate_by_hook_id(self) -> list[str]:
+        """Collapse multiple hooks sharing the same ``hook.id`` to a single entry.
+
+        Keep-rule (in order):
+          1. Prefer an entry whose ``server`` appears in ``DEFAULT_SERVER_PORTS``
+             (the canonical plugin-owned entry).
+          2. On tie, keep the *last* occurrence in list order (freshest
+             re-registration wins).
+
+        Returns the list of removed hook ids (one entry per removed hook; the
+        same id may appear multiple times if it had three or more duplicates).
+        """
+        from collections import defaultdict
+
+        groups: defaultdict[str, list[tuple[int, Hook]]] = defaultdict(list)
+        for idx, hook in enumerate(self.hooks):
+            groups[hook.id].append((idx, hook))
+
+        keep_indices: set[int] = set()
+        removed_ids: list[str] = []
+        for _hook_id, entries in groups.items():
+            if len(entries) == 1:
+                keep_indices.add(entries[0][0])
+                continue
+            # Multiple entries share this id — apply the keep-rule.
+            canonical = [(i, h) for i, h in entries if h.server in DEFAULT_SERVER_PORTS]
+            pool = canonical if canonical else entries
+            # Tiebreak: last in list order wins.
+            kept_idx = max(i for i, _h in pool)
+            keep_indices.add(kept_idx)
+            for i, h in entries:
+                if i != kept_idx:
+                    removed_ids.append(h.id)
+
+        if removed_ids:
+            self.hooks = [h for i, h in enumerate(self.hooks) if i in keep_indices]
         return removed_ids
 
 
