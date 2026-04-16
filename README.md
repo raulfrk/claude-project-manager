@@ -120,6 +120,22 @@ For the full architecture with diagrams and interaction flows, see [docs/archite
 
 ---
 
+## Local development
+
+Install `just` (`brew install just` on macOS, `cargo install just` elsewhere)
+and `uv` (https://docs.astral.sh/uv/). Then, from the repo root:
+
+```bash
+just sync   # uv sync --all-groups in installer + every plugin server
+just test   # pytest in the same set; does not fail-fast
+just ci     # sync + test
+```
+
+Per-plugin justfiles remain under `plugins/<name>/server/justfile` for
+single-plugin workflows (`just check`, `just test-cov`, etc.).
+
+---
+
 ## License
 
 MIT
