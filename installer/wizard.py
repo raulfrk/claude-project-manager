@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from claudemd import ensure_managed_section
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
@@ -18,7 +19,6 @@ from installer._config_loader import (
     get_nested,
     load_existing_yaml,
 )
-from claudemd import ensure_managed_section
 from installer.hooks_diff import apply_diffs, compute_hooks_diff
 from installer.prompts import int_in_range, prompt_choice
 from installer.wizard_specs import PROJ_YAML_PROMPTS, PromptSpec
@@ -37,7 +37,10 @@ def _resolve_plugin_dir(cache_dir: Path, plugin_name: str) -> Path | None:
     if not versions:
         return None
     try:
-        from packaging.version import InvalidVersion, Version  # type: ignore[import-not-found]
+        from packaging.version import (  # type: ignore[import-not-found]
+            InvalidVersion,
+            Version,
+        )
 
         def key(p: Path) -> Version:
             try:

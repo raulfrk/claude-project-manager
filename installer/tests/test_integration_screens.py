@@ -16,7 +16,6 @@ from installer.screens.integration_config import (
     TrelloConfigScreen,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -846,8 +845,9 @@ class TestWriteConfigFiles:
 
     def test_ensures_managed_section_in_claude_md(self, mock_home: Path):
         """_write_config_files creates managed section in CLAUDE.md."""
-        from installer.app import InstallerApp
         from claudemd import MARKER_START
+
+        from installer.app import InstallerApp
 
         app = InstallerApp()
         app.selected_plugins = ["proj"]

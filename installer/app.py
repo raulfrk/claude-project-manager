@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from claudemd import ensure_managed_section, remove_managed_section
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Static
 
@@ -22,24 +23,6 @@ from installer.cleanup import (
 )
 from installer.detect import InstallState, detect_existing
 from installer.errors import InstallerError
-from installer.plugin_status import (
-    PLUGIN_NAME_RE,
-    PluginStatus,
-    build_plugin_status_list,
-)
-from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
-from installer.screens.detection import DetectionScreen, PluginDetectionRow
-from installer.screens.plugin_select import PluginStatusScreen
-from installer.screens.integration_config import (
-    BaseIntegrationScreen,
-    JiraConfigScreen,
-    TodoistConfigScreen,
-    TrelloConfigScreen,
-)
-from installer.screens.progress import ProgressScreen
-from installer.screens.summary import PluginOutcome, SummaryScreen
-from installer.screens.update import UpdateScreen
-from installer.screens.wizard import WizardScreen
 from installer.plugin_cli import (
     add_marketplace,
     check_marketplace_registered,
@@ -50,12 +33,29 @@ from installer.plugin_cli import (
     uninstall_plugin,
     update_plugin,
 )
+from installer.plugin_status import (
+    PLUGIN_NAME_RE,
+    PluginStatus,
+    build_plugin_status_list,
+)
+from installer.screens.confirm import ConfirmOption, ConfirmResult, ConfirmScreen
+from installer.screens.detection import DetectionScreen, PluginDetectionRow
+from installer.screens.integration_config import (
+    BaseIntegrationScreen,
+    JiraConfigScreen,
+    TodoistConfigScreen,
+    TrelloConfigScreen,
+)
+from installer.screens.plugin_select import PluginStatusScreen
+from installer.screens.progress import ProgressScreen
+from installer.screens.summary import PluginOutcome, SummaryScreen
+from installer.screens.update import UpdateScreen
+from installer.screens.wizard import WizardScreen
 from installer.update import (
     _read_installed_version,
     _read_marketplace_versions,
     compare_versions,
 )
-from claudemd import ensure_managed_section, remove_managed_section
 
 logger = logging.getLogger("installer.app")
 
