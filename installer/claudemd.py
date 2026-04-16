@@ -12,6 +12,12 @@ MARKER_END = "<!-- claude-project-manager:end -->"
 
 _SECTION_PATH = Path(__file__).parent / "managed_section.md"
 MANAGED_SECTION = _SECTION_PATH.read_text(encoding="utf-8").rstrip("\n")
+assert MANAGED_SECTION.startswith(MARKER_START), (
+    "managed_section.md first line must match MARKER_START"
+)
+assert MANAGED_SECTION.endswith(MARKER_END), (
+    "managed_section.md last line must match MARKER_END"
+)
 
 
 def _atomic_write(path: Path, content: str) -> None:
