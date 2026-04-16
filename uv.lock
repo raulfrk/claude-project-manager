@@ -233,6 +233,7 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "packaging" },
     { name = "pyyaml" },
     { name = "textual" },
 ]
@@ -265,6 +266,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.28" },
     { name = "mcp", marker = "extra == 'plugins'", specifier = ">=1.2.0" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'plugins'", specifier = ">=6.0" },
     { name = "textual", specifier = ">=0.80" },

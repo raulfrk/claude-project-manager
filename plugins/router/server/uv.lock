@@ -1166,6 +1166,7 @@ dependencies = [
     { name = "claude-hook-transport" },
     { name = "httpx" },
     { name = "mcp" },
+    { name = "packaging" },
     { name = "pyyaml" },
 ]
 
@@ -1192,6 +1193,7 @@ requires-dist = [
     { name = "claude-hook-transport", directory = "../../_shared" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mcp", specifier = ">=1.2.0" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
