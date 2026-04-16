@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
+import installer.claudemd as claudemd
 from installer.claudemd import (
     MANAGED_SECTION,
     MARKER_END,
@@ -182,3 +183,20 @@ class TestManagedSectionContent:
         assert "plan mode" in MANAGED_SECTION
         assert "Auto-capture" in MANAGED_SECTION
         assert "Interactive Q&A" in MANAGED_SECTION
+
+
+def test_managed_section_loaded_from_file():
+    """MANAGED_SECTION loads from installer/managed_section.md at import time."""
+    section_path = Path(claudemd.__file__).parent / "managed_section.md"
+    assert section_path.is_file(), "managed_section.md must ship with installer package"
+    file_content = section_path.read_text(encoding="utf-8").rstrip("\n")
+    assert claudemd.MANAGED_SECTION == file_content
+
+
+def test_managed_section_markers_at_boundaries():
+    """Markers are the first and last lines of managed_section.md."""
+    section_path = Path(claudemd.__file__).parent / "managed_section.md"
+    lines = section_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == claudemd.MARKER_START
+    last_non_empty = next(ln for ln in reversed(lines) if ln.strip())
+    assert last_non_empty == claudemd.MARKER_END
