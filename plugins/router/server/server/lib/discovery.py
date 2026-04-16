@@ -116,10 +116,7 @@ def find_default_hooks_files(
         version = _path_version(path) or Version("0.0.0")
         by_plugin.setdefault(name, []).append((version, path))
 
-    return [
-        max(candidates, key=lambda vp: vp[0])[1]
-        for candidates in by_plugin.values()
-    ]
+    return [max(candidates, key=lambda vp: vp[0])[1] for candidates in by_plugin.values()]
 
 
 def load_hooks_from_file(path: Path) -> list[dict[str, JsonValue]]:
@@ -217,7 +214,9 @@ def discover_and_register(
     Returns:
         A dict mapping plugin name to stats: {"registered": N, "updated": M}.
     """
-    files = find_default_hooks_files(root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
+    files = find_default_hooks_files(
+        root=root, glob_pattern=glob_pattern, active_plugins=active_plugins
+    )
     stats: dict[str, dict[str, int]] = {}
     discovered_keys: set[tuple[str, str, str]] = set()
 
@@ -304,7 +303,11 @@ def discover_and_register(
             logger.info("Removed orphaned auto hook: %s", hook.id)
 
     if orphans_removed:
-        stats["_orphans_removed"] = {"registered": 0, "updated": 0, "orphans_removed": orphans_removed}
+        stats["_orphans_removed"] = {
+            "registered": 0,
+            "updated": 0,
+            "orphans_removed": orphans_removed,
+        }
 
     return stats
 
@@ -351,7 +354,9 @@ def run_discovery(
             ", ".join(deduped_ids),
         )
 
-    stats = discover_and_register(registry, root=root, glob_pattern=glob_pattern, active_plugins=active_plugins)
+    stats = discover_and_register(
+        registry, root=root, glob_pattern=glob_pattern, active_plugins=active_plugins
+    )
     urls_added = populate_server_urls(registry)
 
     orphans_removed = stats.get("_orphans_removed", {}).get("orphans_removed", 0)

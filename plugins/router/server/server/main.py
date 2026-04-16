@@ -40,6 +40,7 @@ def _resolve_active_plugins() -> set[str] | None:
                 return None
     return None
 
+
 mcp = FastMCP("router")
 enable_hook_dispatch(
     mcp,

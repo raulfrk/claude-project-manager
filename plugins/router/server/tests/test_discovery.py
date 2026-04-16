@@ -651,7 +651,9 @@ class TestPluginNameFromPath:
         assert _plugin_name_from_path(path) == "proj"
 
     def test_cache_layout_semver(self):
-        path = Path("/home/u/.claude/plugins/cache/cpm/proj/5.0.0/.claude-plugin/default-hooks.yaml")
+        path = Path(
+            "/home/u/.claude/plugins/cache/cpm/proj/5.0.0/.claude-plugin/default-hooks.yaml"
+        )
         assert _plugin_name_from_path(path) == "proj"
 
     def test_cache_layout_version_with_pre_release(self):
@@ -752,7 +754,7 @@ class TestRunDiscoveryActivePlugins:
                 f"hooks:\n  - trigger_tool: t\n    target_tool: u\n    server: {name}\n"
             )
 
-        summary = run_discovery(
+        run_discovery(
             root=tmp_path,
             glob_pattern="*/*/.claude-plugin",
             active_plugins={"proj"},
