@@ -64,11 +64,29 @@ def resolve_template(template: str, source: dict[str, JsonValue]) -> JsonValue:
 
 
 def resolve_value(value: JsonValue, context: dict[str, JsonValue]) -> JsonValue:
-    """Resolve a value that may be a string template, nested dict, or list."""
+    """Resolve a value that may be a string template, nested dict, or list.
+
+    Dict-level `{"value": ..., "omit_if_empty": True}` directives are honored
+    at any nesting depth: when the resolved value is falsy, the key is omitted
+    from the returned dict. Lists recurse element-wise.
+    """
     if isinstance(value, str):
         return resolve_template(value, context)
     elif isinstance(value, dict):
-        return {k: resolve_value(v, context) for k, v in value.items()}
+        out: dict[str, JsonValue] = {}
+        for k, v in value.items():
+            if _is_omit_if_empty_directive(v):
+                directive: dict[str, JsonValue] = v  # type: ignore[assignment]
+                resolved = resolve_value(directive["value"], context)
+                if _is_empty(resolved):
+                    continue
+                out[k] = resolved
+            elif _is_value_directive(v):
+                directive = v  # type: ignore[assignment]
+                out[k] = resolve_value(directive["value"], context)
+            else:
+                out[k] = resolve_value(v, context)
+        return out
     elif isinstance(value, list):
         return [resolve_value(item, context) for item in value]
     else:
@@ -82,24 +100,13 @@ def resolve_mapping(
 ) -> dict[str, JsonValue]:
     """Resolve every value in *param_mapping* against *source*.
 
-    Dict values of the shape ``{"value": ..., "omit_if_empty": True}`` are
-    resolved specially: when the resolved value is falsy (None, "", 0, [], {}),
-    the key is omitted from the output dict. All other values resolve normally.
+    Thin wrapper around `resolve_value` — the directive-aware dict branch
+    handles `omit_if_empty` at the top level and at any nested depth.
     """
-    out: dict[str, JsonValue] = {}
-    for key, value in param_mapping.items():
-        if _is_omit_if_empty_directive(value):
-            directive: dict[str, JsonValue] = value  # type: ignore[assignment]
-            resolved = resolve_value(directive["value"], source)
-            if _is_empty(resolved):
-                continue
-            out[key] = resolved
-        elif _is_value_directive(value):
-            directive = value  # type: ignore[assignment]
-            out[key] = resolve_value(directive["value"], source)
-        else:
-            out[key] = resolve_value(value, source)
-    return out
+    result = resolve_value(param_mapping, source)
+    if not isinstance(result, dict):  # unreachable given input type, narrow for the caller
+        raise TypeError(f"resolve_value returned non-dict for dict input: {type(result).__name__}")
+    return result
 
 
 def _is_value_directive(value: JsonValue) -> bool:
