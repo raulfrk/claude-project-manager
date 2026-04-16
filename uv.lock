@@ -101,7 +101,7 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.4.2"
+version = "0.4.3"
 source = { directory = "plugins/_shared" }
 dependencies = [
     { name = "httpx" },
@@ -232,6 +232,7 @@ name = "cpm-install"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "claude-hook-transport" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "pyyaml" },
@@ -261,6 +262,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "claude-hook-transport", directory = "plugins/_shared" },
     { name = "claude-hook-transport", marker = "extra == 'plugins'", directory = "plugins/_shared" },
     { name = "gitpython", marker = "extra == 'plugins'", specifier = ">=3.1" },
     { name = "httpx", specifier = ">=0.28" },
