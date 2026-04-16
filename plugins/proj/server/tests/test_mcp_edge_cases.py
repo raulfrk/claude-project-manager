@@ -363,6 +363,23 @@ class TestTodoReadyCompact:
         assert full_ids == compact_ids
         assert compact_data["count"] == len(full_ids)
 
+    async def test_todo_ready_compact_with_limit(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """compact=True composes with limit — count reflects returned items."""
+        await call_tool(mcp_app, "todo_add", title="Ready 1")
+        await call_tool(mcp_app, "todo_add", title="Ready 2")
+        await call_tool(mcp_app, "todo_add", title="Ready 3")
+
+        result = await call_tool(mcp_app, "todo_ready", compact=True, limit=1)
+        data = _json.loads(result)
+
+        assert data["count"] == 1
+        assert data["truncated"] == 0  # todo_ready has no max_items
+        # Single-line result has no embedded newline
+        assert "\n" not in data["result"]
+        assert "|" in data["result"]
+
 
 # ---------------------------------------------------------------------------
 # Gap tests: todo_add / todo_update empty due_date validation
