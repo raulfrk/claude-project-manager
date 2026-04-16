@@ -207,3 +207,14 @@ def test_managed_section_markers_at_boundaries():
     assert lines[0] == claudemd.MARKER_START
     last_non_empty = next(ln for ln in reversed(lines) if ln.strip())
     assert last_non_empty == claudemd.MARKER_END
+
+
+def test_managed_section_contains_revdiff_rule():
+    """The revdiff-routed review bullet is present in MANAGED_SECTION."""
+    assert "Revdiff-routed spec/plan review" in claudemd.MANAGED_SECTION
+    assert 'enabledPlugins["revdiff@revdiff"]' in claudemd.MANAGED_SECTION
+    assert "superpowers skill" in claudemd.MANAGED_SECTION
+    assert (
+        "falls back silently" in claudemd.MANAGED_SECTION
+        or "fall back silently" in claudemd.MANAGED_SECTION
+    )
