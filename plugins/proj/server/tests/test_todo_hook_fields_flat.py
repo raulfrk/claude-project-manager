@@ -161,6 +161,18 @@ def test_hook_fields_flat_child_injects_trello_card_id():
     assert fields["parent_trello_card_id"] == "CARD-1"
 
 
+def test_hook_fields_flat_child_injects_trello_checklist_id():
+    parent = _todo("1", trello_checklist_id="CL-1")
+    child = _todo("2", tags=["group:1"])
+    fields = _todo_hook_fields(
+        child,
+        _meta(),
+        name="demo",
+        todos=[parent, child],
+    )
+    assert fields["parent_trello_checklist_id"] == "CL-1"
+
+
 def test_hook_fields_top_level_has_no_parent_fields():
     todo = _todo("1")
     fields = _todo_hook_fields(todo, _meta(), name="demo", todos=[todo])

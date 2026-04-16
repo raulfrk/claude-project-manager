@@ -221,6 +221,7 @@ def _todo_hook_fields(
     }
     # Resolve parent integration IDs for hook dispatch.
     # Supports both legacy nested model (todo.parent) and flat model (group:<id> tag).
+    # Always invoke when todos are available; the helper early-returns for top-level todos.
     if todos:
         parent_links = _resolve_parent_for_hooks(todo, todos)
         if parent_links.todoist_task_id:
