@@ -36,13 +36,21 @@ Manage project todos. Parse $ARGUMENTS for operation.
 **done** `<id>` — mark complete (e.g. "done 2")
  - `mcp__plugin_proj_proj__todo_complete`
 
-**list** [all|pending|ready|blocked] [--prio|--priorities] — list w/ optional filter
- - Default (no filter): `mcp__plugin_proj_proj__todo_tree` — open tasks as hierarchy, done filtered out
- - `all`: `mcp__plugin_proj_proj__todo_tree` — all todos incl done as hierarchy
- - `ready`: `mcp__plugin_proj_proj__todo_ready` — no-blocker todos, flat list
- - `blocked`: `mcp__plugin_proj_proj__todo_list` w/ `status: "pending"`, filter to non-empty `blocked_by`
- - `--prio`/`--priorities` (combinable w/ `all`):
- 1. `mcp__plugin_proj_proj__todo_tree` w/ `include_done=False` (or `True` if `all` also present)
+**list** [all|pending|ready|blocked] [--prio|--priorities] [--full] — list w/ optional filter
+
+Parse flags:
+ - `--full` present → `full_mode=True`, pass `compact=False` to underlying tool
+ - `--full` absent → `full_mode=False`, pass `compact=True` to underlying tool (default behavior)
+ - `--prio`/`--priorities` → `prio_mode=True` (overrides `--full`; always uses structured JSON internally)
+
+Subcommand → tool map (set `C = not full_mode` except for `--prio` which always uses False):
+ - Default (no filter): `mcp__plugin_proj_proj__todo_tree` w/ `include_done=False, compact=C` — open tasks hierarchy, done filtered out
+ - `all`: `mcp__plugin_proj_proj__todo_tree` w/ `include_done=True, compact=C` — all todos incl done
+ - `ready`: `mcp__plugin_proj_proj__todo_ready` w/ `compact=C` — no-blocker todos
+ - `blocked`: `mcp__plugin_proj_proj__todo_list` w/ `status="pending", blocked=True, compact=C` — server-side blocked filter (no prose post-filter needed)
+
+`--prio`/`--priorities` (combinable w/ `all`, ignores `--full`):
+ 1. `mcp__plugin_proj_proj__todo_tree` w/ `include_done=False, compact=False` (or `include_done=True` if `all` also present)
  2. Flatten tree → collect all todo objects + nested `_children`
  3. Build open set: all IDs from flattened tree
  4. Each todo: filter `blocked_by` to only IDs in open set (resolves stale blockers)
@@ -59,11 +67,16 @@ Manage project todos. Parse $ARGUMENTS for operation.
        ```
  8. Within tier: sort by priority (high→medium→low), then ID numerically
  9. If `all` also present: done todos in separate `### Completed` section after all tiers (✅ icon)
- - Examples:
- - `/proj:todo list --prio` — open todos grouped by blocking tiers
- - `/proj:todo list all --prio` — all todos incl done, grouped by tiers, completed separate
- - `/proj:todo list --priorities` — alias for --prio
- - Display: nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Tag matching `group:*` → extract value after `group:` → append `[group:<value>]` at end. Order: `_(priority)_ [manual] [blocked by X] [blocks Y] [group:X]`.
+
+Compact-mode rendering (default for non-`--prio` paths):
+ - Tools return `{"result": "<lines>", "count": N, "truncated": K}`. Print the `result` string verbatim. Each line: `id | status | title | priority | tags` (or tree-indented for `todo_tree`).
+ - If `truncated > 0`, the `result` string already ends with `... N more items`.
+
+Full-mode rendering (when `--full` given):
+ - Tools return indented JSON. Render as nested bullets w/ icons using the existing formatting rules in the bullet list below.
+
+Rendering rules (apply to full-mode + `--prio` mode):
+ - Nested bullets, 2-space indent per level. Icons: ✅=done, 🔄=in_progress, 🔲=pending. Bold ID, title, priority in italics. Use full exact title — never abbreviate. `"manual" in tags` → append `[manual]` after priority. Blocked → `[blocked by X]` inline. Blocks others → `[blocks Y]` inline. Tag matching `group:*` → extract value after `group:` → append `[group:<value>]` at end. Order: `_(priority)_ [manual] [blocked by X] [blocks Y] [group:X]`.
  - Example:
     ```
     - 🔲 **2** — Build API _(high)_
@@ -71,6 +84,16 @@ Manage project todos. Parse $ARGUMENTS for operation.
       - 🔲 **2.2** — Add auth _(medium)_ [blocked by 2.1]
     - 🔲 **3** — Write skills _(medium)_
     ```
+
+Examples:
+ - `/proj:todo list` — open todos, compact one-line-per-todo
+ - `/proj:todo list --full` — open todos, full structured rendering
+ - `/proj:todo list all` — all todos incl done, compact
+ - `/proj:todo list ready` — ready todos, compact
+ - `/proj:todo list blocked` — blocked todos, compact
+ - `/proj:todo list --prio` — open todos grouped by blocking tiers (compact-independent)
+ - `/proj:todo list all --prio` — all todos incl done, grouped by tiers, completed separate
+ - `/proj:todo list --priorities` — alias for --prio
 
 **tree** — todos as hierarchy
  - `mcp__plugin_proj_proj__todo_tree`
