@@ -293,6 +293,21 @@ class TestTodoListFilters:
         assert len(todos) == 1
         assert todos[0]["title"] == "Free"
 
+    async def test_todo_list_blocked_compact(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """blocked=True combines with compact=True — only blocked todos, pipe-delimited."""
+        await call_tool(mcp_app, "todo_add", title="Blocker")
+        await call_tool(mcp_app, "todo_add", title="Blocked", blocked_by=["1"])
+        await call_tool(mcp_app, "todo_add", title="Unrelated")
+        result = await call_tool(mcp_app, "todo_list", blocked=True, compact=True)
+        data = _json.loads(result)
+        assert data["count"] == 1
+        assert "Blocked" in data["result"]
+        assert "Blocker" not in data["result"]
+        assert "Unrelated" not in data["result"]
+        assert "|" in data["result"]
+
 
 # ---------------------------------------------------------------------------
 # Gap tests: todo_ready compact mode
