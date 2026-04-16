@@ -55,7 +55,7 @@ from installer.update import (
     _read_marketplace_versions,
     compare_versions,
 )
-from installer.claudemd import ensure_managed_section, remove_managed_section
+from claudemd import ensure_managed_section, remove_managed_section
 
 logger = logging.getLogger("installer.app")
 
