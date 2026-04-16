@@ -43,6 +43,8 @@ sync:
 # Run pytest in every plugin + installer. Does NOT fail-fast.
 test:
     #!/usr/bin/env bash
+    # Order here is presentation-only (no dep-resolve concern for tests).
+    # Installer runs first so repo-root pytest output appears at the top.
     set -u
     failed=0
     echo "=== pytest (installer @ repo root) ==="
