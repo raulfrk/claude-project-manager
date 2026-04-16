@@ -46,7 +46,7 @@ test:
     set -u
     failed=0
     echo "=== pytest (installer @ repo root) ==="
-    uv run pytest || { echo ">>> FAILED: installer"; failed=$((failed+1)); }
+    uv run pytest installer/tests || { echo ">>> FAILED: installer"; failed=$((failed+1)); }
     echo ""
     echo "=== pytest (plugins/_shared) ==="
     (cd plugins/_shared && uv run pytest) || { echo ">>> FAILED: plugins/_shared"; failed=$((failed+1)); }
