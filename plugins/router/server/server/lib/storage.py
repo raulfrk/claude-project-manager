@@ -139,9 +139,19 @@ def _atomic_write(path: Path, content: str) -> None:
 def save(registry: HookRegistry, path: Path | None = None) -> Path:
     """Atomically write the hook registry to YAML. Creates file and parent dirs if needed.
 
+    Before writing, collapses entries sharing the same ``hook.id`` via
+    ``HookRegistry.deduplicate_by_hook_id``. If any ids were removed, emits
+    a WARNING log naming them so re-accumulation sources are diagnosable.
+
     Returns the path written to.
     """
     target = path or _HOOKS_FILE
+    removed = registry.deduplicate_by_hook_id()
+    if removed:
+        logger.warning(
+            "hooks.yaml dedup-by-id: collapsed duplicate hook_ids: %s",
+            ", ".join(sorted(set(removed))),
+        )
     data = registry.to_dict()
     content = yaml.dump(data, default_flow_style=False, sort_keys=False)
     _atomic_write(target, content)

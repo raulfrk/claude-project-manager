@@ -526,3 +526,54 @@ class TestAtomicWrite:
         # Verify ordering — oldest first, newest last
         assert entries[0]["hook_id"] == "hook-000"
         assert entries[9]["hook_id"] == "hook-009"
+
+
+class TestSaveDeduplicatesByHookId:
+    """Integration: storage.save() invokes deduplicate_by_hook_id before writing."""
+
+    def test_save_collapses_same_id_dupes_and_logs(self, hooks_yaml: Path, caplog):
+        from server.lib.models import Hook, HookRegistry
+        from server.lib.storage import load, save
+
+        registry = HookRegistry(
+            hooks=[
+                Hook(
+                    id="proj-tracking-flush-on-todo-update",
+                    trigger_tool="todo_update",
+                    target_tool="tracking_git_flush",
+                    server="proj",
+                ),
+                Hook(
+                    id="proj-tracking-flush-on-todo-update",
+                    trigger_tool="todo_update",
+                    target_tool="tracking_git_flush",
+                    server="proj",
+                ),
+            ]
+        )
+        with caplog.at_level("WARNING"):
+            save(registry, hooks_yaml)
+
+        # File on disk contains only one entry.
+        reloaded = load(hooks_yaml)
+        assert len(reloaded.hooks) == 1
+        assert reloaded.hooks[0].id == "proj-tracking-flush-on-todo-update"
+
+        # A dedup warning was emitted naming the id.
+        dedup_msgs = [r.message for r in caplog.records if "hooks.yaml dedup-by-id" in r.message]
+        assert len(dedup_msgs) == 1
+        assert "proj-tracking-flush-on-todo-update" in dedup_msgs[0]
+
+    def test_save_noop_when_no_duplicates(self, hooks_yaml: Path, caplog):
+        from server.lib.models import Hook, HookRegistry
+        from server.lib.storage import save
+
+        registry = HookRegistry(
+            hooks=[
+                Hook(id="a-hook", trigger_tool="t", target_tool="u", server="proj"),
+                Hook(id="b-hook", trigger_tool="t", target_tool="v", server="proj"),
+            ]
+        )
+        with caplog.at_level("WARNING"):
+            save(registry, hooks_yaml)
+        assert not any("hooks.yaml dedup-by-id" in r.message for r in caplog.records)
