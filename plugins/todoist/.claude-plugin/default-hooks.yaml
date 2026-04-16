@@ -9,7 +9,7 @@ hooks:
           projectId: "${todoist_project_id}"
           parentId: "${parent_todoist_task_id}"
           priority: "${priority}"
-          labels: "${tags}"
+          labels: "${synced_tags}"
           description: "${notes}"
           dueString: "${due_date}"
     feedback_tool: todo_update
