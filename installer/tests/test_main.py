@@ -267,6 +267,52 @@ class TestReinstall:
         assert mock_install.call_count == 2  # both proj and hooks reinstalled
 
 
+def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, capsys):
+    """_reinstall runs scan + prune_stale_versions + prune_orphaned_plugins before install loop."""
+    import installer.main as main_mod
+
+    # Set up cache with stale versions + orphan
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    for v in ("3.0.0", "4.0.0", "5.0.0"):
+        (cache / "proj" / v).mkdir(parents=True)
+    (cache / "sandbox" / "1.0.0").mkdir(parents=True)  # orphan
+
+    # Set up marketplace
+    mp = tmp_path / "marketplace.json"
+    mp.write_text('{"plugins": [{"name": "proj"}]}')
+
+    # Monkeypatch path resolvers
+    monkeypatch.setattr(
+        "installer.main._cache_dir_for_reinstall", lambda: cache, raising=False
+    )
+    monkeypatch.setattr(
+        "installer.main._marketplace_path_for_reinstall", lambda: mp, raising=False
+    )
+
+    # Auto-confirm orphan removal
+    monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: True)
+
+    # Stub downstream calls
+    monkeypatch.setattr(main_mod, "install_plugin", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(main_mod, "remove_marketplace", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(main_mod, "add_marketplace", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(main_mod, "get_installed_plugins", lambda: ["proj@claude-project-manager"], raising=False)
+    monkeypatch.setattr(main_mod, "detect_existing", lambda: InstallState(installed_plugins=[]), raising=False)
+    monkeypatch.setattr(main_mod, "display_detection", lambda *a, **kw: None, raising=False)
+
+    import argparse
+    args = argparse.Namespace(reinstall=True, plugins=None, skip_wizard=True, branch=None)
+    main_mod._reinstall(args)
+
+    # Stale versions pruned (only newest kept)
+    assert (cache / "proj" / "5.0.0").is_dir()
+    assert not (cache / "proj" / "3.0.0").exists()
+    assert not (cache / "proj" / "4.0.0").exists()
+    # Orphan removed
+    assert not (cache / "sandbox").exists()
+
+
 # ===================================================================
 # _uninstall dispatch
 # ===================================================================

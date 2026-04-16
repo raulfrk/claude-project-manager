@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import IO
 
 from rich.console import Console
 
 from rich.prompt import Confirm
 
+from installer.cleanup import (
+    prune_orphaned_plugins,
+    prune_stale_versions,
+    scan_stale_cache,
+)
 from installer.cli import build_parser
 from installer.detect import detect_existing, display_detection
 from installer.errors import (
@@ -127,6 +133,20 @@ def _install(args) -> int:
     return EXIT_ERROR if n_failed > 0 else EXIT_SUCCESS
 
 
+def _cache_dir_for_reinstall() -> Path:
+    """Resolve cache dir for reinstall — overridable in tests."""
+    return Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
+
+
+def _marketplace_path_for_reinstall() -> Path:
+    """Resolve marketplace.json path — overridable in tests."""
+    here = Path(__file__).resolve().parent
+    bundled = here / "marketplace.json"
+    if bundled.is_file():
+        return bundled
+    return here.parent / ".claude-plugin" / "marketplace.json"
+
+
 def _reinstall(args) -> int:
     """Run the reinstall flow."""
     console = Console()
@@ -144,6 +164,36 @@ def _reinstall(args) -> int:
     branch = getattr(args, "branch", None)
 
     console.print(f"\n[bold]Reinstalling:[/bold] {', '.join(plugins)}")
+
+    # Prune stale cache versions and orphaned plugins before reinstall
+    cache_dir = _cache_dir_for_reinstall()
+    marketplace_path = _marketplace_path_for_reinstall()
+
+    if cache_dir.is_dir() and marketplace_path.is_file():
+        try:
+            report = scan_stale_cache(cache_dir, marketplace_path)
+        except (FileNotFoundError, OSError) as exc:
+            console.print(f"[yellow]Skipping cache cleanup: {exc}[/yellow]")
+        else:
+            deleted_stale = prune_stale_versions(cache_dir, report)
+            if deleted_stale:
+                console.print(
+                    f"[dim]Pruned {len(deleted_stale)} stale version dir(s)[/dim]"
+                )
+            if report.orphans:
+                console.print(
+                    f"[yellow]Found {len(report.orphans)} orphaned plugin(s): "
+                    f"{', '.join(report.orphans)}[/yellow]"
+                )
+                if Confirm.ask("Remove orphaned plugin cache dirs?", default=True):
+                    deleted_orph = prune_orphaned_plugins(cache_dir, report.orphans)
+                    console.print(
+                        f"[dim]Removed {len(deleted_orph)} orphan plugin(s)[/dim]"
+                    )
+                else:
+                    console.print(
+                        "[dim]Leaving orphans in place; rerun --reinstall anytime.[/dim]"
+                    )
 
     # Remove marketplace (uninstalls all plugins) then re-add
     with console.status("[bold]Removing marketplace...[/bold]"):
