@@ -26,7 +26,7 @@ Refresh cpm-managed block in `~/.claude/CLAUDE.md`. Single-step op.
 
 ## Err Handling
 
-- Tool raises → surface err verbatim. Likely cause: `~/.claude` unreadable or installer pkg missing. Suggest: verify `~/.claude` perms or reinstall cpm.
+- Tool raises → surface err verbatim. Likely cause: `~/.claude` unreadable or claude-hook-transport pkg missing. Suggest: verify `~/.claude` perms or reinstall cpm.
 
 ## When to Use
 
