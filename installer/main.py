@@ -280,12 +280,30 @@ def main() -> int:
         # require the Claude CLI to be installed.
         # getattr() is defensive: existing tests stub `parser.parse_args()` with
         # a bare Namespace and don't know about the 636 migration flags.
-        if getattr(args, "migrate_flat_dry_run", False):
+        # --migrate-dry-run / --migrate-flat-dry-run (alias)
+        if getattr(args, "migrate_dry_run", False) or getattr(
+            args, "migrate_flat_dry_run", False
+        ):
             from installer.cli import load_project_list
             from installer.migrations.entry import run_dry_run
 
             return run_dry_run(load_project_list())
-        if getattr(args, "migrate_flat", False):
+
+        # --migrate-sql-only
+        if getattr(args, "migrate_sql_only", False):
+            import sys as _sys
+
+            from installer.cli import load_project_list
+            from installer.migrations.entry import run_sql_only_migration
+
+            return run_sql_only_migration(
+                load_project_list(),
+                strict_resync=getattr(args, "strict_resync", False),
+                backup_retain_days=getattr(args, "backup_retain", None),
+            )
+
+        # --migrate / --migrate-flat (alias)
+        if getattr(args, "migrate", False) or getattr(args, "migrate_flat", False):
             import sys as _sys
 
             from installer.cli import load_project_list

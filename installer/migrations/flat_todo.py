@@ -13,13 +13,15 @@ from installer.migrations.detect import bump_schema_version, detect_already_flat
 from installer.migrations.integrations.base import FailedAction, IntegrationResync
 from installer.migrations.transform import flatten_todos_sql, flatten_todos_yaml
 from installer.migrations.types import (
-    TARGET_SCHEMA_VERSION,
     MigrationPlan,
     MigrationState,
     PendingProject,
     RecoveryPath,
     TodoRef,
 )
+
+# FlatTodoMigration bumps v1 → v2 only; SqlOnlyMigration handles v2 → v3
+_FLAT_TODO_TARGET = 2
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +177,7 @@ class FlatTodoMigration(MigrationRunner):
                 )
 
     def _commit(self) -> None:
-        bump_schema_version(self.project.proj_yaml_path, TARGET_SCHEMA_VERSION)
+        bump_schema_version(self.project.proj_yaml_path, _FLAT_TODO_TARGET)
 
     def _restore(self) -> None:
         self.transition(MigrationState.RESTORING)

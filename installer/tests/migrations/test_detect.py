@@ -40,23 +40,26 @@ def test_read_schema_version_missing_file_returns_none(tmp_path: Path) -> None:
 
 
 def test_discover_pending_yields_legacy_projects(tmp_path: Path) -> None:
-    legacy_dir = tmp_path / "legacy"
-    current_dir = tmp_path / "current"
-    future_dir = tmp_path / "future"
-    write_proj_yaml(legacy_dir / "proj.yaml", {"name": "legacy"})
-    write_proj_yaml(current_dir / "proj.yaml", {"name": "current", "schema_version": 2})
-    write_proj_yaml(future_dir / "proj.yaml", {"name": "future", "schema_version": 9})
+    v1_dir = tmp_path / "v1proj"
+    v2_dir = tmp_path / "v2proj"
+    v3_dir = tmp_path / "v3proj"
+    write_proj_yaml(v1_dir / "proj.yaml", {"name": "v1proj"})
+    write_proj_yaml(v2_dir / "proj.yaml", {"name": "v2proj", "schema_version": 2})
+    write_proj_yaml(v3_dir / "proj.yaml", {"name": "v3proj", "schema_version": 3})
 
     projects = [
-        {"name": "legacy", "path": str(legacy_dir)},
-        {"name": "current", "path": str(current_dir)},
-        {"name": "future", "path": str(future_dir)},
+        {"name": "v1proj", "path": str(v1_dir)},
+        {"name": "v2proj", "path": str(v2_dir)},
+        {"name": "v3proj", "path": str(v3_dir)},
     ]
 
     result = list(discover_pending(projects))
-    assert len(result) == 1
-    assert result[0].name == "legacy"
-    assert result[0].current_version == 1
+    # Both v1 and v2 are pending (TARGET is now 3); v3 is current
+    assert len(result) == 2
+    names = {r.name for r in result}
+    assert "v1proj" in names
+    assert "v2proj" in names
+    assert "v3proj" not in names
 
 
 def test_discover_pending_skips_corrupted(

@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 
 
-TARGET_SCHEMA_VERSION = 2
+TARGET_SCHEMA_VERSION = 3
 
 
 class MigrationState(str, Enum):
@@ -33,6 +33,18 @@ class PendingProject:
     path: Path
     proj_yaml_path: Path
     current_version: int  # 1 or 0 (absent)
+
+    def refreshed(self) -> "PendingProject":
+        """Return a new PendingProject with current_version re-read from disk."""
+        from installer.migrations.detect import read_schema_version
+
+        v = read_schema_version(self.proj_yaml_path)
+        return PendingProject(
+            name=self.name,
+            path=self.path,
+            proj_yaml_path=self.proj_yaml_path,
+            current_version=v if v is not None else self.current_version,
+        )
 
 
 @dataclass

@@ -106,8 +106,10 @@ class SqlOnlyMigration(MigrationRunner):
         )
 
     def _backup(self) -> None:
+        # Use "<name>_v3" as snapshot dir to avoid collision when both
+        # FlatTodoMigration and SqlOnlyMigration run in the same backup root+ts.
         self.snapshot = BackupSnapshot.create(
-            project=self.project.name,
+            project=f"{self.project.name}_v3",
             run_ts=self.run_ts,
             source_dir=self.project.path,
             backup_root=self.backup_root,
