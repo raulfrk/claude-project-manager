@@ -1,5 +1,7 @@
 # Revdiff-Routed Spec/Plan Review Implementation Plan
 
+> **Errata (2026-04-17)**: The shipped implementation pivoted from `installer/claudemd` to `plugins/_shared/claudemd` during implementation. See commits `28c3c52` and `c119ecc`. References in this document to `installer/managed_section.md` (Architecture), the `cpm-install` path dep on the proj MCP server (Task 4), and `from installer.claudemd import ...` (Task 5) are superseded by `plugins/_shared/claudemd/managed_section.md`, `claude-hook-transport` (which now ships the `claudemd` subpackage), and `from claudemd import ...` respectively.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extract the cpm-managed CLAUDE.md section body to a standalone content file, append a new bullet that routes superpowers spec/plan review through revdiff when available, and expose a user-invocable refresh path via both an MCP tool and a slash-command skill.

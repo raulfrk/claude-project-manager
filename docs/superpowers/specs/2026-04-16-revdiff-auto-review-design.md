@@ -5,6 +5,8 @@
 **Status**: approved, awaiting implementation plan
 **Priority**: low
 
+> **Errata (2026-04-17)**: The shipped implementation pivoted from `installer/claudemd` to `plugins/_shared/claudemd` during implementation. See commits `28c3c52` and `c119ecc`. References in this document to `installer/managed_section.md` and a `cpm-install` path dep on the proj server (Component 2a "Import note") are superseded by `plugins/_shared/claudemd/managed_section.md` and a dependency on `claude-hook-transport` (which now ships the `claudemd` subpackage).
+
 ## Problem
 
 Superpowers workflow skills that produce a spec, plan, or design file (notably `superpowers:brainstorming` and `superpowers:writing-plans`; future candidates include any further superpowers skills that emit a reviewable artifact) currently ask the user to read the file manually: *"Please review it and let me know if you want changes."*
