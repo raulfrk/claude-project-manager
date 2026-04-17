@@ -627,8 +627,9 @@ class TestApplyMapping:
         todos = storage.load_todos(cfg, name)
         parent = next(t for t in todos if t.jira_issue_key == "PROJ-1")
         child = next(t for t in todos if t.jira_issue_key == "PROJ-1a")
-        assert child.parent == parent.id
-        assert child.id in parent.children
+        # Flat model (post-636 Phase 2): relationship is via group:<parent-id> tag,
+        # not via parent/children fields (which were removed from the Todo dataclass).
+        assert f"group:{parent.id}" in child.tags
 
     def test_due_date_preserved(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
