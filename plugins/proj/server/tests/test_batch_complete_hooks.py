@@ -70,26 +70,26 @@ def test_dispatches_to_trello() -> None:
 
 def test_dispatches_to_jira_with_updates_json() -> None:
     """jira default-hooks.yaml has a hook mapping todo_complete
-    → jira_update_issues with updates_json=${jira_updates_json}.
-    The pre-built JSON blob comes from Phase 3 enrichment so the hook
-    template engine (which cannot iterate lists) can pass it verbatim."""
+    → jira_update_issues_bulk with updates=${jira_batch_updates}.
+    The pre-built updates list comes from Phase 3 enrichment so the hook
+    template engine can pass it verbatim."""
     hooks = _load_hooks("jira")
     match = [
         h
         for h in hooks
         if h.get("trigger_tool") == "todo_complete"
-        and h.get("target_tool") == "jira_update_issues"
-        and h.get("param_mapping", {}) == {"updates_json": "${jira_updates_json}"}
+        and h.get("target_tool") == "jira_update_issues_bulk"
+        and h.get("param_mapping", {}) == {"updates": "${jira_batch_updates}"}
     ]
     assert len(match) == 1, (
-        "expected exactly one todo_complete→jira_update_issues (batch) hook in jira"
+        "expected exactly one todo_complete→jira_update_issues_bulk (batch) hook in jira"
     )
     hook = match[0]
     assert hook["server"] == "jira"
     assert hook.get("blocking") is True
     assert "sync.jira" in hook["condition"]
     pm = hook["param_mapping"]
-    assert pm == {"updates_json": "${jira_updates_json}"}
+    assert pm == {"updates": "${jira_batch_updates}"}
 
 
 def test_token_scrubbing() -> None:

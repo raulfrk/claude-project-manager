@@ -106,14 +106,52 @@ def test_proj_default_hooks_have_no_sandbox_server_references():
     assert not offenders, f"hooks still referencing removed 'sandbox' server: {offenders}"
 
 
-def test_jira_on_todo_update_labels_uses_synced_tags():
-    # Raw JSON-string template form — `${synced_tags}` resolves via `resolve_template`
-    # against the hook source dict (which always includes `synced_tags`).
+def test_jira_on_todo_update_uses_structured_param_mapping():
     hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-update")
-    updates_json = hook["param_mapping"]["updates_json"]
-    assert isinstance(updates_json, str)
-    assert "${synced_tags}" in updates_json
-    assert "${tags}" not in updates_json
+    assert hook["target_tool"] == "jira_update_issue_fields"
+    assert hook["param_mapping"]["key"] == "${jira_issue_key}"
+    assert hook["param_mapping"]["summary"] == "${title}"
+    assert hook["param_mapping"]["description"] == "${notes}"
+    assert hook["param_mapping"]["priority"] == "${priority}"
+    assert hook["param_mapping"]["labels"] == "${synced_tags}"
+    # Regression: no raw updates_json key.
+    assert "updates_json" not in hook["param_mapping"]
+
+
+def test_jira_hooks_never_use_raw_updates_json():
+    """Regression for 655 — no hook in jira/default-hooks.yaml may embed
+    raw-JSON-string updates_json templates. All update flows go through
+    structured jira_update_issue_fields / jira_update_issues_bulk."""
+    doc = _load(JIRA_HOOKS)
+    offenders = [
+        h["id"] for h in doc.get("hooks", []) if "updates_json" in h.get("param_mapping", {})
+    ]
+    assert not offenders, f"hooks still use raw updates_json template: {offenders}"
+
+
+def test_jira_on_todo_complete_uses_structured_resolution():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-complete")
+    assert hook["target_tool"] == "jira_update_issue_fields"
+    assert hook["param_mapping"] == {
+        "key": "${jira_issue_key}",
+        "resolution": "Done",
+    }
+
+
+def test_jira_on_todo_delete_uses_structured_resolution():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-delete")
+    assert hook["target_tool"] == "jira_update_issue_fields"
+    assert hook["param_mapping"] == {
+        "key": "${jira_issue_key}",
+        "resolution": "Won't Do",
+    }
+
+
+def test_jira_on_todo_batch_complete_uses_structured_bulk():
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-batch-complete")
+    assert hook["target_tool"] == "jira_update_issues_bulk"
+    assert hook["param_mapping"] == {"updates": "${jira_batch_updates}"}
+    assert hook["result_condition"] == {"is_batch": True}
 
 
 def test_todoist_on_todo_update_labels_uses_synced_tags():
