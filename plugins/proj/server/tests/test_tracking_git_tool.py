@@ -57,9 +57,7 @@ class TestTrackingGitFlush:
     async def test_flush_commits(
         self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
     ) -> None:
-        # Write something to tracking dir
-        tracking = storage.tracking_dir(cfg_with_git, project_with_git)
-        (tracking / "extra.txt").write_text("new data")
+        # write_json_exports (called inside the tool) creates todos.json etc on first flush
         result = await call_tool(mcp_app, "tracking_git_flush", commit_message="test flush")
         data = json.loads(result)
         assert data["status"] == "ok"
@@ -81,8 +79,7 @@ class TestTrackingGitFlush:
     async def test_flush_auto_message(
         self, cfg_with_git: ProjConfig, project_with_git: str, mcp_app: FastMCP
     ) -> None:
-        tracking = storage.tracking_dir(cfg_with_git, project_with_git)
-        (tracking / "extra.txt").write_text("data")
+        # write_json_exports creates JSON files → first flush always has changes
         result = await call_tool(mcp_app, "tracking_git_flush")
         data = json.loads(result)
         assert data["status"] == "ok"
@@ -117,8 +114,7 @@ class TestTrackingGitFlush:
         meta = storage.load_meta(cfg, name)
         meta.git_tracking = ProjectGitTrackingConfig(enabled=True)
         storage.save_meta(cfg, meta)
-        tracking = storage.tracking_dir(cfg, name)
-        (tracking / "extra.txt").write_text("data")
+        # write_json_exports (force=True) creates JSON files → first flush always has changes
         result = await call_tool(mcp_app, "tracking_git_flush", commit_message="per-project")
         data = json.loads(result)
         assert data["status"] == "ok"

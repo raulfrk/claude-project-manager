@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from server.lib.models import ProjConfig, ProjectMeta
+
+# Files staged on every flush (explicit — no git add -A to avoid stray YAML leakage)
+_FLUSH_FILES = ("data.db", "todos.json", "archive.json", "decisions.json", "proj.yaml")
+
+# Lines to ensure are present in .gitignore for WAL + tmp file suppression
+_GITIGNORE_ENTRIES = ("*.tmp", "__pycache__/", "*.pyc", "data.db-wal", "data.db-shm")
 
 
 def resolve_config(
@@ -62,23 +70,68 @@ def is_git_repo(tracking_path: Path) -> bool:
 
 
 def ensure_git_repo(tracking_path: Path) -> bool:
-    """Initialize a git repo if not already one. Creates .gitignore. Returns True on success."""
+    """Initialize a git repo if not already one. Creates/updates .gitignore. Returns True."""
     tracking_path.mkdir(parents=True, exist_ok=True)
     if is_git_repo(tracking_path):
+        _ensure_gitignore(tracking_path)
         return True
     rc, _, _ = _run(["git", "init"], tracking_path)
     if rc != 0:
         return False
-    # Create .gitignore for temp files from atomic writes
-    gitignore = tracking_path / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("*.tmp\n__pycache__/\n*.pyc\n")
+    _ensure_gitignore(tracking_path)
     return True
 
 
+def _ensure_gitignore(tracking_path: Path) -> None:
+    """Ensure .gitignore contains all required entries. Idempotent — won't duplicate lines."""
+    gitignore = tracking_path / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    existing_lines = set(existing.splitlines())
+    missing = [e for e in _GITIGNORE_ENTRIES if e not in existing_lines]
+    if missing:
+        separator = "\n" if existing and not existing.endswith("\n") else ""
+        gitignore.write_text(existing + separator + "\n".join(missing) + "\n")
+
+
+def write_json_exports(cfg: ProjConfig, project_name: str, *, force: bool = False) -> None:
+    """Write derived JSON snapshots of todos/archive/decisions into the tracking dir.
+
+    These files exist for git-diff readability only. SQL is the source of truth.
+    No-op when git_tracking.enabled is False unless force=True.
+    """
+    if not force and not cfg.git_tracking.enabled:
+        return
+
+    from pathlib import Path as _Path
+
+    from server.lib import sql_decisions, sql_todos
+
+    proj_dir = _Path(cfg.tracking_dir).expanduser() / project_name
+    _write_json(proj_dir / "todos.json", sql_todos.load_todos(cfg, project_name))
+    _write_json(proj_dir / "archive.json", sql_todos.load_archived_todos(cfg, project_name))
+    _write_json(proj_dir / "decisions.json", sql_decisions.load_decisions(cfg, project_name))
+
+
+def _write_json(path: Path, items: list[Any]) -> None:
+    """Atomically write a sorted JSON snapshot via a tmp file + rename."""
+
+    payload = [dataclasses.asdict(t) for t in items]
+    payload.sort(key=lambda d: d.get("id") or "")
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def _existing_flush_files(tracking_path: Path) -> list[str]:
+    """Return subset of _FLUSH_FILES that exist on disk (avoids fatal git add errors)."""
+    return [f for f in _FLUSH_FILES if (tracking_path / f).exists()]
+
+
 def tracking_commit(tracking_path: Path, message: str) -> str | None:
-    """Stage all changes and commit. Returns commit SHA or None if nothing to commit."""
-    _run(["git", "add", "-A"], tracking_path)
+    """Stage explicit allowed paths and commit. Returns commit SHA or None if nothing to commit."""
+    existing = _existing_flush_files(tracking_path)
+    if existing:
+        _run(["git", "add", *existing], tracking_path)
     # Check if there are staged changes
     rc, _, _ = _run(["git", "diff", "--cached", "--quiet"], tracking_path)
     if rc == 0:
@@ -155,11 +208,13 @@ async def _arun(cmd: list[str], cwd: str | Path) -> tuple[int, str, str]:
 
 
 async def tracking_commit_async(tracking_path: Path, message: str) -> str | None:
-    """Async variant of tracking_commit(). Stage all changes and commit.
+    """Async variant of tracking_commit(). Stage explicit allowed paths and commit.
 
     Returns commit SHA or None if nothing to commit.
     """
-    await _arun(["git", "add", "-A"], tracking_path)
+    existing = _existing_flush_files(tracking_path)
+    if existing:
+        await _arun(["git", "add", *existing], tracking_path)
     rc, _, _ = await _arun(["git", "diff", "--cached", "--quiet"], tracking_path)
     if rc == 0:
         return None

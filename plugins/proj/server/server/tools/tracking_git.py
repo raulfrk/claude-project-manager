@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib import tracking_git as tg
-from server.lib.db import db_path
-from server.lib.migration import export_sqlite_to_yaml
 from server.tools.config import require_project
 
 logger = logging.getLogger(__name__)
@@ -44,19 +42,19 @@ def register(app: FastMCP) -> None:
             return json.dumps({"status": "disabled"})
 
         tracking_path = Path(cfg.tracking_dir).expanduser()
+        proj_dir = tracking_path / name
         if not tg.ensure_git_repo(tracking_path):
             return json.dumps({"status": "error", "message": "Failed to init git repo"})
 
-        if db_path(cfg, name).exists():
-            try:
-                export_sqlite_to_yaml(cfg, name)
-            except Exception as e:
-                logger.warning(
-                    "export_sqlite_to_yaml failed, committing whatever is on disk: %s", e
-                )
+        try:
+            # Pass enabled=True explicitly since we already verified enabled above,
+            # which may differ from cfg.git_tracking.enabled (per-project override).
+            tg.write_json_exports(cfg, name, force=True)
+        except Exception as e:
+            logger.warning("write_json_exports failed, committing whatever is on disk: %s", e)
 
         msg = commit_message or f"[{name}] Update {name}"
-        sha = await tg.tracking_commit_async(tracking_path, msg)
+        sha = await tg.tracking_commit_async(proj_dir, msg)
         if not sha:
             return json.dumps({"status": "no_changes"})
 

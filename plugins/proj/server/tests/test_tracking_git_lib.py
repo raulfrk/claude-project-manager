@@ -185,13 +185,17 @@ class TestEnsureGitRepo:
         assert ensure_git_repo(target) is True
         assert ensure_git_repo(target) is True
 
-    def test_existing_gitignore_not_overwritten(self, tmp_path: Path) -> None:
+    def test_existing_gitignore_entries_preserved(self, tmp_path: Path) -> None:
+        """Existing .gitignore content is preserved; new WAL entries are appended."""
         target = tmp_path / "tracking"
         target.mkdir()
         subprocess.run(["git", "init"], cwd=target, check=True, capture_output=True)
         (target / ".gitignore").write_text("custom\n")
         ensure_git_repo(target)
-        assert (target / ".gitignore").read_text() == "custom\n"
+        content = (target / ".gitignore").read_text()
+        assert "custom" in content
+        assert "data.db-wal" in content
+        assert "data.db-shm" in content
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +216,7 @@ class TestTrackingCommit:
         """Returns short SHA string after successful commit."""
         target = tmp_path / "repo"
         ensure_git_repo(target)
-        (target / "file.txt").write_text("data")
+        (target / "todos.json").write_text("[]")
         sha = tracking_commit(target, "first commit")
         assert sha is not None
         assert len(sha) >= 7
@@ -221,7 +225,7 @@ class TestTrackingCommit:
     def test_commit_records_message(self, tmp_path: Path) -> None:
         target = tmp_path / "repo"
         ensure_git_repo(target)
-        (target / "f.txt").write_text("hello")
+        (target / "todos.json").write_text("[]")
         tracking_commit(target, "my commit message")
         rc, log, _ = _run(["git", "log", "--oneline", "-1"], target)
         assert rc == 0

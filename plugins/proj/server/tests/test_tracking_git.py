@@ -68,21 +68,25 @@ class TestEnsureGitRepo:
         assert ensure_git_repo(target) is True
         assert ensure_git_repo(target) is True
 
-    def test_existing_gitignore_not_overwritten(self, tmp_path: Path) -> None:
+    def test_existing_gitignore_entries_preserved(self, tmp_path: Path) -> None:
+        """Existing .gitignore content is preserved; new WAL entries are appended."""
         target = tmp_path / "tracking"
         target.mkdir()
         subprocess.run(["git", "init"], cwd=target, check=True, capture_output=True)
         gitignore = target / ".gitignore"
         gitignore.write_text("custom\n")
         ensure_git_repo(target)
-        assert gitignore.read_text() == "custom\n"
+        content = gitignore.read_text()
+        assert "custom" in content
+        assert "data.db-wal" in content
+        assert "data.db-shm" in content
 
 
 class TestTrackingCommit:
     def test_commit_with_changes(self, tmp_path: Path) -> None:
         target = tmp_path / "repo"
         ensure_git_repo(target)
-        (target / "test.txt").write_text("hello")
+        (target / "todos.json").write_text("[]")
         sha = tracking_commit(target, "test commit")
         assert sha is not None
         assert len(sha) >= 7
@@ -99,7 +103,7 @@ class TestTrackingCommit:
     def test_commit_message_used(self, tmp_path: Path) -> None:
         target = tmp_path / "repo"
         ensure_git_repo(target)
-        (target / "test.txt").write_text("hello")
+        (target / "todos.json").write_text("[]")
         tracking_commit(target, "my custom message")
         result = subprocess.run(
             ["git", "log", "--oneline", "-1"],
@@ -187,7 +191,7 @@ class TestTrackingCommitAsync:
     async def test_commit_with_changes(self, tmp_path: Path) -> None:
         target = tmp_path / "repo"
         ensure_git_repo(target)
-        (target / "test.txt").write_text("hello")
+        (target / "todos.json").write_text("[]")
         sha = await tracking_commit_async(target, "async test commit")
         assert sha is not None
         assert len(sha) >= 7
@@ -207,8 +211,8 @@ class TestTrackingCommitAsync:
         async_target = tmp_path / "async_repo"
         ensure_git_repo(sync_target)
         ensure_git_repo(async_target)
-        (sync_target / "test.txt").write_text("identical")
-        (async_target / "test.txt").write_text("identical")
+        (sync_target / "todos.json").write_text("[]")
+        (async_target / "todos.json").write_text("[]")
         sync_sha = tracking_commit(sync_target, "same msg")
         async_sha = await tracking_commit_async(async_target, "same msg")
         # Both should produce a valid SHA (content differs due to timestamps, but both non-None)
