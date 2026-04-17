@@ -35,7 +35,12 @@ def read_schema_version(proj_yaml_path: Path) -> int | None:
 
 
 def bump_schema_version(proj_yaml_path: Path, version: int) -> None:
-    """Merge schema_version into proj.yaml atomically (temp+rename)."""
+    """Merge schema_version into proj.yaml atomically (temp+rename).
+
+    Cleans up the temp file on any failure between creation and rename so
+    a permission error on os.replace doesn't leak `.proj.yaml.*.tmp` files
+    into the project directory across migration runs.
+    """
     data: dict = yaml.safe_load(proj_yaml_path.read_text()) or {}
     data["schema_version"] = version
     tmp = tempfile.NamedTemporaryFile(
@@ -45,13 +50,18 @@ def bump_schema_version(proj_yaml_path: Path, version: int) -> None:
         suffix=".tmp",
         delete=False,
     )
+    tmp_name = tmp.name
     try:
-        yaml.safe_dump(data, tmp, sort_keys=False)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-    finally:
-        tmp.close()
-    os.replace(tmp.name, proj_yaml_path)
+        try:
+            yaml.safe_dump(data, tmp, sort_keys=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        finally:
+            tmp.close()
+        os.replace(tmp_name, proj_yaml_path)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def discover_pending(projects: Iterable[dict]) -> Iterator[PendingProject]:
@@ -82,4 +92,9 @@ def detect_already_flat(todos_yaml_path: Path) -> bool:
         return False
     if not isinstance(data, list):
         return False
-    return all(t.get("parent") is None and not t.get("children") for t in data)
+    # Require every entry to be a dict — a non-dict element is ambiguous and
+    # should not be treated as "flat" (would otherwise raise AttributeError).
+    return all(
+        isinstance(t, dict) and t.get("parent") is None and not t.get("children")
+        for t in data
+    )
