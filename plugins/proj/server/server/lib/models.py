@@ -718,6 +718,7 @@ class ProjectMeta:
     jira_synced_comment_ids: list[str] = field(
         default_factory=list
     )  # Jira comment IDs already synced to NOTES.md
+    jira_detached: bool = False  # True when Jira issue was unassigned from me; sync halted
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -742,6 +743,7 @@ class ProjectMeta:
             "claudemd_management": self.claudemd_management,
             "jira_issue_key": self.jira_issue_key,
             "jira_synced_comment_ids": self.jira_synced_comment_ids,
+            "jira_detached": self.jira_detached,
         }
 
     @classmethod
@@ -818,6 +820,7 @@ class ProjectMeta:
             jira_synced_comment_ids=[str(x) for x in jsci]
             if isinstance((jsci := data.get("jira_synced_comment_ids")), list)
             else [],
+            jira_detached=bool(data.get("jira_detached", False)),
         )
 
 

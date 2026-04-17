@@ -1147,9 +1147,348 @@ def apply_mapping(
     return result
 
 
-# ── Deterministic mapping (full-sync) ────────────────────────────────────────
+# ── Import rule tree (flat model) ────────────────────────────────────────────
 
 _DONE_STATUSES = frozenset({"done", "resolved", "closed", "cancelled", "canceled"})
+
+
+def _get_issue_assignee(issue: JsonDict) -> str:
+    """Extract the assignee display name from a Jira issue dict."""
+    fields = issue.get("fields", issue)
+    assignee_raw = fields.get("assignee") if isinstance(fields, dict) else issue.get("assignee")
+    if isinstance(assignee_raw, dict):
+        return str(assignee_raw.get("displayName", "") or assignee_raw.get("name", ""))
+    if isinstance(assignee_raw, str):
+        return assignee_raw
+    return ""
+
+
+def _get_issue_type(issue: JsonDict) -> str:
+    """Extract the issue type name (Epic / Task / Sub-task) from a Jira issue dict."""
+    fields = issue.get("fields", issue)
+    issuetype_raw = fields.get("issuetype") if isinstance(fields, dict) else issue.get("issuetype")
+    if isinstance(issuetype_raw, dict):
+        return str(issuetype_raw.get("name", ""))
+    if isinstance(issuetype_raw, str):
+        return issuetype_raw
+    return ""
+
+
+def _get_issue_key(issue: JsonDict) -> str:
+    return str(issue.get("key", ""))
+
+
+def _get_issue_summary(issue: JsonDict) -> str:
+    fields = issue.get("fields", issue)
+    if isinstance(fields, dict):
+        return str(fields.get("summary", ""))
+    return str(issue.get("summary", ""))
+
+
+def _get_epic_link(issue: JsonDict) -> str:
+    """Extract the epic link key from a Jira issue (parent epic's key)."""
+    fields = issue.get("fields", issue)
+    if isinstance(fields, dict):
+        # Check parent field first (newer Jira API)
+        parent = fields.get("parent")
+        if isinstance(parent, dict):
+            parent_fields = parent.get("fields", {})
+            if isinstance(parent_fields, dict):
+                pt = parent_fields.get("issuetype", {})
+                if isinstance(pt, dict) and str(pt.get("name", "")).lower() == "epic":
+                    return str(parent.get("key", ""))
+        # Classic epic link field
+        epic_link = fields.get("customfield_10014") or fields.get("epic_link") or ""
+        if epic_link:
+            return str(epic_link)
+    return ""
+
+
+def _get_parent_task(issue: JsonDict) -> JsonDict | None:
+    """Return the parent task issue dict for a Sub-task, or None."""
+    fields = issue.get("fields", issue)
+    if isinstance(fields, dict):
+        parent = fields.get("parent")
+        if isinstance(parent, dict):
+            # Only return if parent is NOT an epic (i.e., it's a task)
+            parent_fields = parent.get("fields", {})
+            if isinstance(parent_fields, dict):
+                pt = parent_fields.get("issuetype", {})
+                if isinstance(pt, dict) and str(pt.get("name", "")).lower() != "epic":
+                    return parent
+            return parent
+    return None
+
+
+def ensure_project(
+    cfg: ProjConfig,
+    name: str,
+    source: JsonDict,
+) -> ProjectMeta:
+    """Idempotently ensure a local project exists for the given Jira issue.
+
+    If a project with *name* already exists, returns its meta (possibly updating
+    jira_issue_key).  If not, creates a new project directory + meta + todos file.
+
+    Returns the ProjectMeta for the (existing or newly created) project.
+    """
+    from server.lib.models import ProjectDates, ProjectEntry
+
+    today = _now()
+    jira_key = _get_issue_key(source)
+    summary = _get_issue_summary(source)
+
+    # Check if project already exists
+    try:
+        meta = storage.load_meta(cfg, name)
+        # Ensure jira_issue_key is set
+        if jira_key and not meta.jira_issue_key:
+            meta.jira_issue_key = jira_key
+            storage.save_meta(cfg, meta)
+        return meta
+    except FileNotFoundError:
+        pass
+
+    # Create new project
+    proj_dir = storage.tracking_dir(cfg, name)
+    proj_dir.mkdir(parents=True, exist_ok=True)
+
+    meta = ProjectMeta(
+        name=name,
+        description=summary,
+        dates=ProjectDates(created=today, last_updated=today),
+        jira_issue_key=jira_key,
+    )
+    storage.save_meta(cfg, meta)
+
+    todos_file = proj_dir / "todos.yaml"
+    if not todos_file.exists():
+        todos_file.write_text("todos: []\n")
+
+    archive_file = proj_dir / "archive.yaml"
+    if not archive_file.exists():
+        archive_file.write_text("todos: []\n")
+
+    index = storage.load_index(cfg)
+    if name not in index.projects:
+        index.projects[name] = ProjectEntry(
+            name=name,
+            tracking_dir=str(proj_dir),
+            created=today,
+        )
+        storage.save_index(cfg, index)
+
+    return meta
+
+
+def ensure_todo(
+    cfg: ProjConfig,
+    project_meta: ProjectMeta,
+    source: JsonDict,
+    extra_tags: list[str] | None = None,
+) -> Todo:
+    """Idempotently ensure a todo exists in *project_meta* for the given Jira issue.
+
+    Looks up by jira_issue_key first.  If found, updates title/status/tags.
+    If not found, creates a new todo.  Returns the (existing or new) Todo.
+    """
+    if extra_tags is None:
+        extra_tags = []
+
+    today = _now()
+    issue_key = _get_issue_key(source)
+    summary = _get_issue_summary(source)
+    priority = _parse_jira_priority(source)
+    status = _parse_jira_status(source)
+    labels = _parse_jira_labels(source)
+    resolved = status.lower() in _DONE_STATUSES
+
+    project_name = project_meta.name
+    todos = storage.load_todos(cfg, project_name)
+
+    # Lookup by jira_issue_key
+    existing = next((t for t in todos if t.jira_issue_key == issue_key), None)
+
+    if existing:
+        # Update in place
+        existing.title = summary
+        existing.priority = priority
+        # Preserve non-group local tags; merge extra_tags + labels + group
+        existing_non_group = [t for t in existing.tags if not t.startswith("group:")]
+        new_tags = list(dict.fromkeys(existing_non_group + labels + extra_tags))
+        existing.tags = new_tags
+        if resolved and existing.status not in {"done", "complete", "cancelled"}:
+            existing.status = "done"
+        existing.updated = today
+        storage.save_todos(cfg, project_name, todos)
+        storage.save_meta(cfg, project_meta)
+        return existing
+
+    # Create new todo
+    all_tags = list(dict.fromkeys(labels + extra_tags))
+    todo = Todo(
+        id=next_todo_id(project_meta),
+        title=summary,
+        priority=priority,
+        tags=all_tags,
+        jira_issue_key=issue_key,
+        status="done" if resolved else "pending",
+        created=today,
+        updated=today,
+    )
+    todos.append(todo)
+    storage.save_todos(cfg, project_name, todos)
+    storage.save_meta(cfg, project_meta)
+    return todo
+
+
+def _import_epic(
+    cfg: ProjConfig,
+    epic: JsonDict,
+    current_user: str,
+    epic_issues: list[JsonDict],
+) -> ProjectMeta:
+    """Import a Jira epic as a local project.
+
+    Rule 1: epic is mine → project named epic:<epic.key>.
+    For each task in the epic: if assigned to me, create a todo + subtasks as
+    group-tagged todos.
+
+    *epic_issues* is the pre-fetched list of issues belonging to this epic
+    (avoids extra API calls in tests; callers supply this list).
+    """
+    epic_key = _get_issue_key(epic)
+    project_meta = ensure_project(cfg, name=f"epic:{epic_key}", source=epic)
+
+    for task in epic_issues:
+        task_assignee = _get_issue_assignee(task)
+        if task_assignee != current_user:
+            continue  # Decision 7: only my tasks
+        task_todo = ensure_todo(cfg, project_meta, source=task)
+        # Handle subtasks of this task
+        task_fields = task.get("fields", task)
+        subtasks_raw = task_fields.get("subtasks", []) if isinstance(task_fields, dict) else []
+        if isinstance(subtasks_raw, list):
+            for subtask in subtasks_raw:
+                if not isinstance(subtask, dict):
+                    continue
+                st_assignee = _get_issue_assignee(subtask)
+                if st_assignee != current_user:
+                    continue
+                ensure_todo(
+                    cfg,
+                    project_meta,
+                    source=subtask,
+                    extra_tags=[f"group:{task_todo.id}"],
+                )
+
+    return project_meta
+
+
+def _import_task_as_project(
+    cfg: ProjConfig,
+    task: JsonDict,
+    current_user: str,
+) -> ProjectMeta:
+    """Import a standalone task (not under a my-epic) as its own local project.
+
+    Rule 2: task is mine, epic is not mine (or no epic).
+    Project named task:<task.key>.  Subtasks assigned to me become todos.
+    """
+    task_key = _get_issue_key(task)
+    project_meta = ensure_project(cfg, name=f"task:{task_key}", source=task)
+
+    task_fields = task.get("fields", task)
+    subtasks_raw = task_fields.get("subtasks", []) if isinstance(task_fields, dict) else []
+    if isinstance(subtasks_raw, list):
+        for subtask in subtasks_raw:
+            if not isinstance(subtask, dict):
+                continue
+            st_assignee = _get_issue_assignee(subtask)
+            if st_assignee != current_user:
+                continue
+            ensure_todo(cfg, project_meta, source=subtask)
+
+    return project_meta
+
+
+def _import_orphan_subtask(
+    cfg: ProjConfig,
+    subtask: JsonDict,
+    current_user: str,
+) -> ProjectMeta:
+    """Import an orphan sub-task as an empty placeholder project.
+
+    Rule 3: sub-task is mine but parent task and parent epic are not mine.
+    Project named task:<subtask.key> with zero todos (metadata only).
+    """
+    st_key = _get_issue_key(subtask)
+    project_meta = ensure_project(cfg, name=f"task:{st_key}", source=subtask)
+    return project_meta
+
+
+def import_jira_issues(
+    cfg: ProjConfig,
+    current_user: str,
+    my_issues: list[JsonDict],
+    epic_issues_by_key: dict[str, list[JsonDict]] | None = None,
+) -> dict[str, int]:
+    """Apply the flat-model import rule tree to a list of Jira issues.
+
+    Pass 1: identify my_epic_keys.
+    Pass 2: dispatch each issue to the correct import handler.
+
+    *my_issues* is the list of Jira issues assigned to *current_user*.
+    *epic_issues_by_key* maps epic_key -> list of child issues (for testing
+    without live API calls; when None, the callers inject this).
+
+    Returns a counts dict: {projects_created, todos_created, todos_updated}.
+    """
+    if epic_issues_by_key is None:
+        epic_issues_by_key = {}
+
+    # Pass 1: identify epics I own
+    my_epic_keys: set[str] = {
+        _get_issue_key(iss) for iss in my_issues if _get_issue_type(iss).lower() == "epic"
+    }
+
+    counts: dict[str, int] = {"projects_created": 0, "todos_created": 0, "todos_updated": 0}
+
+    # Pass 2: dispatch
+    for issue in my_issues:
+        issue_type = _get_issue_type(issue).lower()
+        issue_key = _get_issue_key(issue)
+
+        if issue_type == "epic":
+            epic_issues = epic_issues_by_key.get(issue_key, [])
+            _import_epic(cfg, issue, current_user, epic_issues)
+            counts["projects_created"] += 1
+
+        elif issue_type in {"task", "story"}:
+            epic_link = _get_epic_link(issue)
+            if epic_link and epic_link in my_epic_keys:
+                # Handled via Rule 1 when the epic was processed
+                continue
+            _import_task_as_project(cfg, issue, current_user)
+            counts["projects_created"] += 1
+
+        elif issue_type == "sub-task":
+            parent = _get_parent_task(issue)
+            parent_mine = parent is not None and _get_issue_assignee(parent) == current_user
+            parent_epic_link = _get_epic_link(issue)
+            if not parent_epic_link and parent is not None:
+                parent_epic_link = _get_epic_link(parent)
+            epic_mine = bool(parent_epic_link and parent_epic_link in my_epic_keys)
+            if parent_mine or epic_mine:
+                # Already wired via parent's rule
+                continue
+            _import_orphan_subtask(cfg, issue, current_user)
+            counts["projects_created"] += 1
+
+    return counts
+
+
+# ── Deterministic mapping (full-sync) ────────────────────────────────────────
 
 _MAX_PROJECTS_CREATED = 10
 
