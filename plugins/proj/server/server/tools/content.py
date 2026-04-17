@@ -262,7 +262,7 @@ def register(app: FastMCP) -> None:
             # Flat model: parent pointer lives in group:<id> tag; fall back to .parent field
             # for migrated todos that still carry the legacy field.
             _group_parent = next(
-                (t[7:] for t in todo.tags if t.startswith("group:") and len(t) > 6),
+                (t[6:] for t in todo.tags if t.startswith("group:") and len(t) > 6),
                 None,
             )
             _parent_id = _group_parent or todo.parent

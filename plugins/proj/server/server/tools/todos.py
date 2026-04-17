@@ -473,7 +473,7 @@ def _batch_add_children(
     for c in created:
         # Determine immediate parent from group: tag (flat model) or legacy parent field
         c_group_parent = next(
-            (t[7:] for t in c.get("tags", []) if t.startswith("group:") and len(t) > 6),
+            (t[6:] for t in c.get("tags", []) if t.startswith("group:") and len(t) > 6),
             None,
         )
         c_parent = c_group_parent or c.get("parent")
