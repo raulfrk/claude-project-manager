@@ -1488,6 +1488,60 @@ def import_jira_issues(
     return counts
 
 
+def detach_unassigned_projects(
+    cfg: ProjConfig,
+    current_user: str,
+    my_issues: list[JsonDict],
+) -> dict[str, int]:
+    """Archive empty placeholder projects and mark non-empty ones jira_detached.
+
+    Runs after import_jira_issues.  Any project whose jira_issue_key is no
+    longer in *my_issues* is considered "unassigned":
+    - If it has zero todos → archive it (status set to archived in index).
+    - If it has todos → set jira_detached=True on its ProjectMeta so the user
+      knows the project is no longer actively tracked.
+
+    Returns counts: {archived, detached}.
+    """
+    my_keys: set[str] = {_get_issue_key(iss) for iss in my_issues}
+
+    index = storage.load_index(cfg)
+    counts: dict[str, int] = {"archived": 0, "detached": 0}
+
+    for proj_name in list(index.projects.keys()):
+        try:
+            meta = storage.load_meta(cfg, proj_name)
+        except Exception as exc:
+            _log.debug("detach_unassigned_projects: skipping %s: %s", proj_name, exc)
+            continue
+
+        if not meta.jira_issue_key:
+            continue  # not a Jira-linked project
+
+        if meta.jira_issue_key in my_keys:
+            continue  # still assigned
+
+        todos = storage.load_todos(cfg, proj_name)
+        active_todos = [
+            t for t in todos if getattr(t, "status", "pending") not in {"done", "archived"}
+        ]
+
+        if not active_todos:
+            # Empty placeholder — archive
+            entry = index.projects.get(proj_name)
+            if entry is not None:
+                entry.archived = True
+                storage.save_index(cfg, index)
+            counts["archived"] += 1
+        else:
+            # Has todos — mark detached
+            meta.jira_detached = True
+            storage.save_meta(cfg, meta)
+            counts["detached"] += 1
+
+    return counts
+
+
 # ── Deterministic mapping (full-sync) ────────────────────────────────────────
 
 _MAX_PROJECTS_CREATED = 10

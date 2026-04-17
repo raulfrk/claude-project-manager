@@ -16,6 +16,7 @@ from server.lib.models import (
     ProjectIndex,
 )
 from server.tools.jira_sync import (
+    detach_unassigned_projects,
     ensure_project,
     import_jira_issues,
 )
@@ -306,3 +307,64 @@ def test_ensure_project_idempotent(cfg: ProjConfig) -> None:
     index = storage.load_index(cfg)
     # Should still be only one entry
     assert list(index.projects.keys()).count("epic:E-10") == 1
+
+
+# ── Task 5 tests ──────────────────────────────────────────────────────────────
+
+
+def test_orphan_placeholder_project_archived_when_unassigned(cfg: ProjConfig) -> None:
+    """Empty placeholder project (no todos) archived when issue no longer in my_issues."""
+    # Create an orphan subtask project with no todos
+    subtask = _issue("ST-X", "Orphan", issue_type="Sub-task")
+    import_jira_issues(
+        cfg,
+        current_user="me",
+        my_issues=[subtask],
+        epic_issues_by_key={},
+    )
+    # Verify project was created
+    index = storage.load_index(cfg)
+    assert "task:ST-X" in index.projects
+
+    # Now run detach with empty my_issues (ST-X no longer assigned to me)
+    detach_unassigned_projects(cfg, current_user="me", my_issues=[])
+
+    index = storage.load_index(cfg)
+    entry = index.projects.get("task:ST-X")
+    assert entry is not None
+    assert entry.archived is True, "Empty unassigned project should be archived"
+
+
+def test_task_project_with_todos_marked_detached_when_unassigned(cfg: ProjConfig) -> None:
+    """Non-empty project marked jira_detached=True when issue no longer in my_issues."""
+    # Task with a subtask — creates project with a todo
+    task = _issue(
+        "T-DET",
+        "Detach task",
+        issue_type="Task",
+        subtasks=[
+            {
+                "key": "ST-DET",
+                "fields": {
+                    "summary": "Subtask for detach",
+                    "issuetype": {"name": "Sub-task"},
+                    "assignee": {"displayName": "me"},
+                    "status": {"name": "open"},
+                },
+            },
+        ],
+    )
+    import_jira_issues(
+        cfg,
+        current_user="me",
+        my_issues=[task],
+        epic_issues_by_key={},
+    )
+    todos = storage.load_todos(cfg, "task:T-DET")
+    assert len(todos) > 0, "Expected at least one todo before detach"
+
+    # Now run detach — T-DET no longer in my_issues
+    detach_unassigned_projects(cfg, current_user="me", my_issues=[])
+
+    meta = storage.load_meta(cfg, "task:T-DET")
+    assert meta.jira_detached is True, "Non-empty unassigned project should be marked detached"
