@@ -49,6 +49,41 @@ def _get_done_statuses() -> tuple[str, ...]:
     return _DEFAULT_DONE_STATUSES
 
 
+def _update_issues_core(updates_json: str) -> str:
+    """Shared core for jira update tools. Loops PUT /rest/api/2/issue/{key}.
+    Strips null-valued fields from each update. Returns JSON-encoded
+    {successes: [...], failures: [...]}.
+    """
+    client = get_client()
+    try:
+        payload = json.loads(updates_json)
+    except json.JSONDecodeError as exc:
+        return json.dumps({"error": f"Invalid JSON: {exc}"})
+
+    updates = payload.get("updates", [])
+    if not updates:
+        return json.dumps({"error": "Missing or empty 'updates' array in payload"})
+
+    successes: list[dict[str, JsonValue]] = []
+    failures: list[dict[str, JsonValue]] = []
+    for idx, update in enumerate(updates):
+        try:
+            key = update.get("key", "")
+            if not key:
+                failures.append({"index": idx, "error": "Missing 'key' field"})
+                continue
+            raw_fields = update.get("fields", {})
+            fields = {k: v for k, v in raw_fields.items() if v is not None}
+            if not fields:
+                failures.append({"index": idx, "key": key, "error": "No fields to update"})
+                continue
+            client.put(f"/rest/api/2/issue/{key}", json_body={"fields": fields})
+            successes.append({"key": key, "status": "updated"})
+        except RuntimeError as exc:
+            failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
+    return json.dumps({"successes": successes, "failures": failures})
+
+
 def register(app: FastMCP) -> None:
     @app.tool(description="Search Jira issues using JQL.")
     def jira_search(jql: str, max_results: int = 50, start_at: int = 0) -> str:
@@ -272,33 +307,4 @@ def register(app: FastMCP) -> None:
         ),
     )
     def jira_update_issues(updates_json: str) -> str:
-        client = get_client()
-        try:
-            payload = json.loads(updates_json)
-        except json.JSONDecodeError as exc:
-            return json.dumps({"error": f"Invalid JSON: {exc}"})
-
-        updates = payload.get("updates", [])
-        if not updates:
-            return json.dumps({"error": "Missing or empty 'updates' array in payload"})
-
-        successes: list[dict[str, JsonValue]] = []
-        failures: list[dict[str, JsonValue]] = []
-        for idx, update in enumerate(updates):
-            try:
-                key = update.get("key", "")
-                if not key:
-                    failures.append({"index": idx, "error": "Missing 'key' field"})
-                    continue
-                raw_fields = update.get("fields", {})
-                # Strip null-valued fields: hook templates like "labels": ${tags}
-                # resolve to null when tags is absent, which would clear Jira fields.
-                fields = {k: v for k, v in raw_fields.items() if v is not None}
-                if not fields:
-                    failures.append({"index": idx, "key": key, "error": "No fields to update"})
-                    continue
-                client.put(f"/rest/api/2/issue/{key}", json_body={"fields": fields})
-                successes.append({"key": key, "status": "updated"})
-            except RuntimeError as exc:
-                failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
-        return json.dumps({"successes": successes, "failures": failures})
+        return _update_issues_core(updates_json)
