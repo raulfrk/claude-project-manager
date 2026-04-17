@@ -55,3 +55,30 @@ def current(cfg: ProjConfig, project_name: str) -> int:
 
 def flat_only(cfg: ProjConfig, project_name: str) -> bool:
     return current(cfg, project_name) >= TARGET
+
+
+def _proj_yaml_exists(cfg: ProjConfig, project_name: str) -> bool:
+    """Return True if the project's proj.yaml file exists on disk."""
+    path = Path(cfg.tracking_dir).expanduser() / project_name / "proj.yaml"
+    return path.exists()
+
+
+class LegacyProjectError(RuntimeError):
+    """Raised when a project is still on the nested (pre-flat-model) schema."""
+
+
+def require_flat(cfg: ProjConfig, project_name: str) -> None:
+    """Raise LegacyProjectError when a project has an explicit legacy schema.
+
+    Only raises when proj.yaml EXISTS and reports schema_version < TARGET.
+    Missing proj.yaml is treated as a new (not yet initialized) project and
+    allowed through — storage will raise FileNotFoundError on data.db absence.
+    """
+    if not _proj_yaml_exists(cfg, project_name):
+        return
+    if not flat_only(cfg, project_name):
+        raise LegacyProjectError(
+            f"Project {project_name!r} is still on the nested todo schema "
+            f"(schema_version < {TARGET}). Run `cpm-install --migrate-flat` "
+            f"to upgrade this project before using todo tools.",
+        )

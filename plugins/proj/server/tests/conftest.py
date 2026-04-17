@@ -50,6 +50,8 @@ def setup_project(cfg: ProjConfig, name: str, repo_path: str) -> None:
     proj_dir.mkdir(parents=True)
     (proj_dir / "todos.yaml").write_text("todos: []\n")
     (proj_dir / "NOTES.md").write_text(f"# {name}\n")
+    # schema_version: 2 required so require_flat() passes (Phase 2 guard)
+    (proj_dir / "proj.yaml").write_text(f"name: {name}\nschema_version: 2\n")
     meta = ProjectMeta(
         name=name,
         repos=[RepoEntry(label="code", path=repo_path)],
