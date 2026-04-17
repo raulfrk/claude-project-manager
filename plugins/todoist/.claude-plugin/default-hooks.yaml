@@ -37,7 +37,7 @@ hooks:
       tasks:
         - id: "${todoist_task_id}"
           content: "${title}"
-          labels: "${tags}"
+          labels: "${synced_tags}"
           description: "${notes}"
           dueString: "${due_date}"
     blocking: true
