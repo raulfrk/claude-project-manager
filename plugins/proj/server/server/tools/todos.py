@@ -1322,6 +1322,11 @@ def register(app: FastMCP) -> None:
         # Pre-build full Jira bulk-update JSON string because the hook
         # template engine cannot iterate lists. Hooks map
         # updates_json: ${jira_updates_json} and get the native string.
+        jira_batch_updates: list[dict[str, JsonValue]] = [
+            {"key": key, "resolution": "Done"} for key in jira_issue_keys
+        ]
+        # Legacy raw-JSON form retained for backwards compat with any
+        # pre-655 hook cache still targeting jira_update_issues.
         jira_payload: dict[str, JsonValue] = {
             "updates": [
                 {"key": key, "fields": {"resolution": {"name": "Done"}}} for key in jira_issue_keys
@@ -1354,6 +1359,7 @@ def register(app: FastMCP) -> None:
             "trello_card_ids": trello_card_ids,
             "jira_issue_keys": jira_issue_keys,
             "jira_updates_json": jira_updates_json,
+            "jira_batch_updates": jira_batch_updates,
             "todoist_project_id": todoist_project_id_val,
             "trello_card_id": trello_card_id_val,
             "jira_project_key": jira_project_key_val,
@@ -1367,6 +1373,11 @@ def register(app: FastMCP) -> None:
                 result_data["jira_updates_json"] = ""
                 truncation_notes.append(
                     "jira_updates_json dropped: batch exceeded 90KB payload cap"
+                )
+            if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
+                result_data["jira_batch_updates"] = []
+                truncation_notes.append(
+                    "jira_batch_updates dropped: batch exceeded 90KB payload cap"
                 )
             if _estimate_size(result_data) > _MAX_SOURCE_BYTES:
                 result_data["jira_issue_keys"] = []

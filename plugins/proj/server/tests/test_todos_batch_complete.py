@@ -392,6 +392,35 @@ async def test_depth_cascade_tracking(project_with_todos, mcp_app):
 
 
 @pytest.mark.asyncio
+async def test_jira_batch_updates_field_present(cfg: ProjConfig, mcp_app, tmp_path: Path):
+    """todo_complete batch result must include jira_batch_updates as a structured list
+    alongside the legacy jira_updates_json string (backwards compat)."""
+    setup_project(cfg, "myapp", str(tmp_path))
+    todos = [
+        _make_todo("1", jira_issue_key="PROJ-1"),
+        _make_todo("2", jira_issue_key="PROJ-2"),
+    ]
+    storage.save_todos(cfg, "myapp", todos)
+    state.set_session_active("myapp")
+
+    result = await call_tool(mcp_app, "todo_complete", todo_ids=["1", "2"])
+    data = json.loads(result)
+
+    # New structured field.
+    assert "jira_batch_updates" in data
+    assert isinstance(data["jira_batch_updates"], list)
+    assert len(data["jira_batch_updates"]) == 2
+    keys = {item["key"] for item in data["jira_batch_updates"]}
+    assert keys == {"PROJ-1", "PROJ-2"}
+    for item in data["jira_batch_updates"]:
+        assert item["resolution"] == "Done"
+
+    # Legacy field still present for backwards compat.
+    assert "jira_updates_json" in data
+    assert data["jira_updates_json"] != ""
+
+
+@pytest.mark.asyncio
 async def test_partial_hook_failure_commits_others(cfg: ProjConfig, mcp_app, tmp_path: Path):
     """Validation failures on SOME ids must not prevent others from being
     evaluated. Missing-id case: the whole batch is rejected (documented
