@@ -71,4 +71,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Git branch/ref to install from (e.g. --branch dev).",
     )
 
+    parser.add_argument(
+        "--migrate-flat",
+        action="store_true",
+        help="Run the interactive flat-todo migration outside a full install session.",
+    )
+    parser.add_argument(
+        "--migrate-flat-dry-run",
+        action="store_true",
+        help="Print a dry-run report of what the flat-todo migration would do, no mutation.",
+    )
+    parser.add_argument(
+        "--backup-retain",
+        type=int,
+        default=None,
+        metavar="DAYS",
+        help="Prune migration backups older than DAYS on next run (default: keep forever).",
+    )
+    parser.add_argument(
+        "--strict-resync",
+        action="store_true",
+        help="Abort + revert local flatten on any remote resync failure (default: log + continue).",
+    )
+
     return parser
+
+
+def load_project_list() -> list[dict]:
+    """Read ~/.claude/proj.yaml and return the projects list (each with name + path)."""
+    import yaml
+    from pathlib import Path
+
+    proj_yaml = Path.home() / ".claude" / "proj.yaml"
+    if not proj_yaml.exists():
+        return []
+    data = yaml.safe_load(proj_yaml.read_text()) or {}
+    return list(data.get("projects", []))

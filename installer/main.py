@@ -283,6 +283,25 @@ def main() -> int:
         if args.full_cleanup and not args.uninstall:
             args.uninstall = True
 
+        # Migration-only shortcuts — bypass the install TUI entirely
+        if args.migrate_flat_dry_run:
+            from installer.cli import load_project_list
+            from installer.migrations.entry import run_dry_run
+
+            return run_dry_run(load_project_list())
+        if args.migrate_flat:
+            import sys as _sys
+
+            from installer.cli import load_project_list
+            from installer.migrations.entry import run_pending_migrations
+
+            return run_pending_migrations(
+                load_project_list(),
+                interactive=_sys.stdin.isatty(),
+                strict_resync=args.strict_resync,
+                backup_retain_days=args.backup_retain,
+            )
+
         # Determine mode for TUI routing
         if args.reinstall:
             mode = "reinstall"
