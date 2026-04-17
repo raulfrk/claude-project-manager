@@ -343,3 +343,37 @@ def register(app: FastMCP) -> None:
     )
     def jira_update_issues(updates_json: str) -> str:
         return _update_issues_core(updates_json)
+
+    @app.tool(
+        description=(
+            "Update a single Jira issue with structured fields. "
+            "Any of summary/description/priority/labels/resolution may be supplied; "
+            "None fields are omitted. Returns {successes: [...], failures: [...]} "
+            "from jira_update_issues, or {error} if key is empty, or "
+            "{warning} if no fields are supplied."
+        ),
+    )
+    def jira_update_issue_fields(
+        key: str,
+        summary: str | None = None,
+        description: str | None = None,
+        priority: str | None = None,
+        labels: list[str] | None = None,
+        resolution: str | None = None,
+    ) -> str:
+        if not key:
+            return json.dumps({"error": "key required", "key": ""})
+        item: dict[str, object] = {"key": key}
+        if summary is not None:
+            item["summary"] = summary
+        if description is not None:
+            item["description"] = description
+        if priority is not None:
+            item["priority"] = priority
+        if labels is not None:
+            item["labels"] = labels
+        if resolution is not None:
+            item["resolution"] = resolution
+        if len(item) == 1:  # only 'key' present
+            return json.dumps({"warning": "no fields to update", "key": key})
+        return _update_issues_core(_build_updates_json([item]))
