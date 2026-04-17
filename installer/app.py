@@ -848,3 +848,199 @@ class InstallerApp(App):
             self.pop_screen()
         else:
             self.exit()
+
+    def run(self, **kwargs) -> None:  # type: ignore[override]
+        """Run installer TUI, then trigger post-install flat-todo migration check."""
+        super().run(**kwargs)
+
+        # Post-install flat-todo migration check (todo 636 Phase 1)
+        import sys
+
+        from installer.cli import load_project_list
+        from installer.migrations.entry import run_pending_migrations
+
+        _mig_code = run_pending_migrations(
+            load_project_list(),
+            interactive=sys.stdin.isatty(),
+        )
+        # Non-zero from migration contributes to overall exit code but doesn't mask plugin errors.
+        if _mig_code and not getattr(self, "_exit_code", 0):
+            self._exit_code = _mig_code
+
+
+def run_migration_tui(
+    *,
+    pending: list,
+    run_ts: str,
+    integrations: list,
+    backup_root: "Path",  # noqa: F821
+    strict_resync: bool,
+) -> int:
+    """Launch a standalone Textual app that drives the migration screens.
+
+    Returns exit code: 0 success, 2 partial, 3 user quit.
+    """
+    import json
+
+    from installer.migrations.flat_todo import FlatTodoMigration
+    from installer.screens.migration_overview import MigrationOverviewScreen
+    from installer.screens.migration_progress import (
+        MigrationOutcome,
+        MigrationProgressScreen,
+    )
+    from installer.screens.migration_review import MigrationReviewScreen
+
+    outcomes: list[MigrationOutcome] = []
+    _collected_runners: list[FlatTodoMigration] = []
+    exit_code = 0
+
+    class MigrationApp(App):
+        def on_mount(self) -> None:
+            integration_map = _integration_badges(pending, integrations)
+            counts = {p.name: _count_parents_children(p) for p in pending}
+            self.push_screen(
+                MigrationOverviewScreen(
+                    pending=pending,
+                    integration_map=integration_map,
+                    counts=counts,
+                ),
+                self._after_overview,
+            )
+
+        def _after_overview(self, result: tuple) -> None:
+            action, _payload = result
+            if action in ("skip_all", "quit"):
+                nonlocal exit_code
+                exit_code = 3 if action == "quit" else 0
+                self.exit()
+                return
+            self._review_next(iter(pending))
+
+        def _review_next(self, it) -> None:
+            try:
+                project = next(it)
+            except StopIteration:
+                self.push_screen(MigrationProgressScreen(outcomes=outcomes))
+                return
+            runner = FlatTodoMigration(
+                project=project,
+                run_ts=run_ts,
+                backup_root=backup_root,
+                integrations=integrations,
+                strict_resync=strict_resync,
+            )
+            plan = runner.plan()
+            self.push_screen(
+                MigrationReviewScreen(
+                    plan=plan,
+                    backup_preview=str(backup_root / project.name),
+                ),
+                lambda r, runner=runner, it=it: self._after_review(r, runner, it),
+            )
+
+        def _after_review(self, result, runner, it) -> None:
+            action, _ = result
+            nonlocal exit_code
+            if action == "skip":
+                runner.confirm(False)
+                outcomes.append(
+                    MigrationOutcome(
+                        project=runner.project.name,
+                        ok=True,
+                        resync_partial=False,
+                        backup="—",
+                    ),
+                )
+                self._review_next(it)
+                return
+            if action == "quit":
+                exit_code = 3
+                self.exit()
+                return
+            runner.confirm(True)
+            try:
+                runner.execute_local()
+                runner.commit()
+                partial = bool(runner.resync_failures)
+                outcomes.append(
+                    MigrationOutcome(
+                        project=runner.project.name,
+                        ok=True,
+                        resync_partial=partial,
+                        backup=str(runner.snapshot.dir) if runner.snapshot else "—",
+                    ),
+                )
+                _collected_runners.append(runner)
+                if partial:
+                    exit_code = max(exit_code, 2)
+            except Exception as e:
+                outcomes.append(
+                    MigrationOutcome(
+                        project=runner.project.name,
+                        ok=False,
+                        resync_partial=False,
+                        backup=str(runner.snapshot.dir) if runner.snapshot else "—",
+                        error=str(e),
+                    ),
+                )
+                _collected_runners.append(runner)
+                exit_code = max(exit_code, 2)
+            self._review_next(it)
+
+    MigrationApp().run()
+
+    # Write consolidated JSONL errors log
+    errors_path = backup_root / "errors.log"
+    errors_path.parent.mkdir(parents=True, exist_ok=True)
+    with errors_path.open("w") as f:
+        for outcome, runner in zip(outcomes, _collected_runners):
+            for fail in getattr(runner, "resync_failures", []):
+                f.write(
+                    json.dumps(
+                        {
+                            "ts": run_ts,
+                            "project": outcome.project,
+                            "phase": f"resync:{fail.action.kind}",
+                            "action_id": fail.action.target_id,
+                            "error_class": fail.error_class,
+                            "message": fail.message,
+                            "retryable": fail.retryable,
+                        }
+                    )
+                    + "\n",
+                )
+
+    return exit_code
+
+
+def _integration_badges(pending, integrations) -> dict[str, set[str]]:
+    """Compute the letter badge set per project based on live integration links."""
+    import yaml
+
+    badges: dict[str, set[str]] = {}
+    for project in pending:
+        s: set[str] = set()
+        todos_path = project.path / "todos.yaml"
+        if todos_path.exists():
+            todos = yaml.safe_load(todos_path.read_text()) or []
+            for t in todos:
+                if t.get("todoist_task_id"):
+                    s.add("T")
+                if t.get("trello_card_id") or t.get("trello_checklist_item_id"):
+                    s.add("R")
+                if t.get("jira_issue_key"):
+                    s.add("J")
+        badges[project.name] = s
+    return badges
+
+
+def _count_parents_children(project) -> tuple[int, int]:
+    import yaml
+
+    todos_path = project.path / "todos.yaml"
+    if not todos_path.exists():
+        return 0, 0
+    todos = yaml.safe_load(todos_path.read_text()) or []
+    parents = sum(1 for t in todos if t.get("children"))
+    children = sum(1 for t in todos if t.get("parent") is not None)
+    return parents, children
