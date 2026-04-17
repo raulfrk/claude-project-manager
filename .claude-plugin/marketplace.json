@@ -36,7 +36,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "5.0.1",
+      "version": "5.1.0",
       "author": {
         "name": "raulfrk"
       },
@@ -71,7 +71,7 @@
       "name": "jira",
       "source": "./plugins/jira",
       "description": "Read-only Jira Server issue and project access via REST API.",
-      "version": "5.0.0",
+      "version": "5.1.0",
       "author": {
         "name": "raulfrk"
       },

@@ -1,7 +1,7 @@
 {
   "name": "jira",
   "description": "Read-only Jira Server issue and project access via REST API.",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "author": {
     "name": "raulfrk"
   },
