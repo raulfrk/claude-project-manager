@@ -32,7 +32,7 @@ hooks:
     target_tool: jira_update_issues
     server: jira
     param_mapping:
-      updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"summary": "${title}", "description": "${notes}", "priority": {"name": "${priority}"}, "labels": ${tags}}}]}'
+      updates_json: '{"updates": [{"key": "${jira_issue_key}", "fields": {"summary": "${title}", "description": "${notes}", "priority": {"name": "${priority}"}, "labels": ${synced_tags}}}]}'
     blocking: true
     condition: "sync.jira.enabled and sync.jira.auto_sync and todo.jira_issue_key"
 

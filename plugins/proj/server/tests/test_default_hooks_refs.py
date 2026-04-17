@@ -106,6 +106,23 @@ def test_proj_default_hooks_have_no_sandbox_server_references():
     assert not offenders, f"hooks still referencing removed 'sandbox' server: {offenders}"
 
 
+def test_jira_on_todo_update_labels_uses_synced_tags():
+    # Raw JSON-string template form — `${synced_tags}` resolves via `resolve_template`
+    # against the hook source dict (which always includes `synced_tags`).
+    hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-update")
+    updates_json = hook["param_mapping"]["updates_json"]
+    assert isinstance(updates_json, str)
+    assert "${synced_tags}" in updates_json
+    assert "${tags}" not in updates_json
+
+
+def test_todoist_on_todo_update_labels_uses_synced_tags():
+    hook = _hook(_load(TODOIST_HOOKS), "todoist-on-todo-update")
+    tasks = hook["param_mapping"]["tasks"]
+    assert isinstance(tasks, list)
+    assert tasks[0]["labels"] == "${synced_tags}"
+
+
 def test_jira_on_todo_add_param_mapping_keyset_complete():
     # Guard against accidental field removal — asserts the full expected keyset.
     hook = _hook(_load(JIRA_HOOKS), "jira-on-todo-add")
