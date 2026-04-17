@@ -19,8 +19,11 @@ def make_todo(
     status: str = "pending",
     priority: str = "medium",
     created: str = "2026-01-01",
+    tags: list[str] | None = None,
 ) -> Todo:
-    return Todo(id=id, title=title, status=status, priority=priority, created=created)
+    return Todo(
+        id=id, title=title, status=status, priority=priority, created=created, tags=tags or []
+    )
 
 
 class TestArchiveAndRemoveTodos:
@@ -123,27 +126,27 @@ class TestMigrateDoneToArchive:
         assert result["archived_count"] == 0
         assert result["remaining_count"] == 2
 
-    def test_parent_with_all_done_children_archived(self, cfg: ProjConfig) -> None:
+    def test_all_done_todos_archived_regardless_of_group_tag(self, cfg: ProjConfig) -> None:
+        """Flat model: all terminal-status todos archive immediately — no family traversal."""
         ensure_db(cfg, "myproject")
         parent = make_todo("1", "Parent", status="done")
-        parent.children = ["1.1", "1.2"]
-        child1 = make_todo("1.1", "Child1", status="done")
-        child1.parent = "1"
-        child2 = make_todo("1.2", "Child2", status="done")
-        child2.parent = "1"
+        child1 = make_todo("1.1", "Child1", status="done", tags=["group:1"])
+        child2 = make_todo("1.2", "Child2", status="done", tags=["group:1"])
         save_todos(cfg, "myproject", [parent, child1, child2])
         result = migrate_done_to_archive(cfg, "myproject")
         assert result["archived_count"] == 3
         assert result["remaining_count"] == 0
 
-    def test_parent_with_pending_child_not_archived(self, cfg: ProjConfig) -> None:
+    def test_done_parent_archives_even_with_pending_child(self, cfg: ProjConfig) -> None:
+        """Flat model: done parent archives immediately; pending child stays active."""
         ensure_db(cfg, "myproject")
         parent = make_todo("1", "Parent", status="done")
-        parent.children = ["1.1"]
-        child = make_todo("1.1", "Child", status="pending")
-        child.parent = "1"
+        child = make_todo("1.1", "Child", status="pending", tags=["group:1"])
         save_todos(cfg, "myproject", [parent, child])
-        migrate_done_to_archive(cfg, "myproject")
-        # Done parent with a pending child — neither should be archived
+        result = migrate_done_to_archive(cfg, "myproject")
+        # Only the done parent archives; pending child stays active
+        assert result["archived_count"] == 1
+        assert result["remaining_count"] == 1
         active = load_todos(cfg, "myproject")
-        assert len(active) == 2
+        assert len(active) == 1
+        assert active[0].title == "Child"

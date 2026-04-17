@@ -258,10 +258,18 @@ def register(app: FastMCP) -> None:
             return f"Todo '{todo_id}' not found."
 
         parent_dict = None
-        if include_parent and todo.parent:
-            parent_todo = next((t for t in todos if t.id == todo.parent), None)
-            if parent_todo:
-                parent_dict = parent_todo.to_dict()
+        if include_parent:
+            # Flat model: parent pointer lives in group:<id> tag; fall back to .parent field
+            # for migrated todos that still carry the legacy field.
+            _group_parent = next(
+                (t[7:] for t in todo.tags if t.startswith("group:") and len(t) > 6),
+                None,
+            )
+            _parent_id = _group_parent or todo.parent
+            if _parent_id:
+                parent_todo = next((t for t in todos if t.id == _parent_id), None)
+                if parent_todo:
+                    parent_dict = parent_todo.to_dict()
 
         def _truncate(content: str | None, file_path: Path) -> str | None:
             if content is None:

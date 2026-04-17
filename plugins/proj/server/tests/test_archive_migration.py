@@ -81,15 +81,18 @@ class TestIncludeDoneMerge:
 
 
 class TestDoneParentPendingChild:
-    def test_done_parent_pending_child_not_archived(self, tmp_cfg: ProjConfig) -> None:
-        """Done parent with pending child → parent NOT archived."""
-        parent = _make_todo("1", status="done", children=["2"])
-        child = _make_todo("2", status="pending", parent="1")
+    def test_done_parent_archives_even_with_pending_child(self, tmp_cfg: ProjConfig) -> None:
+        """Flat model: done parent archives immediately regardless of children's status."""
+        parent = _make_todo("1", status="done")
+        child = _make_todo("2", status="pending")
         _setup(tmp_cfg, [parent, child])
 
         result = storage.migrate_done_to_archive(tmp_cfg, PROJECT)
-        assert result["archived_count"] == 0
-        assert result["remaining_count"] == 2
+        # Done parent archives; pending child stays active
+        assert result["archived_count"] == 1
+        assert result["remaining_count"] == 1
+        remaining = storage.load_todos(tmp_cfg, PROJECT)
+        assert remaining[0].id == "2"
 
 
 class TestDoneChildPendingParent:
@@ -188,13 +191,13 @@ class TestNestedFamily:
         assert result["archived_count"] == 3
 
     def test_deep_nested_pending_grandchild(self, tmp_cfg: ProjConfig) -> None:
-        """Grandparent → parent → child(pending) → grandparent NOT archived."""
-        gp = _make_todo("1", status="done", children=["2"])
-        p = _make_todo("2", status="done", parent="1", children=["3"])
-        c = _make_todo("3", status="pending", parent="2")
+        """Flat model: done grandparent + done parent archive immediately; pending child stays."""
+        gp = _make_todo("1", status="done")
+        p = _make_todo("2", status="done")
+        c = _make_todo("3", status="pending")
         _setup(tmp_cfg, [gp, p, c])
 
         result = storage.migrate_done_to_archive(tmp_cfg, PROJECT)
-        # Neither grandparent nor parent should be archived (pending descendant)
-        assert result["archived_count"] == 0
-        assert result["remaining_count"] == 3
+        # Both done todos archive; pending child stays active
+        assert result["archived_count"] == 2
+        assert result["remaining_count"] == 1

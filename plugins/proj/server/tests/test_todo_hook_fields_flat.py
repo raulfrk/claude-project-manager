@@ -75,23 +75,12 @@ def test_resolve_returns_empty_when_no_parent_marker():
     assert result == ParentLinks()
 
 
-def test_resolve_uses_group_tag_over_parent_field():
-    # Both set — tag wins
-    parent_via_tag = _todo("1", todoist_task_id="FROM-TAG")
-    parent_via_field = _todo("9", todoist_task_id="FROM-FIELD")
-    child = _todo("2", tags=["group:1"], parent="9")
-    result = _resolve_parent_for_hooks(
-        child,
-        [parent_via_tag, parent_via_field, child],
-    )
-    assert result.todoist_task_id == "FROM-TAG"
-
-
-def test_resolve_falls_back_to_parent_field():
-    parent = _todo("9", todoist_task_id="FROM-FIELD")
-    child = _todo("2", parent="9")  # no group tag
+def test_resolve_uses_group_tag():
+    # Flat model: parent resolved exclusively via group:<id> tag
+    parent = _todo("1", todoist_task_id="FROM-TAG")
+    child = _todo("2", tags=["group:1"])
     result = _resolve_parent_for_hooks(child, [parent, child])
-    assert result.todoist_task_id == "FROM-FIELD"
+    assert result.todoist_task_id == "FROM-TAG"
 
 
 def test_resolve_returns_empty_when_parent_id_unknown():
@@ -180,16 +169,3 @@ def test_hook_fields_top_level_has_no_parent_fields():
     assert "parent_jira_issue_key" not in fields
     assert "parent_trello_card_id" not in fields
     assert "parent_trello_checklist_id" not in fields
-
-
-def test_hook_fields_legacy_nested_child_still_works():
-    parent = _todo("9", todoist_task_id="T", jira_issue_key="CPM-9")
-    child = _todo("9.1", parent="9")  # legacy — no group tag
-    fields = _todo_hook_fields(
-        child,
-        _meta(),
-        name="demo",
-        todos=[parent, child],
-    )
-    assert fields["parent_todoist_task_id"] == "T"
-    assert fields["parent_jira_issue_key"] == "CPM-9"

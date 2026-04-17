@@ -13,11 +13,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from server.lib import schema_version, storage
+from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
-from server.tools.config import require_config, require_project
+from server.tools.config import require_project
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -61,13 +61,8 @@ def _parent_id_from_tag(tags: list[str]) -> str | None:
 
 
 def _resolve_parent_for_hooks(todo: Todo, todos: list[Todo]) -> ParentLinks:
-    """Resolve parent integration IDs for hook dispatch.
-
-    Resolution order: `group:<id>` tag wins over `todo.parent` when both set.
-    Returns empty ParentLinks if no parent marker, or parent not found, or
-    parent has no integration IDs.
-    """
-    parent_id = _parent_id_from_tag(todo.tags) or todo.parent
+    """Resolve parent integration IDs for hook dispatch via group:<id> tag."""
+    parent_id = _parent_id_from_tag(todo.tags)
     if not parent_id:
         return ParentLinks()
     parent = next((t for t in todos if t.id == parent_id), None)
@@ -84,39 +79,6 @@ def _resolve_parent_for_hooks(todo: Todo, todos: list[Todo]) -> ParentLinks:
 def _normalize_title(title: str) -> str:
     """Collapse whitespace and lowercase for dedup comparison."""
     return " ".join(title.split()).lower()
-
-
-_FLAT_MODE_ERROR = (
-    "todo_add: nested mode disabled (project schema_version >= 2).\n"
-    '  * single child:  todo_add(title="...", tags=["group:<parent-id>"])\n'
-    '  * batch:         todo_add(title="", parent="<parent-id>", children=[...])'
-)
-
-
-def _enforce_flat_args(
-    *,
-    title: str,
-    parent: str | None,
-    children_list: list[dict[str, JsonValue]],
-) -> None:
-    """Raise ValueError when arg shape is disallowed under schema_version >= 2.
-
-    Rejected (post-enforcement):
-      * title non-empty AND parent non-empty (single-child creation w/ parent field)
-      * title non-empty AND parent non-empty AND children non-empty (ambiguous —
-        title means "create root too", parent means "nest it"; not allowed in flat mode)
-
-    Allowed:
-      * title non-empty, parent None                        → flat top-level todo
-      * title empty,     parent non-empty, children non-empty → canonical batch path
-
-    `children_list` is accepted for signature completeness; the guard condition
-    folds both rejection shapes into a single `title + parent` check since any
-    title+parent combination is already disallowed regardless of children.
-    """
-    del children_list  # reserved for future extension points
-    if parent and title and title.strip():
-        raise ValueError(_FLAT_MODE_ERROR)
 
 
 # Module-level lock serializes batch completions across threads. Acquired
@@ -260,7 +222,7 @@ def _todo_hook_fields(
         "todoist_project_id": meta.todoist_project_id,
     }
     # Resolve parent integration IDs for hook dispatch.
-    # Supports both legacy nested model (todo.parent) and flat model (group:<id> tag).
+    # Resolve parent via group:<id> tag (flat model).
     # Always invoke when todos are available; the helper early-returns for top-level todos.
     if todos:
         parent_links = _resolve_parent_for_hooks(todo, todos)
@@ -299,25 +261,14 @@ def _save(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
     storage.save_todos(cfg, project_name, todos)
 
 
-def _collect_family(todo_id: str, todos_list: list[Todo]) -> set[str]:
-    """Recursively collect a todo and all its descendants."""
-    todo_map = {t.id: t for t in todos_list}
-    if todo_id not in todo_map:
-        return set()
-    family: set[str] = {todo_id}
-    for child_id in todo_map[todo_id].children:
-        family.update(_collect_family(child_id, todos_list))
-    return family
-
-
-def _complete_leaf(
+def _complete_todo(
     cfg: ProjConfig,
     name: str,
     todo: Todo,
     todos: list[Todo],
     today: str,
 ) -> str:
-    """CASE 1: LEAF (no parent, no children) — archive immediately."""
+    """Complete a todo: mark done and archive immediately (flat model)."""
     todo_id = todo.id
     todo.status = TodoStatus.DONE
     todo.updated = today
@@ -334,66 +285,6 @@ def _complete_leaf(
             t.updated = today
     storage.archive_and_remove_todos(cfg, name, remaining, [todo])
     return json.dumps({"result": f"Archived {todo_id}.", "todo_id": todo_id})
-
-
-def _complete_child(
-    cfg: ProjConfig,
-    name: str,
-    todo: Todo,
-    todos: list[Todo],
-    today: str,
-) -> str:
-    """CASE 2: CHILD (has parent) — mark done, stay in active until parent completes."""
-    todo.status = TodoStatus.DONE
-    todo.updated = today
-    storage.save_todos(cfg, name, todos)
-    return json.dumps(
-        {
-            "result": f"Marked {todo.id} as done (will archive with parent when parent completes).",
-            "todo_id": todo.id,
-        }
-    )
-
-
-def _complete_parent(
-    cfg: ProjConfig,
-    name: str,
-    todo: Todo,
-    todos: list[Todo],
-    today: str,
-) -> str:
-    """CASE 3: PARENT (has children) — validate all done, archive whole family atomically."""
-    todo_map = {t.id: t for t in todos}
-    todo_id = todo.id
-    undone = [
-        c
-        for c in todo.children
-        if (child := todo_map.get(c)) is not None and child.status != TodoStatus.DONE
-    ]
-    if undone:
-        return json.dumps(
-            {"error": f"Cannot complete {todo_id}: children not done yet: {', '.join(undone)}."}
-        )
-    family_ids = _collect_family(todo_id, todos)
-    family = [t for t in todos if t.id in family_ids]
-    for t in family:
-        t.status = TodoStatus.DONE
-        t.updated = today
-    remaining = [t for t in todos if t.id not in family_ids]
-    for t in remaining:
-        changed = False
-        if any(b in family_ids for b in t.blocks):
-            t.blocks = [b for b in t.blocks if b not in family_ids]
-            changed = True
-        if any(b in family_ids for b in t.blocked_by):
-            t.blocked_by = [b for b in t.blocked_by if b not in family_ids]
-            changed = True
-        if changed:
-            t.updated = today
-    storage.archive_and_remove_todos(cfg, name, remaining, family)
-    return json.dumps(
-        {"result": f"Archived {todo_id} and family ({len(family)} todo(s)).", "todo_id": todo_id}
-    )
 
 
 def _filter_todos(
@@ -460,13 +351,12 @@ def _batch_add_children(
     today: str,
     todos: list[Todo],
     meta: ProjectMeta,
-    *,
-    flat: bool = False,
 ) -> str:
     """Core batch-add logic: create child todos under parent_todo atomically.
 
     Returns JSON result string. Caller must ensure todos/meta are already loaded.
     This function mutates todos and meta in place and performs the atomic save.
+    Children are auto-tagged with group:<parent.id> (flat model).
     """
     created: list[_CreatedEntry] = []
     skipped_duplicates: list[str] = []
@@ -482,8 +372,12 @@ def _batch_add_children(
                 continue
 
             norm_title = _normalize_title(title)
+            # Dedup check: look for existing siblings via group tag (flat model)
+            group_tag_for_dedup = f"group:{parent.id}"
             existing_siblings = [
-                t for t in todos if t.parent == parent.id and t.status not in ("done", "cancelled")
+                t
+                for t in todos
+                if group_tag_for_dedup in t.tags and t.status not in ("done", "cancelled")
             ]
             existing_match = next(
                 (t for t in existing_siblings if _normalize_title(t.title) == norm_title),
@@ -507,43 +401,28 @@ def _batch_add_children(
             notes_raw = spec.get("notes")
             notes = str(notes_raw) if isinstance(notes_raw, str) else ""
 
-            if flat:
-                # Each child's group tag references its IMMEDIATE parent
-                # (`parent`, not `parent_todo`), preserving tree structure for
-                # nested specs. Legacy mode uses `parent.id` for the same reason:
-                # grandchildren point at their direct parent, not the batch root.
-                group_tag = f"group:{parent.id}"
-                if group_tag not in tags:
-                    tags.append(group_tag)
-                child_parent: str | None = None
-            else:
-                child_parent = parent.id
+            # Each child's group tag references its IMMEDIATE parent,
+            # preserving tree structure for nested specs.
+            group_tag = f"group:{parent.id}"
+            if group_tag not in tags:
+                tags.append(group_tag)
 
             child = Todo(
                 id=next_todo_id(meta, parent=parent),
                 title=title,
                 priority=priority,
                 tags=[str(t) for t in tags],
-                parent=child_parent,
                 notes=notes,
                 created=today,
                 updated=today,
             )
-            # Under flat mode the parent's `children` list stays empty — the
-            # parent-child relationship is expressed via the child's group:<id>
-            # tag. Appending here would make todo_complete(parent) route
-            # through _complete_parent and demand all children complete, while
-            # the children themselves have parent=None and would be archived
-            # independently — producing inconsistent completion semantics.
-            if not flat and child.id not in parent.children:
-                parent.children.append(child.id)
             parent.updated = today
             todos.append(child)
             created.append(
                 {
                     "id": child.id,
                     "title": child.title,
-                    "parent": child_parent,
+                    "parent": None,
                     "tags": [str(t) for t in tags],
                 }
             )
@@ -588,10 +467,16 @@ def _batch_add_children(
     storage.save_meta(cfg, meta)
 
     # Build todoist_tasks for hook-053 param mapping
+    # In flat model, parent pointer lives in group:<id> tag; parent field is None.
     created_index: dict[str, int] = {str(c["id"]): i for i, c in enumerate(created)}
     todoist_tasks: list[dict[str, JsonValue]] = []
     for c in created:
-        c_parent = c["parent"]
+        # Determine immediate parent from group: tag (flat model) or legacy parent field
+        c_group_parent = next(
+            (t[7:] for t in c.get("tags", []) if t.startswith("group:") and len(t) > 6),
+            None,
+        )
+        c_parent = c_group_parent or c.get("parent")
         if not isinstance(c_parent, str) or c_parent == parent_todo.id:
             todoist_tasks.append(
                 {
@@ -681,27 +566,6 @@ def register(app: FastMCP) -> None:
         children: str = "[]",
         blocking_pairs: str = "[]",
     ) -> str:
-        # Schema-version-gated flat-only enforcement (todo 624).
-        _cfg = require_config()
-        from server.lib import state as _state  # lazy to avoid module-level cycle
-
-        _project_name = _state.resolve_project(project_name)
-        if _project_name and schema_version.flat_only(_cfg, _project_name):
-            try:
-                _child_specs_for_gate = (
-                    json.loads(children) if children and children.strip() else []
-                )
-            except json.JSONDecodeError:
-                _child_specs_for_gate = []
-            try:
-                _enforce_flat_args(
-                    title=title,
-                    parent=parent,
-                    children_list=_child_specs_for_gate,
-                )
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
-
         _child_specs_raw = children.strip() if children and children.strip() != "[]" else "[]"
         _bp_raw = blocking_pairs.strip() if blocking_pairs else "[]"
 
@@ -737,7 +601,6 @@ def register(app: FastMCP) -> None:
                     today,
                     todos,
                     meta,
-                    flat=schema_version.flat_only(cfg, name),
                 )
             return json.dumps({"error": "title is required when not using children-only mode."})
 
@@ -778,12 +641,25 @@ def register(app: FastMCP) -> None:
                     }
                 )
 
-        # Dedup guard: reject if same normalized title exists under same parent
+        # Dedup guard: reject if same normalized title exists under same parent.
+        # In flat model, siblings are identified via group:<parent-id> tag.
         if not force_create:
             norm_title = _normalize_title(title)
-            scope_todos = [
-                t for t in todos if t.parent == parent and t.status not in ("done", "cancelled")
-            ]
+            if parent_todo:
+                group_tag_for_dedup = f"group:{parent_todo.id}"
+                scope_todos = [
+                    t
+                    for t in todos
+                    if group_tag_for_dedup in t.tags and t.status not in ("done", "cancelled")
+                ]
+            else:
+                # Top-level todos: no group tag, check all top-level
+                scope_todos = [
+                    t
+                    for t in todos
+                    if not any(_GROUP_TAG_RE.match(tag) for tag in t.tags)
+                    and t.status not in ("done", "cancelled")
+                ]
             existing = next(
                 (t for t in scope_todos if _normalize_title(t.title) == norm_title),
                 None,
@@ -796,13 +672,19 @@ def register(app: FastMCP) -> None:
                     }
                 )
 
+        # Build tags: if parent specified, auto-add group:<parent.id> tag
+        resolved_tags = list(tags) if tags is not None else []
+        if parent_todo:
+            group_tag = f"group:{parent_todo.id}"
+            if group_tag not in resolved_tags:
+                resolved_tags.append(group_tag)
+
         todo = Todo(
             id=next_todo_id(meta, parent=parent_todo),
             title=title,
             priority=priority if priority is not None else cfg.default_priority,
-            tags=tags if tags is not None else [],
+            tags=resolved_tags,
             blocked_by=blocked_by or [],
-            parent=parent,
             notes=notes,
             due_date=due_date,
             todoist_task_id=todoist_task_id,
@@ -810,7 +692,6 @@ def register(app: FastMCP) -> None:
             updated=today,
         )
         if parent_todo:
-            parent_todo.children.append(todo.id)
             parent_todo.updated = today
         todos.append(todo)
 
@@ -835,7 +716,6 @@ def register(app: FastMCP) -> None:
                     today,
                     todos,
                     meta,
-                    flat=schema_version.flat_only(cfg, name),
                 )
                 batch_data = json.loads(batch_result_str)
                 return json.dumps(
@@ -1214,68 +1094,20 @@ def register(app: FastMCP) -> None:
                         }
                     )
 
-                # In-memory Phase 2 loop: mark each id done and, for leaves
-                # or fully-done parents, schedule family archive. Parents
-                # with pending children stay in the active list (match
-                # _complete_child behavior).
+                # In-memory Phase 2 loop: mark each id done.
+                # In flat model every completed todo is archived immediately.
                 for tid in still_to_complete:
                     todo = todo_map[tid]
                     todo.status = TodoStatus.DONE
                     todo.updated = today
                     completed_ids.append(tid)
+                    archive_family_ids.add(tid)
                     if todo.todoist_task_id:
                         todoist_task_ids.append(todo.todoist_task_id)
                     if todo.trello_card_id:
                         trello_card_ids.append(todo.trello_card_id)
                     if todo.jira_issue_key:
                         jira_issue_keys.append(todo.jira_issue_key)
-
-                # Second pass: evaluate archival.
-                # - Leaf (no children, no parent): archive this todo alone.
-                # - Child (has parent): stay active; parent archives later.
-                # - Parent (has children): if EVERY descendant across the
-                #   full subtree is done, archive the whole family.
-                def _all_descendants_done(root_id: str) -> bool:
-                    root = todo_map.get(root_id)
-                    if root is None:
-                        return False
-                    status_val = (
-                        root.status.value if isinstance(root.status, TodoStatus) else root.status
-                    )
-                    if status_val != TodoStatus.DONE.value:
-                        return False
-                    return all(_all_descendants_done(c) for c in root.children)
-
-                for tid in completed_ids:
-                    todo = todo_map[tid]
-                    if todo.parent is None and not todo.children:
-                        # Leaf with no parent — archive this todo alone.
-                        archive_family_ids.add(tid)
-                        continue
-                    if todo.children and _all_descendants_done(tid):
-                        # Parent whose full subtree is now done — archive
-                        # the family.
-                        archive_family_ids.update(_collect_family(tid, todos))
-                    # A child (has parent) is marked done but stays in the
-                    # active list until its parent's family archives.
-                    # After marking children, also walk up the parent chain
-                    # to archive any newly-complete parent families.
-                    cur = todo.parent
-                    while cur:
-                        parent_todo = todo_map.get(cur)
-                        if parent_todo is None:
-                            break
-                        if (
-                            _all_descendants_done(cur)
-                            and (
-                                parent_todo.status.value
-                                if isinstance(parent_todo.status, TodoStatus)
-                                else parent_todo.status
-                            )
-                            == TodoStatus.DONE.value
-                        ):
-                            archive_family_ids.update(_collect_family(cur, todos))
-                        cur = parent_todo.parent
 
                 # Build remaining + to_archive lists.
                 to_archive = [t for t in todos if t.id in archive_family_ids]
@@ -1428,12 +1260,7 @@ def register(app: FastMCP) -> None:
         today = _now()
         meta = storage.load_meta(cfg, name)
 
-        if todo.parent:
-            result_str = _complete_child(cfg, name, todo, todos, today)
-        elif todo.children:
-            result_str = _complete_parent(cfg, name, todo, todos, today)
-        else:
-            result_str = _complete_leaf(cfg, name, todo, todos, today)
+        result_str = _complete_todo(cfg, name, todo, todos, today)
 
         result_data = json.loads(result_str)
         result_data.update(_todo_hook_fields(todo, meta, name, cfg=cfg))
@@ -1451,11 +1278,24 @@ def register(app: FastMCP) -> None:
         todos = storage.load_todos(cfg, name)
         todo = next((t for t in todos if t.id == todo_id), None)
         if not todo:
-            # Check if it's archived
+            # In flat model completed todos are immediately archived — un-archive them.
+            from server.lib import sql_todos
+
             archived = storage.load_archived_todos(cfg, name)
-            if any(t.id == todo_id for t in archived):
-                return json.dumps({"error": f"todo {todo_id} is archived — cannot uncomplete"})
-            return json.dumps({"error": f"todo {todo_id} not found"})
+            todo = next((t for t in archived if t.id == todo_id), None)
+            if not todo:
+                return json.dumps({"error": f"todo {todo_id} not found"})
+            todo.status = TodoStatus.PENDING
+            todo.updated = _now()
+            # Remove from archive and add to active
+            remaining_archive = [t for t in archived if t.id != todo_id]
+            sql_todos.replace_archived_todos(cfg, name, remaining_archive)
+            todos.append(todo)
+            meta = storage.load_meta(cfg, name)
+            storage.save_todos(cfg, name, todos)
+            return json.dumps(
+                {"id": todo_id, "status": "pending", **_todo_hook_fields(todo, meta, name, cfg=cfg)}
+            )
         status_val = todo.status.value if isinstance(todo.status, TodoStatus) else todo.status
         if status_val != TodoStatus.DONE.value:
             return json.dumps({"error": f"todo {todo_id} is not completed (status: {status_val})"})
@@ -1487,9 +1327,6 @@ def register(app: FastMCP) -> None:
                 t.updated = today
             if todo_id in t.blocked_by:
                 t.blocked_by.remove(todo_id)
-                t.updated = today
-            if todo_id in t.children:
-                t.children.remove(todo_id)
                 t.updated = today
         todos = [t for t in todos if t.id != todo_id]
         storage.save_todos(cfg, name, todos)
@@ -1625,20 +1462,24 @@ def register(app: FastMCP) -> None:
             archived = storage.load_archived_todos(cfg, name)
             todos = todos + archived
         todo_map = {t.id: t.to_dict() for t in todos}
-        # Add nested children list
+        # Add nested children list (flat model: parent-child via group:<id> tag)
         for t in todos:
             todo_map[t.id]["_children"] = []
         for t in todos:
-            if t.parent and t.parent in todo_map:
-                children_list = todo_map[t.parent]["_children"]
+            parent_id = _parent_id_from_tag(t.tags)
+            if parent_id and parent_id in todo_map:
+                children_list = todo_map[parent_id]["_children"]
                 if isinstance(children_list, list):
                     children_list.append(todo_map[t.id])
-        roots = [todo_map[t.id] for t in todos if t.parent is None]
+        roots = [todo_map[t.id] for t in todos if not _parent_id_from_tag(t.tags)]
         if not include_done:
             roots = [r for r in (_filter_tree_node(root) for root in roots) if r is not None]
-        # Detect orphaned todos: have a parent ID that no longer exists in todo_map
+        # Detect orphaned todos: have a group tag pointing to a non-existent parent
         orphaned = [
-            todo_map[t.id] for t in todos if t.parent is not None and t.parent not in todo_map
+            todo_map[t.id]
+            for t in todos
+            if _parent_id_from_tag(t.tags) is not None
+            and _parent_id_from_tag(t.tags) not in todo_map
         ]
         if not include_done:
             orphaned = [o for o in orphaned if _filter_tree_node(o) is not None]

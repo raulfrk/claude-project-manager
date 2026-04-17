@@ -65,12 +65,12 @@ async def test_todo_add_with_parent_creates_child_id(
         f"Expected child ID to start with '{parent_id}.', got '{child_id}'"
     )
 
-    # Parent must list child in children field
+    # Flat model: child carries group:<parent_id> tag; parent.children not populated
     cfg, name = project
     todos = storage.load_todos(cfg, name)
-    parent_todo = next(t for t in todos if t.id == parent_id)
-    assert child_id in parent_todo.children, (
-        f"Expected '{child_id}' in parent.children, got {parent_todo.children}"
+    child_todo = next(t for t in todos if t.id == child_id)
+    assert f"group:{parent_id}" in child_todo.tags, (
+        f"Expected 'group:{parent_id}' in child.tags, got {child_todo.tags}"
     )
 
 
@@ -137,16 +137,16 @@ async def test_todo_add_children_only_mode(
         f"created_ids mismatch: {r_batch['created_ids']} != {created}"
     )
 
-    # Assert parent's children list now has 2 entries
+    # Flat model: children carry group:<parent_id> tag; verify both children tagged
     cfg, name = project
     todos = storage.load_todos(cfg, name)
-    parent_todo = next(t for t in todos if t.id == parent_id)
-    assert len(parent_todo.children) == 2, (
-        f"Expected 2 children on parent, got: {parent_todo.children}"
+    child_todos = [t for t in todos if f"group:{parent_id}" in t.tags]
+    assert len(child_todos) == 2, (
+        f"Expected 2 todos tagged with group:{parent_id}, got: {[t.id for t in child_todos]}"
     )
 
     # Assert no extra root todo was created (only parent + 2 children = 3 total)
-    root_todos = [t for t in todos if t.parent is None]
+    root_todos = [t for t in todos if not any(tag.startswith("group:") for tag in t.tags)]
     assert len(root_todos) == 1, (
         f"Expected only 1 root todo (the parent), got {len(root_todos)}: "
         f"{[t.id for t in root_todos]}"

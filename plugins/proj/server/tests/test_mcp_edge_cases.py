@@ -425,17 +425,26 @@ class TestTodoCompletionEdgeCases:
         state.set_session_active("myapp")
         return cfg, "myapp"
 
-    async def test_todo_uncomplete_archived_returns_error(
+    async def test_todo_uncomplete_archived_unarchives_todo(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
-        """Uncompleting an archived todo is rejected."""
+        """Uncompleting an archived todo moves it back to active with status=pending."""
+        from server.lib import storage as _storage
+
+        cfg, name = project
         await call_tool(mcp_app, "todo_add", title="Leaf")
         await call_tool(mcp_app, "todo_complete", todo_id="1")
-        # Todo is now archived
+        # Flat model: todo is now archived
+        archived = _storage.load_archived_todos(cfg, name)
+        assert any(t.id == "1" for t in archived)
+        # Uncomplete should move it back to active
         result = await call_tool(mcp_app, "todo_uncomplete", todo_id="1")
         data = _json.loads(result)
-        assert "error" in data
-        assert "archived" in data["error"]
+        assert "error" not in data
+        assert data["id"] == "1"
+        assert data["status"] == "pending"
+        todos = _storage.load_todos(cfg, name)
+        assert any(t.id == "1" for t in todos)
 
     async def test_todo_complete_not_found_returns_error(
         self, mcp_app: Any, project: tuple[ProjConfig, str]

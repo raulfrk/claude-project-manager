@@ -109,16 +109,16 @@ async def test_flat_children_created_atomically(project_with_parent):
     assert data["created"][1]["title"] == "Child B"
     assert data["created"][2]["title"] == "Child C"
 
-    # Verify all children have the parent prefix in their IDs
+    # Verify all children have the parent prefix in their IDs and group tag
     for item in data["created"]:
         assert item["id"].startswith(f"{parent_id}.")
-        assert item["parent"] == parent_id
+        assert f"group:{parent_id}" in item.get("tags", [])
 
     # Verify on-disk state is consistent (single atomic save)
     todos = storage.load_todos(cfg, name)
     assert len(todos) == 4  # parent + 3 children
-    parent_todo = next(t for t in todos if t.id == parent_id)
-    assert len(parent_todo.children) == 3
+    child_todos = [t for t in todos if f"group:{parent_id}" in t.tags]
+    assert len(child_todos) == 3
 
 
 @pytest.mark.asyncio
@@ -163,25 +163,25 @@ async def test_nested_children_correct_ids(project_with_parent):
     # Child A is under parent_id
     child_a_id = created[0]["id"]
     assert child_a_id.startswith(f"{parent_id}.")
-    assert created[0]["parent"] == parent_id
+    assert f"group:{parent_id}" in created[0].get("tags", [])
 
     # Grandchildren are under Child A
     assert created[1]["id"].startswith(f"{child_a_id}.")
-    assert created[1]["parent"] == child_a_id
+    assert f"group:{child_a_id}" in created[1].get("tags", [])
     assert created[2]["id"].startswith(f"{child_a_id}.")
-    assert created[2]["parent"] == child_a_id
+    assert f"group:{child_a_id}" in created[2].get("tags", [])
 
     # Child B is under parent_id (sibling of Child A)
-    assert created[3]["parent"] == parent_id
+    assert f"group:{parent_id}" in created[3].get("tags", [])
 
-    # Verify on-disk hierarchy
+    # Verify on-disk hierarchy via group tags
     todos = storage.load_todos(cfg, name)
-    parent_todo = next(t for t in todos if t.id == parent_id)
-    child_a_todo = next(t for t in todos if t.id == child_a_id)
-    assert child_a_id in parent_todo.children
-    assert created[3]["id"] in parent_todo.children
-    assert created[1]["id"] in child_a_todo.children
-    assert created[2]["id"] in child_a_todo.children
+    direct_children = [t for t in todos if f"group:{parent_id}" in t.tags]
+    assert child_a_id in {t.id for t in direct_children}
+    assert created[3]["id"] in {t.id for t in direct_children}
+    grandchildren = [t for t in todos if f"group:{child_a_id}" in t.tags]
+    assert created[1]["id"] in {t.id for t in grandchildren}
+    assert created[2]["id"] in {t.id for t in grandchildren}
 
 
 @pytest.mark.asyncio

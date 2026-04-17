@@ -300,8 +300,9 @@ class TestTodosMCPTools:
         data = _json.loads(result)
         assert data.get("todo_id") == "1.1"
         todos = storage.load_todos(project[0], "myapp")
-        parent = next(t for t in todos if t.id == "1")
-        assert "1.1" in parent.children
+        child = next(t for t in todos if t.id == "1.1")
+        # Flat model: parent-child via group tag, not parent field
+        assert "group:1" in child.tags
 
     async def test_todo_add_with_parent_exposes_trello_checklist_id(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -325,10 +326,9 @@ class TestTodosMCPTools:
         data = _json.loads(result)
         assert data.get("todo_id") == "1.1"
         todos = storage.load_todos(project[0], "myapp")
-        parent = next(t for t in todos if t.id == "1")
         child = next(t for t in todos if t.id == "1.1")
-        assert "1.1" in parent.children
-        assert child.parent == "1"
+        # Flat model: parent-child via group tag
+        assert "group:1" in child.tags
 
     async def test_todo_add_with_invalid_parent_returns_error(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -348,8 +348,9 @@ class TestTodosMCPTools:
         data = _json.loads(result)
         assert data.get("todo_id") == "1.1.1"
         todos = storage.load_todos(project[0], "myapp")
-        child = next(t for t in todos if t.id == "1.1")
-        assert "1.1.1" in child.children
+        grandchild = next(t for t in todos if t.id == "1.1.1")
+        # Flat model: parent-child via group tag
+        assert "group:1.1" in grandchild.tags
 
     async def test_todo_delete(self, mcp_app: Any, project: tuple[ProjConfig, str]) -> None:
         await call_tool(mcp_app, "todo_add", title="To delete")
@@ -410,16 +411,18 @@ class TestTodosMCPTools:
     async def test_todo_tree_complex_hierarchy(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
+        # Flat model: build hierarchy via group: tags; completing a todo archives it immediately
         await call_tool(mcp_app, "todo_add", title="Root")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child-A")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child-B")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child-C")
-        await call_tool(mcp_app, "todo_complete", todo_id="1.1")
-        await call_tool(mcp_app, "todo_complete", todo_id="1.2")
         await call_tool(mcp_app, "todo_add", parent="1.2", title="Grandchild-B1")
+        # Complete Child-A (archives immediately)
+        await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         result = await call_tool(mcp_app, "todo_tree")
         data = _json.loads(result)
         root = data[0]
+        # Child-A (1.1) archived — only Child-B and Child-C remain under root
         assert len(root["_children"]) == 2
         child_titles = {c["title"] for c in root["_children"]}
         assert child_titles == {"Child-B", "Child-C"}
@@ -842,48 +845,48 @@ class TestTodoArchive:
         assert archived[0].id == "1"
         assert archived[0].status == "done"
 
-    async def test_child_todo_stays_in_active_when_completed(
+    async def test_flat_child_archives_immediately_when_completed(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
+        # Flat model: completing a child todo archives it immediately (no "wait for parent")
         await call_tool(mcp_app, "todo_add", title="Parent")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1.1")
-        assert "done" in result.lower()
+        assert "archived" in result.lower()
         active = storage.load_todos(project[0], "myapp")
         archived = storage.load_archived_todos(project[0], "myapp")
-        child = next(t for t in active if t.id == "1.1")
-        assert child.status == "done"
-        assert len(archived) == 0
+        assert len(archived) == 1
+        assert archived[0].id == "1.1"
+        assert len(active) == 1  # parent still active
 
-    async def test_parent_archives_whole_family(
+    async def test_flat_parent_archives_independently(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
+        # Flat model: parent and children archive independently
         await call_tool(mcp_app, "todo_add", title="Parent")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child-A")
         await call_tool(mcp_app, "todo_add", parent="1", title="Child-B")
         await call_tool(mcp_app, "todo_complete", todo_id="1.1")
-        await call_tool(mcp_app, "todo_complete", todo_id="1.2")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1")
         assert "archived" in result.lower()
         active = storage.load_todos(project[0], "myapp")
         archived = storage.load_archived_todos(project[0], "myapp")
-        assert len(active) == 0
-        assert len(archived) == 3
-        assert {t.id for t in archived} == {"1", "1.1", "1.2"}
+        # Only 1.1 + 1 archived; 1.2 still pending
+        assert {t.id for t in archived} == {"1.1", "1"}
+        assert any(t.id == "1.2" for t in active)
 
-    async def test_parent_cannot_be_completed_with_pending_child(
+    async def test_flat_parent_can_complete_with_pending_children(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
+        # Flat model: no constraint — parent completes independently
         await call_tool(mcp_app, "todo_add", title="Parent")
-        await call_tool(mcp_app, "todo_add", parent="1", title="Done-child")
         await call_tool(mcp_app, "todo_add", parent="1", title="Pending-child")
-        await call_tool(mcp_app, "todo_complete", todo_id="1.1")
         result = await call_tool(mcp_app, "todo_complete", todo_id="1")
-        assert "not done" in result.lower() or "cannot complete" in result.lower()
+        assert "archived" in result.lower()
         active = storage.load_todos(project[0], "myapp")
         archived = storage.load_archived_todos(project[0], "myapp")
-        assert len(active) == 3
-        assert len(archived) == 0
+        assert any(t.id == "1" for t in archived)
+        assert any(t.id == "1.1" for t in active)  # child still active
 
     async def test_archive_cleans_blocking_refs(
         self, mcp_app: Any, project: tuple[ProjConfig, str]
@@ -1084,9 +1087,13 @@ class TestTodoTreeMerge:
     ) -> None:
         """A todo with a missing parent appears under __orphaned__ synthetic root."""
         cfg, name = project
-        # Inject a todo with a dangling parent reference directly via storage
+        # Inject a todo with a dangling group: tag (missing parent) directly via storage
         orphan = Todo(
-            id="99", title="Lost Child", parent="999", created="2026-01-01", updated="2026-01-01"
+            id="99",
+            title="Lost Child",
+            tags=["group:999"],
+            created="2026-01-01",
+            updated="2026-01-01",
         )
         storage.save_todos(cfg, name, [orphan])
         result = await call_tool(mcp_app, "todo_tree", include_done=True)

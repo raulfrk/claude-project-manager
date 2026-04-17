@@ -135,42 +135,8 @@ def migrate_done_to_archive(cfg: ProjConfig, project_name: str) -> dict[str, int
     if not todos:
         return {"archived_count": 0, "remaining_count": 0}
 
-    todo_map = {t.id: t for t in todos}
-
-    def _all_descendants_done(tid: str) -> bool:
-        t = todo_map.get(tid)
-        if t is None:
-            return True
-        if t.status not in TERMINAL_STATUSES:
-            return False
-        return all(_all_descendants_done(cid) for cid in t.children)
-
-    def _collect_family_ids(tid: str) -> set[str]:
-        result: set[str] = {tid}
-        t = todo_map.get(tid)
-        if t:
-            for cid in t.children:
-                result.update(_collect_family_ids(cid))
-        return result
-
-    archive_ids: set[str] = set()
-
-    for t in todos:
-        if t.id in archive_ids:
-            continue
-        if t.status not in TERMINAL_STATUSES:
-            continue
-
-        # Leaf (no children, no parent)
-        if not t.children and not t.parent:
-            archive_ids.add(t.id)
-        # Leaf child (no children, has parent)
-        elif not t.children and t.parent:
-            # Archive child regardless of parent status
-            archive_ids.add(t.id)
-        # Parent (has children) — only archive when ALL descendants also done
-        elif t.children and _all_descendants_done(t.id):
-            archive_ids.update(_collect_family_ids(t.id))
+    # In flat model every terminal todo is a leaf — archive immediately.
+    archive_ids: set[str] = {t.id for t in todos if t.status in TERMINAL_STATUSES}
 
     if not archive_ids:
         return {"archived_count": 0, "remaining_count": len(todos)}
