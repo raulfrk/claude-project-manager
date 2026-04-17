@@ -1107,18 +1107,23 @@ def apply_mapping(
                             result.counts["todos_updated"] += 1
                         else:
                             parent_todo = by_jira_key.get(issue_key)
+                            # Flat model: sub-task becomes a sibling todo tagged
+                            # group:<parent_todo.id> — no parent/children kwargs.
+                            _st_labels = st.get("labels")
+                            subtask_tags: list[str] = (
+                                [str(x) for x in _st_labels] if isinstance(_st_labels, list) else []
+                            )
+                            if parent_todo:
+                                subtask_tags.append(f"group:{parent_todo.id}")
                             st_todo = Todo(
-                                id=next_todo_id(meta, parent=parent_todo),
+                                id=next_todo_id(meta),
                                 title=st_summary,
-                                parent=parent_todo.id if parent_todo else None,
+                                tags=subtask_tags,
                                 jira_issue_key=st_key,
                                 status=TodoStatus.DONE if st_resolved else "pending",
                                 created=today,
                                 updated=today,
                             )
-                            if parent_todo:
-                                parent_todo.children.append(st_todo.id)
-                                parent_todo.updated = today
                             todos.append(st_todo)
                             todo_map[st_todo.id] = st_todo
                             by_jira_key[st_key] = st_todo
