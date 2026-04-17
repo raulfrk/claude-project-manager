@@ -45,13 +45,16 @@ def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjConfig:
 
 
 def setup_project(cfg: ProjConfig, name: str, repo_path: str) -> None:
+    from server.lib.db import ensure_db
+
     today = str(date.today())
     proj_dir = Path(cfg.tracking_dir) / name
     proj_dir.mkdir(parents=True)
-    (proj_dir / "todos.yaml").write_text("todos: []\n")
     (proj_dir / "NOTES.md").write_text(f"# {name}\n")
-    # schema_version: 2 required so require_flat() passes (Phase 2 guard)
-    (proj_dir / "proj.yaml").write_text(f"name: {name}\nschema_version: 2\n")
+    # schema_version: 3 required so require_current() passes (Phase 3 guard)
+    (proj_dir / "proj.yaml").write_text(f"name: {name}\nschema_version: 3\n")
+    # Initialize the SQL database so storage functions work
+    ensure_db(cfg, name)
     meta = ProjectMeta(
         name=name,
         repos=[RepoEntry(label="code", path=repo_path)],
@@ -61,6 +64,22 @@ def setup_project(cfg: ProjConfig, name: str, repo_path: str) -> None:
     index = storage.load_index(cfg)
     index.projects[name] = ProjectEntry(name=name, tracking_dir=str(proj_dir), created=today)
     storage.save_index(cfg, index)
+
+
+def make_v3_project(tmp_path: Path, cfg: ProjConfig, name: str = "demo") -> tuple[ProjConfig, str]:
+    """Create a minimal v3 project fixture for SQL-only storage tests.
+
+    1. Creates tracking_dir/<name>/proj.yaml with schema_version: 3
+    2. Calls ensure_db to create SQL tables
+    3. Returns (cfg, name)
+    """
+    from server.lib.db import ensure_db
+
+    proj_dir = Path(cfg.tracking_dir) / name
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    (proj_dir / "proj.yaml").write_text(f"name: {name}\nschema_version: 3\n")
+    ensure_db(cfg, name)
+    return cfg, name
 
 
 @pytest.fixture()

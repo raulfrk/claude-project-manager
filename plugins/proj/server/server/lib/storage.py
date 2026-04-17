@@ -102,13 +102,13 @@ def todos_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    schema_version.require_flat(cfg, project_name)
+    schema_version.require_current(cfg, project_name)
     _ensure_migrated(cfg, project_name)
     return sql_todos.load_todos(cfg, project_name)
 
 
 def save_todos(cfg: ProjConfig, project_name: str, todos: list[Todo]) -> None:
-    schema_version.require_flat(cfg, project_name)
+    schema_version.require_current(cfg, project_name)
     sql_todos.save_todos(cfg, project_name, todos)
 
 
@@ -120,7 +120,7 @@ def archive_path(cfg: ProjConfig, project_name: str) -> Path:
 
 
 def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
-    schema_version.require_flat(cfg, project_name)
+    schema_version.require_current(cfg, project_name)
     # No _ensure_migrated — sql_todos.load_archived_todos handles the
     # archive.yaml.bak disaster-recovery fallback when data.db is missing.
     return sql_todos.load_archived_todos(cfg, project_name)
@@ -128,7 +128,7 @@ def load_archived_todos(cfg: ProjConfig, project_name: str) -> list[Todo]:
 
 def save_archived_todos(cfg: ProjConfig, project_name: str, todos_to_add: list[Todo]) -> None:
     """Append todos to archive, creating it if needed."""
-    schema_version.require_flat(cfg, project_name)
+    schema_version.require_current(cfg, project_name)
     sql_todos.save_archived_todos_append(cfg, project_name, todos_to_add)
 
 
