@@ -1,5 +1,17 @@
 # Changelog — proj
 
+## [5.0.1] — 2026-04-17
+### Fixed
+- **Sandbox hook migration (todo 650)** — re-added the 5 sandbox hooks that
+  were dropped when the sandbox plugin was folded into proj (commit 0608506).
+  `sandbox-on-setup-permissions`, `sandbox-on-revoke-permissions`,
+  `verify-sandbox-setup`, `sandbox-on-proj-add-repo`, and
+  `sandbox-on-proj-remove-repo` are now declared in proj's
+  `default-hooks.yaml` with `server: proj`. Users on a router with
+  orphan-detection will have stale `server: sandbox` entries replaced on
+  next discovery; users without orphan-detection must manually remove
+  the old entries via `router:remove`.
+
 ## [5.0.0] — 2026-04-15
 ### Removed
 - Superseded workflow skills: define, execute, run, run-batch, refine, decompose, quick, _shared

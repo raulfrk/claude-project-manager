@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 JIRA_HOOKS = REPO_ROOT / "plugins" / "jira" / ".claude-plugin" / "default-hooks.yaml"
 TODOIST_HOOKS = REPO_ROOT / "plugins" / "todoist" / ".claude-plugin" / "default-hooks.yaml"
+PROJ_HOOKS = REPO_ROOT / "plugins" / "proj" / ".claude-plugin" / "default-hooks.yaml"
 
 
 def _load(path: Path) -> dict:
@@ -60,6 +61,49 @@ def test_todoist_on_todo_add_parent_id_has_omit_if_empty():
     assert isinstance(parent_id, dict)
     assert parent_id["value"] == "${parent_todoist_task_id}"
     assert parent_id["omit_if_empty"] is True
+
+
+def test_proj_sandbox_hooks_migrated_to_proj_server():
+    """Regression for todo 650: sandbox hooks folded from the old sandbox plugin
+    (commit 0608506, feat(605.8)) must live in proj's default-hooks.yaml with
+    ``server: proj``.  Stale entries in a user's hooks.yaml pointing at the
+    removed ``server: sandbox`` cause ``sandbox_batch_setup`` to be routed to
+    zombie socket processes whose working directory has been deleted, which
+    surfaces as ``[Errno 2] No such file or directory`` during any
+    ``proj_load_session`` call.
+    """
+    doc = _load(PROJ_HOOKS)
+    expected_ids = {
+        "sandbox-on-setup-permissions",
+        "sandbox-on-revoke-permissions",
+        "verify-sandbox-setup",
+        "sandbox-on-proj-add-repo",
+        "sandbox-on-proj-remove-repo",
+    }
+    present_ids = {h.get("id") for h in doc.get("hooks", [])}
+    missing = expected_ids - present_ids
+    assert not missing, f"missing migrated sandbox hooks: {missing}"
+
+    for hook_id in expected_ids:
+        hook = _hook(doc, hook_id)
+        assert hook["server"] == "proj", (
+            f"{hook_id}: server must be 'proj' (was '{hook['server']}') — "
+            f"the old 'sandbox' server was removed in commit 0608506."
+        )
+        assert hook["condition"] == "sandbox_integration", (
+            f"{hook_id}: condition must be 'sandbox_integration'."
+        )
+
+
+def test_proj_default_hooks_have_no_sandbox_server_references():
+    """Regression for todo 650: no hook in proj's default-hooks.yaml may
+    reference the (removed) ``sandbox`` server.  This keeps the router's
+    orphan-detection pass able to drop any stale ``server: sandbox`` hooks
+    that survived the 605.8 fold.
+    """
+    doc = _load(PROJ_HOOKS)
+    offenders = [h["id"] for h in doc.get("hooks", []) if h.get("server") == "sandbox"]
+    assert not offenders, f"hooks still referencing removed 'sandbox' server: {offenders}"
 
 
 def test_jira_on_todo_add_param_mapping_keyset_complete():

@@ -60,3 +60,55 @@ hooks:
     param_mapping: {}
     blocking: true
     condition: "sandbox_integration"
+
+  # Sandbox hooks migrated from the (now-folded) sandbox plugin into proj.
+  # See commit 0608506 (feat(605.8): fold sandbox plugin into proj MCP server)
+  # and todo 650. These keep the original hook ids so that router
+  # orphan-detection can update stale entries in users' hooks.yaml that
+  # still point at the removed ``server: sandbox``.
+  - id: sandbox-on-setup-permissions
+    trigger_tool: proj_setup_permissions
+    target_tool: sandbox_batch_setup
+    server: proj
+    param_mapping:
+      paths: "${paths}"
+      mcp_servers: "${mcp_servers}"
+    blocking: true
+    condition: "sandbox_integration"
+
+  - id: sandbox-on-revoke-permissions
+    trigger_tool: proj_revoke_all_permissions
+    target_tool: sandbox_batch_revoke
+    server: proj
+    param_mapping:
+      paths: "${paths}"
+      mcp_servers: "${mcp_servers}"
+    blocking: true
+    condition: "sandbox_integration"
+
+  - id: verify-sandbox-setup
+    trigger_tool: proj_setup_permissions
+    target_tool: sandbox_check
+    server: proj
+    param_mapping:
+      scope: "user"
+    verification: true
+    condition: "sandbox_integration"
+
+  - id: sandbox-on-proj-add-repo
+    trigger_tool: proj_add_repo
+    target_tool: sandbox_batch_setup
+    server: proj
+    param_mapping:
+      paths: "${paths}"
+    blocking: true
+    condition: "sandbox_integration"
+
+  - id: sandbox-on-proj-remove-repo
+    trigger_tool: proj_remove_repo
+    target_tool: sandbox_batch_revoke
+    server: proj
+    param_mapping:
+      paths: "${paths}"
+    blocking: true
+    condition: "sandbox_integration"
