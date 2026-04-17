@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-TARGET = 2
+TARGET = 3
 
 
 def current(cfg: ProjConfig, project_name: str) -> int:
@@ -70,15 +70,34 @@ class LegacyProjectError(RuntimeError):
 def require_flat(cfg: ProjConfig, project_name: str) -> None:
     """Raise LegacyProjectError when a project has an explicit legacy schema.
 
+    Only raises when proj.yaml EXISTS and reports schema_version < 2.
+    Missing proj.yaml is treated as a new (not yet initialized) project and
+    allowed through — storage will raise FileNotFoundError on data.db absence.
+    """
+    if not _proj_yaml_exists(cfg, project_name):
+        return
+    v = current(cfg, project_name)
+    if v < 2:
+        raise LegacyProjectError(
+            f"Project {project_name!r} is still on the nested todo schema "
+            f"(schema_version={v}). Run `cpm-install --migrate` "
+            f"to upgrade this project before using todo tools.",
+        )
+
+
+def require_current(cfg: ProjConfig, project_name: str) -> None:
+    """Raise LegacyProjectError when a project is not at schema_version=TARGET (3).
+
     Only raises when proj.yaml EXISTS and reports schema_version < TARGET.
     Missing proj.yaml is treated as a new (not yet initialized) project and
     allowed through — storage will raise FileNotFoundError on data.db absence.
     """
     if not _proj_yaml_exists(cfg, project_name):
         return
-    if not flat_only(cfg, project_name):
+    v = current(cfg, project_name)
+    if v < TARGET:
         raise LegacyProjectError(
-            f"Project {project_name!r} is still on the nested todo schema "
-            f"(schema_version < {TARGET}). Run `cpm-install --migrate-flat` "
+            f"Project {project_name!r} is on schema_version={v} "
+            f"(target is {TARGET}). Run `cpm-install --migrate` "
             f"to upgrade this project before using todo tools.",
         )

@@ -24,8 +24,8 @@ def _write_proj_yaml(tracking_dir: Path, project: str, data: dict) -> None:
     (proj_dir / "proj.yaml").write_text(yaml.safe_dump(data))
 
 
-def test_target_constant_is_2():
-    assert schema_version.TARGET == 2
+def test_target_constant_is_3():
+    assert schema_version.TARGET == 3
 
 
 def test_current_returns_1_when_field_absent(fake_cfg, tmp_path):
@@ -55,12 +55,19 @@ def test_current_returns_1_when_yaml_corrupted(fake_cfg, tmp_path):
 
 
 def test_flat_only_false_when_below_target(fake_cfg, tmp_path):
+    # flat_only now checks >= TARGET (3); v1 and v2 are both below
     _write_proj_yaml(tmp_path, "demo", {"schema_version": 1})
     assert schema_version.flat_only(fake_cfg, "demo") is False
 
 
-def test_flat_only_true_when_at_target(fake_cfg, tmp_path):
+def test_flat_only_false_when_at_v2(fake_cfg, tmp_path):
+    # v2 is below TARGET=3
     _write_proj_yaml(tmp_path, "demo", {"schema_version": 2})
+    assert schema_version.flat_only(fake_cfg, "demo") is False
+
+
+def test_flat_only_true_when_at_target(fake_cfg, tmp_path):
+    _write_proj_yaml(tmp_path, "demo", {"schema_version": 3})
     assert schema_version.flat_only(fake_cfg, "demo") is True
 
 
@@ -70,9 +77,9 @@ def test_flat_only_true_when_above_target(fake_cfg, tmp_path):
 
 
 def test_no_caching_between_calls(fake_cfg, tmp_path):
-    _write_proj_yaml(tmp_path, "demo", {"schema_version": 1})
-    assert schema_version.flat_only(fake_cfg, "demo") is False
     _write_proj_yaml(tmp_path, "demo", {"schema_version": 2})
+    assert schema_version.flat_only(fake_cfg, "demo") is False
+    _write_proj_yaml(tmp_path, "demo", {"schema_version": 3})
     # Second call must pick up the new value — no cache.
     assert schema_version.flat_only(fake_cfg, "demo") is True
 
