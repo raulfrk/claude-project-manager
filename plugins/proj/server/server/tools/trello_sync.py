@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import re
+import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -41,6 +42,50 @@ _DESC_MAX_LEN = 16384
 def _now() -> str:
     """Return current UTC datetime as ISO 8601 string."""
     return datetime.now(tz=_UTC).replace(tzinfo=None).isoformat()
+
+
+# ── Group label helpers ──────────────────────────────────────────────────────
+
+TRELLO_LABEL_COLORS: list[str] = [
+    "green",
+    "yellow",
+    "orange",
+    "red",
+    "purple",
+    "blue",
+    "sky",
+    "lime",
+    "pink",
+    "black",
+]
+
+
+def _stable_color_for(tag: str) -> str:
+    """Return a deterministic Trello label color for a group tag.
+
+    Uses zlib.crc32 for stability across Python versions and platforms.
+    The same tag always maps to the same color.
+    """
+    idx = zlib.crc32(tag.encode()) % len(TRELLO_LABEL_COLORS)
+    return TRELLO_LABEL_COLORS[idx]
+
+
+def _ensure_group_label(
+    board_id: str,
+    label_name: str,
+    existing_labels: list[dict[str, JsonValue]],
+) -> str | None:
+    """Return the Trello label ID for *label_name* on *board_id*.
+
+    ``existing_labels`` is the list already fetched from Trello (avoids an
+    extra API call per label).  Returns the matching ID, or None if no match —
+    callers should create the label using ``_stable_color_for(label_name)`` and
+    add the result to ``existing_labels`` to enable dedup within a sync run.
+    """
+    for lbl in existing_labels:
+        if isinstance(lbl, dict) and str(lbl.get("name", "")) == label_name:
+            return str(lbl.get("id", "")) or None
+    return None
 
 
 # ── Title formatting ────────────────────────────────────────────────────────
@@ -255,6 +300,17 @@ class TrelloSyncPlan:
     # (this check is one-way add-only).
     push_update_labels: list[dict[str, JsonValue]] = field(default_factory=list)
 
+    # Group label actions.
+    # group_label_ensure: [{"board_id": str, "name": str, "color": str}]
+    #   — labels that need to be created on the board if they don't exist yet.
+    # group_label_attach: [{"card_id": str, "label_name": str}]
+    #   — labels to attach to cards (by name; label ID resolved at apply time).
+    group_label_ensure: list[dict[str, JsonValue]] = field(default_factory=list)
+    group_label_attach: list[dict[str, JsonValue]] = field(default_factory=list)
+
+    # Pull group tag sync: [{"todo_id": str, "add_tags": list[str], "remove_tags": list[str]}]
+    pull_update_group_tags: list[dict[str, JsonValue]] = field(default_factory=list)
+
     # Legacy checklist-based fields (used by trello_full_sync)
     push_create_checklist: list[dict[str, JsonValue]] = field(default_factory=list)
     push_create_item: list[dict[str, JsonValue]] = field(default_factory=list)
@@ -416,6 +472,16 @@ def compute_diff(
     proj_task_label_id = (
         str(proj_task_label_id_raw) if isinstance(proj_task_label_id_raw, str) else ""
     )
+
+    # Board-level labels for group label management.
+    # Optional — supplied by full_sync as trello_data["board_labels"].
+    board_labels_raw = trello_data.get("board_labels", [])
+    board_labels: list[dict[str, JsonValue]] = (
+        [lbl for lbl in board_labels_raw if isinstance(lbl, dict)]
+        if isinstance(board_labels_raw, list)
+        else []
+    )
+    board_id_for_labels: str = str(meta.trello.board_id or cfg.trello.default_board_id or "")
 
     lists_raw = trello_data.get("lists", [])
     trello_lists: list[dict[str, JsonValue]] = (
@@ -644,6 +710,97 @@ def compute_diff(
                     name,
                 )
             # else: neither changed -> skip
+
+    # ── Group label push: emit ensure + attach for group:* tags ────
+    # For each todo that has group:* tags and a card (or card being created),
+    # ensure the group label exists on the board and attach it to the card.
+    if board_id_for_labels:
+        _ensured_names: set[str] = set()
+        for todo in todos:
+            group_tags = [t for t in todo.tags if t.startswith("group:")]
+            if not group_tags:
+                continue
+            # Find the card_id for this todo (already linked or being created)
+            t_card_id = todo.trello_card_id
+            if not t_card_id:
+                # Will be created — emit attach without card_id; apply will handle after creation
+                t_card_id = ""
+            for tag in group_tags:
+                # Ensure label exists on board
+                existing_id = _ensure_group_label(board_id_for_labels, tag, board_labels)
+                if not existing_id and tag not in _ensured_names:
+                    color = _stable_color_for(tag)
+                    plan.group_label_ensure.append(
+                        {
+                            "board_id": board_id_for_labels,
+                            "name": tag,
+                            "color": color,
+                        }
+                    )
+                    _ensured_names.add(tag)
+                # Check if card already has the label attached
+                if t_card_id:
+                    trello_card = trello_card_by_id.get(t_card_id)
+                    if trello_card is not None:
+                        card_label_ids = trello_card.get("idLabels", [])
+                        card_label_id_set: set[str] = (
+                            {str(lid) for lid in card_label_ids}
+                            if isinstance(card_label_ids, list)
+                            else set()
+                        )
+                        # Check by label name (ID may not be known yet)
+                        label_id = existing_id or ""
+                        already_attached = label_id and label_id in card_label_id_set
+                        if not already_attached:
+                            plan.group_label_attach.append(
+                                {
+                                    "card_id": t_card_id,
+                                    "label_name": tag,
+                                }
+                            )
+                    else:
+                        # Card not in Trello yet (being created) — always emit attach
+                        plan.group_label_attach.append(
+                            {
+                                "card_id": t_card_id,
+                                "label_name": tag,
+                            }
+                        )
+
+    # ── Group label pull: sync group:* Trello labels back to local tags ─
+    # For each linked todo, compare group:* tags from Trello card labels
+    # vs local todo.tags. Emit pull_update_group_tags if they differ.
+    for todo in todos:
+        if not todo.trello_card_id:
+            continue
+        trello_card = trello_card_by_id.get(todo.trello_card_id)
+        if not trello_card:
+            continue
+        # Get group:* label names from Trello card
+        card_label_ids_raw = trello_card.get("idLabels", [])
+        card_label_ids_list: list[str] = (
+            [str(lid) for lid in card_label_ids_raw] if isinstance(card_label_ids_raw, list) else []
+        )
+        trello_group_tags: set[str] = set()
+        for lbl in board_labels:
+            if not isinstance(lbl, dict):
+                continue
+            lbl_id = str(lbl.get("id", ""))
+            lbl_name = str(lbl.get("name", ""))
+            if lbl_id in card_label_ids_list and lbl_name.startswith("group:"):
+                trello_group_tags.add(lbl_name)
+
+        local_group_tags: set[str] = {t for t in todo.tags if t.startswith("group:")}
+        add_tags = trello_group_tags - local_group_tags
+        remove_tags = local_group_tags - trello_group_tags
+        if add_tags or remove_tags:
+            plan.pull_update_group_tags.append(
+                {
+                    "todo_id": todo.id,
+                    "add_tags": sorted(add_tags),
+                    "remove_tags": sorted(remove_tags),
+                }
+            )
 
     # ── Pull: scan Trello cards for changes to linked todos ─────────
     # Build reverse lookup: trello_card_id -> todo
