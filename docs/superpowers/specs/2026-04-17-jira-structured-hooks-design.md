@@ -204,11 +204,19 @@ directly (same as todoist hooks). No JSON string escape issues.
 
 - **Empty `key`** on single wrapper → return `{"error": "key required", "key": ""}`
   without calling `_update_issues_core`.
-- **`updates` empty or any item missing `key`** on bulk wrapper → return
-  `{"error": "each update requires a non-empty key"}`.
+- **`updates` empty** on bulk wrapper → return
+  `{"error": "updates list is empty"}`.
+- **Any item missing `key`** on bulk wrapper → return
+  `{"error": "each update requires a non-empty key"}`. (Hard error, not skip —
+  caller shape is wrong.)
 - **All fields `None`** on single wrapper → return
   `{"warning": "no fields to update", "key": "..."}`. Mirrors the existing
   null-safe hook tool pattern (e.g. `trello_add_checklist_item_hook`).
+- **Bulk item with only `key` (no updatable fields)** → filter out that item
+  before building payload. If all items filter out → return
+  `{"warning": "no fields to update in any item", "count": N}` without calling
+  `_update_issues_core`. Otherwise dispatch the surviving items and include
+  a `skipped_keys: [...]` field in the result alongside the Jira response.
 - **Invalid resolution name** → pass through to Jira, 400 propagates as
   existing error shape from `_update_issues_core`. No client-side allowlist —
   Jira is authoritative on valid resolution names per project.
@@ -235,6 +243,9 @@ directly (same as todoist hooks). No JSON string escape issues.
   - Mixed field sets across items
   - Empty `updates` list → `{"error": ...}`
   - Item missing `key` → `{"error": ...}`
+  - All items have only `key` (no updatable fields) → `{"warning": ..., "count": N}`
+  - Mixed: some items have fields, some don't → payload built for the
+    former, `skipped_keys` in result for the latter
 
 ### Existing files updated
 
