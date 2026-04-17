@@ -11,6 +11,8 @@ import yaml
 from server.lib.client import JsonValue, get_client
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mcp.server.fastmcp import FastMCP
 
 _DEFAULT_ISSUE_FIELDS = (
@@ -82,6 +84,39 @@ def _update_issues_core(updates_json: str) -> str:
         except RuntimeError as exc:
             failures.append({"index": idx, "key": update.get("key", ""), "error": str(exc)})
     return json.dumps({"successes": successes, "failures": failures})
+
+
+FIELD_MAP: dict[str, Callable[[object], object]] = {
+    "summary": lambda v: v,
+    "description": lambda v: v,
+    "priority": lambda v: {"name": v},
+    "labels": lambda v: v,
+    "resolution": lambda v: {"name": v},
+}
+
+
+def _build_updates_json(items: list[dict[str, object]]) -> str:
+    """Build a Jira updates_json payload from a list of structured items.
+
+    Each item must have a non-empty `key`. Optional fields are those in
+    FIELD_MAP; None values are omitted. Unknown keys are ignored (forward
+    compat). Raises ValueError on empty list or missing key.
+    """
+    if not items:
+        raise ValueError("updates list is empty")
+    built: list[dict[str, object]] = []
+    for item in items:
+        key = item.get("key", "")
+        if not key:
+            raise ValueError("each update requires a non-empty key")
+        fields: dict[str, object] = {}
+        for fname, transform in FIELD_MAP.items():
+            val = item.get(fname)
+            if val is None:
+                continue
+            fields[fname] = transform(val)
+        built.append({"key": key, "fields": fields})
+    return json.dumps({"updates": built}, ensure_ascii=True)
 
 
 def register(app: FastMCP) -> None:
