@@ -274,16 +274,10 @@ def main() -> int:
 
         # Safety checks
         check_root()
-        check_prerequisites()
 
-        # Prevent concurrent runs
-        lock_fh = acquire_lock()
-
-        # --full-cleanup without --uninstall implies --uninstall --full-cleanup
-        if args.full_cleanup and not args.uninstall:
-            args.uninstall = True
-
-        # Migration-only shortcuts — bypass the install TUI entirely.
+        # Migration-only shortcuts — bypass the install TUI (and the Claude CLI
+        # prerequisite check) entirely. Running a flat-todo migration does not
+        # require the Claude CLI to be installed.
         # getattr() is defensive: existing tests stub `parser.parse_args()` with
         # a bare Namespace and don't know about the 636 migration flags.
         if getattr(args, "migrate_flat_dry_run", False):
@@ -303,6 +297,15 @@ def main() -> int:
                 strict_resync=getattr(args, "strict_resync", False),
                 backup_retain_days=getattr(args, "backup_retain", None),
             )
+
+        # Full install/upgrade/uninstall paths still require the Claude CLI
+        # and a process-level lock.
+        check_prerequisites()
+        lock_fh = acquire_lock()
+
+        # --full-cleanup without --uninstall implies --uninstall --full-cleanup
+        if args.full_cleanup and not args.uninstall:
+            args.uninstall = True
 
         # Determine mode for TUI routing
         if args.reinstall:
