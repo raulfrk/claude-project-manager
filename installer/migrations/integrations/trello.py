@@ -170,6 +170,43 @@ def _load_cfg(project: PendingProject) -> dict[str, Any]:
 
 
 def _update_local_trello_card_id(todo_id: str, card_id: str) -> None:
-    """Hook for updating local todo. Stubbed in Task 10 tests via monkeypatch;
-    wired to proj storage in Task 12."""
-    log.debug("TODO local update %s → %s", todo_id, card_id)
+    """Write new trello_card_id back into local todos.yaml + SQL.
+
+    Uses proj plugin's storage layer (load_todos / save_todos) to stay consistent
+    with the hybrid YAML+SQL store.  Requires cfg + project_name which are not
+    available at this call-site signature level, so we load config from the
+    default path via storage.load_config().  If any step fails we log a warning
+    and continue — the local snapshot backup exists for manual recovery.
+    """
+    # Import lazily so the installer doesn't require proj plugin at import time
+    try:
+        from plugins.proj.server.server.lib import storage  # type: ignore[import-not-found]
+    except ImportError as e:
+        log.warning(
+            "proj storage not importable; skipping local trello_card_id update for %s: %s",
+            todo_id,
+            e,
+        )
+        return
+
+    # storage has no single-field updater; use load → patch → save pattern.
+    # storage.update_todo_field does NOT exist — use save_todos after patching.
+    try:
+        cfg = storage.load_config()
+        # Determine project name by scanning all tracked projects for the todo_id
+        index = storage.load_index(cfg)
+        for proj_name in index.projects:
+            todos = storage.load_todos(cfg, proj_name)
+            for todo in todos:
+                if todo.id == todo_id:
+                    todo.trello_card_id = card_id
+                    storage.save_todos(cfg, proj_name, todos)
+                    log.debug(
+                        "updated trello_card_id for todo %s → %s", todo_id, card_id
+                    )
+                    return
+        log.warning(
+            "todo %s not found in any tracked project; skipping local update", todo_id
+        )
+    except Exception as e:
+        log.warning("failed to update local trello_card_id for todo %s: %s", todo_id, e)

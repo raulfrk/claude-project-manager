@@ -117,3 +117,78 @@ def test_bump_only_recovery_for_already_flat(tmp_path: Path) -> None:
     runner.execute_local()
     runner.commit()
     assert read_schema_version(project.proj_yaml_path) == 2
+
+
+from installer.migrations.integrations.base import ResyncResult  # noqa: E402
+
+
+class FakeIntegration:
+    name = "fake"
+    called: list[str] = []
+
+    def enabled_for(self, project) -> bool:
+        return True
+
+    def plan(self, project, migrated):
+        return []
+
+    def execute(self, project, actions):
+        FakeIntegration.called.append(project.name)
+        return ResyncResult()
+
+
+def test_runner_invokes_enabled_integrations(tmp_path: Path) -> None:
+    project = _setup_project(tmp_path / "p")
+    backup_root = tmp_path / "backups"
+    FakeIntegration.called = []
+    runner = FlatTodoMigration(
+        project=project,
+        run_ts="ts",
+        backup_root=backup_root,
+        integrations=[FakeIntegration()],
+    )
+    runner.plan()
+    runner.confirm()
+    runner.execute_local()
+    runner.commit()
+    assert FakeIntegration.called == ["demo"]
+    assert runner.state == MigrationState.COMMITTED
+
+
+def test_resync_failure_does_not_revert_local(tmp_path: Path) -> None:
+    project = _setup_project(tmp_path / "p")
+    backup_root = tmp_path / "backups"
+
+    class FailingIntegration:
+        name = "fail"
+
+        def enabled_for(self, project):
+            return True
+
+        def plan(self, project, migrated):
+            from installer.migrations.integrations.base import Action
+
+            return [Action(kind="noop", target_id="x", payload={})]
+
+        def execute(self, project, actions):
+            from installer.migrations.integrations.base import (
+                FailedAction,
+                ResyncResult,
+            )
+
+            return ResyncResult(failed=[FailedAction(actions[0], "E", "m", True)])
+
+    runner = FlatTodoMigration(
+        project=project,
+        run_ts="ts",
+        backup_root=backup_root,
+        integrations=[FailingIntegration()],
+    )
+    runner.plan()
+    runner.confirm()
+    runner.execute_local()
+    runner.commit()
+    assert (
+        runner.state == MigrationState.COMMITTED
+    )  # local committed despite failed resync
+    assert runner.resync_failures  # collected for summary
