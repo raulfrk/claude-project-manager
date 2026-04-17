@@ -628,7 +628,17 @@ class TestMergeWorktree:
         create_result = create_worktree("myapp", "feature/abort-fail")
         create_data = json.loads(create_result)
         assert "Created" in create_data["result"]
-        wt_path = str(real_git_repo.parent / "worktrees" / "myapp" / "feature-abort-fail")
+        wt_path_p = real_git_repo.parent / "worktrees" / "myapp" / "feature-abort-fail"
+        wt_path = str(wt_path_p)
+
+        # Create divergence so the branch is NOT already a descendant of main
+        # (otherwise rebase_worktree short-circuits to up_to_date; todo 654).
+        (wt_path_p / "feat.txt").write_text("feat work")
+        _git(wt_path_p, "add", ".")
+        _git(wt_path_p, "commit", "-m", "feat commit")
+        (real_git_repo / "main.txt").write_text("main work")
+        _git(real_git_repo, "add", ".")
+        _git(real_git_repo, "commit", "-m", "main commit")
 
         real_run = subprocess.run
 

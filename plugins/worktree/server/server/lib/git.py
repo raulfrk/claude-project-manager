@@ -166,18 +166,80 @@ def commit(path: Path, message: str) -> str:
     return _run(["-C", str(path), "rev-parse", "HEAD"]).strip()
 
 
+def _resolve_base_ref(repo_path: str, base_branch: str) -> str:
+    """Resolve base_branch to a concrete ref, preferring local refs/heads over origin/.
+
+    Returns the ref expression (unchanged input if it already resolves, else
+    refs/remotes/origin/<name> if only the remote exists). Raises GitError if
+    neither local nor remote ref exists.
+    """
+    # Prefer local branch
+    local = subprocess.run(
+        ["git", "-C", repo_path, "show-ref", "--verify", "--quiet", f"refs/heads/{base_branch}"],
+        capture_output=True,
+        text=True,
+    )
+    if local.returncode == 0:
+        return f"refs/heads/{base_branch}"
+    # Fall back to origin/<name>
+    remote = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo_path,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/remotes/origin/{base_branch}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if remote.returncode == 0:
+        return f"refs/remotes/origin/{base_branch}"
+    raise GitError(f"base_branch not found locally or on origin: {base_branch}")
+
+
+def _is_ancestor(worktree_path: str, ancestor: str, descendant: str) -> bool:
+    """Return True if *ancestor* is an ancestor of (or equal to) *descendant*."""
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        capture_output=True,
+        text=True,
+        cwd=worktree_path,
+    )
+    return result.returncode == 0
+
+
 def rebase_worktree(
     repo_path: str, worktree_path: str, base_branch: str
 ) -> dict[str, str | list[str]]:
     """Rebase the worktree's branch onto base_branch.
+
+    If the worktree HEAD is already a descendant of base_branch (i.e. a linear
+    fast-forward is possible), returns {"status": "up_to_date", "base_branch": ...}
+    without invoking rebase. This avoids git's default fork-point heuristic, which
+    can incorrectly rewind a branch onto an ancient commit when the local reflog
+    of base_branch has stale entries (todo 654).
 
     On conflict, returns {"status": "conflict", "conflicted_files": [...], "base_branch": ...}.
     On non-conflict failure, aborts the rebase and raises GitError.
     On success, returns {"status": "rebased", "base_branch": ...}.
     """
     try:
+        # Resolve base_branch to a concrete ref (prefer local over origin/).
+        base_ref = _resolve_base_ref(repo_path, base_branch)
+
+        # Short-circuit: if HEAD already contains base_ref, no rebase is needed.
+        # This is the fast-forward-eligible case — git rebase with default fork-point
+        # can misbehave here (todo 654), so skip it entirely.
+        if _is_ancestor(worktree_path, base_ref, "HEAD"):
+            return {"status": "up_to_date", "base_branch": base_branch}
+
+        # Pass --no-fork-point to avoid reflog-based surprises when the worktree's
+        # view of base_branch has stale reflog entries.
         result = subprocess.run(
-            ["git", "rebase", base_branch],
+            ["git", "rebase", "--no-fork-point", base_ref],
             capture_output=True,
             text=True,
             cwd=worktree_path,
