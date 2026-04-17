@@ -377,3 +377,45 @@ def register(app: FastMCP) -> None:
         if len(item) == 1:  # only 'key' present
             return json.dumps({"warning": "no fields to update", "key": key})
         return _update_issues_core(_build_updates_json([item]))
+
+    @app.tool(
+        description=(
+            "Update multiple Jira issues with structured fields per item. "
+            "`updates` is a list of dicts each having 'key' (required) and any of "
+            "summary/description/priority/labels/resolution (None omitted). "
+            "Items with only a key (no updatable fields) are filtered out and "
+            "listed in 'skipped_keys'. Returns the jira_update_issues response shape "
+            "plus 'skipped_keys' when applicable; or {error} for empty list / "
+            "missing key; or {warning} if all items are empty."
+        ),
+    )
+    def jira_update_issues_bulk(updates: list[dict[str, object]]) -> str:
+        if not updates:
+            return json.dumps({"error": "updates list is empty"})
+        for item in updates:
+            if not item.get("key"):
+                return json.dumps({"error": "each update requires a non-empty key"})
+
+        # Split: items with at least one updatable field vs empty items.
+        dispatchable: list[dict[str, object]] = []
+        skipped_keys: list[str] = []
+        for item in updates:
+            has_field = any(item.get(fname) is not None for fname in FIELD_MAP)
+            if has_field:
+                dispatchable.append(item)
+            else:
+                skipped_keys.append(str(item["key"]))
+
+        if not dispatchable:
+            return json.dumps(
+                {
+                    "warning": "no fields to update in any item",
+                    "count": len(updates),
+                }
+            )
+
+        core_result = _update_issues_core(_build_updates_json(dispatchable))
+        parsed = json.loads(core_result)
+        if skipped_keys:
+            parsed["skipped_keys"] = skipped_keys
+        return json.dumps(parsed)
