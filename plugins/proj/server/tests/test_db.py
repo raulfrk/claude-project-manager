@@ -36,12 +36,13 @@ def test_init_schema_creates_all_tables() -> None:
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()
         table_names = {r[0] for r in rows}
+        # decisions table is created by sql_decisions.ensure_table (called from ensure_db),
+        # not by init_schema directly.
         assert {
             "todos",
             "archive_todos",
             "project_meta",
             "project_index",
-            "decisions",
         } <= table_names
     finally:
         conn.close()
@@ -62,9 +63,25 @@ def test_init_schema_creates_indexes() -> None:
             "idx_todos_jira",
             "idx_archive_project",
             "idx_archive_project_status",
-            "idx_decisions_project",
+            # idx_decisions_* are created by sql_decisions.ensure_table, not init_schema
         }
         assert expected <= index_names
+    finally:
+        conn.close()
+
+
+def test_ensure_db_creates_decisions_table(tmp_cfg: ProjConfig) -> None:
+    """ensure_db calls sql_decisions.ensure_table, creating the decisions table."""
+    ensure_db(tmp_cfg, "demo")
+    conn = get_connection(db_path(tmp_cfg, "demo"))
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='decisions'"
+        ).fetchall()
+        assert len(rows) == 1
+        # Verify new structured columns exist
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(decisions)").fetchall()}
+        assert {"id", "timestamp", "text", "todo_id", "tags"} <= cols
     finally:
         conn.close()
 

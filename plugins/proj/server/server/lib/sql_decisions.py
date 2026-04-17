@@ -1,75 +1,96 @@
-"""Decisions CRUD via SQLite — append-only, ordered by insertion (id ASC)."""
+"""Decisions CRUD via SQLite — structured columns, ordered by insertion (id ASC)."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from server.lib.db import ensure_db, get_connection
 
 if TYPE_CHECKING:
-    from server.lib.models import ProjConfig
+    import sqlite3
+
+    from server.lib.models import Decision, ProjConfig
 
 
-def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, object]]:
-    """Load all decisions for project, ordered by insertion order (id ASC).
+_CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    text TEXT NOT NULL,
+    todo_id TEXT,
+    tags TEXT DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_todo_id ON decisions(todo_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
+"""
+
+
+def ensure_table(conn: sqlite3.Connection) -> None:
+    """Create decisions table + indexes if absent. Idempotent."""
+    conn.executescript(_CREATE_TABLE_SQL)
+
+
+def load_decisions(cfg: ProjConfig, project_name: str) -> list[Decision]:
+    """Load all decisions ordered by insertion order (id ASC).
 
     Returns [] if none found.
     """
+    from server.lib.models import Decision
+
     db_file = ensure_db(cfg, project_name)
     with get_connection(db_file) as conn:
         rows = conn.execute(
-            "SELECT data FROM decisions WHERE project=? ORDER BY id ASC",
-            (project_name,),
+            "SELECT id, timestamp, text, todo_id, tags FROM decisions ORDER BY id ASC",
         ).fetchall()
-    return [json.loads(row["data"]) for row in rows]
-
-
-def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, object]) -> None:
-    """Append a single decision entry — no read+rewrite cycle, just INSERT."""
-    timestamp = entry.get("timestamp") or datetime.now(UTC).isoformat()
-    db_file = ensure_db(cfg, project_name)
-    with get_connection(db_file) as conn:
-        conn.execute(
-            "INSERT INTO decisions (project, timestamp, data) VALUES (?, ?, ?)",
-            (project_name, timestamp, json.dumps(entry)),
+    return [
+        Decision(
+            id=row["id"],
+            timestamp=row["timestamp"],
+            text=row["text"],
+            todo_id=row["todo_id"],
+            tags=json.loads(row["tags"]) if row["tags"] else [],
         )
+        for row in rows
+    ]
 
 
-def replace_decisions(cfg: ProjConfig, project_name: str, entries: list[dict[str, object]]) -> None:
-    """Replace all decisions for a project atomically (DELETE + INSERT)."""
+def save_decisions(cfg: ProjConfig, project_name: str, decisions: list[Decision]) -> None:
+    """Replace all decisions atomically (DELETE + bulk INSERT)."""
     db_file = ensure_db(cfg, project_name)
     with get_connection(db_file) as conn:
-        conn.execute("DELETE FROM decisions WHERE project=?", (project_name,))
-        for entry in entries:
-            timestamp = entry.get("timestamp") or datetime.now(UTC).isoformat()
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM decisions")
+        for d in decisions:
             conn.execute(
-                "INSERT INTO decisions (project, timestamp, data) VALUES (?, ?, ?)",
-                (project_name, timestamp, json.dumps(entry)),
+                "INSERT INTO decisions (timestamp, text, todo_id, tags) VALUES (?, ?, ?, ?)",
+                (
+                    d.timestamp,
+                    d.text,
+                    d.todo_id,
+                    json.dumps(d.tags),
+                ),
             )
+        conn.execute("COMMIT")
 
 
-def load_all_decisions(cfg: ProjConfig) -> dict[str, list[dict[str, object]]]:
-    """Load decisions for ALL projects (used by SQLite→YAML export).
+def append_decision(cfg: ProjConfig, project_name: str, decision: Decision) -> Decision:
+    """Single INSERT; returns Decision with assigned id.
 
-    Returns {project_name: [decisions...]} ordered by project then id.
+    The timestamp is stored as-is (even empty string) for legacy compat.
+    Callers should provide a valid ISO timestamp for new entries.
     """
-    from pathlib import Path
-
-    tracking = Path(cfg.tracking_dir).expanduser()
-    result: dict[str, list[dict[str, object]]] = {}
-
-    if not tracking.exists():
-        return result
-
-    for db_file in sorted(tracking.glob("*/data.db")):
-        with get_connection(db_file) as conn:
-            rows = conn.execute(
-                "SELECT project, data FROM decisions ORDER BY project, id"
-            ).fetchall()
-        for row in rows:
-            project = row["project"]
-            result.setdefault(project, []).append(json.loads(row["data"]))
-
-    return result
+    db_file = ensure_db(cfg, project_name)
+    with get_connection(db_file) as conn:
+        cursor = conn.execute(
+            "INSERT INTO decisions (timestamp, text, todo_id, tags) VALUES (?, ?, ?, ?)",
+            (
+                decision.timestamp,
+                decision.text,
+                decision.todo_id,
+                json.dumps(decision.tags),
+            ),
+        )
+        assigned_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+    return dataclasses.replace(decision, id=assigned_id)

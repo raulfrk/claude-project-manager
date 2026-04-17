@@ -133,9 +133,11 @@ def test_decisions_append_concurrent(tmp_cfg):
     lock = threading.Lock()
 
     def append(i: int) -> None:
+        from server.lib.models import Decision
+
         try:
             sql_decisions.append_decision(
-                tmp_cfg, "proj", {"key": f"val{i}", "timestamp": "2026-01-01"}
+                tmp_cfg, "proj", Decision(timestamp="2026-01-01", text=f"val{i}")
             )
         except Exception as e:
             with lock:

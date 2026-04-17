@@ -87,7 +87,6 @@ def _restore_sqlite_from_backups(
     Uses sql_todos/sql_decisions directly (not storage wrappers) so that
     mocked storage.save_todos in tests does not interfere with restore.
     """
-    from server.lib import sql_decisions as _sqld
     from server.lib import sql_todos as _sqlt
     from server.lib.models import Todo as _Todo
 
@@ -115,7 +114,7 @@ def _restore_sqlite_from_backups(
         if decisions_yaml.exists():
             raw_list = yaml.safe_load(decisions_yaml.read_text()) or []
             if isinstance(raw_list, list):
-                _sqld.replace_decisions(cfg, project_name, raw_list)
+                storage.replace_decisions(cfg, project_name, raw_list)
 
 
 def _migrate_decisions(decisions: list[dict[str, JsonValue]], id_map: dict[str, str]) -> int:

@@ -61,13 +61,6 @@ CREATE TABLE IF NOT EXISTS project_index (
     data TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    data TEXT NOT NULL
-);
-
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project);
 CREATE INDEX IF NOT EXISTS idx_todos_project_status ON todos(project, status);
 CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent);
@@ -78,7 +71,6 @@ CREATE INDEX IF NOT EXISTS idx_todos_jira ON todos(jira_issue_key);
 CREATE INDEX IF NOT EXISTS idx_archive_project ON archive_todos(project);
 CREATE INDEX IF NOT EXISTS idx_archive_project_status ON archive_todos(project, status);
 
-CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);
 """
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -129,6 +121,9 @@ def ensure_db(cfg: ProjConfig, project_name: str) -> Path:
         conn = get_connection(path)
         try:
             init_schema(conn)
+            from server.lib import sql_decisions as _sd
+
+            _sd.ensure_table(conn)
         finally:
             conn.close()
 

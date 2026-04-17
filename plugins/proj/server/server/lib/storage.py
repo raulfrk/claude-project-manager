@@ -14,6 +14,7 @@ import yaml
 from server.lib import schema_version, sql_archive, sql_decisions, sql_meta, sql_todos
 from server.lib.migration import _ensure_migrated
 from server.lib.models import (
+    Decision,
     JsonValue,
     ProjConfig,
     ProjectIndex,
@@ -188,21 +189,55 @@ def _write_yaml_list(path: Path, data: list[dict[str, JsonValue]]) -> None:
         raise
 
 
+def _decision_to_dict(d: Decision) -> dict[str, JsonValue]:
+    """Convert a Decision dataclass to the legacy dict format used by tools/tests."""
+    return {
+        "timestamp": d.timestamp,
+        "decision": d.text,
+        "context": "",
+        "todo_id": d.todo_id or "",
+        "tags": d.tags,
+    }
+
+
+def _dict_to_decision(entry: dict[str, JsonValue]) -> Decision:
+    """Convert a legacy dict entry to a Decision dataclass.
+
+    Preserves raw timestamp strings (including empty/invalid ones) so that
+    context_injection can skip entries with bad timestamps.
+    """
+    tags_raw = entry.get("tags", [])
+    tags: list[str] = [str(t) for t in tags_raw] if isinstance(tags_raw, list) else []
+    # Accept either 'text' (new) or 'decision' (legacy) as the decision text
+    text = str(entry.get("text") or entry.get("decision") or "")
+    # Preserve the raw timestamp as-is (even if empty/invalid) so context_injection
+    # can skip entries with bad timestamps. Only None becomes empty string.
+    raw_ts = entry.get("timestamp")
+    timestamp = str(raw_ts) if raw_ts is not None else ""
+    return Decision(
+        timestamp=timestamp,
+        text=text,
+        todo_id=str(entry["todo_id"]) if entry.get("todo_id") else None,
+        tags=tags,
+    )
+
+
 def load_decisions(cfg: ProjConfig, project_name: str) -> list[dict[str, JsonValue]]:
-    """Read decisions for project from SQLite."""
-    return sql_decisions.load_decisions(cfg, project_name)  # type: ignore[return-value]
+    """Read decisions for project from SQLite — returns legacy dict format."""
+    decisions = sql_decisions.load_decisions(cfg, project_name)
+    return [_decision_to_dict(d) for d in decisions]
 
 
 def append_decision(cfg: ProjConfig, project_name: str, entry: dict[str, JsonValue]) -> None:
     """Append a single decision entry to SQLite."""
-    sql_decisions.append_decision(cfg, project_name, entry)  # type: ignore[arg-type]
+    sql_decisions.append_decision(cfg, project_name, _dict_to_decision(entry))
 
 
 def replace_decisions(
     cfg: ProjConfig, project_name: str, entries: list[dict[str, JsonValue]]
 ) -> None:
     """Replace all decisions for a project atomically (DELETE + INSERT)."""
-    sql_decisions.replace_decisions(cfg, project_name, entries)  # type: ignore[arg-type]
+    sql_decisions.save_decisions(cfg, project_name, [_dict_to_decision(e) for e in entries])
 
 
 def build_decision_entry(

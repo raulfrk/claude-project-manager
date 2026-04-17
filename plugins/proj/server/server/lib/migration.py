@@ -198,12 +198,17 @@ def migrate_yaml_to_sqlite(cfg: ProjConfig, project_name: str) -> dict[str, int 
                 except Exception:
                     logger.warning("Failed to migrate meta for %r — skipping", project_name)
 
-            # Insert decisions
+            # Insert decisions using new structured schema
             for decision in decisions_list:
-                timestamp = decision.get("timestamp") or ""
+                timestamp = str(decision.get("timestamp") or "")
+                # Accept 'text' (new) or 'decision' (legacy) as the decision text
+                text = str(decision.get("text") or decision.get("decision") or "")
+                todo_id = str(decision["todo_id"]) if decision.get("todo_id") else None
+                tags_raw = decision.get("tags", [])
+                tags = json.dumps(tags_raw) if isinstance(tags_raw, list) else "[]"
                 conn.execute(
-                    "INSERT INTO decisions (project, timestamp, data) VALUES (?, ?, ?)",
-                    (project_name, timestamp, json.dumps(decision)),
+                    "INSERT INTO decisions (timestamp, text, todo_id, tags) VALUES (?, ?, ?, ?)",
+                    (timestamp, text, todo_id, tags),
                 )
     finally:
         conn.close()
@@ -287,8 +292,11 @@ def export_sqlite_to_yaml(cfg: ProjConfig, project_name: str) -> list[Path]:
     except FileNotFoundError:
         logger.warning("No meta found for %r — skipping meta.yaml export", project_name)
 
-    # decisions.yaml
-    decisions = sql_decisions.load_decisions(cfg, project_name)
+    # decisions.yaml — convert Decision objects to legacy dict format for YAML export
+    import dataclasses as _dc
+
+    decisions_raw = sql_decisions.load_decisions(cfg, project_name)
+    decisions = [_dc.asdict(d) for d in decisions_raw]
     decisions_path = tdir / "decisions.yaml"
     _write_yaml(decisions_path, decisions)
     written.append(decisions_path)

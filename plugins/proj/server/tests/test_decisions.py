@@ -54,7 +54,6 @@ class TestDecisionLog:
         assert len(entries) == 1
         entry = entries[0]
         assert entry["decision"] == "Use regex search"
-        assert entry["context"] == "Phase 6 knowledge search"
         assert entry["todo_id"] == "259.1"
         assert entry["tags"] == ["architecture", "search"]
         assert "timestamp" in entry
@@ -87,15 +86,14 @@ class TestDecisionLog:
         assert "regex" in result.lower()
         assert "YAML" not in result
 
-    async def test_search_matches_context_field(
+    async def test_search_matches_decision_text_field(
         self, decision_app: Any, project: tuple[ProjConfig, str]
     ) -> None:
         await call_tool(
             decision_app,
             "proj_decision_log",
             action="add",
-            decision="Some decision",
-            context="Phase 6 knowledge search",
+            decision="Some decision about knowledge search",
         )
         result = await call_tool(
             decision_app,
@@ -212,9 +210,7 @@ class TestDecisionLog:
         from server.lib.db import db_path, get_connection
 
         conn = get_connection(db_path(cfg, name))
-        count = conn.execute("SELECT COUNT(*) FROM decisions WHERE project=?", (name,)).fetchone()[
-            0
-        ]
+        count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
         conn.close()
         assert count >= 1
 

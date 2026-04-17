@@ -821,6 +821,20 @@ class ProjectMeta:
         )
 
 
+# ── Decisions ────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Decision:
+    """A single decision log entry stored in the decisions SQL table."""
+
+    timestamp: str
+    text: str
+    todo_id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    id: int | None = None  # assigned by SQL on INSERT
+
+
 # ── Todos ─────────────────────────────────────────────────────────────────────
 
 

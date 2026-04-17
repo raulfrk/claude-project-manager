@@ -514,8 +514,8 @@ class TestMigrateArchiveAndDecisions:
         decisions = storage.load_decisions(cfg, "dec_text")
         assert "T001" not in decisions[0]["decision"]
         assert "1" in decisions[0]["decision"]
-        assert "T002" not in decisions[0]["context"]
-        assert "2" in decisions[0]["context"]
+        # context field is no longer stored (dropped in Decision dataclass schema)
+        # T002 replacement in context is no longer tested here
 
     def test_migrate_decisions_unmapped_pattern_unchanged(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Only task")]

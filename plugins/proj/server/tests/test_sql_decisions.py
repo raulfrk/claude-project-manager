@@ -1,119 +1,90 @@
-"""Unit tests for sql_decisions CRUD module."""
+"""Unit tests for sql_decisions structured CRUD module."""
 
 from __future__ import annotations
 
-from server.lib.models import ProjConfig
+from server.lib.db import ensure_db, get_connection
+from server.lib.models import Decision, ProjConfig
 from server.lib.sql_decisions import (
     append_decision,
-    load_all_decisions,
+    ensure_table,
     load_decisions,
-    replace_decisions,
+    save_decisions,
 )
 
 
-class TestLoadDecisions:
-    def test_empty_returns_empty_list(self, cfg: ProjConfig) -> None:
-        result = load_decisions(cfg, "myproject")
-        assert result == []
+def test_ensure_table_is_idempotent(cfg: ProjConfig) -> None:
+    """ensure_table can be called multiple times without error."""
+    db_file = ensure_db(cfg, "demo")
+    with get_connection(db_file) as conn:
+        ensure_table(conn)
+        ensure_table(conn)  # second call must not raise
+    decisions = load_decisions(cfg, "demo")
+    assert decisions == []
 
-    def test_roundtrip_single_decision(self, cfg: ProjConfig) -> None:
-        entry = {
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "decision": "Use SQLite",
-            "context": "storage layer",
-        }
-        append_decision(cfg, "myproject", entry)
-        result = load_decisions(cfg, "myproject")
-        assert len(result) == 1
-        assert result[0]["decision"] == "Use SQLite"
-        assert result[0]["context"] == "storage layer"
 
-    def test_insertion_order_preserved(self, cfg: ProjConfig) -> None:
-        for i in range(3):
-            append_decision(
-                cfg,
-                "myproject",
-                {"timestamp": f"2026-01-0{i + 1}T00:00:00+00:00", "decision": f"Decision {i}"},
-            )
-        result = load_decisions(cfg, "myproject")
-        assert len(result) == 3
-        assert result[0]["decision"] == "Decision 0"
-        assert result[1]["decision"] == "Decision 1"
-        assert result[2]["decision"] == "Decision 2"
+def test_load_decisions_empty_returns_empty_list(cfg: ProjConfig) -> None:
+    result = load_decisions(cfg, "demo")
+    assert result == []
 
-    def test_project_isolation(self, cfg: ProjConfig) -> None:
+
+def test_append_decision_assigns_id(cfg: ProjConfig) -> None:
+    d = Decision(timestamp="2026-01-01T00:00:00", text="Use SQLite")
+    returned = append_decision(cfg, "demo", d)
+    assert returned.id is not None
+    assert isinstance(returned.id, int)
+    assert returned.id >= 1
+    assert returned.text == "Use SQLite"
+
+
+def test_load_decisions_returns_insertion_order(cfg: ProjConfig) -> None:
+    for i in range(3):
         append_decision(
-            cfg, "proj_a", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "A decision"}
+            cfg,
+            "demo",
+            Decision(timestamp=f"2026-01-0{i + 1}T00:00:00", text=f"Decision {i}"),
         )
+    result = load_decisions(cfg, "demo")
+    assert len(result) == 3
+    assert result[0].text == "Decision 0"
+    assert result[1].text == "Decision 1"
+    assert result[2].text == "Decision 2"
+    assert result[0].id < result[1].id < result[2].id
+
+
+def test_save_decisions_replaces_all(cfg: ProjConfig) -> None:
+    for i in range(3):
         append_decision(
-            cfg, "proj_b", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "B decision"}
+            cfg,
+            "demo",
+            Decision(timestamp="2026-01-01T00:00:00", text=f"Old {i}"),
         )
-        result_a = load_decisions(cfg, "proj_a")
-        result_b = load_decisions(cfg, "proj_b")
-        assert len(result_a) == 1
-        assert result_a[0]["decision"] == "A decision"
-        assert len(result_b) == 1
-        assert result_b[0]["decision"] == "B decision"
+    new_decisions = [
+        Decision(timestamp="2026-06-01T00:00:00", text="New A"),
+        Decision(timestamp="2026-06-02T00:00:00", text="New B"),
+    ]
+    save_decisions(cfg, "demo", new_decisions)
+    result = load_decisions(cfg, "demo")
+    assert len(result) == 2
+    assert result[0].text == "New A"
+    assert result[1].text == "New B"
 
 
-class TestAppendDecision:
-    def test_auto_generates_timestamp_when_missing(self, cfg: ProjConfig) -> None:
-        entry: dict[str, object] = {"decision": "No timestamp"}
-        append_decision(cfg, "myproject", entry)
-        result = load_decisions(cfg, "myproject")
-        assert len(result) == 1
-        # timestamp field was in the stored entry (auto-generated)
-        assert "decision" in result[0]
-        assert result[0]["decision"] == "No timestamp"
+def test_decision_dataclass_roundtrip(cfg: ProjConfig) -> None:
+    """Full roundtrip: all fields preserved across append → load."""
+    d = Decision(
+        timestamp="2026-03-15T10:30:00",
+        text="Switch to SQL-only storage",
+        todo_id="647",
+        tags=["architecture", "storage"],
+    )
+    returned = append_decision(cfg, "demo", d)
+    assert returned.id is not None
 
-    def test_preserves_explicit_timestamp(self, cfg: ProjConfig) -> None:
-        ts = "2025-06-15T12:34:56+00:00"
-        entry = {"timestamp": ts, "decision": "Explicit ts"}
-        append_decision(cfg, "myproject", entry)
-        result = load_decisions(cfg, "myproject")
-        assert len(result) == 1
-        assert result[0]["timestamp"] == ts
-
-
-class TestReplaceDecisions:
-    def test_replaces_all_entries(self, cfg: ProjConfig) -> None:
-        for i in range(3):
-            append_decision(
-                cfg, "myproject", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": f"Old {i}"}
-            )
-        new_entries = [
-            {"timestamp": "2026-06-01T00:00:00+00:00", "decision": "New A"},
-            {"timestamp": "2026-06-02T00:00:00+00:00", "decision": "New B"},
-        ]
-        replace_decisions(cfg, "myproject", new_entries)
-        result = load_decisions(cfg, "myproject")
-        assert len(result) == 2
-        assert result[0]["decision"] == "New A"
-        assert result[1]["decision"] == "New B"
-
-    def test_empty_list_clears_all(self, cfg: ProjConfig) -> None:
-        append_decision(
-            cfg, "myproject", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "Something"}
-        )
-        replace_decisions(cfg, "myproject", [])
-        result = load_decisions(cfg, "myproject")
-        assert result == []
-
-
-class TestLoadAllDecisions:
-    def test_empty_tracking_dir(self, cfg: ProjConfig) -> None:
-        result = load_all_decisions(cfg)
-        assert result == {}
-
-    def test_multiple_projects(self, cfg: ProjConfig) -> None:
-        append_decision(
-            cfg, "proj_a", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "Alpha"}
-        )
-        append_decision(
-            cfg, "proj_b", {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "Beta"}
-        )
-        result = load_all_decisions(cfg)
-        assert "proj_a" in result
-        assert "proj_b" in result
-        assert result["proj_a"][0]["decision"] == "Alpha"
-        assert result["proj_b"][0]["decision"] == "Beta"
+    loaded = load_decisions(cfg, "demo")
+    assert len(loaded) == 1
+    item = loaded[0]
+    assert item.text == "Switch to SQL-only storage"
+    assert item.timestamp == "2026-03-15T10:30:00"
+    assert item.todo_id == "647"
+    assert item.tags == ["architecture", "storage"]
+    assert item.id == returned.id
