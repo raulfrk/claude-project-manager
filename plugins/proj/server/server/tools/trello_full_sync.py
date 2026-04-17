@@ -586,60 +586,78 @@ def _sync_single_project(
         meta = storage.load_meta(cfg, name)
         card_id = meta.trello_card_id
 
-    # Fetch card state
-    lists_data: list[dict[str, JsonValue]] | None = None
+    # Fetch board lists + todo cards for compute_diff (card-per-todo model)
     warnings: list[str] = []
+    try:
+        lists_result = _call_trello_tool("get_lists", {"board_id": board_id})
+        lists_data: list[dict[str, JsonValue]] = (
+            [x for x in lists_result if isinstance(x, dict)]
+            if isinstance(lists_result, list)
+            else []
+        )
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to fetch Trello lists: {e}",
+        }
+
+    # Resolve list IDs by name for tasks + done lists
+    proj_lm = (
+        meta.trello.list_mappings
+        if meta.trello.list_mappings is not None
+        else cfg.trello.list_mappings
+    )
+    list_id_by_name: dict[str, str] = {
+        _as_str(lst.get("name", "")).lower(): _as_str(lst.get("id", ""))
+        for lst in lists_data
+        if isinstance(lst, dict)
+    }
+    task_list_ids = [
+        lid
+        for lname, lid in list_id_by_name.items()
+        if lname in {proj_lm.tasks.lower(), proj_lm.done.lower()}
+    ]
+
+    # Fetch cards from tasks + done lists
+    all_cards: list[dict[str, JsonValue]] = []
+    for list_id in task_list_ids:
+        try:
+            cards_result = _call_trello_tool("get_cards_by_list_id", {"list_id": list_id})
+            if isinstance(cards_result, list):
+                all_cards.extend(c for c in cards_result if isinstance(c, dict))
+        except Exception as e:
+            warnings.append(f"Failed to fetch cards for list {list_id}: {e}")
+
+    # Fetch project tracking card if linked
+    project_card: dict[str, JsonValue] | None = None
     if card_id:
         try:
-            card_data = _call_trello_tool("get_card_checklists", {"card_id": card_id})
-            checklists = (
-                card_data
-                if isinstance(card_data, list)
-                else _as_list(_as_dict(card_data).get("checklists", []))
-            )
-        except Exception as e:
-            return {
-                "status": "error",
-                "error": f"Failed to fetch card checklists: {e}",
-            }
-        card_detail: dict[str, JsonValue] = {}
-        try:
-            card_detail = _as_dict(_call_trello_tool("get_card", {"card_id": card_id}))
-            if not isinstance(card_detail, dict):
-                card_detail = {}
+            project_card = _as_dict(_call_trello_tool("get_card", {"card_id": card_id}))
         except Exception:
-            logger.debug("Failed to fetch card detail from Trello", exc_info=True)
-        trello_card_json = json.dumps(
-            {
-                "checklists": checklists,
-                "idList": card_detail.get("idList", ""),
-                "list": card_detail.get("list", {}),
-            }
-        )
-    else:
-        trello_card_json = json.dumps({"checklists": []})
+            logger.debug("Failed to fetch project tracking card from Trello", exc_info=True)
+
+    trello_card_json = json.dumps(
+        {
+            "cards": all_cards,
+            "lists": lists_data,
+            "project_card": project_card or {},
+        }
+    )
 
     # Compute diff
     plan = compute_diff(trello_card_json, cfg, name)
 
-    # If card needs creating, do it first
-    if plan.card_create and not card_id:
+    # If project tracking card needs creating, do it first
+    if plan.project_card_create and not card_id:
         try:
-            lists_result = _call_trello_tool("get_lists", {"board_id": board_id})
-            lists_data = (
-                [x for x in lists_result if isinstance(x, dict)]
-                if isinstance(lists_result, list)
-                else None
-            )
             default_list = cfg.trello.default_list or "Active"
             target_list_id = None
-            if isinstance(lists_data, list):
-                for lst in lists_data:
-                    if _as_str(lst.get("name", "")).lower() == default_list.lower():
-                        target_list_id = lst["id"]
-                        break
-                if not target_list_id and lists_data:
-                    target_list_id = lists_data[0]["id"]
+            for lst in lists_data:
+                if _as_str(lst.get("name", "")).lower() == default_list.lower():
+                    target_list_id = lst.get("id")
+                    break
+            if not target_list_id and lists_data:
+                target_list_id = lists_data[0].get("id")
 
             if not target_list_id:
                 return {
@@ -669,7 +687,7 @@ def _sync_single_project(
                     name,
                     existing_card_id,
                 )
-                card_result = {"id": existing_card_id}
+                card_result: dict[str, JsonValue] = {"id": existing_card_id}
             else:
                 card_result = _as_dict(
                     _call_trello_tool(
@@ -685,7 +703,10 @@ def _sync_single_project(
                 link_data = TrelloApplyInput(link_trello_card_id=new_card_id)
                 apply_changes(link_data, cfg, name)
                 card_id = new_card_id
-                trello_card_json = json.dumps({"checklists": []})
+                # Re-compute diff with empty cards (new project card, no todos yet)
+                trello_card_json = json.dumps(
+                    {"cards": [], "lists": lists_data, "project_card": {}}
+                )
                 plan = compute_diff(trello_card_json, cfg, name)
         except Exception as e:
             return {
