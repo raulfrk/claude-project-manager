@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from installer.migrations.detect import read_schema_version
-from installer.migrations.entry import MIGRATION_ROOT
 from installer.migrations.flat_todo import FlatTodoMigration
 from installer.migrations.types import PendingProject, RecoveryPath
 
@@ -28,10 +27,11 @@ def test_bump_only_path_after_interrupted_run(
         def _commit(self) -> None:  # crash after flatten succeeded
             raise SystemExit("crash")
 
+    backup_root = home_with_projects / ".claude" / "migrations"
     runner = CrashingRunner(
         project=project,
         run_ts="crash-run",
-        backup_root=MIGRATION_ROOT / "crash-run",
+        backup_root=backup_root,
         integrations=[],
     )
     runner.plan()
@@ -56,7 +56,7 @@ def test_bump_only_path_after_interrupted_run(
     runner2 = FlatTodoMigration(
         project=project,
         run_ts="recovery-run",
-        backup_root=MIGRATION_ROOT / "recovery-run",
+        backup_root=backup_root,
         integrations=[],
     )
     plan = runner2.plan()

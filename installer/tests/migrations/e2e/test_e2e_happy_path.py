@@ -9,7 +9,6 @@ import yaml
 from httpx import Response
 
 from installer.migrations.detect import read_schema_version
-from installer.migrations.entry import MIGRATION_ROOT
 from installer.migrations.flat_todo import FlatTodoMigration
 from installer.migrations.integrations.jira import JiraResync
 from installer.migrations.integrations.todoist import TodoistResync
@@ -43,6 +42,7 @@ def test_happy_path_three_projects(
         return_value=Response(204),
     )
 
+    backup_root = home_with_projects / ".claude" / "migrations"
     projects = [
         PendingProject(
             name=name,
@@ -58,7 +58,7 @@ def test_happy_path_three_projects(
         runner = FlatTodoMigration(
             project=p,
             run_ts="e2e-happy",
-            backup_root=MIGRATION_ROOT / "e2e-happy",
+            backup_root=backup_root,
             integrations=integrations,
         )
         runner.plan()

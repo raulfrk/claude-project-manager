@@ -9,7 +9,6 @@ import yaml
 from httpx import Response
 
 from installer.migrations.detect import read_schema_version
-from installer.migrations.entry import MIGRATION_ROOT
 from installer.migrations.flat_todo import FlatTodoMigration
 from installer.migrations.integrations.trello import TrelloResync
 from installer.migrations.types import PendingProject
@@ -35,7 +34,7 @@ def test_trello_500_leaves_local_committed(
     runner = FlatTodoMigration(
         project=project,
         run_ts="e2e-partial",
-        backup_root=MIGRATION_ROOT / "e2e-partial",
+        backup_root=home_with_projects / ".claude" / "migrations",
         integrations=[TrelloResync()],
     )
     runner.plan()

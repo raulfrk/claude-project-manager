@@ -7,7 +7,6 @@ import pytest
 import yaml
 
 from installer.migrations.detect import read_schema_version
-from installer.migrations.entry import MIGRATION_ROOT
 from installer.migrations.flat_todo import FlatTodoMigration
 from installer.migrations.types import PendingProject
 
@@ -42,12 +41,13 @@ def test_rollback_isolated_to_failing_project(
         for name in ("cpm", "side", "legacy")
     ]
 
+    backup_root = home_with_projects / ".claude" / "migrations"
     results: list[tuple[str, str]] = []
     for p in projects:
         runner = FlatTodoMigration(
             project=p,
             run_ts="e2e-rb",
-            backup_root=MIGRATION_ROOT / "e2e-rb",
+            backup_root=backup_root,
             integrations=[],  # local-only — no SaaS mocks needed
         )
         runner.plan()
