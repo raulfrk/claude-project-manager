@@ -89,3 +89,26 @@ def test_create_handles_missing_optional_files(tmp_path: Path) -> None:
     assert not (snap.dir / "data.db").exists()
     manifest = json.loads((snap.dir / "manifest.json").read_text())
     assert "archive.yaml" not in manifest["checksums"]
+
+
+def test_create_includes_decisions_yaml_when_present(
+    src_project: Path, tmp_path: Path
+) -> None:
+    """decisions.yaml is included in backup when it exists."""
+    (src_project / "decisions.yaml").write_text("[]\n")
+    backup_root = tmp_path / "backups"
+    snap = BackupSnapshot.create("demo", "ts", src_project, backup_root)
+    assert (snap.dir / "decisions.yaml").exists()
+    manifest = json.loads((snap.dir / "manifest.json").read_text())
+    assert "decisions.yaml" in manifest["checksums"]
+
+
+def test_create_skips_decisions_yaml_when_absent(
+    src_project: Path, tmp_path: Path
+) -> None:
+    """decisions.yaml is not required; backup succeeds when it's missing."""
+    backup_root = tmp_path / "backups"
+    snap = BackupSnapshot.create("demo", "ts", src_project, backup_root)
+    assert not (snap.dir / "decisions.yaml").exists()
+    manifest = json.loads((snap.dir / "manifest.json").read_text())
+    assert "decisions.yaml" not in manifest["checksums"]

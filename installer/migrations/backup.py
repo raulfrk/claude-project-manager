@@ -17,7 +17,7 @@ class VerificationError(RuntimeError):
     """Raised when a backup's manifest checksums don't match its files."""
 
 
-OPTIONAL_FILES = ("archive.yaml", "data.db")
+OPTIONAL_FILES = ("archive.yaml", "data.db", "decisions.yaml")
 REQUIRED_FILES = ("todos.yaml", "proj.yaml")
 
 
