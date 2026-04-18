@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 
 def test_dry_run_writes_report_exits_zero(home_with_projects: Path) -> None:
@@ -21,11 +20,11 @@ def test_dry_run_writes_report_exits_zero(home_with_projects: Path) -> None:
     assert r.returncode == 0
     assert "Dry-run report:" in r.stdout
 
-    # Nothing mutated
+    # Nothing mutated — .schema-version should not be created
     for name in ("cpm", "side", "legacy"):
-        pj = home_with_projects / "projects" / name / "proj.yaml"
-        data = yaml.safe_load(pj.read_text())
-        assert "schema_version" not in data
+        assert not (
+            home_with_projects / "projects" / "tracking" / name / ".schema-version"
+        ).exists()
 
 
 def test_non_tty_exits_with_warning(
@@ -43,6 +42,6 @@ def test_non_tty_exits_with_warning(
     assert r.returncode == 0
     assert "interactive terminal" in r.stdout
     # Still no mutation
-    pj = home_with_projects / "projects" / "cpm" / "proj.yaml"
-    data = yaml.safe_load(pj.read_text())
-    assert "schema_version" not in data
+    assert not (
+        home_with_projects / "projects" / "tracking" / "cpm" / ".schema-version"
+    ).exists()

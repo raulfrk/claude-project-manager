@@ -27,8 +27,12 @@ def test_trello_500_leaves_local_committed(
 
     project = PendingProject(
         name="cpm",
-        path=home_with_projects / "projects" / "cpm",
-        schema_version_path=home_with_projects / "projects" / "cpm" / ".schema-version",
+        path=home_with_projects / "projects" / "tracking" / "cpm",
+        schema_version_path=home_with_projects
+        / "projects"
+        / "tracking"
+        / "cpm"
+        / ".schema-version",
         current_version=1,
     )
     runner = FlatTodoMigration(

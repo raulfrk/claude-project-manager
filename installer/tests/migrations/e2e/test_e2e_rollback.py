@@ -34,9 +34,10 @@ def test_rollback_isolated_to_failing_project(
     projects = [
         PendingProject(
             name=name,
-            path=home_with_projects / "projects" / name,
+            path=home_with_projects / "projects" / "tracking" / name,
             schema_version_path=home_with_projects
             / "projects"
+            / "tracking"
             / name
             / ".schema-version",
             current_version=1,

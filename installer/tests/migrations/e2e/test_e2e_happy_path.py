@@ -46,9 +46,10 @@ def test_happy_path_three_projects(
     projects = [
         PendingProject(
             name=name,
-            path=home_with_projects / "projects" / name,
+            path=home_with_projects / "projects" / "tracking" / name,
             schema_version_path=home_with_projects
             / "projects"
+            / "tracking"
             / name
             / ".schema-version",
             current_version=1,

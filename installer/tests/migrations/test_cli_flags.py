@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
+import yaml
 
 
 def test_help_lists_migrate_flags() -> None:
@@ -18,14 +22,43 @@ def test_help_lists_migrate_flags() -> None:
     assert "--strict-resync" in r.stdout
 
 
-def test_dry_run_flag_exits_zero_without_mutation(tmp_path, monkeypatch) -> None:
-    # Point fake home at tmp_path so no real config touched
-    monkeypatch.setenv("HOME", str(tmp_path))
-    (tmp_path / ".claude").mkdir()
-    (tmp_path / ".claude" / "proj.yaml").write_text("projects: []\n")
+def test_dry_run_flag_exits_zero_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Build a real-shape registry so dry-run iterates projects.
+    home = tmp_path / "home"
+    tracking = home / "projects" / "tracking"
+    (home / ".claude").mkdir(parents=True)
+
+    # One project at v1 (no .schema-version file)
+    proj_dir = tracking / "demo"
+    proj_dir.mkdir(parents=True)
+    (proj_dir / "todos.yaml").write_text("[]\n")
+    (proj_dir / "archive.yaml").write_text("[]\n")
+
+    # Global config with tracking_dir
+    (home / ".claude" / "proj.yaml").write_text(
+        yaml.safe_dump({"tracking_dir": str(tracking)})
+    )
+
+    # Registry
+    registry = {
+        "projects": {
+            "demo": {"tracking_dir": str(proj_dir), "archived": False},
+        }
+    }
+    (tracking / "active-projects.yaml").write_text(yaml.safe_dump(registry))
+
+    monkeypatch.setenv("HOME", str(home))
+
     r = subprocess.run(
         [sys.executable, "-m", "installer.main", "--migrate-flat-dry-run"],
         capture_output=True,
         text=True,
+        env={"HOME": str(home), "PATH": __import__("os").environ["PATH"]},
     )
     assert r.returncode == 0
+    # Dry-run report should mention the project
+    assert "demo" in r.stdout or "Dry-run" in r.stdout
+    # Nothing mutated — .schema-version should NOT be created
+    assert not (proj_dir / ".schema-version").exists()

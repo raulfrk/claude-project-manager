@@ -16,8 +16,12 @@ def test_bump_only_path_after_interrupted_run(
 ) -> None:
     project = PendingProject(
         name="cpm",
-        path=home_with_projects / "projects" / "cpm",
-        schema_version_path=home_with_projects / "projects" / "cpm" / ".schema-version",
+        path=home_with_projects / "projects" / "tracking" / "cpm",
+        schema_version_path=home_with_projects
+        / "projects"
+        / "tracking"
+        / "cpm"
+        / ".schema-version",
         current_version=1,
     )
     # Simulate SIGKILL between FLATTENED and COMMITTED by running through flatten
