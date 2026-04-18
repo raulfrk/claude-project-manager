@@ -90,7 +90,7 @@ def test_storage_raises_legacy_project_error_on_v2(tmp_path: Path, cfg: ProjConf
 
     proj_dir = Path(cfg.tracking_dir) / "legacy"
     proj_dir.mkdir(parents=True, exist_ok=True)
-    (proj_dir / "proj.yaml").write_text("name: legacy\nschema_version: 2\n")
+    (proj_dir / ".schema-version").write_text("2\n")
     ensure_db(cfg, "legacy")
 
     with pytest.raises(LegacyProjectError, match="cpm-install --migrate"):
