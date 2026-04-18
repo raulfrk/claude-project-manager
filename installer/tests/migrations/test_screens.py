@@ -12,13 +12,13 @@ def _fixture_projects(tmp_path: Path) -> list[PendingProject]:
         PendingProject(
             name="cpm",
             path=tmp_path / "cpm",
-            proj_yaml_path=tmp_path / "cpm" / "proj.yaml",
+            schema_version_path=tmp_path / "cpm" / ".schema-version",
             current_version=1,
         ),
         PendingProject(
             name="side",
             path=tmp_path / "side",
-            proj_yaml_path=tmp_path / "side" / "proj.yaml",
+            schema_version_path=tmp_path / "side" / ".schema-version",
             current_version=1,
         ),
     ]
@@ -55,7 +55,7 @@ def test_review_screen_snapshot(snap_compare, tmp_path: Path) -> None:
     project = PendingProject(
         name="cpm",
         path=tmp_path / "cpm",
-        proj_yaml_path=tmp_path / "cpm" / "proj.yaml",
+        schema_version_path=tmp_path / "cpm" / ".schema-version",
         current_version=1,
     )
     plan = MigrationPlan(
@@ -97,7 +97,7 @@ def test_review_dry_run_tab_snapshot(snap_compare, tmp_path: Path) -> None:
     project = PendingProject(
         name="cpm",
         path=tmp_path / "cpm",
-        proj_yaml_path=tmp_path / "cpm" / "proj.yaml",
+        schema_version_path=tmp_path / "cpm" / ".schema-version",
         current_version=1,
     )
     plan = MigrationPlan(

@@ -79,7 +79,7 @@ def _init_db(project_dir: Path) -> None:
 def v2_project(tmp_path: Path) -> PendingProject:
     root = tmp_path / "myapp"
     root.mkdir()
-    (root / "proj.yaml").write_text("name: myapp\nschema_version: 2\n")
+    (root / ".schema-version").write_text("2\n")
 
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
@@ -136,7 +136,7 @@ def v2_project(tmp_path: Path) -> PendingProject:
     return PendingProject(
         name="myapp",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=2,
     )
 
@@ -151,7 +151,7 @@ def test_v2_to_v3_migration(v2_project: PendingProject, tmp_path: Path) -> None:
     assert result.reason == "complete"
 
     # schema_version bumped to 3
-    assert read_schema_version(v2_project.proj_yaml_path) == 3
+    assert read_schema_version(v2_project.schema_version_path) == 3
 
     # YAML files deleted
     assert not (v2_project.path / "todos.yaml").exists()

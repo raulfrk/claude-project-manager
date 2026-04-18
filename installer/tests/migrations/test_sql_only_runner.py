@@ -71,7 +71,7 @@ def _init_db(project_dir: Path) -> None:
 
 def _make_v2_project(root: Path) -> PendingProject:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "proj.yaml").write_text("name: demo\nschema_version: 2\n")
+    (root / ".schema-version").write_text("2\n")
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
             [
@@ -92,7 +92,7 @@ def _make_v2_project(root: Path) -> PendingProject:
     return PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=2,
     )
 
@@ -108,7 +108,7 @@ def test_happy_path_commits(tmp_path: Path) -> None:
     runner.commit()
 
     assert runner.state == MigrationState.COMMITTED
-    assert read_schema_version(project.proj_yaml_path) == 3
+    assert read_schema_version(project.schema_version_path) == 3
     assert not (project.path / "todos.yaml").exists()
     assert not (project.path / "archive.yaml").exists()
     assert not (project.path / "decisions.yaml").exists()
@@ -137,20 +137,20 @@ def test_rollback_on_transform_failure(tmp_path: Path) -> None:
     assert runner.state == MigrationState.FAILED
     # YAML files restored from backup
     assert (project.path / "todos.yaml").exists()
-    assert (project.path / "proj.yaml").exists()
+    assert (project.path / ".schema-version").exists()
 
 
 def test_bump_only_when_yaml_absent(tmp_path: Path) -> None:
     """If YAML files already absent, skip flatten and jump straight to RESYNCED."""
     root = tmp_path / "p"
     root.mkdir()
-    (root / "proj.yaml").write_text("name: demo\nschema_version: 2\n")
+    (root / ".schema-version").write_text("2\n")
     # No YAML files — already SQL-only
     _init_db(root)
     project = PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=2,
     )
     backup_root = tmp_path / "backups"
@@ -161,4 +161,4 @@ def test_bump_only_when_yaml_absent(tmp_path: Path) -> None:
     runner.commit()
 
     assert runner.state == MigrationState.COMMITTED
-    assert read_schema_version(project.proj_yaml_path) == 3
+    assert read_schema_version(project.schema_version_path) == 3

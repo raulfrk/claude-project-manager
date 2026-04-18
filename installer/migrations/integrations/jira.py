@@ -101,4 +101,4 @@ class JiraResync:
 def _load_cfg(project: PendingProject) -> dict[str, Any]:
     import yaml
 
-    return yaml.safe_load(project.proj_yaml_path.read_text()) or {}
+    return yaml.safe_load((project.path / "proj.yaml").read_text()) or {}

@@ -1,67 +1,44 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-
-import yaml
 
 from installer.migrations.types import TARGET_SCHEMA_VERSION, PendingProject
 
 log = logging.getLogger(__name__)
 
+SCHEMA_VERSION_FILE = ".schema-version"
 
-def read_schema_version(proj_yaml_path: Path) -> int | None:
-    """Return schema_version (1 when absent), or None when unreadable."""
+
+def read_schema_version(path: Path) -> int | None:
+    """Return schema_version from a .schema-version file, or None when unreadable.
+
+    `path` is the file itself (not a directory).
+    Returns 1 when file is absent (legacy default).
+    Returns None when file is present but unreadable/malformed.
+    """
     try:
-        raw = proj_yaml_path.read_text()
+        raw = path.read_text().strip()
     except FileNotFoundError:
-        return None
-    try:
-        data = yaml.safe_load(raw) or {}
-    except yaml.YAMLError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    v = data.get("schema_version")
-    if v is None:
         return 1
+    except OSError:
+        return None
     try:
-        return int(v)
+        return int(raw)
     except (TypeError, ValueError):
         return None
 
 
-def bump_schema_version(proj_yaml_path: Path, version: int) -> None:
-    """Merge schema_version into proj.yaml atomically (temp+rename).
+def bump_schema_version(project_dir: Path, version: int) -> None:
+    """Write the schema_version file atomically (temp+rename).
 
-    Cleans up the temp file on any failure between creation and rename so
-    a permission error on os.replace doesn't leak `.proj.yaml.*.tmp` files
-    into the project directory across migration runs.
+    `project_dir` is the project directory; writes <project_dir>/.schema-version.
     """
-    data: dict = yaml.safe_load(proj_yaml_path.read_text()) or {}
-    data["schema_version"] = version
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w",
-        dir=proj_yaml_path.parent,
-        prefix=".proj.yaml.",
-        suffix=".tmp",
-        delete=False,
-    )
-    tmp_name = tmp.name
-    try:
-        try:
-            yaml.safe_dump(data, tmp, sort_keys=False)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        finally:
-            tmp.close()
-        os.replace(tmp_name, proj_yaml_path)
-    except Exception:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    path = project_dir / SCHEMA_VERSION_FILE
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(f"{version}\n")
+    tmp.replace(path)
 
 
 def discover_pending(projects: Iterable[dict]) -> Iterator[PendingProject]:
@@ -69,23 +46,27 @@ def discover_pending(projects: Iterable[dict]) -> Iterator[PendingProject]:
     for entry in projects:
         name = entry["name"]
         proj_path = Path(entry["path"])
-        proj_yaml = proj_path / "proj.yaml"
-        v = read_schema_version(proj_yaml)
+        schema_version_file = proj_path / SCHEMA_VERSION_FILE
+        v = read_schema_version(schema_version_file)
         if v is None:
-            log.warning("proj.yaml unreadable for %s, skipping migration detect", name)
+            log.warning(
+                ".schema-version unreadable for %s, skipping migration detect", name
+            )
             continue
         if v >= TARGET_SCHEMA_VERSION:
             continue
         yield PendingProject(
             name=name,
             path=proj_path,
-            proj_yaml_path=proj_yaml,
+            schema_version_path=schema_version_file,
             current_version=v,
         )
 
 
 def detect_already_flat(todos_yaml_path: Path) -> bool:
     """Return True when no todo has a non-null `parent` field."""
+    import yaml
+
     try:
         data = yaml.safe_load(todos_yaml_path.read_text()) or []
     except (FileNotFoundError, yaml.YAMLError):

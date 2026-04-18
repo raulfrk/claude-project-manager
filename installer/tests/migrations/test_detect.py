@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from installer.migrations.detect import (
     bump_schema_version,
@@ -12,40 +11,34 @@ from installer.migrations.detect import (
 )
 
 
-def write_proj_yaml(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data))
-
-
-def test_read_schema_version_missing_field_returns_1(tmp_path: Path) -> None:
-    p = tmp_path / "proj.yaml"
-    write_proj_yaml(p, {"name": "x"})
-    assert read_schema_version(p) == 1
+def test_read_schema_version_returns_1_when_file_absent(tmp_path: Path) -> None:
+    assert read_schema_version(tmp_path / ".schema-version") == 1
 
 
 def test_read_schema_version_reads_int(tmp_path: Path) -> None:
-    p = tmp_path / "proj.yaml"
-    write_proj_yaml(p, {"name": "x", "schema_version": 2})
+    p = tmp_path / ".schema-version"
+    p.write_text("2\n")
     assert read_schema_version(p) == 2
 
 
-def test_read_schema_version_corrupted_returns_none(tmp_path: Path) -> None:
-    p = tmp_path / "proj.yaml"
-    p.write_text("not: [valid: yaml")
+def test_read_schema_version_malformed_returns_none(tmp_path: Path) -> None:
+    p = tmp_path / ".schema-version"
+    p.write_text("not-a-number\n")
     assert read_schema_version(p) is None
-
-
-def test_read_schema_version_missing_file_returns_none(tmp_path: Path) -> None:
-    assert read_schema_version(tmp_path / "nope.yaml") is None
 
 
 def test_discover_pending_yields_legacy_projects(tmp_path: Path) -> None:
     v1_dir = tmp_path / "v1proj"
     v2_dir = tmp_path / "v2proj"
     v3_dir = tmp_path / "v3proj"
-    write_proj_yaml(v1_dir / "proj.yaml", {"name": "v1proj"})
-    write_proj_yaml(v2_dir / "proj.yaml", {"name": "v2proj", "schema_version": 2})
-    write_proj_yaml(v3_dir / "proj.yaml", {"name": "v3proj", "schema_version": 3})
+    v1_dir.mkdir()
+    v2_dir.mkdir()
+    v3_dir.mkdir()
+    # v1: no .schema-version file → treated as v1
+    # v2: .schema-version = 2
+    (v2_dir / ".schema-version").write_text("2\n")
+    # v3: .schema-version = 3
+    (v3_dir / ".schema-version").write_text("3\n")
 
     projects = [
         {"name": "v1proj", "path": str(v1_dir)},
@@ -62,23 +55,35 @@ def test_discover_pending_yields_legacy_projects(tmp_path: Path) -> None:
     assert "v3proj" not in names
 
 
-def test_discover_pending_skips_corrupted(
+def test_discover_pending_skips_malformed(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     bad_dir = tmp_path / "bad"
-    (bad_dir).mkdir()
-    (bad_dir / "proj.yaml").write_text("not: [valid")
+    bad_dir.mkdir()
+    (bad_dir / ".schema-version").write_text("not-a-number\n")
 
     projects = [{"name": "bad", "path": str(bad_dir)}]
     result = list(discover_pending(projects))
     assert result == []
-    assert any("proj.yaml unreadable" in r.message for r in caplog.records)
+    assert any(".schema-version unreadable" in r.message for r in caplog.records)
 
 
 def test_bump_schema_version_writes_atomically(tmp_path: Path) -> None:
-    p = tmp_path / "proj.yaml"
-    write_proj_yaml(p, {"name": "x"})
-    bump_schema_version(p, 2)
-    data = yaml.safe_load(p.read_text())
-    assert data["schema_version"] == 2
-    assert data["name"] == "x"  # other keys preserved
+    bump_schema_version(tmp_path, 2)
+    assert (tmp_path / ".schema-version").read_text().strip() == "2"
+
+
+def test_bump_schema_version_overwrites(tmp_path: Path) -> None:
+    bump_schema_version(tmp_path, 2)
+    bump_schema_version(tmp_path, 3)
+    assert (tmp_path / ".schema-version").read_text().strip() == "3"
+
+
+def test_discover_pending_sets_schema_version_path(tmp_path: Path) -> None:
+    proj_dir = tmp_path / "myproj"
+    proj_dir.mkdir()
+    (proj_dir / ".schema-version").write_text("1\n")
+    projects = [{"name": "myproj", "path": str(proj_dir)}]
+    result = list(discover_pending(projects))
+    assert len(result) == 1
+    assert result[0].schema_version_path == proj_dir / ".schema-version"

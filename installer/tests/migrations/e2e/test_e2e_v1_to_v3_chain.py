@@ -80,8 +80,7 @@ def _init_db(project_dir: Path) -> None:
 def v1_project(tmp_path: Path) -> PendingProject:
     root = tmp_path / "legacy"
     root.mkdir()
-    # v1: no schema_version field
-    (root / "proj.yaml").write_text("name: legacy\n")
+    # v1: no .schema-version file → treated as v1 (absent = 1)
 
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
@@ -138,7 +137,7 @@ def v1_project(tmp_path: Path) -> PendingProject:
     return PendingProject(
         name="legacy",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=1,
     )
 
@@ -153,7 +152,7 @@ def test_v1_to_v3_chain_migration(v1_project: PendingProject, tmp_path: Path) ->
     assert result.reason == "complete"
 
     # schema_version bumped to 3
-    assert read_schema_version(v1_project.proj_yaml_path) == 3
+    assert read_schema_version(v1_project.schema_version_path) == 3
 
     # YAML files deleted
     assert not (v1_project.path / "todos.yaml").exists()

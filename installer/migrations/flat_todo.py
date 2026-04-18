@@ -177,7 +177,7 @@ class FlatTodoMigration(MigrationRunner):
                 )
 
     def _commit(self) -> None:
-        bump_schema_version(self.project.proj_yaml_path, _FLAT_TODO_TARGET)
+        bump_schema_version(self.project.path, _FLAT_TODO_TARGET)
 
     def _restore(self) -> None:
         self.transition(MigrationState.RESTORING)

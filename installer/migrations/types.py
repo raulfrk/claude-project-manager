@@ -31,18 +31,18 @@ class RecoveryPath(str, Enum):
 class PendingProject:
     name: str
     path: Path
-    proj_yaml_path: Path
+    schema_version_path: Path  # was: proj_yaml_path
     current_version: int  # 1 or 0 (absent)
 
     def refreshed(self) -> "PendingProject":
         """Return a new PendingProject with current_version re-read from disk."""
         from installer.migrations.detect import read_schema_version
 
-        v = read_schema_version(self.proj_yaml_path)
+        v = read_schema_version(self.schema_version_path)
         return PendingProject(
             name=self.name,
             path=self.path,
-            proj_yaml_path=self.proj_yaml_path,
+            schema_version_path=self.schema_version_path,
             current_version=v if v is not None else self.current_version,
         )
 

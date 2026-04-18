@@ -17,7 +17,7 @@ def test_bump_only_path_after_interrupted_run(
     project = PendingProject(
         name="cpm",
         path=home_with_projects / "projects" / "cpm",
-        proj_yaml_path=home_with_projects / "projects" / "cpm" / "proj.yaml",
+        schema_version_path=home_with_projects / "projects" / "cpm" / ".schema-version",
         current_version=1,
     )
     # Simulate SIGKILL between FLATTENED and COMMITTED by running through flatten
@@ -50,7 +50,7 @@ def test_bump_only_path_after_interrupted_run(
     flatten_todos_yaml(project.path / "todos.yaml")
 
     # Now schema_version is still 1 (commit never ran)
-    assert read_schema_version(project.proj_yaml_path) == 1
+    assert read_schema_version(project.schema_version_path) == 1
 
     # Second run should detect already-flat and take BUMP_ONLY path
     runner2 = FlatTodoMigration(
@@ -64,4 +64,4 @@ def test_bump_only_path_after_interrupted_run(
     runner2.confirm()
     runner2.execute_local()
     runner2.commit()
-    assert read_schema_version(project.proj_yaml_path) == 2
+    assert read_schema_version(project.schema_version_path) == 2

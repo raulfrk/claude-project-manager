@@ -28,7 +28,7 @@ def test_trello_500_leaves_local_committed(
     project = PendingProject(
         name="cpm",
         path=home_with_projects / "projects" / "cpm",
-        proj_yaml_path=home_with_projects / "projects" / "cpm" / "proj.yaml",
+        schema_version_path=home_with_projects / "projects" / "cpm" / ".schema-version",
         current_version=1,
     )
     runner = FlatTodoMigration(
@@ -42,7 +42,7 @@ def test_trello_500_leaves_local_committed(
     runner.execute_local()
     runner.commit()
 
-    assert read_schema_version(project.proj_yaml_path) == 2
+    assert read_schema_version(project.schema_version_path) == 2
     todos = yaml.safe_load((project.path / "todos.yaml").read_text())
     assert "group:1" in [tag for t in todos for tag in t.get("tags", [])]
     assert len(runner.resync_failures) >= 1

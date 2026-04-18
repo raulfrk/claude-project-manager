@@ -29,7 +29,10 @@ def project_with_todoist(
     )
     (root / "todos.yaml").write_text("[]\n")
     return PendingProject(
-        name="demo", path=root, proj_yaml_path=proj, current_version=1
+        name="demo",
+        path=root,
+        schema_version_path=root / ".schema-version",
+        current_version=1,
     )
 
 

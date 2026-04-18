@@ -14,7 +14,7 @@ from installer.migrations.types import MigrationState, PendingProject, RecoveryP
 
 def _setup_project(root: Path) -> PendingProject:
     root.mkdir(parents=True)
-    (root / "proj.yaml").write_text(yaml.safe_dump({"name": "demo"}))
+    (root / ".schema-version").write_text("1\n")
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
             [
@@ -44,7 +44,7 @@ def _setup_project(root: Path) -> PendingProject:
     return PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=1,
     )
 
@@ -58,7 +58,7 @@ def test_happy_path_commits(tmp_path: Path) -> None:
     runner.execute_local()
     runner.commit()
     assert runner.state == MigrationState.COMMITTED
-    assert read_schema_version(project.proj_yaml_path) == 2
+    assert read_schema_version(project.schema_version_path) == 2
     todos = yaml.safe_load((project.path / "todos.yaml").read_text())
     assert "group:1" in todos[1]["tags"]
 
@@ -86,7 +86,7 @@ def test_rollback_on_flatten_failure(
     assert runner.state == MigrationState.FAILED
     todos = yaml.safe_load((project.path / "todos.yaml").read_text())
     assert todos[0]["children"] == ["1.1"]  # restored
-    assert read_schema_version(project.proj_yaml_path) == 1
+    assert read_schema_version(project.schema_version_path) == 1
 
 
 def test_bump_only_recovery_for_already_flat(tmp_path: Path) -> None:
@@ -116,7 +116,7 @@ def test_bump_only_recovery_for_already_flat(tmp_path: Path) -> None:
     runner.confirm()
     runner.execute_local()
     runner.commit()
-    assert read_schema_version(project.proj_yaml_path) == 2
+    assert read_schema_version(project.schema_version_path) == 2
 
 
 from installer.migrations.integrations.base import ResyncResult  # noqa: E402

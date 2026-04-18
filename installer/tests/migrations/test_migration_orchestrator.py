@@ -77,7 +77,7 @@ def _make_v1_project(root: Path) -> PendingProject:
     the remaining columns are compatible with SqlOnlyMigration's INSERT.
     """
     root.mkdir(parents=True, exist_ok=True)
-    (root / "proj.yaml").write_text("name: demo\n")  # no schema_version = v1
+    # v1: no .schema-version file → treated as v1 (absent = 1)
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
             [
@@ -106,14 +106,14 @@ def _make_v1_project(root: Path) -> PendingProject:
     return PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=1,
     )
 
 
 def _make_v2_project(root: Path) -> PendingProject:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "proj.yaml").write_text("name: demo\nschema_version: 2\n")
+    (root / ".schema-version").write_text("2\n")
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
             [
@@ -134,7 +134,7 @@ def _make_v2_project(root: Path) -> PendingProject:
     return PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=2,
     )
 
@@ -146,7 +146,7 @@ def test_orchestrator_v1_chains_through_both_migrations(tmp_path: Path) -> None:
     result = run_migrations_for_project(project, "ts1", backup_root)
     assert result.stopped_at == 3
     assert result.reason == "complete"
-    assert read_schema_version(project.proj_yaml_path) == 3
+    assert read_schema_version(project.schema_version_path) == 3
     assert not (project.path / "todos.yaml").exists()
     assert not (project.path / "decisions.yaml").exists()
 
@@ -158,7 +158,7 @@ def test_orchestrator_v2_runs_sql_only_only(tmp_path: Path) -> None:
     result = run_migrations_for_project(project, "ts1", backup_root)
     assert result.stopped_at == 3
     assert result.reason == "complete"
-    assert read_schema_version(project.proj_yaml_path) == 3
+    assert read_schema_version(project.schema_version_path) == 3
     assert not (project.path / "todos.yaml").exists()
 
 
@@ -166,12 +166,12 @@ def test_orchestrator_v3_is_noop(tmp_path: Path) -> None:
     """v3 project: already up-to-date, no migrations run."""
     root = tmp_path / "p"
     root.mkdir()
-    (root / "proj.yaml").write_text("name: demo\nschema_version: 3\n")
+    (root / ".schema-version").write_text("3\n")
     _init_db(root)
     project = PendingProject(
         name="demo",
         path=root,
-        proj_yaml_path=root / "proj.yaml",
+        schema_version_path=root / ".schema-version",
         current_version=3,
     )
     result = run_migrations_for_project(project, "ts1", tmp_path / "backups")
@@ -193,5 +193,5 @@ def test_orchestrator_stops_at_v2_when_sql_only_fails(tmp_path: Path) -> None:
     assert result.stopped_at == 2
     assert "sql-only failed" in result.reason
     # Project still at v2 — YAML files restored from backup
-    assert read_schema_version(project.proj_yaml_path) == 2
+    assert read_schema_version(project.schema_version_path) == 2
     assert (project.path / "todos.yaml").exists()

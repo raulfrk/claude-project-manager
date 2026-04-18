@@ -35,7 +35,10 @@ def test_rollback_isolated_to_failing_project(
         PendingProject(
             name=name,
             path=home_with_projects / "projects" / name,
-            proj_yaml_path=home_with_projects / "projects" / name / "proj.yaml",
+            schema_version_path=home_with_projects
+            / "projects"
+            / name
+            / ".schema-version",
             current_version=1,
         )
         for name in ("cpm", "side", "legacy")
@@ -61,9 +64,9 @@ def test_rollback_isolated_to_failing_project(
 
     assert results == [("cpm", "ok"), ("side", "failed"), ("legacy", "ok")]
 
-    assert read_schema_version(projects[0].proj_yaml_path) == 2
-    assert read_schema_version(projects[1].proj_yaml_path) == 1  # reverted
-    assert read_schema_version(projects[2].proj_yaml_path) == 2
+    assert read_schema_version(projects[0].schema_version_path) == 2
+    assert read_schema_version(projects[1].schema_version_path) == 1  # reverted
+    assert read_schema_version(projects[2].schema_version_path) == 2
 
     side_todos = yaml.safe_load(
         (projects[1].path / "todos.yaml").read_text(),

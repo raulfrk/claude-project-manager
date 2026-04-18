@@ -47,7 +47,10 @@ def test_happy_path_three_projects(
         PendingProject(
             name=name,
             path=home_with_projects / "projects" / name,
-            proj_yaml_path=home_with_projects / "projects" / name / "proj.yaml",
+            schema_version_path=home_with_projects
+            / "projects"
+            / name
+            / ".schema-version",
             current_version=1,
         )
         for name in ("cpm", "side", "legacy")
@@ -68,7 +71,7 @@ def test_happy_path_three_projects(
         outcomes.append(runner)
 
     for r in outcomes:
-        assert read_schema_version(r.project.proj_yaml_path) == 2
+        assert read_schema_version(r.project.schema_version_path) == 2
         todos = yaml.safe_load((r.project.path / "todos.yaml").read_text())
         child = next(t for t in todos if t["id"] == "1.1")
         assert "group:1" in child["tags"]

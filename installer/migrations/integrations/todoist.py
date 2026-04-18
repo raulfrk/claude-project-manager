@@ -29,12 +29,7 @@ class TodoistResync:
         # Also requires at least one todo with a todoist_task_id link
         import yaml
 
-        todos = (
-            yaml.safe_load(
-                project.proj_yaml_path.parent.joinpath("todos.yaml").read_text()
-            )
-            or []
-        )
+        todos = yaml.safe_load((project.path / "todos.yaml").read_text()) or []
         return any(t.get("todoist_task_id") for t in todos if isinstance(t, dict))
 
     def plan(self, project: PendingProject, migrated: list[TodoRef]) -> list[Action]:
@@ -115,4 +110,4 @@ class TodoistResync:
 def _load_cfg(project: PendingProject) -> dict[str, Any]:
     import yaml
 
-    return yaml.safe_load(project.proj_yaml_path.read_text()) or {}
+    return yaml.safe_load((project.path / "proj.yaml").read_text()) or {}

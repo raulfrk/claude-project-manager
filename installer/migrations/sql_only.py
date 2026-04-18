@@ -129,7 +129,7 @@ class SqlOnlyMigration(MigrationRunner):
         pass
 
     def _commit(self) -> None:
-        bump_schema_version(self.project.proj_yaml_path, _SQL_ONLY_TARGET)
+        bump_schema_version(self.project.path, _SQL_ONLY_TARGET)
 
     def _restore(self) -> None:
         self.transition(MigrationState.RESTORING)

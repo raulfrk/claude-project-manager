@@ -17,7 +17,7 @@ def _fake_plan(tmp_path: Path) -> MigrationPlan:
     project = PendingProject(
         name="cpm",
         path=tmp_path / "cpm",
-        proj_yaml_path=tmp_path / "cpm" / "proj.yaml",
+        schema_version_path=tmp_path / "cpm" / ".schema-version",
         current_version=1,
     )
     return MigrationPlan(
