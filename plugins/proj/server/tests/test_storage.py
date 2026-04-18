@@ -87,7 +87,10 @@ def test_todos_roundtrip(tmp_cfg: ProjConfig) -> None:
     loaded = storage.load_todos(tmp_cfg, "myapp")
     assert len(loaded) == 2
     assert loaded[0].id == "T001"
-    assert loaded[1].parent == "T001"
+    assert loaded[1].id == "T002"
+    # parent/children/next_child_id are no longer persisted in the flat SQL schema
+    # (dropped in Task 2a of the flat-model cleanup); they default to None/[]/1 on load
+    assert loaded[1].parent is None
 
 
 def test_append_note_creates_file(tmp_cfg: ProjConfig) -> None:

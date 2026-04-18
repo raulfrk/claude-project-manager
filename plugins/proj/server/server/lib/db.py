@@ -24,9 +24,6 @@ _TODO_COLUMNS = """
     priority TEXT NOT NULL DEFAULT 'medium',
     created TEXT NOT NULL,
     updated TEXT NOT NULL,
-    parent TEXT,
-    children TEXT NOT NULL DEFAULT '[]',
-    next_child_id INTEGER NOT NULL DEFAULT 1,
     tags TEXT NOT NULL DEFAULT '[]',
     git_branch TEXT,
     git_commits TEXT NOT NULL DEFAULT '[]',
@@ -63,7 +60,6 @@ CREATE TABLE IF NOT EXISTS project_index (
 
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project);
 CREATE INDEX IF NOT EXISTS idx_todos_project_status ON todos(project, status);
-CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent);
 CREATE INDEX IF NOT EXISTS idx_todos_todoist ON todos(todoist_task_id);
 CREATE INDEX IF NOT EXISTS idx_todos_trello ON todos(trello_card_id);
 CREATE INDEX IF NOT EXISTS idx_todos_jira ON todos(jira_issue_key);

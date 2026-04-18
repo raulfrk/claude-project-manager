@@ -57,12 +57,12 @@ def test_init_schema_creates_indexes() -> None:
         expected = {
             "idx_todos_project",
             "idx_todos_project_status",
-            "idx_todos_parent",
             "idx_todos_todoist",
             "idx_todos_trello",
             "idx_todos_jira",
             "idx_archive_project",
             "idx_archive_project_status",
+            # idx_todos_parent dropped in Task 2a of the flat-model cleanup
             # idx_decisions_* are created by sql_decisions.ensure_table, not init_schema
         }
         assert expected <= index_names

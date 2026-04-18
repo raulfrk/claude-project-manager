@@ -29,9 +29,6 @@ def _todo_to_row(t: Todo, project_name: str) -> tuple[str | int | None, ...]:
         getattr(t.priority, "value", t.priority),
         t.created,
         t.updated,
-        t.parent,
-        json.dumps(t.children),
-        t.next_child_id,
         json.dumps(t.tags),
         git.branch if git else None,
         json.dumps(git.commits if git else []),
@@ -53,15 +50,15 @@ def _todo_to_row(t: Todo, project_name: str) -> tuple[str | int | None, ...]:
 
 
 _INSERT_COLS = """(
-    id, project, title, status, priority, created, updated, parent,
-    children, next_child_id, tags, git_branch, git_commits,
+    id, project, title, status, priority, created, updated,
+    tags, git_branch, git_commits,
     blocks, blocked_by, notes, has_requirements, has_research,
     todoist_task_id, todoist_desc_synced, trello_card_id,
     trello_checklist_id, trello_checklist_item_id, jira_issue_key,
     jira_comment_ids, due_date, trello_sync_state
 )"""
 
-_PLACEHOLDERS = "(" + ", ".join(["?"] * 27) + ")"
+_PLACEHOLDERS = "(" + ", ".join(["?"] * 24) + ")"
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
