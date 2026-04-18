@@ -16,17 +16,15 @@ from installer.migrations.types import PendingProject, TodoRef
 def project_with_todoist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> PendingProject:
+    # Global integration config lives in ~/.claude/proj.yaml — point HOME at tmp.
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "proj.yaml").write_text(
+        yaml.safe_dump({"sync": {"todoist": {"enabled": True, "api_token": "tok"}}}),
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
     root = tmp_path / "demo"
     root.mkdir()
-    proj = root / "proj.yaml"
-    proj.write_text(
-        yaml.safe_dump(
-            {
-                "name": "demo",
-                "sync": {"todoist": {"enabled": True, "api_token": "tok"}},
-            }
-        ),
-    )
     (root / "todos.yaml").write_text("[]\n")
     return PendingProject(
         name="demo",

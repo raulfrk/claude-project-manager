@@ -95,11 +95,23 @@ def _todo_row(todo: dict[str, object], project_name: str) -> dict[str, object]:
 
 
 def _load_yaml_list(path: Path) -> list[dict[str, object]]:
-    """Load a YAML file that should be a list. Returns [] on missing/invalid."""
+    """Load a YAML file that should be a list. Returns [] on missing/invalid.
+
+    Real proj-plugin YAML files for todos + archive use a `{"todos": [...]}`
+    wrapper; decisions.yaml is a bare list. Accepts both shapes.
+    """
     try:
         raw = yaml.safe_load(path.read_text())
     except (FileNotFoundError, yaml.YAMLError):
         return []
+    if isinstance(raw, dict):
+        # Wrapped form: {"todos": [...]} — todos.yaml + archive.yaml
+        for key in ("todos", "decisions", "items"):
+            if key in raw and isinstance(raw[key], list):
+                raw = raw[key]
+                break
+        else:
+            return []
     if isinstance(raw, list):
         return [item for item in raw if isinstance(item, dict)]
     return []

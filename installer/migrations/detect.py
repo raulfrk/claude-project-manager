@@ -64,12 +64,22 @@ def discover_pending(projects: Iterable[dict]) -> Iterator[PendingProject]:
 
 
 def detect_already_flat(todos_yaml_path: Path) -> bool:
-    """Return True when no todo has a non-null `parent` field."""
+    """Return True when no todo has a non-null `parent` field.
+
+    Real proj-plugin todos.yaml uses `{"todos": [...]}` wrapper; bare list also
+    accepted for back-compat with simpler test fixtures.
+    """
     import yaml
 
     try:
-        data = yaml.safe_load(todos_yaml_path.read_text()) or []
+        raw = yaml.safe_load(todos_yaml_path.read_text())
     except (FileNotFoundError, yaml.YAMLError):
+        return False
+    if isinstance(raw, dict):
+        data = raw.get("todos") or raw.get("items") or []
+    elif isinstance(raw, list):
+        data = raw
+    else:
         return False
     if not isinstance(data, list):
         return False

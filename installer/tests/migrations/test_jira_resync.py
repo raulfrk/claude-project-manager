@@ -13,14 +13,15 @@ from installer.migrations.types import PendingProject, TodoRef
 
 
 @pytest.fixture
-def project_with_jira(tmp_path: Path) -> PendingProject:
-    root = tmp_path / "demo"
-    root.mkdir()
-    proj = root / "proj.yaml"
-    proj.write_text(
+def project_with_jira(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> PendingProject:
+    # Global integration config lives in ~/.claude/proj.yaml — point HOME at tmp.
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "proj.yaml").write_text(
         yaml.safe_dump(
             {
-                "name": "demo",
                 "sync": {
                     "jira": {
                         "enabled": True,
@@ -33,6 +34,9 @@ def project_with_jira(tmp_path: Path) -> PendingProject:
             }
         ),
     )
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+    root = tmp_path / "demo"
+    root.mkdir()
     (root / "todos.yaml").write_text("[]\n")
     return PendingProject(
         name="demo",

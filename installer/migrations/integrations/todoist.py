@@ -108,6 +108,18 @@ class TodoistResync:
 
 
 def _load_cfg(project: PendingProject) -> dict[str, Any]:
-    import yaml
+    """Load global integration config from `~/.claude/proj.yaml`.
 
-    return yaml.safe_load((project.path / "proj.yaml").read_text()) or {}
+    Per-project files (meta.yaml) hold project IDs but the enable flags +
+    api tokens live in the global config.
+    """
+    import yaml
+    from pathlib import Path
+
+    config_path = Path.home() / ".claude" / "proj.yaml"
+    if not config_path.exists():
+        return {}
+    try:
+        return yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError:
+        return {}

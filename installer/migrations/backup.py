@@ -21,7 +21,7 @@ OPTIONAL_FILES = (
     "archive.yaml",
     "data.db",
     "decisions.yaml",
-    "proj.yaml",
+    "meta.yaml",
     ".schema-version",
 )
 REQUIRED_FILES = ("todos.yaml",)

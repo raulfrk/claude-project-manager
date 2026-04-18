@@ -101,11 +101,21 @@ class FlatTodoMigration(MigrationRunner):
 
     def _plan(self) -> None:
         todos_path = self.project.path / "todos.yaml"
-        data = yaml.safe_load(todos_path.read_text()) or []
+        # Real proj-plugin todos.yaml uses {"todos": [...]} wrapper; bare list
+        # also accepted for back-compat with simpler test fixtures.
+        raw = yaml.safe_load(todos_path.read_text())
+        if isinstance(raw, dict):
+            data = raw.get("todos") or raw.get("items") or []
+        elif isinstance(raw, list):
+            data = raw
+        else:
+            data = []
         parents: list[TodoRef] = []
         children: list[TodoRef] = []
         migrated: list[TodoRef] = []
         for t in data:
+            if not isinstance(t, dict):
+                continue
             ref = TodoRef(
                 id=t.get("id", ""),
                 title=t.get("title", ""),

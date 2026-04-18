@@ -20,13 +20,33 @@ def flatten_todos_yaml(path: Path) -> None:
     Idempotent. Writes atomically (temp + rename). Preserves all other fields.
     Orphan children (parent id missing from todos) keep their data but get no
     group tag and a WARNING is logged.
+
+    Real proj-plugin todos.yaml + archive.yaml use a `{"todos": [...]}` wrapper.
+    Bare-list YAML is also accepted (for back-compat with simpler test fixtures).
+    The wrapped/unwrapped shape is preserved on write.
     """
-    data = yaml.safe_load(path.read_text()) or []
-    if not isinstance(data, list):
-        raise ValueError(f"{path} root must be a list")
-    ids = {t["id"] for t in data if "id" in t}
+    raw = yaml.safe_load(path.read_text())
+    wrapper_key: str | None = None
+    if isinstance(raw, dict):
+        for key in ("todos", "items"):
+            if key in raw and isinstance(raw[key], list):
+                wrapper_key = key
+                data = raw[key]
+                break
+        else:
+            raise ValueError(f"{path} root dict has no recognized list key")
+    elif isinstance(raw, list):
+        data = raw
+    elif raw is None:
+        data = []
+    else:
+        raise ValueError(f"{path} root must be a list or dict-with-list")
+
+    ids = {t["id"] for t in data if isinstance(t, dict) and "id" in t}
 
     for todo in data:
+        if not isinstance(todo, dict):
+            continue
         parent = todo.pop("parent", None)
         todo.pop("children", None)
         todo.pop("next_child_id", None)
@@ -44,10 +64,15 @@ def flatten_todos_yaml(path: Path) -> None:
         if tag not in tags:
             tags.append(tag)
 
-    _atomic_write_yaml(path, data)
+    out: list | dict
+    if wrapper_key is not None:
+        out = {wrapper_key: data}
+    else:
+        out = data
+    _atomic_write_yaml(path, out)
 
 
-def _atomic_write_yaml(path: Path, data: list) -> None:
+def _atomic_write_yaml(path: Path, data) -> None:
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
         dir=path.parent,

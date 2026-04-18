@@ -30,7 +30,7 @@ def src_project(tmp_path: Path) -> Path:
     root.mkdir()
     (root / "todos.yaml").write_text("- id: '1'\n  title: hi\n")
     (root / "archive.yaml").write_text("[]\n")
-    (root / "proj.yaml").write_text("name: x\n")
+    (root / "meta.yaml").write_text("name: x\n")
     _make_db(root / "data.db")
     return root
 
@@ -42,7 +42,7 @@ def test_create_writes_all_artifacts(src_project: Path, tmp_path: Path) -> None:
     )
     assert (snap.dir / "todos.yaml").exists()
     assert (snap.dir / "archive.yaml").exists()
-    assert (snap.dir / "proj.yaml").exists()
+    assert (snap.dir / "meta.yaml").exists()
     assert (snap.dir / "data.db").exists()
     manifest = json.loads((snap.dir / "manifest.json").read_text())
     assert manifest["project"] == "demo"
@@ -81,7 +81,7 @@ def test_create_handles_missing_optional_files(tmp_path: Path) -> None:
     root = tmp_path / "src"
     root.mkdir()
     (root / "todos.yaml").write_text("[]\n")
-    (root / "proj.yaml").write_text("name: x\n")
+    (root / "meta.yaml").write_text("name: x\n")
     backup_root = tmp_path / "backups"
     snap = BackupSnapshot.create("demo", "ts", root, backup_root)
     assert (snap.dir / "todos.yaml").exists()

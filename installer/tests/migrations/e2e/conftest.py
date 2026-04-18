@@ -13,9 +13,11 @@ def home_with_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Fake $HOME with 3 projects: cpm (T+R+J), side (T only), legacy (no integrations).
 
     Uses real-shape file layout:
-    - ~/.claude/proj.yaml has tracking_dir
+    - ~/.claude/proj.yaml has tracking_dir + global integration config (sync section)
     - <tracking_dir>/active-projects.yaml has projects: map
-    - Per-project dir has .schema-version (absent = v1) + proj.yaml (for integration config)
+    - Per-project dir has .schema-version (absent = v1) + todos.yaml/archive.yaml/data.db
+    - Per-project integration "enablement" derived from todos having integration IDs (not
+      from a per-project proj.yaml — that file does not exist in real environments).
     """
     home = tmp_path / "home"
     tracking_dir = home / "projects" / "tracking"
@@ -31,27 +33,7 @@ def home_with_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         d.mkdir(parents=True)
         # v1: no .schema-version file (absent = version 1)
-        sync: dict = {}
-        if integ.get("todoist"):
-            sync["todoist"] = {"enabled": True, "api_token": "tok"}
-        if integ.get("trello"):
-            sync["trello"] = {
-                "enabled": True,
-                "api_key": "k",
-                "api_token": "t",
-                "board_id": "b",
-                "list_mappings": {"tasks": "l"},
-            }
-        if integ.get("jira"):
-            sync["jira"] = {
-                "enabled": True,
-                "base_url": "https://ex.atlassian.net",
-                "email": "e@x.com",
-                "api_token": "tok",
-                "epic_link_field": "customfield_10014",
-            }
-        # proj.yaml holds integration config only (no schema_version)
-        (d / "proj.yaml").write_text(yaml.safe_dump({"name": name, "sync": sync}))
+        # No per-project proj.yaml — integration config lives at global ~/.claude/proj.yaml
         tdata = [
             {
                 "id": "1",
@@ -87,9 +69,31 @@ def home_with_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         conn.commit()
         conn.close()
 
-    # Global config — tracking_dir only (no projects: list)
+    # Global config — tracking_dir + integration auth/enable for all 3 SaaS.
+    # Per-project enabled_for() derives actual usage from the project's todo data.
     (home / ".claude" / "proj.yaml").write_text(
-        yaml.safe_dump({"tracking_dir": str(tracking_dir)})
+        yaml.safe_dump(
+            {
+                "tracking_dir": str(tracking_dir),
+                "sync": {
+                    "todoist": {"enabled": True, "api_token": "tok"},
+                    "trello": {
+                        "enabled": True,
+                        "api_key": "k",
+                        "api_token": "t",
+                        "board_id": "b",
+                        "list_mappings": {"tasks": "l"},
+                    },
+                    "jira": {
+                        "enabled": True,
+                        "base_url": "https://ex.atlassian.net",
+                        "email": "e@x.com",
+                        "api_token": "tok",
+                        "epic_link_field": "customfield_10014",
+                    },
+                },
+            }
+        )
     )
 
     # Registry — real-shape active-projects.yaml
