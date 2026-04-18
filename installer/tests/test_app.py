@@ -458,3 +458,82 @@ class TestTodosYamlWrapperHandling:
             path = proj_dir
 
         assert _count_parents_children(_Proj()) == (0, 0)
+
+
+class TestUpdateWorker:
+    """Exercise ``InstallerApp._run_update_worker`` directly."""
+
+    @pytest.mark.asyncio
+    async def test_update_worker_uses_qualified_plugin_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from installer.app import InstallerApp
+
+        update_mock = MagicMock(return_value=None)
+        monkeypatch.setattr("installer.app.update_plugin", update_mock)
+        monkeypatch.setattr(
+            "installer.app.get_available_plugins",
+            lambda: [
+                "proj@claude-project-manager",
+                "router@claude-project-manager",
+                "worktree@claude-project-manager",
+            ],
+        )
+        monkeypatch.setattr(
+            "installer.app.get_installed_plugins",
+            lambda: [
+                "proj@claude-project-manager",
+                "router@claude-project-manager",
+                "worktree@claude-project-manager",
+            ],
+        )
+
+        app = InstallerApp()
+        progress = _StubProgress()
+        await app._run_update_worker(["proj"], progress)
+
+        assert update_mock.call_count == 1
+        assert update_mock.call_args.args == ("proj@claude-project-manager",)
+
+    @pytest.mark.asyncio
+    async def test_update_worker_fallback_when_plugin_absent_from_lists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from installer.app import InstallerApp
+
+        update_mock = MagicMock(return_value=None)
+        monkeypatch.setattr("installer.app.update_plugin", update_mock)
+        monkeypatch.setattr("installer.app.get_available_plugins", lambda: [])
+        monkeypatch.setattr("installer.app.get_installed_plugins", lambda: [])
+
+        app = InstallerApp()
+        progress = _StubProgress()
+        await app._run_update_worker(["weird_plugin"], progress)
+
+        assert update_mock.call_count == 1
+        assert update_mock.call_args.args == ("weird_plugin@claude-project-manager",)
+
+    @pytest.mark.asyncio
+    async def test_update_worker_continues_when_enumeration_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from installer.app import InstallerApp
+        from installer.errors import InstallerError
+
+        update_mock = MagicMock(return_value=None)
+        monkeypatch.setattr("installer.app.update_plugin", update_mock)
+
+        def _raise() -> list[str]:
+            raise InstallerError("CLI timeout")
+
+        monkeypatch.setattr("installer.app.get_available_plugins", _raise)
+        monkeypatch.setattr("installer.app.get_installed_plugins", lambda: [])
+
+        app = InstallerApp()
+        progress = _StubProgress()
+        await app._run_update_worker(["proj"], progress)
+
+        # Fallback still applied; no crash.
+        assert update_mock.call_count == 1
+        assert update_mock.call_args.args == ("proj@claude-project-manager",)
+        assert any("name resolution failed" in log for log in progress.logs)

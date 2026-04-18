@@ -631,11 +631,27 @@ class InstallerApp(App):
     ) -> None:
         """Execute plugin updates, advancing the progress bar."""
         await progress.wait_ready()
+
+        # Build name→ID map (same pattern as _run_status_install_worker).
+        try:
+            available = await asyncio.to_thread(get_available_plugins)
+            installed_ids = await asyncio.to_thread(get_installed_plugins)
+        except InstallerError as exc:
+            progress.write_log(f"  [yellow]name resolution failed: {exc}[/yellow]")
+            available, installed_ids = [], []
+
+        name_to_id: dict[str, str] = {}
+        for pid in available + installed_ids:
+            name_to_id.setdefault(pid.split("@")[0], pid)
+
         updated: set[str] = set()
         for plugin_name in selected:
+            plugin_id = name_to_id.get(
+                plugin_name, f"{plugin_name}@claude-project-manager"
+            )
             try:
-                progress.write_log(f"  Updating {plugin_name}...")
-                await asyncio.to_thread(update_plugin, plugin_name)
+                progress.write_log(f"  Updating {plugin_id}...")
+                await asyncio.to_thread(update_plugin, plugin_id)
                 updated.add(plugin_name)
                 progress.write_log(f"  [green]✓ {plugin_name} updated[/green]")
                 progress.advance(1, detail=f"Updated {plugin_name}")
