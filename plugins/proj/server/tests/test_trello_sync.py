@@ -182,10 +182,11 @@ class TestCardDescription:
         desc = build_card_description(todo)
         assert "**Blocked by**: 1, 2, 3" in desc
 
-    def test_children_listed(self) -> None:
+    def test_children_not_in_description(self) -> None:
+        # Flat model: Children block removed from card description
         todo = Todo(id="1", title="Parent", children=["1.1", "1.2"])
         desc = build_card_description(todo)
-        assert "**Children**: 1.1, 1.2" in desc
+        assert "**Children**" not in desc
 
     def test_notes_included(self) -> None:
         todo = Todo(id="1", title="Test", notes="Some notes here")
@@ -245,13 +246,12 @@ class TestDescHash:
 
 
 class TestTopoSort:
-    def test_parents_before_children(self) -> None:
-        parent = Todo(id="1", title="Parent", children=["1.1"])
-        child = Todo(id="1.1", title="Child", parent="1")
-        # Feed in child-first order
-        result = _topo_sort_todos([child, parent])
-        ids = [t.id for t in result]
-        assert ids.index("1") < ids.index("1.1")
+    def test_returns_insertion_order(self) -> None:
+        # Flat model: _topo_sort_todos returns todos in insertion order
+        a = Todo(id="1", title="A")
+        b = Todo(id="1.1", title="B")
+        result = _topo_sort_todos([b, a])
+        assert [t.id for t in result] == ["1.1", "1"]
 
     def test_independent_todos_preserved(self) -> None:
         a = Todo(id="1", title="A")
@@ -259,19 +259,18 @@ class TestTopoSort:
         result = _topo_sort_todos([a, b])
         assert len(result) == 2
 
-    def test_deep_hierarchy(self) -> None:
-        root = Todo(id="1", title="Root", children=["1.1"])
-        mid = Todo(id="1.1", title="Mid", parent="1", children=["1.1.1"])
-        leaf = Todo(id="1.1.1", title="Leaf", parent="1.1")
+    def test_preserves_all_todos(self) -> None:
+        root = Todo(id="1", title="Root")
+        mid = Todo(id="1.1", title="Mid")
+        leaf = Todo(id="1.1.1", title="Leaf")
         result = _topo_sort_todos([leaf, mid, root])
-        ids = [t.id for t in result]
-        assert ids.index("1") < ids.index("1.1") < ids.index("1.1.1")
+        assert len(result) == 3
+        assert {t.id for t in result} == {"1", "1.1", "1.1.1"}
 
-    def test_circular_refs_handled(self) -> None:
-        """Circular references should not cause infinite loop."""
-        a = Todo(id="1", title="A", parent="2")
-        b = Todo(id="2", title="B", parent="1")
-        # Should not hang
+    def test_any_input_order_safe(self) -> None:
+        # No infinite loop possible; flat model is O(n)
+        a = Todo(id="1", title="A")
+        b = Todo(id="2", title="B")
         result = _topo_sort_todos([a, b])
         assert len(result) == 2
 
@@ -621,11 +620,11 @@ class TestComputeDiff:
         self,
         cfg_with_project: tuple[ProjConfig, str],
     ) -> None:
-        """Parent cards should be created before child cards."""
+        """Parent cards should be created before child cards (insertion-order guarantee)."""
         cfg, name = cfg_with_project
         parent = _make_todo(cfg, name, "Parent")
-        child = _make_todo(cfg, name, "Child", parent=parent.id)
-        parent.children.append(child.id)
+        # Flat model: child membership encoded via group:<parent_id> tag
+        child = _make_todo(cfg, name, "Child", tags=[f"group:{parent.id}"])
         storage.save_todos(cfg, name, [parent, child])
 
         plan = compute_diff(_make_trello_data(cards=[], lists=[]), cfg, name)
@@ -639,8 +638,8 @@ class TestComputeDiff:
         """When parent has a card and child is being created, attach link is emitted."""
         cfg, name = cfg_with_project
         parent = _make_todo(cfg, name, "Parent", trello_card_id="parent_card")
-        child = _make_todo(cfg, name, "Child", parent=parent.id)
-        parent.children.append(child.id)
+        # Flat model: child membership encoded via group:<parent_id> tag
+        child = _make_todo(cfg, name, "Child", tags=[f"group:{parent.id}"])
         expected_title = format_card_title(name, parent.id, "Parent")
         expected_desc = build_card_description(parent, name)
         parent.trello_sync_state = TrelloSyncState(
@@ -1076,8 +1075,9 @@ class TestBuildProjectCardDescription:
             repos=[RepoEntry(label="code", path="/tmp/code")],
             dates=ProjectDates(created="2026-01-01T00:00:00", last_updated="2026-01-01T00:00:00"),
         )
-        root = Todo(id="1", title="Root task", children=["1.1"])
-        child = Todo(id="1.1", title="Child", parent="1")
+        root = Todo(id="1", title="Root task")
+        # Flat model: child membership encoded via group:<parent_id> tag
+        child = Todo(id="1.1", title="Child", tags=["group:1"])
         desc = build_project_card_description(meta, [root, child], "proj")
         assert "## Root Todos" in desc
         assert "[1] Root task" in desc

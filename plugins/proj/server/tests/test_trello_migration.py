@@ -246,14 +246,14 @@ class TestMigrateChecklistToCard:
         meta = storage.load_meta(cfg, name)
 
         parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
+        # Flat model: child membership encoded via group:<parent_id> tag
         child = _make_todo(
             cfg,
             name,
             "Child",
             trello_checklist_item_id="item1",
-            parent=parent.id,
+            tags=[f"group:{parent.id}"],
         )
-        parent.children = [child.id]
         todos = [parent, child]
         _save_todos(cfg, name, todos)
 
@@ -397,14 +397,14 @@ class TestMigrateChecklistToCard:
         meta = storage.load_meta(cfg, name)
 
         parent = _make_todo(cfg, name, "Parent", trello_checklist_id="cl1")
+        # Flat model: child membership encoded via group:<parent_id> tag
         child = _make_todo(
             cfg,
             name,
             "Child",
             trello_checklist_item_id="item1",
-            parent=parent.id,
+            tags=[f"group:{parent.id}"],
         )
-        parent.children = [child.id]
         todos = [parent, child]
         _save_todos(cfg, name, todos)
 

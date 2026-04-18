@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, TypedDict, cast
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
 from server.tools.config import require_project
@@ -43,26 +44,9 @@ class ParentLinks:
     jira_issue_key: str | None = None
 
 
-def _parent_id_from_tag(tags: list[str]) -> str | None:
-    """Return parent id from first `group:<id>` tag, or None.
-
-    A `group:` tag with no id is ignored (treated as a normal tag).
-    Multiple `group:*` tags → first wins + DEBUG log for diagnosability.
-    """
-    matches = [m for m in (_GROUP_TAG_RE.match(t) for t in tags) if m]
-    if not matches:
-        return None
-    if len(matches) > 1:
-        logger.debug(
-            "todo has multiple group:* tags: %s — using first",
-            [m.group(0) for m in matches],
-        )
-    return matches[0].group("id")
-
-
 def _resolve_parent_for_hooks(todo: Todo, todos: list[Todo]) -> ParentLinks:
     """Resolve parent integration IDs for hook dispatch via group:<id> tag."""
-    parent_id = _parent_id_from_tag(todo.tags)
+    parent_id = parent_id_from_tags(todo.tags)
     if not parent_id:
         return ParentLinks()
     parent = next((t for t in todos if t.id == parent_id), None)
@@ -1466,20 +1450,20 @@ def register(app: FastMCP) -> None:
         for t in todos:
             todo_map[t.id]["_children"] = []
         for t in todos:
-            parent_id = _parent_id_from_tag(t.tags)
+            parent_id = parent_id_from_tags(t.tags)
             if parent_id and parent_id in todo_map:
                 children_list = todo_map[parent_id]["_children"]
                 if isinstance(children_list, list):
                     children_list.append(todo_map[t.id])
-        roots = [todo_map[t.id] for t in todos if not _parent_id_from_tag(t.tags)]
+        roots = [todo_map[t.id] for t in todos if not parent_id_from_tags(t.tags)]
         if not include_done:
             roots = [r for r in (_filter_tree_node(root) for root in roots) if r is not None]
         # Detect orphaned todos: have a group tag pointing to a non-existent parent
         orphaned = [
             todo_map[t.id]
             for t in todos
-            if _parent_id_from_tag(t.tags) is not None
-            and _parent_id_from_tag(t.tags) not in todo_map
+            if parent_id_from_tags(t.tags) is not None
+            and parent_id_from_tags(t.tags) not in todo_map
         ]
         if not include_done:
             orphaned = [o for o in orphaned if _filter_tree_node(o) is not None]
@@ -1841,7 +1825,6 @@ def register(app: FastMCP) -> None:
                     "blocked_by": scoped_blocked_by,
                     "blocks": scoped_blocks,
                     "tags": t.tags,
-                    "children": t.children,
                     "critical_path_depth": cp_depth.get(t.id, 0),
                     "transitive_fan_out": fan_out.get(t.id, 0),
                     "is_on_critical_path": t.id in critical_path_set,

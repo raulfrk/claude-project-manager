@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.models import JsonValue, ProjConfig, Todo, TrelloSyncState
 from server.lib.retry import retry_link
 from server.tools.config import require_project
@@ -140,11 +141,6 @@ def build_card_description(todo: Todo, project_name: str = "") -> str:
         blocked_str = ", ".join(sorted(todo.blocked_by))
         lines.append(f"**Blocked by**: {blocked_str}")
 
-    # Children
-    if todo.children:
-        children_str = ", ".join(todo.children)
-        lines.append(f"**Children**: {children_str}")
-
     # Notes
     if todo.notes:
         lines.append("")
@@ -186,7 +182,7 @@ def build_project_card_description(
     lines.append(f"**Todos**: {total} total, {done} done, {pending} pending")
 
     # Root todos list
-    roots = [t for t in todos if t.parent is None]
+    roots = [t for t in todos if parent_id_from_tags(t.tags) is None]
     if roots:
         lines.append("")
         lines.append("## Root Todos")
@@ -209,30 +205,8 @@ def compute_desc_hash(desc: str) -> str:
 
 
 def _topo_sort_todos(todos: list[Todo]) -> list[Todo]:
-    """Sort todos so parents come before children (topological order).
-
-    Todos without parents come first, then children in order of depth.
-    """
-    todo_map = {t.id: t for t in todos}
-    visited: set[str] = set()
-    result: list[Todo] = []
-
-    def _visit(tid: str) -> None:
-        if tid in visited:
-            return
-        visited.add(tid)
-        todo = todo_map.get(tid)
-        if not todo:
-            return
-        # Visit parent first
-        if todo.parent and todo.parent in todo_map:
-            _visit(todo.parent)
-        result.append(todo)
-
-    for t in todos:
-        _visit(t.id)
-
-    return result
+    """Return todos in insertion order (flat model has no tree topology)."""
+    return list(todos)
 
 
 # ── Data structures ──────────────────────────────────────────────────────────
@@ -548,7 +522,7 @@ def compute_diff(
                     "title": expected_title,
                     "desc": expected_desc,
                     "list_name": target_list,
-                    "parent_todo_id": todo.parent or "",
+                    "parent_todo_id": parent_id_from_tags(todo.tags) or "",
                 }
             )
             continue
@@ -572,7 +546,7 @@ def compute_diff(
                     "title": expected_title,
                     "desc": expected_desc,
                     "list_name": target_list,
-                    "parent_todo_id": todo.parent or "",
+                    "parent_todo_id": parent_id_from_tags(todo.tags) or "",
                 }
             )
             continue

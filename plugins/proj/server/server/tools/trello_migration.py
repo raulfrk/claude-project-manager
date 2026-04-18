@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from server.lib import storage
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.models import JsonValue, ProjConfig, ProjectMeta, Todo
 from server.tools.trello_sync import (
     _topo_sort_todos,
@@ -217,8 +218,9 @@ def migrate_checklist_to_card(
         migrated += 1
 
         # Create parent-child attachment link
-        if todo.parent:
-            parent = todo_map.get(todo.parent)
+        parent_id = parent_id_from_tags(todo.tags)
+        if parent_id:
+            parent = todo_map.get(parent_id)
             if parent and parent.trello_card_id:
                 try:
                     call_trello(
@@ -231,7 +233,7 @@ def migrate_checklist_to_card(
                     )
                     attachments_created += 1
                 except Exception as e:
-                    errors.append(f"Failed to link todo {todo.id} to parent {todo.parent}: {e}")
+                    errors.append(f"Failed to link todo {todo.id} to parent {parent_id}: {e}")
 
     # Also clear legacy fields on todos that already had trello_card_id
     # (they were skipped for card creation but still may have stale checklist fields)

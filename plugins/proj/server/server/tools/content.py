@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from server.lib import state, storage
+from server.lib.group_tags import parent_id_from_tags
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -259,13 +260,7 @@ def register(app: FastMCP) -> None:
 
         parent_dict = None
         if include_parent:
-            # Flat model: parent pointer lives in group:<id> tag; fall back to .parent field
-            # for migrated todos that still carry the legacy field.
-            _group_parent = next(
-                (t[6:] for t in todo.tags if t.startswith("group:") and len(t) > 6),
-                None,
-            )
-            _parent_id = _group_parent or todo.parent
+            _parent_id = parent_id_from_tags(todo.tags)
             if _parent_id:
                 parent_todo = next((t for t in todos if t.id == _parent_id), None)
                 if parent_todo:
