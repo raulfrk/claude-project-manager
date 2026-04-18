@@ -22,6 +22,7 @@ import httpx
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, Todo
 from server.lib.retry import retry_link
@@ -103,11 +104,13 @@ def _content_differs(local: Todo, task: dict[str, JsonValue]) -> bool:
         )
         return True
     todoist_labels = _parse_todoist_labels(task)
-    if sorted(local.tags) != sorted(todoist_labels):
+    # Group tags are local-only; exclude them from the Todoist comparison.
+    local_todoist_tags = [t for t in local.tags if not t.startswith("group:")]
+    if sorted(local_todoist_tags) != sorted(todoist_labels):
         logger.warning(
             "content_differs[%s]: labels %r != %r",
             task.get("id", "?"),
-            local.tags,
+            local_todoist_tags,
             todoist_labels,
         )
         return True
@@ -215,8 +218,9 @@ def _reconcile_unlinked_todos(
             candidate = avail_todoist[0]
             todoist_id = str(candidate.get("id", ""))
             # Require parent-context confirmation for auto-link
-            if todoist_id and todo.parent:
-                parent_todo = local_by_id.get(todo.parent)
+            todo_parent_id = parent_id_from_tags(todo.tags)
+            if todoist_id and todo_parent_id:
+                parent_todo = local_by_id.get(todo_parent_id)
                 parent_todoist_id = parent_todo.todoist_task_id if parent_todo else None
                 cand_parent = str(candidate.get("parent_id", "") or "")
                 if parent_todoist_id and cand_parent == parent_todoist_id:
@@ -235,9 +239,10 @@ def _reconcile_unlinked_todos(
         for todo in avail_local:
             if todo.id in matched_local_ids:
                 continue
-            if not todo.parent:
+            todo_parent_id = parent_id_from_tags(todo.tags)
+            if not todo_parent_id:
                 continue
-            parent_todo = local_by_id.get(todo.parent)
+            parent_todo = local_by_id.get(todo_parent_id)
             parent_todoist_id = parent_todo.todoist_task_id if parent_todo else None
             if not parent_todoist_id:
                 continue
@@ -520,8 +525,10 @@ def _infer_parent_link_from_children(
     for child_task in todoist_children:
         child_id = str(child_task.get("id", ""))
         linked_local = local_by_todoist_id.get(child_id)
-        if linked_local and linked_local.parent:
-            local_child_parents.add(linked_local.parent)
+        if linked_local:
+            pid = parent_id_from_tags(linked_local.tags)
+            if pid:
+                local_child_parents.add(pid)
 
     if len(local_child_parents) != 1:
         return None  # No linked children, or children disagree on parent
@@ -530,19 +537,26 @@ def _infer_parent_link_from_children(
     return local_by_id.get(parent_id)
 
 
+def _direct_children(todos: list[Todo], parent_id: str) -> list[Todo]:
+    """Return todos whose group tag encodes *parent_id* as their parent."""
+    return [t for t in todos if parent_id_from_tags(t.tags) == parent_id]
+
+
 def _collect_descendant_todoist_ids(
     todo: Todo,
     local_by_id: dict[str, Todo],
     allowed_ids: set[str] | None = None,
 ) -> list[str]:
-    """Walk todo.children recursively, collecting todoist_task_ids of terminal descendants.
+    """Walk direct children recursively via group tags, collecting todoist_task_ids of
+    terminal descendants.
 
     When *allowed_ids* is provided, only IDs present in the set are included.
     This filters out stale IDs whose Todoist tasks are no longer in the active fetch.
     """
+    all_todos = list(local_by_id.values())
     result: list[str] = []
     seen: set[str] = set()
-    stack = list(todo.children) if todo.children else []
+    stack = [c.id for c in _direct_children(all_todos, todo.id)]
     while stack:
         child_id = stack.pop()
         if child_id in seen:
@@ -557,8 +571,8 @@ def _collect_descendant_todoist_ids(
             and (allowed_ids is None or child.todoist_task_id in allowed_ids)
         ):
             result.append(child.todoist_task_id)
-        if child.children:
-            stack.extend(child.children)
+        for grandchild in _direct_children(all_todos, child.id):
+            stack.append(grandchild.id)
     return list(dict.fromkeys(result))
 
 
@@ -716,7 +730,7 @@ def compute_diff(
         for todoist_id, task in todoist_by_id.items():
             if task.get("parent_id"):
                 cleanup_todo = local_by_todoist_id.get(todoist_id)
-                if cleanup_todo and cleanup_todo.parent:
+                if cleanup_todo and parent_id_from_tags(cleanup_todo.tags) is not None:
                     plan.root_only_cleanup.append(
                         {
                             "todoist_task_id": todoist_id,
@@ -731,15 +745,17 @@ def compute_diff(
     remaining_unlinked = [
         t
         for t in local_unlinked
-        if t.id not in linked_local_ids and not (t.parent and t.parent in linked_local_ids)
+        if t.id not in linked_local_ids
+        and not (parent_id_from_tags(t.tags) and parent_id_from_tags(t.tags) in linked_local_ids)
     ]
     unlinked_ids = {t.id for t in remaining_unlinked}
     unlinked_roots: list[Todo] = []
     unlinked_children: list[Todo] = []
     for todo in remaining_unlinked:
-        if effective_root_only and todo.parent:
+        todo_pid = parent_id_from_tags(todo.tags)
+        if effective_root_only and todo_pid:
             continue
-        if todo.parent and todo.parent in unlinked_ids:
+        if todo_pid and todo_pid in unlinked_ids:
             unlinked_children.append(todo)
         else:
             unlinked_roots.append(todo)
@@ -748,8 +764,9 @@ def compute_diff(
     for todo in sorted(unlinked_roots, key=lambda t: t.id):
         todoist_priority = _LOCAL_TO_TODOIST.get(todo.priority, "p4")
         parent_todoist_id: str | None = None
-        if todo.parent:
-            parent_todo = next((t for t in todos if t.id == todo.parent), None)
+        todo_pid = parent_id_from_tags(todo.tags)
+        if todo_pid:
+            parent_todo = next((t for t in todos if t.id == todo_pid), None)
             if parent_todo and parent_todo.todoist_task_id:
                 parent_todoist_id = parent_todo.todoist_task_id
 
@@ -779,7 +796,7 @@ def compute_diff(
             "priority": todoist_priority,
             "description": todo.notes,
             "labels": todo.tags,
-            "_parent_local_id": todo.parent,
+            "_parent_local_id": parent_id_from_tags(todo.tags),
         }
         if todo.due_date:
             entry_p2["dueString"] = todo.due_date
@@ -839,7 +856,11 @@ def compute_diff(
     # ── Parent cascade: collect descendant todoist IDs for completed parents ──
     active_todoist_ids = set(todoist_by_id.keys())
     for todo in todos:
-        if todo.children and todo.status in TERMINAL_STATUSES and todo.todoist_task_id:
+        if (
+            _direct_children(todos, todo.id)
+            and todo.status in TERMINAL_STATUSES
+            and todo.todoist_task_id
+        ):
             descendant_ids = _collect_descendant_todoist_ids(
                 todo, local_by_id, allowed_ids=active_todoist_ids
             )
@@ -856,10 +877,11 @@ def compute_diff(
         if todoist_id not in local_by_todoist_id:
             continue
         local_todo = local_by_todoist_id[todoist_id]
-        if not local_todo.parent:
+        local_todo_pid = parent_id_from_tags(local_todo.tags)
+        if local_todo_pid is None:
             continue
         # Local todo has a parent — find parent's todoist_task_id
-        parent_todo = next((t for t in todos if t.id == local_todo.parent), None)
+        parent_todo = next((t for t in todos if t.id == local_todo_pid), None)
         if not parent_todo or not parent_todo.todoist_task_id:
             continue
         # Check if Todoist task already has the correct parent_id set
@@ -973,8 +995,7 @@ def apply_changes(
         if not push_confirmed and desc_synced_value:
             staged_description_synced[todo.id] = desc_synced_value
         if parent_todo:
-            todo.parent = parent_todo.id
-            parent_todo.children.append(todo.id)
+            todo.tags = [*todo.tags, f"group:{parent_todo.id}"]
             parent_todo.updated = today
         todos.append(todo)
         todo_map[todo.id] = todo
@@ -997,7 +1018,10 @@ def apply_changes(
             todo.priority = str(item["priority"])
             content_changed = True
         if "tags" in item and isinstance(item["tags"], list):
-            todo.tags = [str(t) for t in item["tags"]]
+            # Preserve group: tags (local-only parent encoding) when applying Todoist labels.
+            group_tags = [t for t in todo.tags if t.startswith("group:")]
+            todoist_only = [str(t) for t in item["tags"] if not str(t).startswith("group:")]
+            todo.tags = group_tags + todoist_only
             content_changed = True
         if "notes" in item and item["notes"] is not None:
             todo.notes = str(item["notes"])
@@ -1074,11 +1098,9 @@ def apply_changes(
         if not orphan_todo or not parent_todo:
             continue
         # Skip if orphan already has a parent (was linked by a later sibling resolution)
-        if orphan_todo.parent:
+        if parent_id_from_tags(orphan_todo.tags) is not None:
             continue
-        orphan_todo.parent = parent_todo.id
-        if orphan_todo.id not in parent_todo.children:
-            parent_todo.children.append(orphan_todo.id)
+        orphan_todo.tags = [*orphan_todo.tags, f"group:{parent_todo.id}"]
         parent_todo.updated = today
         int_counts["relinked"] += 1
 
@@ -1099,7 +1121,7 @@ def apply_changes(
         todo.updated = today
         int_counts["completed"] += 1
         # Leaf todos (no parent, no children) get archived
-        if not todo.parent and not todo.children:
+        if parent_id_from_tags(todo.tags) is None and not _direct_children(todos, todo.id):
             todo.todoist_description_synced = ""
             to_archive.append(todo)
             # Clean up blocking references
@@ -1788,9 +1810,10 @@ def _migrate_parent_links(
     updates: list[dict[str, str]] = []
 
     for todo in todos:
-        if not todo.todoist_task_id or not todo.parent:
+        todo_pid = parent_id_from_tags(todo.tags)
+        if not todo.todoist_task_id or not todo_pid:
             continue
-        parent = todo_map.get(todo.parent)
+        parent = todo_map.get(todo_pid)
         if not parent or not parent.todoist_task_id:
             counts["skipped_unlinked"] += 1
             continue
@@ -2086,12 +2109,15 @@ def _run_todoist_full_sync(
             if task.get("parent_id"):
                 continue
             local_todo = _post_local_by_tid.get(tid)
-            if not local_todo or not local_todo.parent:
+            if not local_todo:
                 continue
-            parent_todo = _post_todo_map.get(local_todo.parent)
+            local_todo_pid = parent_id_from_tags(local_todo.tags)
+            if local_todo_pid is None:
+                continue
+            parent_todo = _post_todo_map.get(local_todo_pid)
             if not parent_todo:
                 continue
-            parent_tid = combined_id_map.get(local_todo.parent) or parent_todo.todoist_task_id
+            parent_tid = combined_id_map.get(local_todo_pid) or parent_todo.todoist_task_id
             if parent_tid:
                 post_link_updates.append({"id": tid, "parent_id": parent_tid})
         if post_link_updates:

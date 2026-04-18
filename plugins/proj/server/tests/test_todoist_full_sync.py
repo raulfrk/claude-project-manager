@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from server.lib import storage
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.ids import next_todo_id
 from server.lib.models import (
     ProjConfig,
@@ -315,8 +316,8 @@ class TestProjTodoistFullSync:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent task")
-        child = _make_todo(cfg, name, "Child task", parent=parent.id)
-        parent.children.append(child.id)
+        child = _make_todo(cfg, name, "Child task")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         call_log = []
@@ -360,8 +361,8 @@ class TestProjTodoistFullSync:
 
         # Create parent with linked todoist ID, and child also linked
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp")
-        child = _make_todo(cfg, name, "Child", todoist_task_id="tc", parent=parent.id)
-        parent.children.append(child.id)
+        child = _make_todo(cfg, name, "Child", todoist_task_id="tc")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         todoist_tasks = [
@@ -538,12 +539,14 @@ class TestMigrateParentLinks:
     def _make_local_todo(
         self, todo_id: str, parent: str | None = None, todoist_task_id: str | None = None
     ) -> Todo:
-        return Todo(
+        t = Todo(
             id=todo_id,
             title=f"Todo {todo_id}",
-            parent=parent,
             todoist_task_id=todoist_task_id,
         )
+        if parent:
+            t.tags = [*t.tags, f"group:{parent}"]
+        return t
 
     def test_migrates_missing_parent_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Child with todoist_task_id, parent with todoist_task_id,
@@ -661,9 +664,8 @@ class TestPostExecutionLinkageFix:
         # Parent todo (unlinked — will be created in this sync)
         parent_todo = _make_todo(cfg, name, "Parent task")
         # Child todo (already linked to Todoist, but Todoist task has no parentId)
-        child_todo = _make_todo(
-            cfg, name, "Child task", parent=parent_todo.id, todoist_task_id="existing_child_tid"
-        )
+        child_todo = _make_todo(cfg, name, "Child task", todoist_task_id="existing_child_tid")
+        child_todo.tags = [*child_todo.tags, f"group:{parent_todo.id}"]
         storage.save_todos(cfg, name, [parent_todo, child_todo])
 
         # Todoist state: only the child exists (parent not yet created)
@@ -719,7 +721,8 @@ def _make_local_todo(
     today = str(date.today())
     t = Todo(id=todo_id, title=title, created=today, updated=today)
     t.todoist_task_id = todoist_id
-    t.parent = parent
+    if parent:
+        t.tags = [*t.tags, f"group:{parent}"]
     return t
 
 
@@ -843,10 +846,10 @@ class TestComputeDiffChildInference:
         parent_todo.todoist_task_id = "task-a"
         child1 = Todo(id="1.1", title="Manual test 1", created=today, updated=today)
         child1.todoist_task_id = "tc1"
-        child1.parent = "1"
+        child1.tags = ["group:1"]
         child2 = Todo(id="1.2", title="Manual test 2", created=today, updated=today)
         child2.todoist_task_id = "tc2"
-        child2.parent = "1"
+        child2.tags = ["group:1"]
         storage.save_todos(cfg, name, [parent_todo, child1, child2])
 
         # Todoist state: task-a (linked), task-b (unlinked duplicate), tc1/tc2 (children of task-b)
@@ -1012,8 +1015,7 @@ class TestApplyChangesParentChild:
 
         parent = todo_map["Parent"]
         child = todo_map["Child"]
-        assert child.parent == parent.id
-        assert child.id in parent.children
+        assert parent_id_from_tags(child.tags) == parent.id
 
     def test_existing_parent_new_child(
         self,
@@ -1045,8 +1047,7 @@ class TestApplyChangesParentChild:
 
         child = todo_map["New child"]
         parent = todo_map["Existing parent"]
-        assert child.parent == parent.id
-        assert child.id in parent.children
+        assert parent_id_from_tags(child.tags) == parent.id
 
     def test_orphan_relinked_after_batch_create(
         self,
@@ -1106,8 +1107,7 @@ class TestApplyChangesParentChild:
 
         # With depth-based sorting, parent (depth 0) is created before child (depth 1),
         # so the child finds its parent at creation time — no orphan pass needed.
-        assert child.parent == parent.id
-        assert child.id in parent.children
+        assert parent_id_from_tags(child.tags) == parent.id
 
     def test_empty_todoist_parent_id_stays_root(
         self,
@@ -1132,7 +1132,7 @@ class TestApplyChangesParentChild:
         assert result["created"] == 1
         todos = storage.load_todos(cfg, name)
         root = next(t for t in todos if t.title == "Root task")
-        assert root.parent is None
+        assert parent_id_from_tags(root.tags) is None
 
 
 # ── 448.6: Integration tests for full sync round-trip with nested tasks ──────
@@ -1174,10 +1174,8 @@ class TestFullSyncParentChild:
         mid = todo_map["Mid"]
         leaf = todo_map["Leaf"]
 
-        assert mid.parent == root.id
-        assert leaf.parent == mid.id
-        assert mid.id in root.children
-        assert leaf.id in mid.children
+        assert parent_id_from_tags(mid.tags) == root.id
+        assert parent_id_from_tags(leaf.tags) == mid.id
 
     def test_external_parent_child_stays_root(
         self,
@@ -1207,7 +1205,7 @@ class TestFullSyncParentChild:
 
         todos = storage.load_todos(cfg, name)
         child = next(t for t in todos if t.title == "Orphan child")
-        assert child.parent is None
+        assert parent_id_from_tags(child.tags) is None
 
 
 # ── 492.6: Completion sync, reopen, cascade, timestamp tests ──────────────────
@@ -1223,10 +1221,8 @@ class TestCompletionSync:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp")
-        child = _make_todo(
-            cfg, name, "Child", parent=parent.id, todoist_task_id="tc", status="done"
-        )
-        parent.children.append(child.id)
+        child = _make_todo(cfg, name, "Child", todoist_task_id="tc", status="done")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         # Todoist returns parent but NOT child
@@ -1243,12 +1239,10 @@ class TestCompletionSync:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "P", todoist_task_id="tp", status="done")
-        child = _make_todo(cfg, name, "C", parent=parent.id, todoist_task_id="tc", status="done")
-        grandchild = _make_todo(
-            cfg, name, "GC", parent=child.id, todoist_task_id="tgc", status="done"
-        )
-        parent.children.append(child.id)
-        child.children.append(grandchild.id)
+        child = _make_todo(cfg, name, "C", todoist_task_id="tc", status="done")
+        child.tags = [*child.tags, f"group:{parent.id}"]
+        grandchild = _make_todo(cfg, name, "GC", todoist_task_id="tgc", status="done")
+        grandchild.tags = [*grandchild.tags, f"group:{child.id}"]
         storage.save_todos(cfg, name, [parent, child, grandchild])
 
         # Todoist returns none of them
@@ -1328,9 +1322,10 @@ class TestCompletionSync:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp", status="done")
-        child1 = _make_todo(cfg, name, "C1", parent=parent.id, todoist_task_id="tc1", status="done")
-        child2 = _make_todo(cfg, name, "C2", parent=parent.id, todoist_task_id="tc2", status="done")
-        parent.children = [child1.id, child2.id]
+        child1 = _make_todo(cfg, name, "C1", todoist_task_id="tc1", status="done")
+        child1.tags = [*child1.tags, f"group:{parent.id}"]
+        child2 = _make_todo(cfg, name, "C2", todoist_task_id="tc2", status="done")
+        child2.tags = [*child2.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child1, child2])
 
         # All three are in Todoist (not completed there)
@@ -1405,15 +1400,8 @@ class TestCompletionSync:
         storage.save_meta(cfg, meta)
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="tp", status="done")
-        child = _make_todo(
-            cfg,
-            name,
-            "Child",
-            parent=parent.id,
-            todoist_task_id="tc",
-            status="done",
-        )
-        parent.children = [child.id]
+        child = _make_todo(cfg, name, "Child", todoist_task_id="tc", status="done")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         todoist_tasks = [
@@ -1442,6 +1430,7 @@ class TestCompletionSync:
             updated=today,
             status="done",
             todoist_task_id="tc1",
+            tags=["group:1"],
         )
         child_pending = Todo(
             id="1.2",
@@ -1450,6 +1439,7 @@ class TestCompletionSync:
             updated=today,
             status="pending",
             todoist_task_id="tc2",
+            tags=["group:1"],
         )
         child_no_id = Todo(
             id="1.3",
@@ -1457,6 +1447,7 @@ class TestCompletionSync:
             created=today,
             updated=today,
             status="done",
+            tags=["group:1"],
         )
         grandchild = Todo(
             id="1.1.1",
@@ -1465,9 +1456,8 @@ class TestCompletionSync:
             updated=today,
             status="done",
             todoist_task_id="tgc",
+            tags=["group:1.1"],
         )
-        parent.children = ["1.1", "1.2", "1.3"]
-        child_done.children = ["1.1.1"]
 
         local_by_id = {
             t.id: t for t in [parent, child_done, child_pending, child_no_id, grandchild]
@@ -1492,12 +1482,11 @@ class TestCompletionSync:
             cfg,
             name,
             "Child",
-            parent=parent.id,
             todoist_task_id="tc",
             status="done",
             updated="2099-06-01T00:00:00",
         )
-        parent.children = [child.id]
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         # Child is in Todoist (open, old timestamp) — first-pass will add tc to push_complete.
@@ -1535,10 +1524,8 @@ class TestCompletionSync:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "P", todoist_task_id="tp", status="done")
-        child = _make_todo(
-            cfg, name, "C", parent=parent.id, todoist_task_id="tc_stale", status="done"
-        )
-        parent.children = [child.id]
+        child = _make_todo(cfg, name, "C", todoist_task_id="tc_stale", status="done")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         # Todoist returns parent (as completed=False, old ts) but NOT child
@@ -1559,12 +1546,11 @@ class TestCompletionSync:
             cfg,
             name,
             "C",
-            parent=parent.id,
             todoist_task_id="tc_active",
             status="done",
             updated="2099-06-01T00:00:00",
         )
-        parent.children = [child.id]
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         # Todoist returns both parent and child
@@ -1855,7 +1841,8 @@ class TestReconcileUnlinkedTodos:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
-        child = _make_todo(cfg, name, "Fix bug", parent=parent.id)
+        child = _make_todo(cfg, name, "Fix bug")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         todoist_tasks = [
@@ -1875,7 +1862,8 @@ class TestReconcileUnlinkedTodos:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
-        child = _make_todo(cfg, name, "Deploy", parent=parent.id)
+        child = _make_todo(cfg, name, "Deploy")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         todoist_tasks = [
@@ -1908,7 +1896,8 @@ class TestReconcileUnlinkedTodos:
 
         existing = _make_todo(cfg, name, "Fix bug", todoist_task_id="td-claimed")
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
-        unlinked = _make_todo(cfg, name, "Fix bug", parent=parent.id)
+        unlinked = _make_todo(cfg, name, "Fix bug")
+        unlinked.tags = [*unlinked.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [existing, parent, unlinked])
 
         todoist_tasks = [
@@ -1923,7 +1912,8 @@ class TestReconcileUnlinkedTodos:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
-        done_todo = _make_todo(cfg, name, "Fix bug", parent=parent.id, status="done")
+        done_todo = _make_todo(cfg, name, "Fix bug", status="done")
+        done_todo.tags = [*done_todo.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, done_todo])
 
         todoist_tasks = [
@@ -1943,7 +1933,8 @@ class TestReconcileUnlinkedTodos:
         cfg, name = cfg_with_project
 
         parent = _make_todo(cfg, name, "Parent", todoist_task_id="td-parent")
-        child = _make_todo(cfg, name, "Fix Bug", parent=parent.id)
+        child = _make_todo(cfg, name, "Fix Bug")
+        child.tags = [*child.tags, f"group:{parent.id}"]
         storage.save_todos(cfg, name, [parent, child])
 
         todoist_tasks = [
@@ -2000,3 +1991,87 @@ class TestFindExistingTodoistTask:
         )
         result = _find_existing_todoist_task("proj-1", "fix bug")
         assert result == "t1"
+
+
+# ── Regression invariant: no .parent/.children reads in the sync path ────────
+
+
+def test_full_sync_reads_no_parent_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defensive: any attr-read on Todo.parent or Todo.children in the sync path is a bug.
+
+    Fails fast if production code regresses to reading `.parent`/`.children` after this cleanup.
+    """
+    from server.lib.models import Todo
+
+    accesses: list[str] = []
+    orig_getattr = Todo.__getattribute__
+
+    def recording_getattr(self: Todo, name: str) -> object:
+        if name in ("parent", "children", "next_child_id"):
+            accesses.append(name)
+        return orig_getattr(self, name)
+
+    monkeypatch.setattr(Todo, "__getattribute__", recording_getattr)
+
+    today = str(date.today())
+    # 1 root + 2 children via group:<parent.id> tags
+    root = Todo(id="r1", title="Root", created=today, updated=today)
+    child1 = Todo(id="r1.1", title="Child 1", created=today, updated=today, tags=["group:r1"])
+    child2 = Todo(id="r1.2", title="Child 2", created=today, updated=today, tags=["group:r1"])
+
+    # Drive compute_diff with a minimal in-memory diff (no Todoist tasks)
+    # which exercises all read paths without a full network round-trip.
+    import tempfile
+    from pathlib import Path as _Path
+
+    from server.lib import storage as _storage
+    from server.lib.models import (
+        ProjConfig,
+        ProjectDates,
+        ProjectEntry,
+        ProjectIndex,
+        ProjectMeta,
+        TodoistSync,
+    )
+    from server.tools.todoist_full_sync import compute_diff
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = _Path(tmp)
+        config_path = tmp_path / "proj.yaml"
+        monkeypatch.setattr(_storage, "_DEFAULT_CONFIG_PATH", config_path)
+        monkeypatch.delenv("PROJ_CONFIG", raising=False)
+
+        cfg = ProjConfig(
+            tracking_dir=str(tmp_path / "tracking"),
+            todoist=TodoistSync(enabled=True),
+        )
+        _storage.save_config(cfg)
+
+        proj_dir = _Path(cfg.tracking_dir) / "testproj"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "archive.yaml").write_text("todos: []\n")
+        today_str = str(date.today())
+        meta = ProjectMeta(
+            name="testproj",
+            repos=[],
+            dates=ProjectDates(created=today_str, last_updated=today_str),
+        )
+        _storage.save_meta(cfg, meta)
+        index = ProjectIndex(
+            projects={
+                "testproj": ProjectEntry(
+                    name="testproj",
+                    tracking_dir=str(proj_dir),
+                    created=today_str,
+                )
+            }
+        )
+        _storage.save_index(cfg, index)
+        _storage.save_todos(cfg, "testproj", [root, child1, child2])
+
+        # Clear accesses accumulated during setup
+        accesses.clear()
+
+        compute_diff([], cfg, "testproj")
+
+    assert accesses == [], f"Sync path read deprecated fields: {accesses}"
