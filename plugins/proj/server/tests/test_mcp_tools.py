@@ -1113,7 +1113,7 @@ class TestTodoTreeMerge:
         orphan = Todo(
             id="99",
             title="Done Orphan",
-            parent="999",
+            tags=["group:999"],
             status="done",
             created="2026-01-01",
             updated="2026-01-01",

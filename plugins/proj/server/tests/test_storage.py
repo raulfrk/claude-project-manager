@@ -81,16 +81,21 @@ def test_todos_roundtrip(tmp_cfg: ProjConfig) -> None:
     (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
     todos = [
         Todo(id="T001", title="First", created="2026-01-01", updated="2026-01-01"),
-        Todo(id="T002", title="Second", parent="T001", created="2026-01-01", updated="2026-01-01"),
+        Todo(
+            id="T002",
+            title="Second",
+            tags=["group:T001"],
+            created="2026-01-01",
+            updated="2026-01-01",
+        ),
     ]
     storage.save_todos(tmp_cfg, "myapp", todos)
     loaded = storage.load_todos(tmp_cfg, "myapp")
     assert len(loaded) == 2
     assert loaded[0].id == "T001"
     assert loaded[1].id == "T002"
-    # parent/children/next_child_id are no longer persisted in the flat SQL schema
-    # (dropped in Task 2a of the flat-model cleanup); they default to None/[]/1 on load
-    assert loaded[1].parent is None
+    # Flat model: parent membership via group:<id> tag, no .parent field
+    assert "group:T001" in loaded[1].tags
 
 
 def test_append_note_creates_file(tmp_cfg: ProjConfig) -> None:

@@ -72,7 +72,10 @@ def cfg_with_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 def _make_todo(cfg: ProjConfig, name: str, title: str, **kwargs: object) -> Todo:
     meta = storage.load_meta(cfg, name)
     today = str(date.today())
-    todo = Todo(id=next_todo_id(meta), title=title, created=today, updated=today)
+    # Translate legacy parent= kwarg to group: tag (flat model)
+    parent_id = kwargs.pop("parent", None)
+    tags: list[str] = [f"group:{parent_id}"] if parent_id is not None else []
+    todo = Todo(id=next_todo_id(meta), title=title, created=today, updated=today, tags=tags)
     for k, v in kwargs.items():
         setattr(todo, k, v)
     storage.save_meta(cfg, meta)
@@ -306,7 +309,7 @@ class TestTwoPhasePush:
         cfg, name = cfg_with_project
         parent = _make_todo(cfg, name, "Parent task")
         child = _make_todo(cfg, name, "Child task", parent=parent.id)
-        parent.children.append(child.id)
+        # Flat model: child carries group:<parent.id> tag; no .children field on parent
         storage.save_todos(cfg, name, [parent, child])
 
         plan = compute_diff([], cfg, name)

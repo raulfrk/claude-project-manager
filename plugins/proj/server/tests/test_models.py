@@ -232,6 +232,16 @@ class TestSmartGateBool:
         assert cfg.smart_gate is True
 
 
+class TestTodoLegacyFieldsDropped:
+    def test_todo_has_no_legacy_tree_fields(self) -> None:
+        from dataclasses import fields
+
+        names = {f.name for f in fields(Todo)}
+        assert "parent" not in names
+        assert "children" not in names
+        assert "next_child_id" not in names
+
+
 class TestQualityLevel:
     def test_valid_levels(self) -> None:
         assert QualityLevel.FAST == "fast"

@@ -258,11 +258,6 @@ class TestRowToTodoCorruptJson:
         row.__getitem__ = lambda self_, key: defaults[key]
         return row
 
-    def test_corrupt_children_returns_empty_list(self) -> None:
-        row = self._make_row({"children": "{not valid json"})
-        todo = _row_to_todo(row)
-        assert todo.children == []
-
     def test_corrupt_tags_returns_empty_list(self) -> None:
         row = self._make_row({"tags": "!!!"})
         todo = _row_to_todo(row)
@@ -291,7 +286,6 @@ class TestRowToTodoCorruptJson:
     def test_multiple_corrupt_fields_returns_all_defaults(self) -> None:
         row = self._make_row(
             {
-                "children": "bad",
                 "tags": "bad",
                 "git_commits": "bad",
                 "blocks": "bad",
@@ -300,7 +294,6 @@ class TestRowToTodoCorruptJson:
             }
         )
         todo = _row_to_todo(row)
-        assert todo.children == []
         assert todo.tags == []
         assert todo.git.commits == []
         assert todo.blocks == []

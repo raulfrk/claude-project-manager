@@ -86,11 +86,20 @@ def cfg_with_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 def _make_todo(cfg: ProjConfig, name: str, title: str, **kwargs: object) -> Todo:
     meta = storage.load_meta(cfg, name)
     now = datetime.now(tz=UTC).replace(tzinfo=None).isoformat()
+    parent_id = kwargs.pop("parent", None)
     parent_todo = None
-    if kwargs.get("parent"):
+    if parent_id:
         todos = storage.load_todos(cfg, name)
-        parent_todo = next((t for t in todos if t.id == kwargs["parent"]), None)
-    todo = Todo(id=next_todo_id(meta, parent=parent_todo), title=title, created=now, updated=now)
+        parent_todo = next((t for t in todos if t.id == parent_id), None)
+    # Flat model: parent membership via group: tag
+    tags: list[str] = [f"group:{parent_id}"] if parent_id is not None else []
+    todo = Todo(
+        id=next_todo_id(meta, parent=parent_todo),
+        title=title,
+        created=now,
+        updated=now,
+        tags=tags,
+    )
     for k, v in kwargs.items():
         setattr(todo, k, v)
     storage.save_meta(cfg, meta)
@@ -183,8 +192,8 @@ class TestCardDescription:
         assert "**Blocked by**: 1, 2, 3" in desc
 
     def test_children_not_in_description(self) -> None:
-        # Flat model: Children block removed from card description
-        todo = Todo(id="1", title="Parent", children=["1.1", "1.2"])
+        # Flat model: Children block removed from card description (children use group: tags)
+        todo = Todo(id="1", title="Parent")
         desc = build_card_description(todo)
         assert "**Children**" not in desc
 

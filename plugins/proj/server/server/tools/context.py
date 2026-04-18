@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from server.lib import state, storage
 from server.lib.enums import TERMINAL_STATUSES
+from server.lib.group_tags import parent_id_from_tags
 from server.lib.router_health import check_router_reachable
 from server.lib.sockets_cleanup import sockets_cleanup_stale
 from server.tools.config import require_config
@@ -528,6 +529,13 @@ def register(app: FastMCP) -> None:
         blocked = [t for t in all_open if t.blocked_by]
         done_count = sum(1 for t in todos if t.status == "done")
 
+        # Build children count from group tags (flat model: no .children field)
+        children_count_by_id: dict[str, int] = {}
+        for _t in todos:
+            pid = parent_id_from_tags(_t.tags)
+            if pid is not None:
+                children_count_by_id[pid] = children_count_by_id.get(pid, 0) + 1
+
         def _todo_summary(t: Todo) -> dict[str, JsonValue]:
             return {
                 "id": t.id,
@@ -536,7 +544,7 @@ def register(app: FastMCP) -> None:
                 "status": t.status,
                 "tags": t.tags,
                 "blocked_by": t.blocked_by,
-                "children_count": len(t.children),
+                "children_count": children_count_by_id.get(t.id, 0),
             }
 
         # Git activity

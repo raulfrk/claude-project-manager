@@ -129,9 +129,8 @@ def test_no_parent_or_children_kwargs_on_todo_constructor(
     st_todo = next((t for t in todos if t.jira_issue_key == "PROJ-21"), None)
     assert st_todo is not None
 
-    # Flat model: parent field must be None, children must be empty
-    assert st_todo.parent is None, f"Expected parent=None, got parent={st_todo.parent!r}"
-    assert st_todo.children == [], f"Expected children=[], got children={st_todo.children!r}"
+    # Flat model: no .parent/.children fields; parent membership via group: tags only
+    # (fields were dropped in Task 2f of 636 flat-model cleanup)
 
 
 def test_todos_list_contains_parent_and_subtask_as_siblings(
@@ -155,10 +154,8 @@ def test_todos_list_contains_parent_and_subtask_as_siblings(
         f"child.id={child.id!r} looks like a nested ID under parent {parent.id!r}"
     )
 
-    # parent has no children in the children list
-    assert child.id not in parent.children, (
-        f"parent.children should not contain child id {child.id!r}"
-    )
+    # Flat model: no .children field; children identified via group:<parent.id> tag on child
+    # (fields were dropped in Task 2f of 636 flat-model cleanup)
 
 
 def test_empty_subtasks_list_noop(

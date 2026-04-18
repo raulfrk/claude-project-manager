@@ -30,13 +30,14 @@ def _make_todo(
     jira_issue_key: str = "",
 ) -> Todo:
     today = str(date.today())
+    tags = [f"group:{parent}"] if parent is not None else []
     return Todo(
         id=tid,
         title=title,
         created=today,
         updated=today,
         status=status,  # type: ignore[arg-type]
-        parent=parent,
+        tags=tags,
         todoist_task_id=todoist_task_id,
         trello_card_id=trello_card_id,
         jira_issue_key=jira_issue_key,

@@ -67,13 +67,14 @@ def _make_todo(
     jira_issue_key: str = "",
 ) -> Todo:
     today = str(date.today())
+    tags = [f"group:{parent}"] if parent is not None else []
     return Todo(
         id=tid,
         title=title,
         created=today,
         updated=today,
         status=status,  # type: ignore[arg-type]
-        parent=parent,
+        tags=tags,
         todoist_task_id=todoist_task_id,
         trello_card_id=trello_card_id,
         jira_issue_key=jira_issue_key,
@@ -284,8 +285,6 @@ async def test_parent_family_archive_walks_full_tree(cfg: ProjConfig, mcp_app, t
     c1 = _make_todo("1.1", parent="1")
     c2 = _make_todo("1.2", parent="1")
     gc = _make_todo("1.1.1", parent="1.1")
-    p.children = ["1.1", "1.2"]
-    c1.children = ["1.1.1"]
     storage.save_todos(cfg, "myapp", [p, c1, c2, gc])
     state.set_session_active("myapp")
 
@@ -306,8 +305,6 @@ async def test_children_across_trees_independent(cfg: ProjConfig, mcp_app, tmp_p
     a1 = _make_todo("1.1", parent="1")
     b = _make_todo("2")
     b1 = _make_todo("2.1", parent="2")
-    a.children = ["1.1"]
-    b.children = ["2.1"]
     storage.save_todos(cfg, "myapp", [a, a1, b, b1])
     state.set_session_active("myapp")
 

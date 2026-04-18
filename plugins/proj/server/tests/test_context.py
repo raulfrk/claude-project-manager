@@ -298,7 +298,8 @@ def _make_status_todos() -> list[Todo]:
             title="In progress task",
             status="in_progress",
             priority="medium",
-            children=["T002.1"],
+            # Flat model: children are identified by group:<id> tags on the child todo.
+            # children_count for T002 is computed dynamically from all todos at query time.
         ),
         Todo(id="T003", title="Done task", status="done", priority="low"),
         Todo(
@@ -315,6 +316,13 @@ def _make_status_todos() -> list[Todo]:
             status="in_progress",
             priority="high",
             tags=["urgent"],
+        ),
+        Todo(
+            id="T002.1",
+            title="Child of T002",
+            status="done",
+            priority="low",
+            tags=["group:T002"],
         ),
     ]
 
@@ -387,8 +395,8 @@ class TestProjStatusContext:
         open_ids = {t["id"] for t in todos["all_open"]}
         assert open_ids == {"T001", "T002", "T004", "T006"}
 
-        # done_count: T003
-        assert todos["done_count"] == 1
+        # done_count: T003 + T002.1 (child of T002)
+        assert todos["done_count"] == 2
 
     async def test_todo_summary_fields(self, mcp_app: Any, cfg: ProjConfig, tmp_path: Path) -> None:
         """Each todo in the lists has id, title, priority,

@@ -53,7 +53,10 @@ def cfg_with_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 
 def _make_todo(meta: ProjectMeta, title: str, **kwargs: object) -> Todo:
     today = str(date.today())
-    todo = Todo(id=next_todo_id(meta), title=title, created=today, updated=today)
+    # Translate legacy parent= kwarg to group: tag (flat model)
+    parent_id = kwargs.pop("parent", None)
+    tags: list[str] = [f"group:{parent_id}"] if parent_id is not None else []
+    todo = Todo(id=next_todo_id(meta), title=title, created=today, updated=today, tags=tags)
     for k, v in kwargs.items():
         setattr(todo, k, v)
     return todo
@@ -86,11 +89,12 @@ class TestTodoCRUD:
         assert todos[0].status == "done"
 
     def test_nested_todos(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        from server.lib.group_tags import parent_id_from_tags
+
         cfg, name = cfg_with_project
         meta = storage.load_meta(cfg, name)
         parent = _make_todo(meta, "Parent task")
         child = _make_todo(meta, "Child task", parent=parent.id)
-        parent.children.append(child.id)
         storage.save_meta(cfg, meta)
         storage.save_todos(cfg, name, [parent, child])
 
@@ -98,8 +102,8 @@ class TestTodoCRUD:
         assert len(todos) == 2
         parent_loaded = next(t for t in todos if t.id == parent.id)
         child_loaded = next(t for t in todos if t.id == child.id)
-        assert child_loaded.id in parent_loaded.children
-        assert child_loaded.parent == parent.id
+        # Flat model: parent membership via group: tag
+        assert parent_id_from_tags(child_loaded.tags) == parent_loaded.id
 
     def test_blocking_relationships(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project

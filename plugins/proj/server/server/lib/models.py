@@ -911,9 +911,6 @@ class Todo:
     priority: str = "medium"
     created: str = ""
     updated: str = ""
-    parent: str | None = None
-    children: list[str] = field(default_factory=list)
-    next_child_id: int = 1
     tags: list[str] = field(default_factory=list)
     git: TodoGit = field(default_factory=TodoGit)
     blocks: list[str] = field(default_factory=list)
@@ -943,9 +940,6 @@ class Todo:
             "priority": getattr(self.priority, "value", self.priority),
             "created": self.created,
             "updated": self.updated,
-            "parent": self.parent,
-            "children": self.children,
-            "next_child_id": self.next_child_id,
             "tags": self.tags,
             "git": self.git.to_dict(),
             "blocks": self.blocks,
@@ -976,9 +970,6 @@ class Todo:
             priority=str(data.get("priority", "medium")),
             created=str(data.get("created", "")),
             updated=str(data.get("updated", "")),
-            parent=str(data["parent"]) if isinstance(data.get("parent"), str) else None,
-            children=[str(x) for x in _list(data.get("children"))],
-            next_child_id=_int(data.get("next_child_id"), 1),
             tags=[str(x) for x in _list(data.get("tags"))],
             git=TodoGit.from_dict(git_raw if isinstance(git_raw, dict) else {}),
             blocks=[str(x) for x in _list(data.get("blocks"))],

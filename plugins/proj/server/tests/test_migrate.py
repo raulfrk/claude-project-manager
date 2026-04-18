@@ -49,7 +49,8 @@ def _setup_project_with_todos(
         name=name,
         repos=[RepoEntry(label="code", path=str(proj_dir))],
         dates=ProjectDates(created=today, last_updated=today),
-        next_todo_id=len([t for t in todos if t.parent is None]) + 1,
+        next_todo_id=len([t for t in todos if not any(tag.startswith("group:") for tag in t.tags)])
+        + 1,
     )
     storage.save_meta(cfg, meta)
     storage.save_todos(cfg, name, todos)
@@ -65,13 +66,14 @@ def _make_todo(
     children: list[str] | None = None,
     created: str = "2026-01-01",
 ) -> Todo:
+    # Flat model: parent membership via group: tag; children identified by their own tags
+    tags = [f"group:{parent}"] if parent is not None else []
     return Todo(
         id=tid,
         title=title,
         created=created,
         updated=created,
-        parent=parent,
-        children=children or [],
+        tags=tags,
     )
 
 

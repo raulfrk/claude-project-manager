@@ -32,12 +32,13 @@ def _make_todo(
     blocks: list[str] | None = None,
     blocked_by: list[str] | None = None,
 ) -> Todo:
+    # Flat model: parent membership via group: tag; children kwarg ignored (use group tags)
+    tags = [f"group:{parent}"] if parent is not None else []
     return Todo(
         id=tid,
         title=f"Todo {tid}",
         status=status,
-        parent=parent,
-        children=children or [],
+        tags=tags,
         blocks=blocks or [],
         blocked_by=blocked_by or [],
     )
