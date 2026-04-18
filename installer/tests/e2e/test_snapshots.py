@@ -111,6 +111,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,19 @@ _CREATE_MISSING = os.environ.get("SNAPSHOT_CREATE_MISSING", "") == "1"
 # Consistent terminal size for reproducible screenshots
 _TERM_SIZE = (120, 40)
 
+_TERMINAL_HASH_RE = re.compile(r"terminal-\d+-")
+
+
+def _normalize_svg(svg: str) -> str:
+    """Replace the non-deterministic `terminal-<hash>-` prefix that Rich/Textual
+    generates per-render with a stable placeholder, so snapshot compares are
+    byte-exact across runs.
+
+    Only the hash-prefixed CSS class names are touched; all other SVG content
+    passes through unchanged.
+    """
+    return _TERMINAL_HASH_RE.sub("terminal-XXX-", svg)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,23 +174,28 @@ def _assert_snapshot(svg: str, name: str) -> None:
     - ``SNAPSHOT_UPDATE=1``: overwrite all goldens (regenerate baseline).
     - ``SNAPSHOT_CREATE_MISSING=1``: create only missing goldens, compare existing.
     - Default: hard-fail on missing, exact-match on existing.
+
+    The SVG is normalized before compare/write via `_normalize_svg` so that
+    Rich's non-deterministic ``terminal-<digits>-`` CSS class prefix doesn't
+    cause spurious mismatches between runs.
     """
+    normalized = _normalize_svg(svg)
     golden = _SNAPSHOT_DIR / f"{name}.svg"
     if _FORCE_UPDATE:
-        golden.write_text(svg, encoding="utf-8")
+        golden.write_text(normalized, encoding="utf-8")
         return
     if not golden.exists():
         if _CREATE_MISSING:
-            golden.write_text(svg, encoding="utf-8")
+            golden.write_text(normalized, encoding="utf-8")
             return
         pytest.fail(
             f"Golden file missing for {name!r}: {golden}. "
             f"Run with SNAPSHOT_UPDATE=1 to generate."
         )
     expected = golden.read_text(encoding="utf-8")
-    if svg != expected:
+    if normalized != expected:
         actual_path = _SNAPSHOT_DIR / f"{name}_actual.svg"
-        actual_path.write_text(svg, encoding="utf-8")
+        actual_path.write_text(normalized, encoding="utf-8")
         pytest.fail(
             f"Snapshot mismatch for {name!r}. "
             f"Actual saved to {actual_path}. "
