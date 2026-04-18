@@ -229,6 +229,20 @@ def migrate_yaml_to_sql(project_dir: Path) -> None:
 
     conn = sqlite3.connect(db_path)
     try:
+        # Drop any stale pre-647 decisions table (schema: id/project/timestamp/data).
+        # decisions.yaml has been the canonical source; the legacy SQL rows are stale
+        # mirrors that never got the 647 schema migration (text/todo_id/tags cols).
+        # Dropping lets CREATE TABLE IF NOT EXISTS below produce the new schema.
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='decisions'"
+        )
+        if cur.fetchone() is not None:
+            cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(decisions)").fetchall()
+            }
+            if "todo_id" not in cols:
+                conn.execute("DROP TABLE decisions")
+
         conn.executescript(_FLAT_SCHEMA_SQL)
         conn.execute("BEGIN IMMEDIATE")
 
