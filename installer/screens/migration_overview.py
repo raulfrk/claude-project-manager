@@ -16,7 +16,8 @@ class MigrationOverviewScreen(Screen):
     """Screen 1: lists projects needing flat-todo migration."""
 
     BINDINGS = [
-        Binding("enter", "review", "Review"),
+        Binding("r", "review", "Review"),
+        Binding("enter", "review", "Review", show=False),
         Binding("s", "skip_all", "Skip all"),
         Binding("q", "quit", "Quit"),
     ]
@@ -24,6 +25,7 @@ class MigrationOverviewScreen(Screen):
     CSS = """
     MigrationOverviewScreen > Vertical { padding: 1 2; }
     DataTable { height: 1fr; }
+    .hint { margin-top: 1; color: $text-muted; }
     """
 
     def __init__(
@@ -51,6 +53,12 @@ class MigrationOverviewScreen(Screen):
                 remote = ",".join(sorted(self.integration_map.get(p.name, []))) or "–"
                 table.add_row(p.name, str(parents), str(children), remote)
             yield table
+            yield Static(
+                "Press [bold]r[/] to review and migrate, "
+                "[bold]s[/] to skip all, "
+                "[bold]q[/] to quit.",
+                classes="hint",
+            )
         yield Footer()
 
     def action_review(self) -> None:

@@ -21,6 +21,7 @@ class MigrationReviewScreen(Screen):
     CSS = """
     MigrationReviewScreen > Vertical { padding: 1 2; }
     .label { margin-bottom: 1; }
+    .hint { margin-top: 1; color: $text-muted; }
     """
 
     def __init__(self, plan: MigrationPlan, backup_preview: str) -> None:
@@ -47,6 +48,13 @@ class MigrationReviewScreen(Screen):
                 classes="label",
             )
             yield Static(f"[bold]Backup:[/] {self.backup_preview}", classes="label")
+            yield Static(
+                "Press [bold]m[/] to migrate this project, "
+                "[bold]s[/] to skip, "
+                "[bold]d[/] for dry-run preview, "
+                "[bold]q[/] to quit.",
+                classes="hint",
+            )
         yield Footer()
 
     def action_migrate(self) -> None:
