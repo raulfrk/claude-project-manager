@@ -323,3 +323,96 @@ async def test_confirm_screen_geometry(
         screen = app.screen
         assert isinstance(screen, ConfirmScreen)
         assert_all_visible(screen)
+
+
+# ---------------------------------------------------------------------------
+# 6. Selective update: updating one plugin must not affect others (657)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_one_preserves_others(
+    e2e_app,
+    mock_detect,
+    mock_plugin_cli,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecting one plugin to update must not disturb the other installed plugins."""
+    # Three plugins all outdated; we will update only proj.
+    diffs = {
+        "proj": ("1.0.0", "1.1.0"),
+        "router": ("1.0.0", "1.1.0"),
+        "worktree": ("1.0.0", "1.1.0"),
+    }
+    _patch_compare_versions(monkeypatch, diffs)
+    _patch_marketplace_versions(
+        monkeypatch,
+        {"proj": "1.1.0", "router": "1.1.0", "worktree": "1.1.0"},
+    )
+    _patch_installed_version(
+        monkeypatch,
+        {"proj": "1.0.0", "router": "1.0.0", "worktree": "1.0.0"},
+    )
+
+    # Ensure get_installed_plugins / get_available_plugins include all three.
+
+    mock_plugin_cli["get_installed_plugins"].return_value = [
+        "proj@claude-project-manager",
+        "router@claude-project-manager",
+        "worktree@claude-project-manager",
+    ]
+    mock_plugin_cli["get_available_plugins"].return_value = [
+        "proj@claude-project-manager",
+        "router@claude-project-manager",
+        "worktree@claude-project-manager",
+    ]
+
+    app: InstallerApp = e2e_app(mode="update")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        # Start on DetectionScreen.
+        await pilot.pause()
+        assert isinstance(app.screen, DetectionScreen), (
+            f"Expected DetectionScreen, got {type(app.screen).__name__}"
+        )
+
+        # Proceed to UpdateScreen.
+        await pilot.click("#btn-continue")
+        await pilot.pause()
+
+        assert isinstance(app.screen, UpdateScreen), (
+            f"Expected UpdateScreen, got {type(app.screen).__name__}"
+        )
+
+        # All three rows should appear.
+        table = app.screen.query_one("#update-table")
+        assert table.row_count == 3
+
+        # Deselect all (n), then re-select only the first row (proj, sorted alphabetically).
+        await pilot.press("n")
+        await pilot.pause()
+        # Cursor defaults to row 0 (proj); toggle it on.
+        await pilot.press("space")
+        await pilot.pause()
+        # Submit via the "Update Selected" button.
+        await pilot.click("#btn-update-selected")
+        await pilot.pause()
+
+        # Wait for the update worker to complete.
+        for _ in range(30):
+            if mock_plugin_cli["update_plugin"].called:
+                break
+            await pilot.pause()
+
+    # Only proj should have been updated.
+    update_calls = [
+        call.args[0] for call in mock_plugin_cli["update_plugin"].call_args_list
+    ]
+    assert update_calls == ["proj@claude-project-manager"], (
+        f"update_plugin called with unexpected args: {update_calls}"
+    )
+    # uninstall_plugin must never be called during a selective update.
+    assert not mock_plugin_cli["uninstall_plugin"].called, (
+        f"uninstall_plugin must not be called during a selective update; "
+        f"got {mock_plugin_cli['uninstall_plugin'].call_args_list}"
+    )
