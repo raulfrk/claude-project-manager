@@ -52,6 +52,36 @@ def test_enabled_for_requires_config_and_links(
     assert len(actions) == 1
 
 
+def test_enabled_for_unwraps_todos_dict(
+    project_with_todoist: PendingProject,
+) -> None:
+    """Real proj-plugin todos.yaml is {"todos": [...]}; enabled_for must unwrap."""
+    (project_with_todoist.path / "todos.yaml").write_text(
+        yaml.safe_dump({"todos": [{"id": "1", "todoist_task_id": "tsk-1"}]}),
+    )
+    assert TodoistResync().enabled_for(project_with_todoist) is True
+
+
+def test_enabled_for_accepts_bare_list(
+    project_with_todoist: PendingProject,
+) -> None:
+    """Legacy bare-list todos.yaml still accepted."""
+    (project_with_todoist.path / "todos.yaml").write_text(
+        yaml.safe_dump([{"id": "1", "todoist_task_id": "tsk-1"}]),
+    )
+    assert TodoistResync().enabled_for(project_with_todoist) is True
+
+
+def test_enabled_for_returns_false_when_no_todoist_ids(
+    project_with_todoist: PendingProject,
+) -> None:
+    """Wrapped todos.yaml w/ no todoist_task_id → enabled_for False."""
+    (project_with_todoist.path / "todos.yaml").write_text(
+        yaml.safe_dump({"todos": [{"id": "1", "title": "t"}]}),
+    )
+    assert TodoistResync().enabled_for(project_with_todoist) is False
+
+
 def test_plan_emits_clear_parent_per_child(
     project_with_todoist: PendingProject,
 ) -> None:

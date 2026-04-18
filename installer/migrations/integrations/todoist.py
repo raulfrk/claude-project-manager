@@ -26,10 +26,17 @@ class TodoistResync:
         cfg = _load_cfg(project)
         if not cfg.get("sync", {}).get("todoist", {}).get("enabled"):
             return False
-        # Also requires at least one todo with a todoist_task_id link
+        # Also requires at least one todo with a todoist_task_id link.
+        # Real todos.yaml uses {"todos": [...]} wrapper; bare list also accepted.
         import yaml
 
-        todos = yaml.safe_load((project.path / "todos.yaml").read_text()) or []
+        raw = yaml.safe_load((project.path / "todos.yaml").read_text())
+        if isinstance(raw, dict):
+            todos = raw.get("todos") or raw.get("items") or []
+        elif isinstance(raw, list):
+            todos = raw
+        else:
+            todos = []
         return any(t.get("todoist_task_id") for t in todos if isinstance(t, dict))
 
     def plan(self, project: PendingProject, migrated: list[TodoRef]) -> list[Action]:
