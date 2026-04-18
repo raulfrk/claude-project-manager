@@ -1013,6 +1013,17 @@ def run_migration_tui(
     return exit_code
 
 
+def _unwrap_todos(raw: object) -> list[dict]:
+    """Real proj-plugin todos.yaml uses `{"todos": [...]}` wrapper; bare list accepted."""
+    if isinstance(raw, dict):
+        data = raw.get("todos") or raw.get("items") or []
+    elif isinstance(raw, list):
+        data = raw
+    else:
+        return []
+    return [t for t in data if isinstance(t, dict)]
+
+
 def _integration_badges(pending, integrations) -> dict[str, set[str]]:
     """Compute the letter badge set per project based on live integration links."""
     import yaml
@@ -1022,7 +1033,7 @@ def _integration_badges(pending, integrations) -> dict[str, set[str]]:
         s: set[str] = set()
         todos_path = project.path / "todos.yaml"
         if todos_path.exists():
-            todos = yaml.safe_load(todos_path.read_text()) or []
+            todos = _unwrap_todos(yaml.safe_load(todos_path.read_text()))
             for t in todos:
                 if t.get("todoist_task_id"):
                     s.add("T")
@@ -1040,7 +1051,7 @@ def _count_parents_children(project) -> tuple[int, int]:
     todos_path = project.path / "todos.yaml"
     if not todos_path.exists():
         return 0, 0
-    todos = yaml.safe_load(todos_path.read_text()) or []
+    todos = _unwrap_todos(yaml.safe_load(todos_path.read_text()))
     parents = sum(1 for t in todos if t.get("children"))
     children = sum(1 for t in todos if t.get("parent") is not None)
     return parents, children

@@ -387,3 +387,74 @@ class TestPrepareAndReinstallPrunesStaleCache:
         assert not (cache / "proj" / "3.0.0").exists()
         assert (cache / "proj" / "5.0.0").is_dir()
         assert not (cache / "sandbox").exists()
+
+
+class TestTodosYamlWrapperHandling:
+    """_integration_badges + _count_parents_children must unwrap {"todos": [...]}."""
+
+    def _make_project(self, tmp_path, shape: str, todos: list[dict]):
+        import yaml
+
+        proj_dir = tmp_path / "demo"
+        proj_dir.mkdir()
+        payload = {"todos": todos} if shape == "wrapped" else todos
+        (proj_dir / "todos.yaml").write_text(yaml.safe_dump(payload))
+
+        class _Proj:
+            name = "demo"
+            path = proj_dir
+
+        return _Proj()
+
+    def test_count_parents_children_wrapped(self, tmp_path):
+        from installer.app import _count_parents_children
+
+        proj = self._make_project(
+            tmp_path,
+            "wrapped",
+            [
+                {"id": "1", "children": ["1.1"]},
+                {"id": "1.1", "parent": "1"},
+                {"id": "2"},
+            ],
+        )
+        assert _count_parents_children(proj) == (1, 1)
+
+    def test_count_parents_children_bare_list(self, tmp_path):
+        from installer.app import _count_parents_children
+
+        proj = self._make_project(
+            tmp_path,
+            "bare",
+            [
+                {"id": "1", "children": ["1.1"]},
+                {"id": "1.1", "parent": "1"},
+            ],
+        )
+        assert _count_parents_children(proj) == (1, 1)
+
+    def test_integration_badges_wrapped(self, tmp_path):
+        from installer.app import _integration_badges
+
+        proj = self._make_project(
+            tmp_path,
+            "wrapped",
+            [
+                {"id": "1", "todoist_task_id": "t", "jira_issue_key": "J-1"},
+                {"id": "2", "trello_card_id": "c"},
+            ],
+        )
+        badges = _integration_badges([proj], [])
+        assert badges["demo"] == {"T", "R", "J"}
+
+    def test_count_parents_children_missing_file(self, tmp_path):
+        from installer.app import _count_parents_children
+
+        proj_dir = tmp_path / "empty"
+        proj_dir.mkdir()
+
+        class _Proj:
+            name = "empty"
+            path = proj_dir
+
+        assert _count_parents_children(_Proj()) == (0, 0)
