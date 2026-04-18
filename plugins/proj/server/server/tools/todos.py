@@ -408,7 +408,7 @@ def _batch_add_children(
                 tags.append(group_tag)
 
             child = Todo(
-                id=next_todo_id(meta, parent=parent),
+                id=next_todo_id(meta, parent=parent, siblings=todos),
                 title=title,
                 priority=priority,
                 tags=[str(t) for t in tags],
@@ -680,7 +680,7 @@ def register(app: FastMCP) -> None:
                 resolved_tags.append(group_tag)
 
         todo = Todo(
-            id=next_todo_id(meta, parent=parent_todo),
+            id=next_todo_id(meta, parent=parent_todo, siblings=todos),
             title=title,
             priority=priority if priority is not None else cfg.default_priority,
             tags=resolved_tags,

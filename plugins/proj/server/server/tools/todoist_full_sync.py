@@ -957,7 +957,7 @@ def apply_changes(
 
         desc_synced_value = str(item.get("todoist_description_synced", ""))
         todo = Todo(
-            id=next_todo_id(meta, parent=parent_todo),
+            id=next_todo_id(meta, parent=parent_todo, siblings=todos),
             title=str(item.get("title", "")),
             priority=str(item.get("priority", cfg.default_priority)),
             tags=[str(t) for t in tags_raw]

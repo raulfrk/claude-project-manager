@@ -159,7 +159,7 @@ class TestNextTodoId:
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
         parent = Todo(id="3", title="Parent", created=today, updated=today)
-        child_id = next_todo_id(meta, parent=parent)
+        child_id = next_todo_id(meta, parent=parent, siblings=[])
         assert child_id == "3.1"
 
     def test_child_id_increments_parent_counter(
@@ -169,9 +169,17 @@ class TestNextTodoId:
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
         parent = Todo(id="2", title="Parent", created=today, updated=today)
-        next_todo_id(meta, parent=parent)
-        next_todo_id(meta, parent=parent)
-        assert parent.next_child_id == 3
+        siblings: list[Todo] = []
+        c1 = Todo(
+            id=next_todo_id(meta, parent=parent, siblings=siblings),
+            title="C1",
+            created=today,
+            updated=today,
+        )
+        siblings.append(c1)
+        c2_id = next_todo_id(meta, parent=parent, siblings=siblings)
+        assert c1.id == "2.1"
+        assert c2_id == "2.2"
 
     def test_child_id_does_not_increment_meta_counter(
         self, cfg_with_project: tuple[ProjConfig, str]
@@ -181,7 +189,7 @@ class TestNextTodoId:
         today = str(__import__("datetime").date.today())
         parent = Todo(id="1", title="Parent", created=today, updated=today)
         before = meta.next_todo_id
-        next_todo_id(meta, parent=parent)
+        next_todo_id(meta, parent=parent, siblings=[])
         assert meta.next_todo_id == before
 
     def test_deep_nesting_three_levels(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
@@ -193,11 +201,14 @@ class TestNextTodoId:
         assert root.id == "1"
         # Child todo: ID "1.1"
         child = Todo(
-            id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today
+            id=next_todo_id(meta, parent=root, siblings=[]),
+            title="Child",
+            created=today,
+            updated=today,
         )
         assert child.id == "1.1"
         # Grandchild todo: ID "1.1.1"
-        grandchild_id = next_todo_id(meta, parent=child)
+        grandchild_id = next_todo_id(meta, parent=child, siblings=[])
         assert grandchild_id == "1.1.1"
 
     def test_multiple_children_get_sequential_suffixes(
@@ -207,7 +218,12 @@ class TestNextTodoId:
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
         parent = Todo(id="5", title="Parent", created=today, updated=today)
-        ids = [next_todo_id(meta, parent=parent) for _ in range(4)]
+        siblings: list[Todo] = []
+        ids: list[str] = []
+        for i in range(4):
+            tid = next_todo_id(meta, parent=parent, siblings=siblings)
+            ids.append(tid)
+            siblings.append(Todo(id=tid, title=f"C{i}", created=today, updated=today))
         assert ids == ["5.1", "5.2", "5.3", "5.4"]
 
     def test_deep_nesting_five_levels(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
@@ -217,21 +233,27 @@ class TestNextTodoId:
         root = Todo(id=next_todo_id(meta), title="Root", created=today, updated=today)
         assert root.id == "1"
         child = Todo(
-            id=next_todo_id(meta, parent=root), title="Child", created=today, updated=today
+            id=next_todo_id(meta, parent=root, siblings=[]),
+            title="Child",
+            created=today,
+            updated=today,
         )
         assert child.id == "1.1"
         grandchild = Todo(
-            id=next_todo_id(meta, parent=child), title="Grandchild", created=today, updated=today
+            id=next_todo_id(meta, parent=child, siblings=[]),
+            title="Grandchild",
+            created=today,
+            updated=today,
         )
         assert grandchild.id == "1.1.1"
         great = Todo(
-            id=next_todo_id(meta, parent=grandchild),
+            id=next_todo_id(meta, parent=grandchild, siblings=[]),
             title="Great-grandchild",
             created=today,
             updated=today,
         )
         assert great.id == "1.1.1.1"
-        great_great_id = next_todo_id(meta, parent=great)
+        great_great_id = next_todo_id(meta, parent=great, siblings=[])
         assert great_great_id == "1.1.1.1.1"
         # Meta counter only incremented once (for root)
         assert meta.next_todo_id == 2
@@ -243,19 +265,30 @@ class TestNextTodoId:
         meta = storage.load_meta(cfg, name)
         today = str(__import__("datetime").date.today())
         root = Todo(id=next_todo_id(meta), title="Root", created=today, updated=today)
+        root_siblings: list[Todo] = []
         child_a = Todo(
-            id=next_todo_id(meta, parent=root), title="Child A", created=today, updated=today
+            id=next_todo_id(meta, parent=root, siblings=root_siblings),
+            title="Child A",
+            created=today,
+            updated=today,
         )
+        root_siblings.append(child_a)
         child_b = Todo(
-            id=next_todo_id(meta, parent=root), title="Child B", created=today, updated=today
+            id=next_todo_id(meta, parent=root, siblings=root_siblings),
+            title="Child B",
+            created=today,
+            updated=today,
         )
         assert child_a.id == "1.1"
         assert child_b.id == "1.2"
         # Each child has its own independent counter
-        gc_a1 = next_todo_id(meta, parent=child_a)
-        gc_a2 = next_todo_id(meta, parent=child_a)
-        gc_b1 = next_todo_id(meta, parent=child_b)
-        assert gc_a1 == "1.1.1"
+        gc_a_siblings: list[Todo] = []
+        gc_a1_id = next_todo_id(meta, parent=child_a, siblings=gc_a_siblings)
+        gc_a1 = Todo(id=gc_a1_id, title="GC-A1", created=today, updated=today)
+        gc_a_siblings.append(gc_a1)
+        gc_a2 = next_todo_id(meta, parent=child_a, siblings=gc_a_siblings)
+        gc_b1 = next_todo_id(meta, parent=child_b, siblings=[])
+        assert gc_a1_id == "1.1.1"
         assert gc_a2 == "1.1.2"
         assert gc_b1 == "1.2.1"
 
