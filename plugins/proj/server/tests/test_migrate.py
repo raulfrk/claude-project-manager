@@ -103,9 +103,10 @@ class TestMigrateProjectDryRun:
         assert saved[0].id == "T001"
 
     def test_dry_run_shows_child_mapping(self, cfg: ProjConfig) -> None:
+        # Flat model: child membership via group:<parent_id> tag
         todos = [
-            _make_todo("T001", "Parent", children=["T002"]),
-            _make_todo("T002", "Child", parent="T001"),
+            Todo(id="T001", title="Parent", created="2026-01-01", tags=[]),
+            Todo(id="T002", title="Child", created="2026-01-02", tags=["group:T001"]),
         ]
         _setup_project_with_todos(cfg, "alpha", todos)
 
@@ -148,10 +149,11 @@ class TestMigrateProjectActual:
         assert not any(i.startswith("T") for i in ids)
 
     def test_migrates_child_todos(self, cfg: ProjConfig) -> None:
+        # Flat model: children expressed via group:<parent_id> tags
         todos = [
-            _make_todo("T001", "Parent", children=["T002", "T003"]),
-            _make_todo("T002", "Child A", parent="T001"),
-            _make_todo("T003", "Child B", parent="T001"),
+            Todo(id="T001", title="Parent", created="2026-01-01", tags=[]),
+            Todo(id="T002", title="Child A", created="2026-01-02", tags=["group:T001"]),
+            Todo(id="T003", title="Child B", created="2026-01-03", tags=["group:T001"]),
         ]
         _setup_project_with_todos(cfg, "beta", todos)
 
@@ -162,10 +164,9 @@ class TestMigrateProjectActual:
         assert by_title["Parent"].id == "1"
         assert by_title["Child A"].id == "1.1"
         assert by_title["Child B"].id == "1.2"
-        assert by_title["Child A"].parent == "1"
-        assert by_title["Child B"].parent == "1"
-        assert "1.1" in by_title["Parent"].children
-        assert "1.2" in by_title["Parent"].children
+        # Flat model: parent membership in group tag, not .parent field
+        assert "group:1" in by_title["Child A"].tags
+        assert "group:1" in by_title["Child B"].tags
 
     def test_migrates_blocks_and_blocked_by(self, cfg: ProjConfig) -> None:
         t1 = _make_todo("T001", "Blocker")
@@ -212,20 +213,6 @@ class TestMigrateProjectActual:
 
         meta = storage.load_meta(cfg, "delta")
         assert meta.next_todo_id == 3  # 2 root todos → next = 3
-
-    def test_updates_next_child_id_on_parent(self, cfg: ProjConfig) -> None:
-        todos = [
-            _make_todo("T001", "Parent", children=["T002", "T003"]),
-            _make_todo("T002", "Child A", parent="T001"),
-            _make_todo("T003", "Child B", parent="T001"),
-        ]
-        _setup_project_with_todos(cfg, "delta", todos)
-
-        _migrate_project(cfg, "delta", dry_run=False)
-
-        saved = storage.load_todos(cfg, "delta")
-        parent = next(t for t in saved if t.title == "Parent")
-        assert parent.next_child_id == 3  # 2 children → next = 3
 
     def test_renames_content_dirs(self, cfg: ProjConfig) -> None:
         todos = [_make_todo("T001", "Task")]
@@ -297,10 +284,11 @@ class TestMigrateProjectEdgeCases:
 
 class TestMigrateDeepNesting:
     def test_migrates_three_level_hierarchy(self, cfg: ProjConfig) -> None:
+        # Flat model: parent membership via group:<parent_id> tags
         todos = [
-            _make_todo("T001", "Root", children=["T002"]),
-            _make_todo("T002", "Child", parent="T001", children=["T003"]),
-            _make_todo("T003", "Grandchild", parent="T002"),
+            Todo(id="T001", title="Root", created="2026-01-01", tags=[]),
+            Todo(id="T002", title="Child", created="2026-01-02", tags=["group:T001"]),
+            Todo(id="T003", title="Grandchild", created="2026-01-03", tags=["group:T002"]),
         ]
         _setup_project_with_todos(cfg, "deep", todos)
 
@@ -311,40 +299,19 @@ class TestMigrateDeepNesting:
         assert by_title["Root"].id == "1"
         assert by_title["Child"].id == "1.1"
         assert by_title["Grandchild"].id == "1.1.1"
-        assert by_title["Grandchild"].parent == "1.1"
-        assert "1.1.1" in by_title["Child"].children
-        assert "1.1" in by_title["Root"].children
-
-    def test_next_child_id_set_correctly_at_all_levels(self, cfg: ProjConfig) -> None:
-        todos = [
-            _make_todo("T001", "Root", children=["T002", "T003"]),
-            _make_todo("T002", "Child A", parent="T001", children=["T004"]),
-            _make_todo("T003", "Child B", parent="T001"),
-            _make_todo("T004", "Grandchild", parent="T002"),
-        ]
-        _setup_project_with_todos(cfg, "deep_counter", todos)
-
-        _migrate_project(cfg, "deep_counter", dry_run=False)
-
-        saved = storage.load_todos(cfg, "deep_counter")
-        by_title = {t.title: t for t in saved}
-        # Root has 2 children → next_child_id = 3
-        assert by_title["Root"].next_child_id == 3
-        # Child A has 1 child → next_child_id = 2
-        assert by_title["Child A"].next_child_id == 2
-        # Child B has 0 children → next_child_id = 1
-        assert by_title["Child B"].next_child_id == 1
-        # Grandchild has 0 children → next_child_id = 1
-        assert by_title["Grandchild"].next_child_id == 1
+        # Flat model: parent membership in group tags, not .parent/.children fields
+        assert "group:1.1" in by_title["Grandchild"].tags
+        assert "group:1" in by_title["Child"].tags
 
 
 class TestMigrateBlockingRelationships:
     def test_child_blocking_relationship_remapped(self, cfg: ProjConfig) -> None:
         # Child T002 is blocked by sibling T003 under same parent T001
-        parent = _make_todo("T001", "Parent", children=["T002", "T003"])
-        t2 = _make_todo("T002", "Child A", parent="T001")
+        # Flat model: parent membership via group:<parent_id> tags
+        parent = Todo(id="T001", title="Parent", created="2026-01-01", tags=[])
+        t2 = Todo(id="T002", title="Child A", created="2026-01-02", tags=["group:T001"])
         t2.blocked_by = ["T003"]
-        t3 = _make_todo("T003", "Child B", parent="T001")
+        t3 = Todo(id="T003", title="Child B", created="2026-01-03", tags=["group:T001"])
         t3.blocks = ["T002"]
         _setup_project_with_todos(cfg, "child_block", [parent, t2, t3])
 
@@ -785,6 +752,38 @@ class TestMigrateIdsToolMultiProject:
         assert by_project["good"]["migrated"] is True
         assert by_project["bad"]["migrated"] is False
         assert "error" in by_project["bad"]
+
+
+class TestApplyRemapGroupTags:
+    def test_remap_rewrites_group_tag_instead_of_parent_field(self, tmp_path: Path) -> None:
+        """Post-flat-model: parent membership is in a group:<id> tag, not .parent."""
+        from server.tools.migrate import _apply_remap
+
+        parent = Todo(id="T1", title="P", tags=[])
+        child = Todo(id="T2", title="C", tags=["group:T1"])
+        id_map = {"T1": "1", "T2": "1.1"}
+        _apply_remap([parent, child], id_map)
+        assert parent.id == "1"
+        assert child.id == "1.1"
+        assert "group:1" in child.tags
+        assert "group:T1" not in child.tags
+
+    def test_remap_rebuilds_id_mapping_from_group_tags(self, tmp_path: Path) -> None:
+        from server.tools.migrate import _build_id_mapping
+
+        # Two roots + one child under each
+        todos = [
+            Todo(id="Ta", title="A", created="2026-01-01", tags=[]),
+            Todo(id="Tb", title="B", created="2026-01-02", tags=[]),
+            Todo(id="Tc", title="C", created="2026-01-03", tags=["group:Ta"]),
+            Todo(id="Td", title="D", created="2026-01-04", tags=["group:Tb"]),
+        ]
+        id_map = _build_id_mapping(todos)
+        # Sorted by created: Ta=1, Tb=2, Tc=1.1, Td=2.1
+        assert id_map["Ta"] == "1"
+        assert id_map["Tb"] == "2"
+        assert id_map["Tc"] == "1.1"
+        assert id_map["Td"] == "2.1"
 
 
 class TestMigrateDirectoryRollback:

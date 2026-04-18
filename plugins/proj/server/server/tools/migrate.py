@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from server.lib import storage
+from server.lib.group_tags import parent_id_from_tags
 from server.tools.config import require_config
 
 if TYPE_CHECKING:
@@ -22,45 +23,53 @@ if TYPE_CHECKING:
     from server.lib.models import JsonValue, ProjConfig, Todo
 
 
+_GROUP_PREFIX = "group:"
+
+
 def _assign_ids(
     parent_todos: list[Todo],
     all_todos: list[Todo],
     id_map: dict[str, str],
     prefix: str = "",
 ) -> None:
-    """Recursively assign numeric dot-notation IDs to todos, populating id_map."""
+    """Recursively assign numeric dot-notation IDs, populating id_map."""
     for i, todo in enumerate(parent_todos, 1):
         new_id = f"{prefix}{i}" if prefix else str(i)
         id_map[todo.id] = new_id
-        # Find and recursively assign children
         children = sorted(
-            [t for t in all_todos if t.parent == todo.id],
+            [t for t in all_todos if parent_id_from_tags(t.tags) == todo.id],
             key=lambda t: (t.created, t.id),
         )
         _assign_ids(children, all_todos, id_map, prefix=f"{new_id}.")
 
 
 def _build_id_mapping(todos: list[Todo]) -> dict[str, str]:
-    """Build old→new ID mapping for all todos, sorted by creation date."""
-    root_todos = sorted(
-        [t for t in todos if t.parent is None],
+    """Build old→new ID mapping for all todos, sorted by creation date.
+
+    Root = any todo whose tags carry no group:<id> pointing at a known todo.
+    """
+    known_ids = {t.id for t in todos}
+    roots = sorted(
+        [t for t in todos if (pid := parent_id_from_tags(t.tags)) is None or pid not in known_ids],
         key=lambda t: (t.created, t.id),
     )
     id_map: dict[str, str] = {}
-    _assign_ids(root_todos, todos, id_map)
+    _assign_ids(roots, todos, id_map)
     return id_map
 
 
 def _apply_remap(todos: list[Todo], id_map: dict[str, str]) -> None:
-    """Apply id_map to all todo fields in-place."""
+    """Apply id_map to each todo in-place: id, group:<parent> tag, blocks/blocked_by."""
     for todo in todos:
         todo.id = id_map.get(todo.id, todo.id)
-        todo.parent = id_map.get(todo.parent, todo.parent) if todo.parent else None
-        todo.children = [id_map.get(c, c) for c in todo.children]
+        todo.tags = [
+            f"{_GROUP_PREFIX}{id_map.get(tag[len(_GROUP_PREFIX) :], tag[len(_GROUP_PREFIX) :])}"
+            if tag.startswith(_GROUP_PREFIX)
+            else tag
+            for tag in todo.tags
+        ]
         todo.blocks = [id_map.get(b, b) for b in todo.blocks]
         todo.blocked_by = [id_map.get(b, b) for b in todo.blocked_by]
-        # Set next_child_id = len(children) + 1
-        todo.next_child_id = len(todo.children) + 1
 
 
 def _backup_file(path: Path, timestamp: str) -> Path | None:
@@ -203,7 +212,7 @@ def _migrate_project(
     _apply_remap(todos, id_map)
 
     # Update meta
-    root_count = len([t for t in todos if t.parent is None])
+    root_count = sum(1 for v in id_map.values() if "." not in v)
     meta.next_todo_id = root_count + 1
 
     if dry_run:
