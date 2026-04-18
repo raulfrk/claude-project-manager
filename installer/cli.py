@@ -113,12 +113,35 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def load_project_list() -> list[dict]:
-    """Read ~/.claude/proj.yaml and return the projects list (each with name + path)."""
+    """Return projects to consider for migration as [{"name", "path"}, ...].
+
+    Reads the proj plugin's project registry at <tracking_dir>/active-projects.yaml.
+    Filters out archived projects. Returns empty list when registry is missing
+    (fresh install, no projects yet).
+    """
     import yaml
     from pathlib import Path
 
-    proj_yaml = Path.home() / ".claude" / "proj.yaml"
-    if not proj_yaml.exists():
+    config_path = Path.home() / ".claude" / "proj.yaml"
+    if not config_path.exists():
         return []
-    data = yaml.safe_load(proj_yaml.read_text()) or {}
-    return list(data.get("projects", []))
+    try:
+        cfg = yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+    tracking_dir = Path(cfg.get("tracking_dir") or "~/projects/tracking").expanduser()
+    registry_path = tracking_dir / "active-projects.yaml"
+    if not registry_path.exists():
+        return []
+    try:
+        registry = yaml.safe_load(registry_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+    projects_map = registry.get("projects") or {}
+    out: list[dict] = []
+    for name, entry in projects_map.items():
+        if entry.get("archived", False):
+            continue
+        path = entry.get("tracking_dir") or str(tracking_dir / name)
+        out.append({"name": name, "path": path})
+    return out
