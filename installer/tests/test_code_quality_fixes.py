@@ -4,73 +4,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 
 # ---------------------------------------------------------------------------
 # 475.66 — async _on_uninstall_confirmed
-# ---------------------------------------------------------------------------
-
-
-class TestAsyncUninstallConfirmed:
-    """_on_uninstall_confirmed must not block the event loop."""
-
-    @pytest.mark.asyncio
-    async def test_prepare_and_uninstall_calls_get_installed_off_thread(self):
-        """get_installed_plugins must run via asyncio.to_thread; plan is built + exit called."""
-        from installer.app import InstallerApp
-        from installer.detect import InstallState
-        from installer.screens.confirm import ConfirmResult
-
-        plugins = ["proj@claude-project-manager"]
-
-        with (
-            patch(
-                "installer.app.get_installed_plugins",
-                return_value=plugins,
-            ) as mock_get,
-            patch(
-                "installer.app.get_available_plugins",
-                return_value=plugins,
-            ),
-        ):
-            app = InstallerApp()
-            app._state = InstallState(installed_plugins=["proj"])
-            app.exit = MagicMock()  # type: ignore[method-assign]
-
-            result = ConfirmResult(confirmed=True, options={"full_cleanup": False})
-
-            await app._prepare_and_uninstall(result)
-
-            # get_installed_plugins was called (via asyncio.to_thread in production;
-            # also called again by _build_install_plan for name→ID resolution).
-            assert mock_get.called
-            # App built an install plan and exited
-            assert app.install_plan is not None
-            app.exit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_prepare_and_uninstall_exits_when_no_plugins(self):
-        """When no plugins installed, _prepare_and_uninstall calls exit."""
-        from installer.app import InstallerApp
-        from installer.detect import InstallState
-        from installer.screens.confirm import ConfirmResult
-
-        with patch(
-            "installer.app.get_installed_plugins",
-            return_value=[],
-        ):
-            app = InstallerApp()
-            app._state = InstallState(installed_plugins=[])
-            app.exit = MagicMock()  # type: ignore[method-assign]
-
-            result = ConfirmResult(confirmed=True, options={})
-            await app._prepare_and_uninstall(result)
-
-            app.exit.assert_called_once()
-
+# (Tests deleted in P3 #672 — InstallerApp._prepare_and_uninstall removed
+# along with InstallerApp class. Uninstall flow now in run_installer_flow.)
 
 # ---------------------------------------------------------------------------
 # 475.67 — specific exceptions in main.py (relocated from app.py; 970d960
@@ -126,40 +68,8 @@ class TestSpecificExceptionsApp:
                     "Should catch specific exceptions, not bare Exception"
                 )
 
-    def test_show_error_catches_no_matches_only(self):
-        """_show_error catches NoMatches, not generic Exception."""
-        from installer.app import InstallerApp
-        from textual.css.query import NoMatches
-
-        app = InstallerApp()
-        mock_log = MagicMock()
-
-        # Patch query_one to raise NoMatches — should not raise
-        with (
-            patch.object(app, "query_one", side_effect=NoMatches("nope")),
-            patch.object(
-                type(app), "log", new_callable=lambda: property(lambda self: mock_log)
-            ),
-        ):
-            app._show_error("test error")
-
-        mock_log.error.assert_called_once_with("test error")
-
-    def test_show_error_propagates_other_exceptions(self):
-        """_show_error lets non-NoMatches exceptions propagate."""
-        from installer.app import InstallerApp
-
-        app = InstallerApp()
-        mock_log = MagicMock()
-
-        with (
-            patch.object(app, "query_one", side_effect=RuntimeError("unexpected")),
-            patch.object(
-                type(app), "log", new_callable=lambda: property(lambda self: mock_log)
-            ),
-            pytest.raises(RuntimeError, match="unexpected"),
-        ):
-            app._show_error("test error")
+    # test_show_error_catches_no_matches_only and test_show_error_propagates_other_exceptions
+    # deleted in P3 (#672) — InstallerApp._show_error removed along with InstallerApp class.
 
 
 # ---------------------------------------------------------------------------

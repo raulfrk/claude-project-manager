@@ -1,17 +1,17 @@
-"""Shared fixtures for installer end-to-end tests."""
+"""Shared fixtures for installer end-to-end tests.
+
+Note: InstallerApp-specific fixtures (e2e_app, mock_detect, mock_plugin_cli,
+marketplace_json, mock_subprocess) were deleted in P3 (#672) together with
+the InstallerApp class and the Textual pilot behavioral tests. Only fixtures
+still used by snapshot tests are retained here.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import httpx
 import pytest
-
-from installer.app import InstallerApp
-from installer.detect import InstallState
 
 
 # ---------------------------------------------------------------------------
@@ -40,75 +40,8 @@ def assert_all_visible(
 
 
 # ---------------------------------------------------------------------------
-# Full marketplace data (all 8 plugins)
-# ---------------------------------------------------------------------------
-
-_ALL_PLUGINS = [
-    {
-        "name": "worktree",
-        "description": "Git worktree management",
-        "version": "3.0.0",
-        "category": "utilities",
-        "keywords": ["git", "worktree"],
-    },
-    {
-        "name": "proj",
-        "description": "Project lifecycle management",
-        "version": "4.0.0",
-        "category": "productivity",
-        "keywords": ["project", "tracking"],
-    },
-    {
-        "name": "trello",
-        "description": "Trello board and card management",
-        "version": "3.0.0",
-        "category": "integrations",
-        "keywords": ["trello", "boards"],
-    },
-    {
-        "name": "jira",
-        "description": "Jira issue and project access",
-        "version": "3.0.0",
-        "category": "integrations",
-        "keywords": ["jira", "issues"],
-    },
-    {
-        "name": "router",
-        "description": "Central MCP-to-MCP hook registry",
-        "version": "2.0.0",
-        "category": "utilities",
-        "keywords": ["router", "hooks"],
-    },
-    {
-        "name": "todoist",
-        "description": "Todoist task and project management",
-        "version": "2.0.0",
-        "category": "integrations",
-        "keywords": ["todoist", "tasks"],
-    },
-]
-
-
-# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-def _mock_args(**overrides) -> SimpleNamespace:
-    """Build a fake args namespace matching the CLI parser output."""
-    defaults = {
-        "update": False,
-        "reinstall": False,
-        "uninstall": False,
-        "full_cleanup": False,
-        "plugins": None,
-        "skip_wizard": False,
-        "verbose": False,
-        "no_tui": False,
-        "branch": None,
-    }
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
 
 
 @pytest.fixture()
@@ -121,80 +54,6 @@ def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.setenv("HOME", str(home))
     return home
-
-
-@pytest.fixture()
-def mock_subprocess(mocker):
-    """Patch subprocess.run and return the mock."""
-    return mocker.patch("subprocess.run")
-
-
-@pytest.fixture()
-def marketplace_json(tmp_path: Path) -> Path:
-    """Write a test marketplace.json with all plugins and return its path."""
-    data = {"plugins": _ALL_PLUGINS}
-    path = tmp_path / "marketplace.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return path
-
-
-@pytest.fixture()
-def mock_detect(monkeypatch: pytest.MonkeyPatch) -> InstallState:
-    """Mock ``installer.detect.detect_existing`` at both source and import site."""
-    state = InstallState(
-        installed_plugins=["proj", "router"],
-        mcp_entries=[
-            "plugin_proj_proj",
-            "plugin_router_router",
-        ],
-    )
-    monkeypatch.setattr("installer.detect.detect_existing", lambda: state)
-    # Also patch the local reference in app.py
-    monkeypatch.setattr("installer.app.detect_existing", lambda: state)
-    return state
-
-
-@pytest.fixture()
-def mock_plugin_cli(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
-    """Monkeypatch all functions in ``installer.plugin_cli`` with reasonable defaults.
-
-    Patches at BOTH ``installer.plugin_cli.<fn>`` and ``installer.app.<fn>``
-    because app.py imports functions directly (``from installer.plugin_cli import ...``).
-    """
-    mocks: dict[str, MagicMock] = {}
-
-    def _patch(name: str, mock: MagicMock) -> None:
-        monkeypatch.setattr(f"installer.plugin_cli.{name}", mock)
-        # Also patch the local reference in app.py (direct import)
-        try:
-            monkeypatch.setattr(f"installer.app.{name}", mock)
-        except AttributeError:
-            pass  # function not imported in app.py
-        mocks[name] = mock
-
-    _patch("check_marketplace_registered", MagicMock(return_value=True))
-    _patch("add_marketplace", MagicMock(return_value=None))
-    _patch("remove_marketplace", MagicMock(return_value=None))
-    _patch(
-        "get_installed_plugins",
-        MagicMock(
-            return_value=[
-                "proj@claude-project-manager",
-                "router@claude-project-manager",
-            ]
-        ),
-    )
-    _patch(
-        "get_available_plugins",
-        MagicMock(
-            return_value=[f"{p['name']}@claude-project-manager" for p in _ALL_PLUGINS]
-        ),
-    )
-    _patch("install_plugin", MagicMock(return_value=None))
-    _patch("update_plugin", MagicMock(return_value=None))
-    _patch("uninstall_plugin", MagicMock(return_value=None))
-
-    return mocks
 
 
 @pytest.fixture()
@@ -214,18 +73,3 @@ def stub_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("httpx.get", _raise)
     monkeypatch.setattr("httpx.Client.get", _raise)
     monkeypatch.setattr("httpx.AsyncClient.get", _raise)
-
-
-@pytest.fixture()
-def e2e_app(
-    mock_home: Path,
-    marketplace_json: Path,
-    mock_subprocess,
-    mock_plugin_cli: dict[str, MagicMock],
-):
-    """Factory fixture that creates an InstallerApp with mocked dependencies."""
-
-    def _factory(mode: str = "install", **kwargs) -> InstallerApp:
-        return InstallerApp(mode=mode, args=_mock_args(**kwargs))
-
-    return _factory
