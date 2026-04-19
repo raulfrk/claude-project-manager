@@ -549,7 +549,7 @@ class TestEmitResyncRunbooks:
 
         from installer.app import _emit_resync_runbooks
         from installer.migrations.integrations.base import Action, FailedAction
-        from installer.screens.migration_progress import MigrationOutcome
+        from installer.flow.migration_summary import MigrationOutcome
 
         class _Runner:
             def __init__(self, failures: list[FailedAction]) -> None:
@@ -591,7 +591,7 @@ class TestEmitResyncRunbooks:
 
         from installer.app import _emit_resync_runbooks
         from installer.migrations.integrations.base import Action, FailedAction
-        from installer.screens.migration_progress import MigrationOutcome
+        from installer.flow.migration_summary import MigrationOutcome
 
         class _Runner:
             def __init__(self, failures: list[FailedAction]) -> None:
@@ -618,7 +618,7 @@ class TestEmitResyncRunbooks:
 
         from installer.app import _emit_resync_runbooks
         from installer.migrations.integrations.base import Action, FailedAction
-        from installer.screens.migration_progress import MigrationOutcome
+        from installer.flow.migration_summary import MigrationOutcome
 
         class _Runner:
             def __init__(self, failures: list[FailedAction]) -> None:

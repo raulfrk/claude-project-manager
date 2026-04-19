@@ -933,12 +933,13 @@ def run_migration_tui(
     """
     import json
 
+    from installer.flow.console import get_console
+    from installer.flow.migration_summary import (
+        MigrationOutcome,
+        show_migration_summary,
+    )
     from installer.migrations.flat_todo import FlatTodoMigration
     from installer.screens.migration_overview import MigrationOverviewScreen
-    from installer.screens.migration_progress import (
-        MigrationOutcome,
-        MigrationProgressScreen,
-    )
     from installer.screens.migration_review import MigrationReviewScreen
 
     outcomes: list[MigrationOutcome] = []
@@ -972,7 +973,10 @@ def run_migration_tui(
             try:
                 project = next(it)
             except StopIteration:
-                self.push_screen(MigrationProgressScreen(outcomes=outcomes))
+                # Summary is rendered post-Textual-exit via show_migration_summary.
+                # Textual owns the terminal during the app; Rich output works
+                # only after App.run() returns.
+                self.exit()
                 return
 
             # Already at v2+: skip flat review, run sql-only phase unattended.
@@ -1073,6 +1077,8 @@ def run_migration_tui(
             self._review_next(it)
 
     MigrationApp().run()
+    # Textual has exited; terminal is ours again. Print summary via Rich.
+    show_migration_summary(outcomes, get_console())
 
     # Write consolidated JSONL errors log
     errors_path = backup_root / "errors.log"

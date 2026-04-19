@@ -121,34 +121,3 @@ def test_review_dry_run_tab_snapshot(snap_compare, tmp_path: Path) -> None:
             await self.press("d")  # open dry-run tab
 
     assert snap_compare(Harness())
-
-
-def test_progress_summary_snapshot(snap_compare, tmp_path: Path) -> None:
-    from textual.app import App
-
-    from installer.screens.migration_progress import (
-        MigrationOutcome,
-        MigrationProgressScreen,
-    )
-
-    outcomes = [
-        MigrationOutcome(
-            project="cpm", ok=True, resync_partial=False, backup="/tmp/b1"
-        ),
-        MigrationOutcome(
-            project="side",
-            ok=False,
-            resync_partial=False,
-            backup="/tmp/b2",
-            error="ALTER failed",
-        ),
-        MigrationOutcome(
-            project="legacy", ok=True, resync_partial=True, backup="/tmp/b3"
-        ),
-    ]
-
-    class Harness(App):
-        def on_mount(self) -> None:
-            self.push_screen(MigrationProgressScreen(outcomes=outcomes))
-
-    assert snap_compare(Harness())
