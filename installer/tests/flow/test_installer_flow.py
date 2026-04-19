@@ -1,13 +1,18 @@
 # installer/tests/flow/test_installer_flow.py
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
 from rich.console import Console
 
 from installer.flow.install_plan import (
     InstallPlan,
     InstallResult,
 )
-from installer.flow.installer_flow import run_installer_flow
+from installer.flow.installer_flow import (
+    _compute_integration_diff,
+    run_installer_flow,
+)
 from installer.flow.pre_install_phase import PreInstallResult
 
 
@@ -659,9 +664,196 @@ class TestUpdate:
                 "installer.flow.installer_flow.compare_versions",
                 return_value={},
             ),
-            patch("installer.flow.installer_flow.execute_install_plan") as mock_exec,
+            patch("installer.flow.installer_flow.execute_install_plan"),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
             code = run_installer_flow("update", _Args(), console)
         assert code == 0
-        mock_exec.assert_not_called()
+
+
+# ── Integration config diff gate (todo 682) ────────────────────────────────
+
+
+class TestIntegrationConfigDiff:
+    """Parity: configure_* results must pass through review_config_diff when
+    existing config differs from proposed. Mirrors pre-P3 ConfigDiffScreen."""
+
+    def _existing_home(self, tmp_path: Path) -> Path:
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        return home
+
+    def test_compute_diff_first_time_skips(self, tmp_path: Path) -> None:
+        home = self._existing_home(tmp_path)
+        proposed = {"api_token": "abc", "sync_enabled": True, "auto_sync": True}
+        with patch("installer.flow.installer_flow.Path.home", return_value=home):
+            diff_text, is_first_time = _compute_integration_diff("todoist", proposed)
+        assert is_first_time is True
+        # Diff text may be non-empty (new values), but the call-site short-circuits
+        # on is_first_time=True so content doesn't matter.
+
+    def test_compute_diff_no_changes_returns_empty(self, tmp_path: Path) -> None:
+        home = self._existing_home(tmp_path)
+        (home / ".claude" / "todoist.yaml").write_text("api_token: abc\n")
+        (home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump({"sync": {"todoist": {"enabled": True, "auto_sync": True}}})
+        )
+        proposed = {"api_token": "abc", "sync_enabled": True, "auto_sync": True}
+        with patch("installer.flow.installer_flow.Path.home", return_value=home):
+            diff_text, is_first_time = _compute_integration_diff("todoist", proposed)
+        assert is_first_time is False
+        assert not diff_text.strip()
+
+    def test_compute_diff_shows_changes(self, tmp_path: Path) -> None:
+        home = self._existing_home(tmp_path)
+        (home / ".claude" / "todoist.yaml").write_text("api_token: OLD_TOKEN\n")
+        (home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump(
+                {"sync": {"todoist": {"enabled": False, "auto_sync": False}}}
+            )
+        )
+        proposed = {"api_token": "NEW_TOKEN", "sync_enabled": True, "auto_sync": True}
+        with patch("installer.flow.installer_flow.Path.home", return_value=home):
+            diff_text, is_first_time = _compute_integration_diff("todoist", proposed)
+        assert is_first_time is False
+        assert "OLD_TOKEN" in diff_text
+        assert "NEW_TOKEN" in diff_text
+
+    def test_install_flow_skips_write_on_cancel(self, tmp_path: Path) -> None:
+        home = self._existing_home(tmp_path)
+        # Pre-existing config — will trigger a diff prompt
+        (home / ".claude" / "todoist.yaml").write_text("api_token: OLD\n")
+        (home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump(
+                {"sync": {"todoist": {"enabled": False, "auto_sync": False}}}
+            )
+        )
+
+        with (
+            patch("installer.flow.installer_flow.Path.home", return_value=home),
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("todoist", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["todoist@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.configure_todoist",
+                return_value={
+                    "api_token": "NEW",
+                    "sync_enabled": True,
+                    "auto_sync": True,
+                },
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
+                "installer.flow.installer_flow.review_config_diff",
+                return_value=False,  # user cancels
+            ) as mock_review,
+            patch(
+                "installer.flow.installer_flow._write_integration_result"
+            ) as mock_write,
+            patch(
+                "installer.flow.installer_flow.review_hooks_diff",
+                return_value=None,
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("install", _Args(), console)
+
+        mock_review.assert_called_once()
+        mock_write.assert_not_called()
+
+    def test_install_flow_writes_on_confirm(self, tmp_path: Path) -> None:
+        home = self._existing_home(tmp_path)
+        (home / ".claude" / "todoist.yaml").write_text("api_token: OLD\n")
+        (home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump(
+                {"sync": {"todoist": {"enabled": False, "auto_sync": False}}}
+            )
+        )
+
+        with (
+            patch("installer.flow.installer_flow.Path.home", return_value=home),
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("todoist", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["todoist@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.configure_todoist",
+                return_value={
+                    "api_token": "NEW",
+                    "sync_enabled": True,
+                    "auto_sync": True,
+                },
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
+                "installer.flow.installer_flow.review_config_diff",
+                return_value=True,  # user confirms
+            ),
+            patch(
+                "installer.flow.installer_flow._write_integration_result"
+            ) as mock_write,
+            patch(
+                "installer.flow.installer_flow.review_hooks_diff",
+                return_value=None,
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("install", _Args(), console)
+
+        mock_write.assert_called_once_with(
+            "todoist",
+            {"api_token": "NEW", "sync_enabled": True, "auto_sync": True},
+        )

@@ -21,6 +21,7 @@ from installer.cleanup import (
     prune_orphaned_plugins,
 )
 from installer.errors import InstallerError
+from installer.flow.config_diff import review_config_diff
 from installer.flow.hooks_diff import review_hooks_diff
 from installer.flow.install_plan import (
     InstallAction,
@@ -74,6 +75,130 @@ def _write_wizard_result(result: dict[str, Any]) -> None:
         write_bucket(path, existing, answers, bucket=bucket_name)
 
 
+_INTEGRATION_CRED_FIELDS: dict[str, list[str]] = {
+    "todoist": ["api_token"],
+    "trello": ["api_key", "token"],
+    "jira": [
+        "base_url",
+        "default_user",
+        "personal_access_token",
+        "default_project",
+    ],
+}
+# Dotted-key prefix for sync settings in proj.yaml.
+# Jira uses top-level "jira.<field>"; Todoist/Trello use "sync.<service>.<field>".
+_INTEGRATION_SYNC_PREFIX: dict[str, str] = {
+    "todoist": "sync.todoist",
+    "trello": "sync.trello",
+    "jira": "jira",
+}
+_INTEGRATION_SYNC_FIELDS: dict[str, list[str]] = {
+    "todoist": ["enabled", "auto_sync", "root_only"],
+    "trello": ["enabled", "auto_sync", "default_list", "on_delete"],
+    "jira": ["enabled", "auto_sync"],
+}
+
+
+def _compute_integration_diff(service: str, result: dict[str, Any]) -> tuple[str, bool]:
+    """Compute unified yaml diff between existing + proposed integration config.
+
+    Returns (diff_text, is_first_time) where is_first_time means the service
+    credential yaml doesn't exist yet. Callers should bypass the diff prompt
+    when is_first_time=True OR when diff_text is empty.
+
+    Mirrors the pre-P3 Textual ConfigDiffScreen._compute_diff step so the user
+    sees credential + sync-flag changes before overwrite.
+    """
+    import difflib
+
+    import yaml
+
+    from installer._config_loader import load_existing_yaml
+
+    claude_home = Path.home() / ".claude"
+    service_yaml = claude_home / f"{service}.yaml"
+    proj_yaml = claude_home / "proj.yaml"
+
+    proposed_svc: dict[str, Any] = {
+        field: result[field]
+        for field in _INTEGRATION_CRED_FIELDS[service]
+        if field in result
+    }
+    proposed_sync: dict[str, Any] = {}
+    for field in _INTEGRATION_SYNC_FIELDS[service]:
+        src_key = "sync_enabled" if field == "enabled" else field
+        if src_key in result:
+            proposed_sync[field] = result[src_key]
+
+    is_first_time = not service_yaml.exists()
+
+    try:
+        existing_svc = load_existing_yaml(service_yaml) if service_yaml.exists() else {}
+    except Exception:
+        existing_svc = {}
+    try:
+        existing_proj = load_existing_yaml(proj_yaml) if proj_yaml.exists() else {}
+    except Exception:
+        existing_proj = {}
+
+    prefix_path = _INTEGRATION_SYNC_PREFIX[service].split(".")
+    existing_sync: dict[str, Any] = existing_proj
+    for key in prefix_path:
+        existing_sync = (
+            existing_sync.get(key, {}) if isinstance(existing_sync, dict) else {}
+        )
+    if not isinstance(existing_sync, dict):
+        existing_sync = {}
+
+    merged_svc = {**existing_svc, **proposed_svc}
+
+    old_lines: list[str] = []
+    new_lines: list[str] = []
+    if existing_svc:
+        old_lines.append(f"# {service_yaml.name}\n")
+        old_lines.extend(
+            yaml.safe_dump(
+                existing_svc, default_flow_style=False, sort_keys=False
+            ).splitlines(keepends=True)
+        )
+    new_lines.append(f"# {service_yaml.name}\n")
+    new_lines.extend(
+        yaml.safe_dump(
+            merged_svc, default_flow_style=False, sort_keys=False
+        ).splitlines(keepends=True)
+    )
+
+    section_label = _INTEGRATION_SYNC_PREFIX[service]
+    filtered_existing_sync = {
+        k: existing_sync[k]
+        for k in _INTEGRATION_SYNC_FIELDS[service]
+        if k in existing_sync
+    }
+    if filtered_existing_sync:
+        old_lines.append(f"\n# proj.yaml [{section_label}]\n")
+        old_lines.extend(
+            yaml.safe_dump(
+                filtered_existing_sync, default_flow_style=False, sort_keys=False
+            ).splitlines(keepends=True)
+        )
+    new_lines.append(f"\n# proj.yaml [{section_label}]\n")
+    new_lines.extend(
+        yaml.safe_dump(
+            proposed_sync, default_flow_style=False, sort_keys=False
+        ).splitlines(keepends=True)
+    )
+
+    diff_lines = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile="current",
+        tofile="proposed",
+        lineterm="",
+    )
+    diff_text = "\n".join(diff_lines)
+    return diff_text, is_first_time
+
+
 def _write_integration_result(service: str, result: dict[str, Any]) -> None:
     """Split result dict into credential yaml + proj.yaml sync section.
 
@@ -87,28 +212,9 @@ def _write_integration_result(service: str, result: dict[str, Any]) -> None:
     service_yaml = claude_home / f"{service}.yaml"
     proj_yaml = claude_home / "proj.yaml"
 
-    CRED_FIELDS: dict[str, list[str]] = {
-        "todoist": ["api_token"],
-        "trello": ["api_key", "token"],
-        "jira": [
-            "base_url",
-            "default_user",
-            "personal_access_token",
-            "default_project",
-        ],
-    }
-    # Dotted-key prefix for sync settings in proj.yaml.
-    # Jira uses top-level "jira.<field>"; Todoist/Trello use "sync.<service>.<field>".
-    SYNC_PREFIX: dict[str, str] = {
-        "todoist": "sync.todoist",
-        "trello": "sync.trello",
-        "jira": "jira",
-    }
-    SYNC_FIELDS: dict[str, list[str]] = {
-        "todoist": ["enabled", "auto_sync", "root_only"],
-        "trello": ["enabled", "auto_sync", "default_list", "on_delete"],
-        "jira": ["enabled", "auto_sync"],
-    }
+    CRED_FIELDS = _INTEGRATION_CRED_FIELDS
+    SYNC_PREFIX = _INTEGRATION_SYNC_PREFIX
+    SYNC_FIELDS = _INTEGRATION_SYNC_FIELDS
 
     # Build credential answers dict (flat, non-dotted — service yaml is flat)
     cred_answers: dict[str, Any] = {
@@ -237,7 +343,17 @@ def _run_install(args: Any, console: Console) -> int:
         if result is None:
             console.print(f"[dim]Cancelled at {service} config.[/dim]")
             return 0
-        _write_integration_result(service, result)
+        # Parity w/ pre-P3 ConfigDiffScreen (todo 682): show yaml diff of
+        # existing → proposed config before overwrite. First-time setup + no-
+        # changes skip the prompt. User "no" skips write for this service but
+        # continues the flow (same as pre-migration cancel semantics).
+        diff_text, is_first_time = _compute_integration_diff(service, result)
+        if is_first_time or not diff_text.strip():
+            _write_integration_result(service, result)
+        elif review_config_diff(service, diff_text, console):
+            _write_integration_result(service, result)
+        else:
+            console.print(f"[dim]Skipped {service} config write.[/dim]")
 
     hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
     # Resolve plugin dirs from selected plugin names so compute_hooks_diff can
