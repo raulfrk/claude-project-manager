@@ -75,23 +75,17 @@ def _write_wizard_result(result: dict[str, Any]) -> None:
 
 
 def _write_integration_result(service: str, result: dict[str, Any]) -> None:
-    """Split result dict into credential yaml + proj.yaml sync section."""
-    import yaml
+    """Split result dict into credential yaml + proj.yaml sync section.
 
+    Uses write_bucket for both writes: fcntl.flock + atomic tmp+rename +
+    TOCTOU drift detection.
+    """
     from installer._config_loader import load_existing_yaml
+    from installer._config_writer import write_bucket
 
     claude_home = Path.home() / ".claude"
     service_yaml = claude_home / f"{service}.yaml"
     proj_yaml = claude_home / "proj.yaml"
-
-    try:
-        existing_service = (
-            load_existing_yaml(service_yaml) if service_yaml.exists() else {}
-        )
-        existing_proj = load_existing_yaml(proj_yaml) if proj_yaml.exists() else {}
-    except Exception:
-        existing_service = {}
-        existing_proj = {}
 
     CRED_FIELDS: dict[str, list[str]] = {
         "todoist": ["api_token"],
@@ -103,41 +97,46 @@ def _write_integration_result(service: str, result: dict[str, Any]) -> None:
             "default_project",
         ],
     }
+    # Dotted-key prefix for sync settings in proj.yaml.
+    # Jira uses top-level "jira.<field>"; Todoist/Trello use "sync.<service>.<field>".
+    SYNC_PREFIX: dict[str, str] = {
+        "todoist": "sync.todoist",
+        "trello": "sync.trello",
+        "jira": "jira",
+    }
     SYNC_FIELDS: dict[str, list[str]] = {
         "todoist": ["enabled", "auto_sync", "root_only"],
         "trello": ["enabled", "auto_sync", "default_list", "on_delete"],
         "jira": ["enabled", "auto_sync"],
     }
 
-    # Write service credentials yaml
-    for field in CRED_FIELDS[service]:
-        if field in result:
-            existing_service[field] = result[field]
-    service_yaml.parent.mkdir(parents=True, exist_ok=True)
-    service_yaml.write_text(yaml.safe_dump(existing_service, sort_keys=False))
+    # Build credential answers dict (flat, non-dotted — service yaml is flat)
+    cred_answers: dict[str, Any] = {
+        field: result[field] for field in CRED_FIELDS[service] if field in result
+    }
+    if cred_answers:
+        try:
+            existing_service = (
+                load_existing_yaml(service_yaml) if service_yaml.exists() else {}
+            )
+        except Exception:
+            existing_service = {}
+        write_bucket(service_yaml, existing_service, cred_answers, bucket=service)
 
-    # Write sync settings to proj.yaml
-    # Jira uses top-level "jira"; Todoist/Trello use "sync.<service>"
-    if service == "jira":
-        section_path = ["jira"]
-    else:
-        section_path = ["sync", service]
-
-    cursor = existing_proj
-    for key in section_path[:-1]:
-        if key not in cursor or not isinstance(cursor[key], dict):
-            cursor[key] = {}
-        cursor = cursor[key]
-    target_section: dict[str, Any] = cursor.setdefault(section_path[-1], {})
-
+    # Build dotted-key answers for proj.yaml sync section
+    prefix = SYNC_PREFIX[service]
+    proj_answers: dict[str, Any] = {}
     for field in SYNC_FIELDS[service]:
         # sync_enabled in result → "enabled" in yaml
         src_key = "sync_enabled" if field == "enabled" else field
         if src_key in result:
-            target_section[field] = result[src_key]
-
-    proj_yaml.parent.mkdir(parents=True, exist_ok=True)
-    proj_yaml.write_text(yaml.safe_dump(existing_proj, sort_keys=False))
+            proj_answers[f"{prefix}.{field}"] = result[src_key]
+    if proj_answers:
+        try:
+            existing_proj = load_existing_yaml(proj_yaml) if proj_yaml.exists() else {}
+        except Exception:
+            existing_proj = {}
+        write_bucket(proj_yaml, existing_proj, proj_answers, bucket="proj")
 
 
 def _name_to_id_map() -> dict[str, str]:

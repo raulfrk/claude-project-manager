@@ -374,6 +374,76 @@ class TestInstall:
         assert code == 0
         mock_wizard.assert_not_called()
 
+    def test_install_cancel_at_trello_config(self) -> None:
+        """configure_trello returns None → exit 0, skip hooks_diff + execute."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="trello")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("trello", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
+                "installer.flow.installer_flow.configure_trello",
+                return_value=None,  # user cancelled
+            ),
+            patch("installer.flow.installer_flow.execute_install_plan") as mock_exec,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+        assert code == 0
+        mock_exec.assert_not_called()
+
+    def test_install_cancel_at_jira_config(self) -> None:
+        """configure_jira returns None → exit 0, skip hooks_diff + execute."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="jira")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("jira", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
+                "installer.flow.installer_flow.configure_jira",
+                return_value=None,
+            ),
+            patch("installer.flow.installer_flow.execute_install_plan") as mock_exec,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+        assert code == 0
+        mock_exec.assert_not_called()
+
     def test_install_resolves_plugin_dirs_for_hooks_diff(self) -> None:
         """_run_install must pass non-empty plugin_dirs to compute_hooks_diff.
 
