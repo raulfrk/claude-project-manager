@@ -163,6 +163,10 @@ jobs:
 
       - name: Commit generated snapshots
         run: |
+          if [ ! -d installer/tests/e2e/snapshots ]; then
+            echo "No snapshots directory — Textual SVG snapshots removed in P4 (#672)"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add installer/tests/e2e/snapshots/
@@ -182,6 +186,10 @@ jobs:
       - name: Generate visual diff report
         if: failure()
         run: |
+          if [ ! -d installer/tests/e2e/snapshots ]; then
+            echo "No snapshots directory — nothing to diff"
+            exit 0
+          fi
           docker run --rm \
             --user $(id -u):$(id -g) \
             -v ${{ github.workspace }}:/app \
@@ -196,3 +204,4 @@ jobs:
         with:
           name: snapshot-svgs
           path: installer/tests/e2e/snapshots/
+          if-no-files-found: ignore
