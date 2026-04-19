@@ -81,6 +81,8 @@ def execute_install_plan(plan: InstallPlan, console: Console) -> InstallResult:
                 elif action.action == "reinstall":
                     uninstall_plugin(action.plugin_id)
                     install_plugin(action.plugin_id)
+                else:
+                    raise ValueError(f"unknown action: {action.action!r}")
                 result.success_count += 1
             except InstallerError as exc:
                 result.failures.append(
