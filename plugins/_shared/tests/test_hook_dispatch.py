@@ -614,7 +614,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -634,7 +634,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -657,7 +657,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -678,7 +678,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -707,7 +707,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -738,7 +738,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -760,7 +760,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -783,7 +783,7 @@ class TestDispatchHookReturn:
         with (
             patch(
                 "hook_dispatch.dispatch._resolve_hooks_transport",
-                return_value=("http://localhost/hook", None),
+                return_value=("http://localhost/hook", MagicMock()),
             ),
             patch("hook_dispatch.dispatch.httpx.AsyncClient", return_value=mock_client),
         ):
@@ -1449,3 +1449,32 @@ async def test_skip_hooks_false_dispatches_normally(mock_mcp):
         await mock_mcp._registered_tools["tool_with_false_skip"]()
 
     mock_dispatch.assert_awaited_once()
+
+
+# ── 669: short-circuit when transport unavailable ─────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_dispatch_short_circuits_when_transport_is_none() -> None:
+    """When _resolve_hooks_transport returns (url, None), _dispatch_hook must
+    skip the httpx call entirely and return the 'unreachable' envelope.
+
+    Previously: transport=None fell through to httpx.AsyncClient default
+    transport → attempted localhost:80 connect → 60s httpx timeout before
+    ConnectError. Fix: return the unreachable envelope immediately.
+    """
+    with (
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            return_value=("http://localhost/hook", None),
+        ),
+        patch(
+            "hook_dispatch.dispatch.httpx.AsyncClient",
+            side_effect=AssertionError("httpx.AsyncClient should not be constructed"),
+        ),
+    ):
+        result = await _dispatch_hook("tool_name", json.dumps({"x": 1}))
+
+    assert result is not None
+    assert result["_error"] == "hooks server unreachable"
+    assert result["hooks_fired"] == 0

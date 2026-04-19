@@ -158,6 +158,15 @@ async def _dispatch_hook(
     Returns a dict with '_error' key if the response is malformed.
     """
     hooks_url, hooks_transport = _resolve_hooks_transport(hooks_port)
+    if hooks_transport is None:
+        # No socket + no registry entry → nothing to dispatch to.
+        # Short-circuit before attempting a 60s httpx connect to localhost:80.
+        return {
+            "_error": "hooks server unreachable",
+            "hooks_fired": 0,
+            "errors": [],
+            "results": [],
+        }
     serialized = _serialize_result(result)
     payload = {
         "tool": f"{DISPATCH_PLUGIN_NAME}_fire_tool",
