@@ -124,19 +124,17 @@ class TestSchemaIntrospection:
 
 
 class TestCrossPathBucketParity:
-    """Rich and Textual wizards must iterate the same PROJ_YAML_PROMPTS
-    table and therefore write to identical bucket keys. This regression
-    test locks the invariant: for every spec, the (yaml_file, dotted_key)
-    pair is the canonical destination both paths resolve to."""
+    """Rich wizard must iterate the same PROJ_YAML_PROMPTS table and write
+    to identical bucket keys. This regression test locks the invariant:
+    for every spec, the (yaml_file, dotted_key) pair is the canonical
+    destination the flow path resolves to."""
 
-    def test_both_paths_see_same_spec_table(self) -> None:
-        """Rich (wizard.py) and Textual (screens/wizard.py) import the
-        same PROJ_YAML_PROMPTS symbol. Import both and assert identity."""
+    def test_rich_path_sees_same_spec_table(self) -> None:
+        """flow/wizard.py (prompt_toolkit) imports the same PROJ_YAML_PROMPTS
+        symbol as wizard_specs.py. Textual screens/ deleted in P4 (#672)."""
         from installer import wizard as rich_wizard
-        from installer.screens import wizard as textual_wizard
 
         assert rich_wizard.PROJ_YAML_PROMPTS is PROJ_YAML_PROMPTS
-        assert textual_wizard.PROJ_YAML_PROMPTS is PROJ_YAML_PROMPTS
 
     def test_bucket_partition_covers_every_spec_key(self) -> None:
         """partition_answers_by_bucket must route every spec.dotted_key
@@ -458,14 +456,16 @@ class TestTrelloWizardSpecs:
 
     def test_default_board_id_grep_counts(self) -> None:
         """r2 regression: default_board_id must not be referenced as code in
-        integration_config.py (comments mentioning the migration are allowed)
-        and must appear exactly once as a PromptSpec entry in wizard_specs.py.
+        flow/integration_config.py (comments mentioning the migration are
+        allowed) and must appear exactly once as a PromptSpec entry in
+        wizard_specs.py.  Textual screens/integration_config.py deleted in
+        P4 (#672).
         """
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[2]
         ws = (repo_root / "installer" / "wizard_specs.py").read_text()
-        ic_path = repo_root / "installer" / "screens" / "integration_config.py"
+        ic_path = repo_root / "installer" / "flow" / "integration_config.py"
         # Strip comment lines so the migration comment doesn't trip the check.
         code_lines = [
             ln
@@ -474,7 +474,7 @@ class TestTrelloWizardSpecs:
         ]
         ic_code = "\n".join(code_lines)
         assert "default_board_id" not in ic_code, (
-            "default_board_id leaked back into integration_config.py code "
+            "default_board_id leaked back into flow/integration_config.py code "
             "(comments are allowed; actual references are not)"
         )
         assert ws.count('dotted_key="sync.trello.default_board_id"') == 1, (
