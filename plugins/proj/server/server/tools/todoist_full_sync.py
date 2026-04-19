@@ -918,6 +918,9 @@ def apply_changes(
     """
     meta = storage.load_meta(cfg, name)
     todos = storage.load_todos(cfg, name)
+    # Archived siblings participate in ID allocation (todo 673) to prevent new
+    # pulled-in Todoist children from colliding with archived local todo IDs.
+    archived_siblings = storage.load_archived_todos(cfg, name)
     todo_map = {t.id: t for t in todos}
     today = _now()
     todo: Todo | None
@@ -978,8 +981,9 @@ def apply_changes(
                     pull_create_orphans.append((item_tid, todoist_parent_id))
 
         desc_synced_value = str(item.get("todoist_description_synced", ""))
+        sync_sibling_pool = todos + archived_siblings if parent_todo else todos
         todo = Todo(
-            id=next_todo_id(meta, parent=parent_todo, siblings=todos),
+            id=next_todo_id(meta, parent=parent_todo, siblings=sync_sibling_pool),
             title=str(item.get("title", "")),
             priority=str(item.get("priority", cfg.default_priority)),
             tags=[str(t) for t in tags_raw]

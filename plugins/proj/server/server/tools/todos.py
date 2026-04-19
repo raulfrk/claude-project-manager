@@ -345,6 +345,9 @@ def _batch_add_children(
     created: list[_CreatedEntry] = []
     skipped_duplicates: list[str] = []
     _batch_titles: dict[str, set[str]] = {}
+    # Archived siblings must participate in ID allocation (todo 673) — otherwise a
+    # new child can collide with an archived ID that still exists in archive.yaml.
+    archived_siblings = storage.load_archived_todos(cfg, name)
 
     def _flatten(
         specs: list[dict[str, JsonValue]],
@@ -392,7 +395,7 @@ def _batch_add_children(
                 tags.append(group_tag)
 
             child = Todo(
-                id=next_todo_id(meta, parent=parent, siblings=todos),
+                id=next_todo_id(meta, parent=parent, siblings=todos + archived_siblings),
                 title=title,
                 priority=priority,
                 tags=[str(t) for t in tags],
@@ -663,8 +666,11 @@ def register(app: FastMCP) -> None:
             if group_tag not in resolved_tags:
                 resolved_tags.append(group_tag)
 
+        # Include archived siblings in ID allocation (todo 673) to prevent
+        # new todos colliding with archived ones under the same parent.
+        sibling_pool = todos + storage.load_archived_todos(cfg, name) if parent_todo else todos
         todo = Todo(
-            id=next_todo_id(meta, parent=parent_todo, siblings=todos),
+            id=next_todo_id(meta, parent=parent_todo, siblings=sibling_pool),
             title=title,
             priority=priority if priority is not None else cfg.default_priority,
             tags=resolved_tags,

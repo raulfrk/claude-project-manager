@@ -297,6 +297,60 @@ class TestNextTodoId:
         assert gc_b1 == "1.2.1"
 
 
+class TestArchiveAwareIdAllocation:
+    """Regression: todo 673 — new child IDs must not collide with archived siblings."""
+
+    def test_new_child_skips_archived_sibling_id(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        from server.tools.todos import _batch_add_children
+
+        cfg, name = cfg_with_project
+        meta = storage.load_meta(cfg, name)
+        today = str(date.today())
+
+        parent = Todo(id="3", title="Parent", created=today, updated=today)
+        active_child = Todo(
+            id="3.1",
+            title="Active child",
+            created=today,
+            updated=today,
+            tags=["group:3"],
+        )
+        # "3.2" has been archived — remains in the archive even though absent from active.
+        archived_child = Todo(
+            id="3.2",
+            title="Archived child",
+            created=today,
+            updated=today,
+            tags=["group:3"],
+            status="done",
+        )
+        todos = [parent, active_child]
+        storage.save_todos(cfg, name, todos)
+        storage.save_archived_todos(cfg, name, [archived_child])
+        storage.save_meta(cfg, meta)
+
+        meta = storage.load_meta(cfg, name)
+        todos = storage.load_todos(cfg, name)
+        parent_todo = next(t for t in todos if t.id == "3")
+        _batch_add_children(
+            cfg,
+            name,
+            parent_todo,
+            [{"title": "New child under 3"}],
+            [],
+            today,
+            todos,
+            meta,
+        )
+        final = storage.load_todos(cfg, name)
+        new_ids = sorted(t.id for t in final if t.id.startswith("3."))
+        # Expect "3.3" (3.1 active, 3.2 archived) — not "3.2" which would collide.
+        assert "3.3" in new_ids
+        assert "3.2" not in new_ids  # 3.2 still only in archive
+
+
 class TestContent:
     def test_requirements_write_read(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
         cfg, name = cfg_with_project
