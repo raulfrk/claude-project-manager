@@ -155,6 +155,52 @@ def test_runner_invokes_enabled_integrations(tmp_path: Path) -> None:
     assert runner.state == MigrationState.COMMITTED
 
 
+def test_plan_populates_todo_ref_parent_before_flatten(tmp_path: Path) -> None:
+    """Integration plan() receives TodoRefs with parent set from pre-flatten yaml.
+
+    Regression guard for todo 668: if `_plan()` ever moved to after `_flatten()`,
+    TodoRef.parent would be None for every child (flatten strips parent field),
+    and TrelloResync / JiraResync would find zero parent-child relationships to
+    promote. This test captures the exact argument list handed to integ.plan()
+    to prove parent references survive.
+    """
+    project = _setup_project(tmp_path / "p")
+    backup_root = tmp_path / "backups"
+
+    captured: dict[str, list] = {}
+
+    class CaptureIntegration:
+        name = "capture"
+
+        def enabled_for(self, project):
+            return True
+
+        def plan(self, project, migrated):
+            captured["migrated"] = list(migrated)
+            return []
+
+        def execute(self, project, actions):
+            from installer.migrations.integrations.base import ResyncResult
+
+            return ResyncResult()
+
+    runner = FlatTodoMigration(
+        project=project,
+        run_ts="ts",
+        backup_root=backup_root,
+        integrations=[CaptureIntegration()],
+    )
+    runner.plan()
+
+    refs = captured["migrated"]
+    parents = [r for r in refs if r.parent is None]
+    children = [r for r in refs if r.parent is not None]
+    assert len(parents) == 1 and parents[0].id == "1"
+    assert len(children) == 1
+    assert children[0].id == "1.1"
+    assert children[0].parent == "1"
+
+
 def test_resync_failure_does_not_revert_local(tmp_path: Path) -> None:
     project = _setup_project(tmp_path / "p")
     backup_root = tmp_path / "backups"
