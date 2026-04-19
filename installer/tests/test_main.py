@@ -446,6 +446,11 @@ class TestMain:
         args = _make_args(no_tui=False)
         mock_parser.return_value.parse_args.return_value = args
         _lock.return_value = MagicMock()
+        # Ensure post-exit branch doesn't execute any real subprocesses.
+        mock_app_inst = mock_app_cls.return_value
+        mock_app_inst.install_plan = None
+        mock_app_inst.reinstall_message = None
+        mock_app_inst.full_cleanup = False
         result = main()
         assert result == EXIT_SUCCESS
         mock_app_cls.assert_called_once_with(mode="install", args=args)
@@ -616,6 +621,7 @@ class TestMain:
 
     @patch("installer.main.cleanup_orphaned_plugin_caches", return_value=[])
     @patch("installer.main.execute_install_plan")
+    @patch("installer.main.check_marketplace_registered", return_value=True)
     @patch("installer.main.release_lock")
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
@@ -630,6 +636,7 @@ class TestMain:
         _prereq,
         _lock,
         _release,
+        _mock_marketplace,
         mock_exec_plan,
         mock_cleanup,
     ):
