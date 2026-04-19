@@ -190,12 +190,41 @@ Single FF-merge feature branch `feat/672-p3-kill-installerapp`. Tasks broken int
 
 **Rollback:** feature branch is atomic FF-merge; `git revert <merge>` restores the full Textual+InstallerApp stack for the 7 ported screens.
 
+## Feature-parity guarantee (MUST)
+
+**Every user-facing feature + every option + every exit-code path that existed before P3 MUST exist after P3.** No regression is acceptable. The migration is purely a rendering + event-loop swap.
+
+**Explicit parity checklist** (implementer MUST verify each before final merge):
+
+| Feature | Before (Textual) | After (Rich/prompt_toolkit) |
+|---|---|---|
+| Install mode: marketplace auto-register | yes | yes |
+| Install mode: plugin status list → per-plugin action select (install/update/uninstall/skip) | PluginStatusScreen | prompt_toolkit checkboxlist_dialog w/ per-row action |
+| Install mode: hooks.yaml diff review + apply/skip/cancel | HooksDiffScreen | Rich Syntax + Prompt.ask |
+| Install mode: config diff review (proj.yaml etc) | ConfigDiffScreen | Rich Syntax + Prompt.ask |
+| Update mode: version-diff display + per-plugin checkbox multi-select | UpdateScreen | prompt_toolkit checkboxlist_dialog |
+| Update mode: "no outdated" message | ProgressScreen placeholder | Rich console.print |
+| Reinstall mode: confirm + `reset_configs` toggle | ConfirmScreen | Rich confirm_with_options |
+| Reinstall mode: stale-cache scan + orphan removal confirm | ConfirmScreen | Rich confirm_with_options |
+| Uninstall mode: confirm + `full_cleanup` toggle | ConfirmScreen | Rich confirm_with_options |
+| All modes: detection table (installed vs available) + proceed/cancel | DetectionScreen | Rich Table + Prompt.ask |
+| All modes: corrupt-yaml fallback + continue/cancel | CorruptYamlScreen | Rich Panel + Prompt.ask |
+| Non-TTY fallback | existing prompts.py path | preserved |
+| Keyboard interrupt (Ctrl-C) → exit 130 | existing main.py handling | preserved |
+| Post-install orphan cache cleanup | main.py post-exit | preserved |
+| Post-install CLAUDE.md managed section (`full_cleanup`) | main.py post-exit | preserved |
+| Post-install runbook emission on resync failure | main.py post-exit | preserved |
+| Exit codes: 0 success, 1 failure, 2 partial, 3 user-quit, 130 interrupt | as-is | preserved |
+
+**Final-task acceptance check** (part of the ship task): run the full installer test suite + the 3 e2e flow tests (`test_install_flow.py`, `test_update_flows.py`, `test_integration_flow.py`). Any test asserting a specific Textual screen transition gets REWRITTEN (not deleted) to assert the equivalent Rich/prompt_toolkit call sequence, preserving coverage. Net test count MUST NOT decrease.
+
 ## Non-goals
 
 - Not porting wizard, advanced_config, integration_config × 3 (P4).
 - Not removing Textual from deps (P5).
 - No changes to the `cpm-install` CLI interface.
 - No new user-facing features.
+- No silent behavior changes (see Feature-parity guarantee above — explicit parity required).
 
 ## Open questions
 
