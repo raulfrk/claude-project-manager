@@ -8,7 +8,7 @@ import respx
 import yaml
 from httpx import Response
 
-from installer.migrations.integrations.todoist import TodoistResync
+from installer.migrations.integrations.todoist import TodoistResync, _load_api_token
 from installer.migrations.types import PendingProject, TodoRef
 
 
@@ -144,3 +144,66 @@ def test_execute_auth_failure_aborts(project_with_todoist: PendingProject) -> No
     result = TodoistResync().execute(project_with_todoist, actions)
     assert result.aborted is True
     assert len(result.failed) == 2
+
+
+class TestLoadApiToken:
+    """Priority: ~/.claude/todoist.yaml → proj.yaml → None."""
+
+    def test_load_from_todoist_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "todoist.yaml").write_text(
+            "api_token: tok-from-todoist\n"
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        # Proj cfg should be ignored when todoist.yaml wins.
+        cfg = {"sync": {"todoist": {"api_token": "tok-from-proj"}}}
+        assert _load_api_token(cfg) == "tok-from-todoist"
+
+    def test_fallback_to_proj_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        # No todoist.yaml file.
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        cfg = {"sync": {"todoist": {"api_token": "tok-from-proj"}}}
+        assert _load_api_token(cfg) == "tok-from-proj"
+
+    def test_returns_none_when_both_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        assert _load_api_token({}) is None
+        assert _load_api_token(None) is None
+        assert _load_api_token({"sync": {"todoist": {}}}) is None
+
+    def test_yaml_error_in_todoist_yaml_fallbacks_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "todoist.yaml").write_text(":::broken\n")
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        cfg = {"sync": {"todoist": {"api_token": "tok-from-proj"}}}
+        assert _load_api_token(cfg) == "tok-from-proj"
+
+    def test_empty_token_treated_as_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "todoist.yaml").write_text("api_token: '   '\n")
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        # Should fall through to proj.yaml.
+        cfg = {"sync": {"todoist": {"api_token": "tok-from-proj"}}}
+        assert _load_api_token(cfg) == "tok-from-proj"

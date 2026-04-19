@@ -130,3 +130,30 @@ def _load_cfg(project: PendingProject) -> dict[str, Any]:
         return yaml.safe_load(config_path.read_text()) or {}
     except yaml.YAMLError:
         return {}
+
+
+def _load_api_token(project_cfg: dict[str, Any] | None = None) -> str | None:
+    """Resolve Todoist api_token.
+
+    Priority:
+      1. ``~/.claude/todoist.yaml`` ``api_token`` (local plugins/todoist config).
+      2. ``project_cfg['sync']['todoist']['api_token']`` (legacy / opt-in).
+      3. ``None`` if neither yields a non-empty token.
+    """
+    import yaml
+    from pathlib import Path
+
+    todoist_yaml = Path.home() / ".claude" / "todoist.yaml"
+    if todoist_yaml.exists():
+        try:
+            raw = yaml.safe_load(todoist_yaml.read_text())
+            data = raw if isinstance(raw, dict) else {}
+            tok = str(data.get("api_token", "")).strip()
+            if tok:
+                return tok
+        except yaml.YAMLError:
+            pass  # fall through to proj.yaml fallback
+
+    cfg = project_cfg or {}
+    tok = str(cfg.get("sync", {}).get("todoist", {}).get("api_token", "")).strip()
+    return tok or None
