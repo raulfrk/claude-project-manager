@@ -10,10 +10,14 @@ MigrationReviewScreen removed — replaced by installer/flow/ helpers
 (main.py failure loop + migration_flow.prompt_migration_action +
 prompt_migration_review).
 
-NOTE (2026-04-19, #672 phase 3): PluginSelectScreen, DetectionScreen,
-UpdateScreen, ConfirmScreen, CorruptYamlScreen, HooksDiffScreen,
-ConfigDiffScreen, PluginStatusScreen removed — ported to plain-Python flow
-in installer/flow/.
+NOTE (2026-04-19, #672 phase 3): ConfirmScreen, DetectionScreen,
+CorruptYamlScreen, HooksDiffScreen, UpdateScreen, PluginStatusScreen
+removed — replaced by installer/flow/ helpers (confirm_with_options,
+show_detection_and_confirm, show_corrupt_yaml_and_confirm,
+review_hooks_diff, select_updates, select_plugin_actions). InstallerApp
+deleted in the same phase; main.py now calls run_installer_flow.
+ConfigDiffScreen remains (still used by P4's Textual integration_config
+screens).
 
 Each test renders a screen inside a minimal Textual App, exports an SVG
 screenshot, and compares it against a golden file in
@@ -39,10 +43,12 @@ Active ``Screen`` subclasses under ``installer/screens/``:
         - TodoistConfigScreen
         - TrelloConfigScreen
         - JiraConfigScreen
+    4. ``config_diff.py`` -> ConfigDiffScreen (P4 — still used)
 
 Snapshot tests for wizard: test_snapshots_main.py
 Snapshot tests for integration: test_snapshots_integration.py
 Snapshot tests for advanced: test_snapshots_advanced.py
+Snapshot tests for config_diff: test_snapshots_config_diff.py
 ================================================================================
 """
 

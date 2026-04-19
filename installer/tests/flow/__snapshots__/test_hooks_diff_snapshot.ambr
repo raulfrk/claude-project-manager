@@ -1,0 +1,23 @@
+# serializer version: 1
+# name: test_hooks_diff_empty_snapshot
+  ''
+# ---
+# name: test_hooks_diff_snapshot
+  '''
+  Hook Configuration Updates
+  ╭────────────────────────── NEW proj-tracking-flush ───────────────────────────╮
+  │ --- /dev/null                                                                │
+  │ +++ proj-tracking-flush                                                      │
+  │ +trigger: todo_add                                                           │
+  │                                                                              │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  ╭──────────────────────────── CHANGED todoist-auto ────────────────────────────╮
+  │ --- todoist-auto                                                             │
+  │ +++ todoist-auto                                                             │
+  │  trigger: todo_complete                                                      │
+  │ +blocking: true                                                              │
+  │                                                                              │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  
+  '''
+# ---

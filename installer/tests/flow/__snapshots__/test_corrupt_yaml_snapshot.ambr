@@ -1,0 +1,40 @@
+# serializer version: 1
+# name: test_corrupt_yaml_cancel_snapshot
+  '''
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ ⚠ Corrupt Configuration File(s)                                              │
+  │                                                                              │
+  │ The following ~/.claude/*.yaml files could not be parsed. You can continue   │
+  │ with defaults (values from the affected files will NOT be preserved) or      │
+  │ cancel to fix them manually.                                                 │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ proj.yaml                                                                    │
+  │ /home/raul/.claude/proj.yaml                                                 │
+  │ Reason: bad token at line 5                                                  │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  
+  '''
+# ---
+# name: test_corrupt_yaml_snapshot
+  '''
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ ⚠ Corrupt Configuration File(s)                                              │
+  │                                                                              │
+  │ The following ~/.claude/*.yaml files could not be parsed. You can continue   │
+  │ with defaults (values from the affected files will NOT be preserved) or      │
+  │ cancel to fix them manually.                                                 │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ proj.yaml                                                                    │
+  │ /home/raul/.claude/proj.yaml                                                 │
+  │ Reason: bad token at line 5                                                  │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ worktree.yaml                                                                │
+  │ /home/raul/.claude/worktree.yaml                                             │
+  │ Reason: mapping values are not allowed here                                  │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  
+  '''
+# ---

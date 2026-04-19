@@ -1,0 +1,19 @@
+# serializer version: 1
+# name: test_config_diff_empty_snapshot
+  ''
+# ---
+# name: test_config_diff_snapshot
+  '''
+  Configuration Changes — proj
+  ╭──────────────────────────────────────────────────────────────────────────────╮
+  │ --- /home/user/.claude/proj.yaml                                             │
+  │ +++ /home/user/.claude/proj.yaml                                             │
+  │  tracking_dir: /tmp/tracking                                                 │
+  │ -default_priority: low                                                       │
+  │ +default_priority: high                                                      │
+  │  git_enabled: true                                                           │
+  │                                                                              │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  
+  '''
+# ---

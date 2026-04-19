@@ -1,0 +1,27 @@
+# serializer version: 1
+# name: test_detection_cancel_snapshot
+  '''
+  Version Check
+  ┏━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+  ┃ Plugin   ┃ Installed ┃ Available ┃ Status        ┃
+  ┡━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+  │ proj     │ 1.0.0     │ 1.1.0     │ outdated      │
+  │ worktree │ —         │ 2.0.0     │ not installed │
+  │ router   │ 3.0.0     │ —         │ unknown       │
+  └──────────┴───────────┴───────────┴───────────────┘
+  
+  '''
+# ---
+# name: test_detection_snapshot
+  '''
+  Plugin Status
+  ┏━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+  ┃ Plugin   ┃ Installed ┃ Available ┃ Status        ┃
+  ┡━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+  │ proj     │ 1.0.0     │ 1.1.0     │ outdated      │
+  │ worktree │ —         │ 2.0.0     │ not installed │
+  │ router   │ 3.0.0     │ —         │ unknown       │
+  └──────────┴───────────┴───────────┴───────────────┘
+  
+  '''
+# ---
