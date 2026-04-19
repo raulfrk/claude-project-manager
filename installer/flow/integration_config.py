@@ -133,3 +133,79 @@ def configure_todoist(console: Console) -> dict[str, Any] | None:
         ),
     ]
     return _run_integration_form("Todoist", fields, _todoist_validator, console)
+
+
+def _trello_validator(values: dict[str, Any]) -> str | None:
+    key = (values.get("api_key") or "").strip()
+    token = (values.get("token") or "").strip()
+    if not key or not token:
+        return "API key and token are both required"
+    try:
+        resp = httpx.get(
+            f"https://api.trello.com/1/members/me?key={key}&token={token}",
+            timeout=10,
+        )
+        if resp.status_code == 401:
+            return "Invalid API key or token"
+        if resp.status_code != 200:
+            return f"Trello API error: {resp.status_code}"
+    except httpx.ConnectError:
+        return "Cannot reach Trello API — check network"
+    except httpx.TimeoutException:
+        return "Trello API timeout"
+    return None
+
+
+def configure_trello(console: Console) -> dict[str, Any] | None:
+    """Trello integration config form. Returns dict or None on cancel."""
+    claude_home = Path.home() / ".claude"
+    trello_cfg = _load_yaml(claude_home / "trello.yaml")
+    proj_cfg = _load_yaml(claude_home / "proj.yaml")
+    sync_section = (proj_cfg.get("sync", {}) or {}).get("trello", {}) or {}
+
+    default_list = str(sync_section.get("default_list") or "Todo")
+    on_delete = str(sync_section.get("on_delete") or "archive")
+    if on_delete not in ("archive", "delete"):
+        on_delete = "archive"
+
+    fields = [
+        FieldSpec(
+            key="api_key",
+            label="API Key",
+            kind="password",
+            default=trello_cfg.get("api_key") or "",
+            help_text="Get from https://trello.com/power-ups/admin/",
+        ),
+        FieldSpec(
+            key="token",
+            label="Token",
+            kind="password",
+            default=trello_cfg.get("token") or "",
+        ),
+        FieldSpec(
+            key="sync_enabled",
+            label="Enable Trello sync",
+            kind="bool",
+            default=bool(sync_section.get("enabled", False)),
+        ),
+        FieldSpec(
+            key="auto_sync",
+            label="Auto-sync on todo changes",
+            kind="bool",
+            default=bool(sync_section.get("auto_sync", True)),
+        ),
+        FieldSpec(
+            key="default_list",
+            label="Default Trello list name",
+            kind="text",
+            default=default_list,
+        ),
+        FieldSpec(
+            key="on_delete",
+            label="On delete",
+            kind="select",
+            default=on_delete,
+            choices=["archive", "delete"],
+        ),
+    ]
+    return _run_integration_form("Trello", fields, _trello_validator, console)

@@ -6,7 +6,7 @@ import pytest
 import yaml
 from rich.console import Console
 
-from installer.flow.integration_config import configure_todoist
+from installer.flow.integration_config import configure_todoist, configure_trello
 
 
 class TestConfigureTodoist:
@@ -187,3 +187,134 @@ class TestConfigureTodoist:
         # Second call should have error_message from first attempt
         assert err_captured[0] is None
         assert err_captured[1] == "invalid token"
+
+
+class TestConfigureTrello:
+    def test_cancel_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+        with patch("installer.flow.integration_config.run_form", return_value=None):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = configure_trello(console)
+        assert result is None
+
+    def test_defaults_from_existing_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Existing creds in trello.yaml MUST pre-fill api_key + token."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "trello.yaml").write_text(
+            yaml.safe_dump({"api_key": "existing-key", "token": "existing-token"})
+        )
+        (fake_home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "sync": {
+                        "trello": {
+                            "enabled": True,
+                            "auto_sync": False,
+                            "default_list": "MyList",
+                            "on_delete": "delete",
+                        }
+                    }
+                }
+            )
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        captured: list = []
+
+        def _capture(fields, console, **k):
+            captured.extend(fields)
+            return None
+
+        with patch("installer.flow.integration_config.run_form", side_effect=_capture):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            configure_trello(console)
+
+        field_by_key = {f.key: f for f in captured}
+        assert field_by_key["api_key"].default == "existing-key"
+        assert field_by_key["token"].default == "existing-token"
+        assert field_by_key["sync_enabled"].default is True
+        assert field_by_key["auto_sync"].default is False
+        assert field_by_key["default_list"].default == "MyList"
+        assert field_by_key["on_delete"].default == "delete"
+        # on_delete should be kind="select" with choices
+        assert field_by_key["on_delete"].kind == "select"
+        assert set(field_by_key["on_delete"].choices or []) == {"archive", "delete"}
+
+    def test_sync_disabled_skips_validation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        validator_called = {"n": 0}
+
+        def _fake_validator(values):
+            validator_called["n"] += 1
+            return None
+
+        with (
+            patch(
+                "installer.flow.integration_config.run_form",
+                return_value={
+                    "api_key": "",
+                    "token": "",
+                    "sync_enabled": False,
+                    "auto_sync": True,
+                    "default_list": "Todo",
+                    "on_delete": "archive",
+                },
+            ),
+            patch(
+                "installer.flow.integration_config._trello_validator",
+                side_effect=_fake_validator,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = configure_trello(console)
+
+        assert result is not None
+        assert result["sync_enabled"] is False
+        assert validator_called["n"] == 0
+
+    def test_submit_with_valid_creds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        with (
+            patch(
+                "installer.flow.integration_config.run_form",
+                return_value={
+                    "api_key": "k",
+                    "token": "t",
+                    "sync_enabled": True,
+                    "auto_sync": True,
+                    "default_list": "Todo",
+                    "on_delete": "archive",
+                },
+            ),
+            patch(
+                "installer.flow.integration_config._trello_validator",
+                return_value=None,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = configure_trello(console)
+        assert result == {
+            "api_key": "k",
+            "token": "t",
+            "sync_enabled": True,
+            "auto_sync": True,
+            "default_list": "Todo",
+            "on_delete": "archive",
+        }
