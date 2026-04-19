@@ -6,6 +6,7 @@ versions, derived status) then prompts y/n to continue.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -14,7 +15,25 @@ from rich.table import Table
 
 if TYPE_CHECKING:
     from installer.detect import InstallState
-    from installer.screens.detection import PluginDetectionRow
+
+
+@dataclass
+class PluginDetectionRow:
+    """A row in the detection table."""
+
+    plugin: str
+    installed_version: str | None
+    available_version: str | None
+
+    @property
+    def status(self) -> str:
+        if self.installed_version is None:
+            return "not installed"
+        if self.available_version is None:
+            return "unknown"
+        if self.installed_version == self.available_version:
+            return "up-to-date"
+        return "outdated"
 
 
 _STATUS_STYLE: dict[str, str] = {

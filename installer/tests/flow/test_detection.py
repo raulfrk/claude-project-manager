@@ -5,7 +5,7 @@ from rich.console import Console
 
 from installer.detect import InstallState
 from installer.flow.detection import show_detection_and_confirm
-from installer.screens.detection import PluginDetectionRow
+from installer.flow.detection import PluginDetectionRow
 
 
 def _state(tmp_path: Path) -> InstallState:

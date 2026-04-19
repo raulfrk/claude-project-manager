@@ -30,7 +30,7 @@ from installer.update import (
 
 if TYPE_CHECKING:
     from installer.detect import InstallState
-    from installer.screens.detection import PluginDetectionRow
+    from installer.flow.detection import PluginDetectionRow
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class PreInstallResult:
 
 def _build_detection_rows(state: "InstallState") -> list["PluginDetectionRow"]:
     """Build (plugin, installed, available) rows used by show_detection_and_confirm."""
-    from installer.screens.detection import PluginDetectionRow
+    from installer.flow.detection import PluginDetectionRow
 
     repo_versions = _read_marketplace_versions()
     rows: list[PluginDetectionRow] = []
