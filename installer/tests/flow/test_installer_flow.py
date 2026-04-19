@@ -382,6 +382,10 @@ class TestInstall:
                 return_value=[MagicMock(name="todoist")],
             ),
             patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[],
+            ),
+            patch(
                 "installer.flow.installer_flow.select_plugin_actions",
                 return_value=[("todoist", "install")],
             ),
@@ -740,6 +744,10 @@ class TestIntegrationConfigDiff:
                 return_value=True,
             ),
             patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[],
+            ),
+            patch(
                 "installer.flow.installer_flow.select_plugin_actions",
                 return_value=[("todoist", "install")],
             ),
@@ -806,6 +814,10 @@ class TestIntegrationConfigDiff:
             patch(
                 "installer.flow.installer_flow.check_marketplace_registered",
                 return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[],
             ),
             patch(
                 "installer.flow.installer_flow.select_plugin_actions",
