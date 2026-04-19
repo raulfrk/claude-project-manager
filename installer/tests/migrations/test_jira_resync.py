@@ -8,7 +8,7 @@ import respx
 import yaml
 from httpx import Response
 
-from installer.migrations.integrations.jira import JiraResync
+from installer.migrations.integrations.jira import JiraResync, _load_jira_cfg
 from installer.migrations.types import PendingProject, TodoRef
 
 
@@ -208,3 +208,152 @@ def test_execute_aborts_when_sync_jira_block_missing(
     assert result.aborted is True
     assert len(result.failed) == 1
     assert result.failed[0].error_class == "ConfigError"
+
+
+# ── 662: jira.yaml priority + proj.yaml fallback ──────────────────────────────
+
+
+class TestLoadJiraCfg:
+    """Priority: ~/.claude/jira.yaml → proj.yaml sync.jira → {}."""
+
+    def test_load_from_jira_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "jira.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "personal_access_token": "tok-from-jira-yaml",
+                    "base_url": "https://ex.atlassian.net",
+                    "email": "u@ex.com",
+                }
+            )
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        # proj.yaml sync.jira values should be ignored when jira.yaml wins.
+        proj_cfg = {
+            "sync": {
+                "jira": {
+                    "api_token": "tok-from-proj",
+                    "base_url": "https://should-be-ignored",
+                    "email": "ignored@ex.com",
+                }
+            }
+        }
+        cfg = _load_jira_cfg(proj_cfg)
+        assert cfg["api_token"] == "tok-from-jira-yaml"
+        assert cfg["base_url"] == "https://ex.atlassian.net"
+        assert cfg["email"] == "u@ex.com"
+
+    def test_jira_yaml_maps_personal_access_token_to_api_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "jira.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "personal_access_token": "pat-xyz",
+                    "base_url": "https://ex.atlassian.net",
+                    "email": "u@ex.com",
+                }
+            )
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+        cfg = _load_jira_cfg({})
+        # jira.yaml uses `personal_access_token`; helper normalises to api_token.
+        assert cfg.get("api_token") == "pat-xyz"
+
+    def test_fallback_to_proj_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        # No jira.yaml.
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        proj_cfg = {
+            "sync": {
+                "jira": {
+                    "api_token": "tok-from-proj",
+                    "base_url": "https://ex.atlassian.net",
+                    "email": "u@ex.com",
+                    "enabled": True,
+                }
+            }
+        }
+        cfg = _load_jira_cfg(proj_cfg)
+        assert cfg["api_token"] == "tok-from-proj"
+        assert cfg["base_url"] == "https://ex.atlassian.net"
+        assert cfg["email"] == "u@ex.com"
+
+    def test_returns_empty_when_both_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+        assert _load_jira_cfg({}) == {}
+        assert _load_jira_cfg(None) == {}
+
+    def test_yaml_error_falls_back_to_proj_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "jira.yaml").write_text(":::broken\n")
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        proj_cfg = {
+            "sync": {
+                "jira": {
+                    "api_token": "tok-from-proj",
+                    "base_url": "https://ex.atlassian.net",
+                    "email": "u@ex.com",
+                }
+            }
+        }
+        cfg = _load_jira_cfg(proj_cfg)
+        assert cfg["api_token"] == "tok-from-proj"
+
+
+@respx.mock
+def test_execute_uses_jira_yaml_token_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: no proj.yaml sync.jira credentials, but jira.yaml has them."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "proj.yaml").write_text(
+        yaml.safe_dump({"sync": {"jira": {"enabled": True}}})
+    )
+    (fake_home / ".claude" / "jira.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "personal_access_token": "pat-from-yaml",
+                "base_url": "https://ex.atlassian.net",
+                "email": "u@ex.com",
+            }
+        )
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+    project = PendingProject(
+        name="demo",
+        path=tmp_path / "demo",
+        schema_version_path=tmp_path / "demo" / ".schema-version",
+        current_version=1,
+    )
+    (tmp_path / "demo").mkdir()
+    (tmp_path / "demo" / "todos.yaml").write_text("[]\n")
+
+    respx.put(url__regex=r"https://ex\.atlassian\.net/rest/api/3/issue/CPM-101").mock(
+        return_value=Response(204)
+    )
+
+    result = JiraResync().execute(project, _actions_stub()[:1])
+
+    assert result.aborted is False
+    assert len(result.ok) == 1

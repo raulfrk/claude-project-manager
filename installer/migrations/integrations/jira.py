@@ -56,7 +56,7 @@ class JiraResync:
         result = ResyncResult()
         if not actions:
             return result
-        cfg = _load_cfg(project).get("sync", {}).get("jira", {})
+        cfg = _load_jira_cfg(_load_cfg(project))
         base_url = cfg.get("base_url")
         email = cfg.get("email")
         token = cfg.get("api_token")
@@ -139,3 +139,46 @@ def _load_cfg(project: PendingProject) -> dict[str, Any]:
         return yaml.safe_load(config_path.read_text()) or {}
     except yaml.YAMLError:
         return {}
+
+
+def _load_jira_cfg(project_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve Jira config with ``~/.claude/jira.yaml`` priority.
+
+    Fields resolved: ``base_url``, ``email``, ``api_token`` (+ optional
+    ``epic_link_field``). ``jira.yaml`` stores the token as
+    ``personal_access_token``; normalise to ``api_token`` here so callers
+    can use one key.
+
+    Priority:
+      1. ``~/.claude/jira.yaml``
+      2. ``project_cfg['sync']['jira']`` (legacy)
+      3. ``{}`` if neither yields usable fields.
+    """
+    import yaml
+    from pathlib import Path
+
+    jira_yaml = Path.home() / ".claude" / "jira.yaml"
+    if jira_yaml.exists():
+        try:
+            raw = yaml.safe_load(jira_yaml.read_text())
+            data = raw if isinstance(raw, dict) else {}
+            token = str(data.get("personal_access_token", "")).strip()
+            base_url = str(data.get("base_url", "")).strip()
+            email = str(data.get("email", "")).strip()
+            if token or base_url or email:
+                cfg: dict[str, Any] = {}
+                if base_url:
+                    cfg["base_url"] = base_url
+                if email:
+                    cfg["email"] = email
+                if token:
+                    cfg["api_token"] = token
+                epic_field = str(data.get("epic_link_field", "")).strip()
+                if epic_field:
+                    cfg["epic_link_field"] = epic_field
+                return cfg
+        except yaml.YAMLError:
+            pass  # fall through to proj.yaml fallback
+
+    proj = project_cfg or {}
+    return dict(proj.get("sync", {}).get("jira", {}))

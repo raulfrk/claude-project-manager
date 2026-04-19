@@ -65,17 +65,26 @@ class TrelloResync:
         result = ResyncResult()
         if not actions:
             return result
-        cfg = _load_cfg(project)["sync"]["trello"]
+        cfg = _load_trello_cfg(_load_cfg(project))
         key = cfg.get("api_key")
         token = cfg.get("api_token")
         if not (key and token):
             result.aborted = True
-            for a in actions:
-                result.failed.append(
-                    FailedAction(
-                        a, "ConfigError", "trello api_key/token missing", False
+            # Single synthetic failure w/ runbook — not one-per-action spam.
+            result.failed.append(
+                FailedAction(
+                    actions[0],
+                    "ConfigError",
+                    (
+                        "trello api_key/token not found in "
+                        "~/.claude/trello.yaml or proj.yaml. Run "
+                        "`/proj:trello-sync` on this project after "
+                        "migration completes to push the flat "
+                        "structure to Trello."
                     ),
-                )
+                    retryable=False,
+                ),
+            )
             return result
 
         auth = {"key": key, "token": token}
@@ -175,6 +184,48 @@ def _load_cfg(project: PendingProject) -> dict[str, Any]:
         return yaml.safe_load(config_path.read_text()) or {}
     except yaml.YAMLError:
         return {}
+
+
+def _load_trello_cfg(project_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve Trello auth + sync config with ``~/.claude/trello.yaml`` priority.
+
+    ``trello.yaml`` stores the bearer token under key ``token``; normalise to
+    ``api_token`` so callers can use one key.
+
+    Priority:
+      1. ``~/.claude/trello.yaml`` (keys ``api_key`` + ``token``, normalised).
+      2. ``project_cfg['sync']['trello']`` (legacy; keys ``api_key`` + ``api_token``).
+      3. ``{}`` if neither yields usable fields.
+    """
+    import yaml
+    from pathlib import Path
+
+    trello_yaml = Path.home() / ".claude" / "trello.yaml"
+    if trello_yaml.exists():
+        try:
+            raw = yaml.safe_load(trello_yaml.read_text())
+            data = raw if isinstance(raw, dict) else {}
+            api_key = str(data.get("api_key", "")).strip()
+            token = str(data.get("token", "")).strip()
+            if api_key or token:
+                cfg: dict[str, Any] = {}
+                if api_key:
+                    cfg["api_key"] = api_key
+                if token:
+                    cfg["api_token"] = token
+                # Preserve sync config that the plan stage reads (board_id, list_mappings).
+                # These still come from proj.yaml since trello.yaml doesn't carry them.
+                proj = project_cfg or {}
+                plan_fields = proj.get("sync", {}).get("trello", {})
+                for field_name in ("board_id", "list_mappings", "default_list"):
+                    if field_name in plan_fields:
+                        cfg[field_name] = plan_fields[field_name]
+                return cfg
+        except yaml.YAMLError:
+            pass  # fall through to proj.yaml fallback
+
+    proj = project_cfg or {}
+    return dict(proj.get("sync", {}).get("trello", {}))
 
 
 def _update_local_trello_card_id(todo_id: str, card_id: str) -> None:
