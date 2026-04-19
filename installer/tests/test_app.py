@@ -646,3 +646,144 @@ class TestEmitResyncRunbooks:
         assert "alpha" in text
         assert "beta" not in text  # no token failure → not listed
         assert "gamma" in text
+
+
+class TestRunSqlPhaseHelper:
+    """Unit tests for the _run_sql_phase module-level helper."""
+
+    def _make_project(self, version: int, tmp_path) -> "object":
+        """Return a PendingProject-like object at the given schema version."""
+
+        from installer.migrations.types import PendingProject
+
+        proj_dir = tmp_path / f"proj_v{version}"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        sv_path = proj_dir / ".schema-version"
+        if version >= 2:
+            sv_path.write_text(f"{version}\n")
+        return PendingProject(
+            name=f"proj_v{version}",
+            path=proj_dir,
+            schema_version_path=sv_path,
+            current_version=version,
+        )
+
+    def test_v2_project_calls_sql_migration_and_returns_ok(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """v2 project → SqlOnlyMigration runs through all phases → (True, None)."""
+        from installer.app import _run_sql_phase
+
+        plan_called = []
+        confirm_called = []
+        execute_called = []
+        commit_called = []
+
+        class _MockSqlOnlyMigration:
+            def __init__(self, **kwargs):
+                self._kwargs = kwargs
+
+            def plan(self):
+                plan_called.append(True)
+
+            def confirm(self, confirmed: bool = True):
+                confirm_called.append(confirmed)
+
+            def execute_local(self):
+                execute_called.append(True)
+
+            def commit(self):
+                commit_called.append(True)
+
+        monkeypatch.setattr(
+            "installer.migrations.sql_only.SqlOnlyMigration", _MockSqlOnlyMigration
+        )
+
+        project = self._make_project(2, tmp_path)
+        ok, err = _run_sql_phase(project, "test-ts", tmp_path / "backups")
+
+        assert ok is True
+        assert err is None
+        assert len(plan_called) == 1
+        assert confirm_called == [True]
+        assert len(execute_called) == 1
+        assert len(commit_called) == 1
+
+    def test_v3_project_is_noop_no_migration_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """v3 project (already migrated) → returns (True, None) without running anything."""
+        from installer.app import _run_sql_phase
+
+        instantiated = []
+
+        class _MockSqlOnlyMigration:
+            def __init__(self, **kwargs):
+                instantiated.append(True)
+
+        monkeypatch.setattr(
+            "installer.migrations.sql_only.SqlOnlyMigration", _MockSqlOnlyMigration
+        )
+
+        project = self._make_project(3, tmp_path)
+        ok, err = _run_sql_phase(project, "test-ts", tmp_path / "backups")
+
+        assert ok is True
+        assert err is None
+        assert len(instantiated) == 0  # migration class never instantiated
+
+    def test_v1_project_returns_error_without_running_migration(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """v1 project → returns (False, error msg) without running SqlOnlyMigration."""
+        from installer.app import _run_sql_phase
+
+        instantiated = []
+
+        class _MockSqlOnlyMigration:
+            def __init__(self, **kwargs):
+                instantiated.append(True)
+
+        monkeypatch.setattr(
+            "installer.migrations.sql_only.SqlOnlyMigration", _MockSqlOnlyMigration
+        )
+
+        project = self._make_project(1, tmp_path)
+        ok, err = _run_sql_phase(project, "test-ts", tmp_path / "backups")
+
+        assert ok is False
+        assert err is not None
+        assert "v1" in err
+        assert len(instantiated) == 0  # migration class never instantiated
+
+    def test_sql_migration_exception_returns_error_tuple(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """SqlOnlyMigration raises → returns (False, str(exc)) without propagating."""
+        from installer.app import _run_sql_phase
+
+        class _FailingMigration:
+            def __init__(self, **kwargs):
+                pass
+
+            def plan(self):
+                raise RuntimeError("db locked")
+
+            def confirm(self, confirmed: bool = True):
+                pass
+
+            def execute_local(self):
+                pass
+
+            def commit(self):
+                pass
+
+        monkeypatch.setattr(
+            "installer.migrations.sql_only.SqlOnlyMigration", _FailingMigration
+        )
+
+        project = self._make_project(2, tmp_path)
+        ok, err = _run_sql_phase(project, "test-ts", tmp_path / "backups")
+
+        assert ok is False
+        assert err == "db locked"

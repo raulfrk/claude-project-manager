@@ -885,6 +885,39 @@ class InstallerApp(App):
             self._exit_code = _mig_code
 
 
+def _run_sql_phase(
+    project: "PendingProject",  # noqa: F821
+    run_ts: str,
+    backup_root: "Path",  # noqa: F821
+) -> "tuple[bool, str | None]":
+    """Run SqlOnlyMigration for a project already at v2. Returns (ok, error).
+
+    Unattended — no user review. The sql phase is deterministic (moves YAML to
+    SQLite, deletes YAML files) so no per-project confirmation is needed.
+    """
+    from installer.migrations.sql_only import SqlOnlyMigration
+
+    if project.current_version >= 3:
+        return True, None
+    if project.current_version < 2:
+        return False, f"expected v2 or later, got v{project.current_version}"
+
+    runner = SqlOnlyMigration(project=project, run_ts=run_ts, backup_root=backup_root)
+    try:
+        runner.plan()
+        runner.confirm()
+        runner.execute_local()
+        runner.commit()
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).error(
+            "%s: sql-only migration failed: %s", project.name, exc, exc_info=True
+        )
+        return False, str(exc)
+    return True, None
+
+
 def run_migration_tui(
     *,
     pending: list,
@@ -934,11 +967,33 @@ def run_migration_tui(
             self._review_next(iter(pending))
 
         def _review_next(self, it) -> None:
+            nonlocal exit_code
             try:
                 project = next(it)
             except StopIteration:
                 self.push_screen(MigrationProgressScreen(outcomes=outcomes))
                 return
+
+            # Already at v2+: skip flat review, run sql-only phase unattended.
+            if project.current_version >= 2:
+                ok, err = _run_sql_phase(project, run_ts, backup_root)
+                outcomes.append(
+                    MigrationOutcome(
+                        project=project.name,
+                        ok=ok,
+                        resync_partial=False,
+                        backup=str(backup_root / project.name),
+                        error=err,
+                    )
+                )
+                _collected_runners.append(
+                    None
+                )  # keep zip(outcomes, _collected_runners) aligned
+                if not ok:
+                    exit_code = max(exit_code, 2)
+                self._review_next(it)
+                return
+
             runner = FlatTodoMigration(
                 project=project,
                 run_ts=run_ts,
@@ -990,6 +1045,20 @@ def run_migration_tui(
                 _collected_runners.append(runner)
                 if partial:
                     exit_code = max(exit_code, 2)
+
+                # Chain sql-only phase: flat commit → project now at v2 → run v2→v3.
+                refreshed = runner.project.refreshed()
+                sql_ok, sql_err = _run_sql_phase(refreshed, run_ts, backup_root)
+                if not sql_ok:
+                    exit_code = max(exit_code, 2)
+                    # Mutate the outcome entry to carry the sql-phase error.
+                    outcomes[-1] = MigrationOutcome(
+                        project=outcomes[-1].project,
+                        ok=False,
+                        resync_partial=outcomes[-1].resync_partial,
+                        backup=outcomes[-1].backup,
+                        error=f"sql-phase failed: {sql_err}",
+                    )
             except Exception as e:
                 outcomes.append(
                     MigrationOutcome(
