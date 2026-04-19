@@ -117,8 +117,14 @@ class TestPreInstallPhaseReinstall:
         assert result.mode_options == {"reset_configs": False}
         assert result.orphans_to_remove == []
 
-    def test_reinstall_with_orphans_accepted(self) -> None:
+    def test_reinstall_with_orphans_accepted(self, tmp_path) -> None:
         call_idx = {"n": 0}
+
+        # Create real paths so the is_dir/is_file guards pass in CI.
+        fake_cache = tmp_path / "cache"
+        fake_cache.mkdir()
+        fake_marketplace = tmp_path / "marketplace.json"
+        fake_marketplace.write_text("{}")
 
         def confirm_side_effect(*a, **k):
             call_idx["n"] += 1
@@ -144,6 +150,14 @@ class TestPreInstallPhaseReinstall:
             patch(
                 "installer.flow.pre_install_phase.scan_stale_cache",
                 return_value=MagicMock(orphans=["stale-plugin"]),
+            ),
+            patch(
+                "installer.flow.pre_install_phase._cache_dir",
+                return_value=fake_cache,
+            ),
+            patch(
+                "installer.flow.pre_install_phase._marketplace_path",
+                return_value=fake_marketplace,
             ),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
