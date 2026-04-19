@@ -92,3 +92,119 @@ def test_execute_project_rejects_type_change(project_with_jira) -> None:
     result = JiraResync().execute(project_with_jira, actions)
     assert len(result.failed) == 1
     assert result.failed[0].retryable is False
+
+
+# ── 661: safe-get + runbook for missing config fields ─────────────────────────
+
+
+def _actions_stub() -> list:
+    """Return a minimal 2-action list — execute must abort before touching network."""
+    from installer.migrations.integrations.base import Action
+
+    return [
+        Action(
+            kind="demote_subtask",
+            target_id="CPM-101",
+            payload={"new_issue_type": "Story", "epic_link": "CPM-100"},
+        ),
+        Action(
+            kind="demote_subtask",
+            target_id="CPM-102",
+            payload={"new_issue_type": "Story", "epic_link": "CPM-100"},
+        ),
+    ]
+
+
+def _write_proj_yaml(home: Path, jira_cfg: dict | None) -> None:
+    body: dict = {"sync": {}}
+    if jira_cfg is not None:
+        body["sync"]["jira"] = jira_cfg
+    (home / ".claude" / "proj.yaml").write_text(yaml.safe_dump(body))
+
+
+def test_execute_aborts_when_api_token_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    _write_proj_yaml(
+        fake_home,
+        {
+            "enabled": True,
+            "base_url": "https://ex.atlassian.net",
+            "email": "u@example.com",
+            # api_token intentionally missing
+        },
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+    project = PendingProject(
+        name="demo",
+        path=tmp_path / "demo",
+        schema_version_path=tmp_path / "demo" / ".schema-version",
+        current_version=1,
+    )
+    (tmp_path / "demo").mkdir()
+
+    result = JiraResync().execute(project, _actions_stub())
+
+    assert result.aborted is True
+    # Single synthetic FailedAction — not one-per-action spam.
+    assert len(result.failed) == 1
+    fa = result.failed[0]
+    assert fa.error_class == "ConfigError"
+    assert "api_token" in fa.message
+    assert "/proj:jira-sync" in fa.message
+
+
+def test_execute_aborts_when_base_url_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    _write_proj_yaml(
+        fake_home,
+        {
+            "enabled": True,
+            "email": "u@example.com",
+            "api_token": "tok",
+            # base_url intentionally missing
+        },
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+    project = PendingProject(
+        name="demo",
+        path=tmp_path / "demo",
+        schema_version_path=tmp_path / "demo" / ".schema-version",
+        current_version=1,
+    )
+    (tmp_path / "demo").mkdir()
+
+    result = JiraResync().execute(project, _actions_stub())
+
+    assert result.aborted is True
+    assert len(result.failed) == 1
+    assert result.failed[0].error_class == "ConfigError"
+    assert "base_url" in result.failed[0].message
+
+
+def test_execute_aborts_when_sync_jira_block_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No `sync.jira` block at all — must not KeyError on `cfg['sync']['jira']`."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "proj.yaml").write_text(yaml.safe_dump({}))
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+    project = PendingProject(
+        name="demo",
+        path=tmp_path / "demo",
+        schema_version_path=tmp_path / "demo" / ".schema-version",
+        current_version=1,
+    )
+    (tmp_path / "demo").mkdir()
+
+    result = JiraResync().execute(project, _actions_stub())
+
+    assert result.aborted is True
+    assert len(result.failed) == 1
+    assert result.failed[0].error_class == "ConfigError"

@@ -56,10 +56,39 @@ class JiraResync:
         result = ResyncResult()
         if not actions:
             return result
-        cfg = _load_cfg(project)["sync"]["jira"]
-        base = cfg["base_url"].rstrip("/")
-        email = cfg["email"]
-        token = cfg["api_token"]
+        cfg = _load_cfg(project).get("sync", {}).get("jira", {})
+        base_url = cfg.get("base_url")
+        email = cfg.get("email")
+        token = cfg.get("api_token")
+        missing = [
+            key
+            for key, val in (
+                ("base_url", base_url),
+                ("email", email),
+                ("api_token", token),
+            )
+            if not val
+        ]
+        if missing:
+            result.aborted = True
+            # Single synthetic failure w/ runbook — not one-per-action spam.
+            result.failed.append(
+                FailedAction(
+                    actions[0],
+                    "ConfigError",
+                    (
+                        f"jira {', '.join(missing)} not found in "
+                        "~/.claude/proj.yaml sync.jira block. Run "
+                        "`/proj:jira-sync` on this project after "
+                        "migration completes to push the flat "
+                        "structure to Jira."
+                    ),
+                    retryable=False,
+                ),
+            )
+            return result
+
+        base = base_url.rstrip("/")
         epic_field = cfg.get("epic_link_field", "customfield_10014")
 
         auth = httpx.BasicAuth(email, token)
