@@ -63,6 +63,87 @@ class TestReinstall:
         assert isinstance(plan_arg, InstallPlan)
         assert any(a.action == "reinstall" for a in plan_arg.actions)
 
+    def test_reinstall_reset_configs_deletes_yamls(self, tmp_path) -> None:
+        """reset_configs=True removes ~/.claude/proj.yaml + worktree.yaml."""
+        home = tmp_path / "home"
+        claude = home / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "proj.yaml").write_text("tracking_dir: /tmp/foo\n")
+        (claude / "worktree.yaml").write_text("default_branch: main\n")
+        # unrelated file survives
+        (claude / "todoist.yaml").write_text("api_token: keep-me\n")
+
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": True},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.Path.home", return_value=home),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("reinstall", _Args(), console)
+
+        assert code == 0
+        assert not (claude / "proj.yaml").exists()
+        assert not (claude / "worktree.yaml").exists()
+        assert (claude / "todoist.yaml").exists()
+
+    def test_reinstall_reset_configs_false_keeps_yamls(self, tmp_path) -> None:
+        """reset_configs=False leaves yamls untouched."""
+        home = tmp_path / "home"
+        claude = home / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "proj.yaml").write_text("tracking_dir: /tmp/foo\n")
+        (claude / "worktree.yaml").write_text("default_branch: main\n")
+
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": False},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.Path.home", return_value=home),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("reinstall", _Args(), console)
+
+        assert code == 0
+        assert (claude / "proj.yaml").exists()
+        assert (claude / "worktree.yaml").exists()
+
 
 # ── Uninstall ──────────────────────────────────────────────────────────────
 

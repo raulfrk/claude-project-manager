@@ -335,7 +335,20 @@ def _run_reinstall(
     )
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=orphans, console=console)
+    if mode_options.get("reset_configs"):
+        _reset_installer_configs(console)
     return exit_code
+
+
+def _reset_installer_configs(console: Console) -> None:
+    """Delete ~/.claude/proj.yaml + worktree.yaml to force wizard re-prompt."""
+    claude_dir = Path.home() / ".claude"
+    for name in ("proj.yaml", "worktree.yaml"):
+        target = claude_dir / name
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as err:
+            console.print(f"[yellow]![/] could not remove {target}: {err}")
 
 
 def _run_uninstall(
