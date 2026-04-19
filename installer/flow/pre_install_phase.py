@@ -19,9 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
+from installer._config_loader import ConfigLoadError, load_existing_yaml
 from installer.cleanup import scan_stale_cache
 from installer.detect import detect_existing
 from installer.flow.confirm import ConfirmOption, confirm_with_options
+from installer.flow.corrupt_yaml import show_corrupt_yaml_and_confirm
 from installer.flow.detection import show_detection_and_confirm
 from installer.update import (
     _read_installed_version,
@@ -77,7 +79,34 @@ def _marketplace_path() -> Path:
     return here.parent / ".claude-plugin" / "marketplace.json"
 
 
+_KNOWN_BUCKETS: tuple[str, ...] = ("proj", "worktree", "todoist", "trello", "jira")
+
+
+def _check_corrupt_yaml(console: Console) -> bool:
+    """Preload ~/.claude/{bucket}.yaml for known buckets. Prompt user on errors.
+
+    Returns True if all yaml OK or user opts to continue with defaults.
+    Returns False if user cancels.
+    """
+    claude_home = Path.home() / ".claude"
+    errors: dict[str, Exception] = {}
+    for bucket in _KNOWN_BUCKETS:
+        path = claude_home / f"{bucket}.yaml"
+        if not path.exists():
+            continue
+        try:
+            load_existing_yaml(path)
+        except ConfigLoadError as exc:
+            errors[bucket] = exc.original if hasattr(exc, "original") else exc
+    if errors:
+        return show_corrupt_yaml_and_confirm(errors, console)
+    return True
+
+
 def pre_install_phase(mode: str, args: Any, console: Console) -> PreInstallResult:
+    if not _check_corrupt_yaml(console):
+        return PreInstallResult(state=None, proceed=False)
+
     if mode == "install":
         # Install mode: plugin_select handles per-plugin picks in the interactive phase.
         # No detection/confirm here.

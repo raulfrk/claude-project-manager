@@ -1,4 +1,5 @@
 # installer/tests/flow/test_pre_install_phase.py
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
@@ -216,3 +217,78 @@ class TestPreInstallPhaseUnknown:
         result = pre_install_phase("unknown_mode", _Args(), console)
         assert result.proceed is False
         assert result.exit_code == 2
+
+
+class TestPreInstallPhaseCorruptYaml:
+    def test_corrupt_yaml_cancel_aborts(self) -> None:
+        from installer._config_loader import ConfigLoadError
+
+        error = ValueError("yaml parse error")
+
+        def mock_load_yaml(path: Path):
+            if "proj" in path.name:
+                raise ConfigLoadError(path, error)
+            return {}
+
+        with (
+            patch(
+                "installer.flow.pre_install_phase.load_existing_yaml",
+                side_effect=mock_load_yaml,
+            ),
+            patch(
+                "installer.flow.pre_install_phase.show_corrupt_yaml_and_confirm",
+                return_value=False,
+            ),
+            patch.object(Path, "exists", return_value=True),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = pre_install_phase("install", _Args(), console)
+        assert result.proceed is False
+
+    def test_corrupt_yaml_continue_proceeds(self) -> None:
+        from installer._config_loader import ConfigLoadError
+
+        error = ValueError("yaml parse error")
+
+        def mock_load_yaml(path: Path):
+            if "proj" in path.name:
+                raise ConfigLoadError(path, error)
+            return {}
+
+        with (
+            patch(
+                "installer.flow.pre_install_phase.load_existing_yaml",
+                side_effect=mock_load_yaml,
+            ),
+            patch(
+                "installer.flow.pre_install_phase.show_corrupt_yaml_and_confirm",
+                return_value=True,
+            ),
+            patch.object(Path, "exists", return_value=True),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = pre_install_phase("install", _Args(), console)
+        assert result.proceed is True
+
+    def test_valid_yaml_no_prompt(self) -> None:
+        prompt_called = {"n": 0}
+
+        def _not_called(*a, **k):
+            prompt_called["n"] += 1
+            return True
+
+        with (
+            patch(
+                "installer.flow.pre_install_phase.load_existing_yaml",
+                return_value={},
+            ),
+            patch(
+                "installer.flow.pre_install_phase.show_corrupt_yaml_and_confirm",
+                side_effect=_not_called,
+            ),
+            patch.object(Path, "exists", return_value=True),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = pre_install_phase("install", _Args(), console)
+        assert prompt_called["n"] == 0
+        assert result.proceed is True
