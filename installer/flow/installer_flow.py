@@ -83,6 +83,24 @@ def _post_execute_cleanup(
         remove_managed_section(Path.home() / ".claude" / "CLAUDE.md")
 
 
+def _resolve_plugin_dirs(plugin_names: list[str]) -> list[Path]:
+    """Resolve highest-version cache dirs for each selected plugin name.
+
+    Mirrors app.py::_check_hooks_diff which called wizard._resolve_plugin_dir
+    per selected plugin.  Without this, compute_hooks_diff receives an empty
+    list → merge_defaults returns {} → diff treats every hook as "to remove".
+    """
+    from installer.wizard import _resolve_plugin_dir
+
+    cache_dir = Path.home() / ".claude" / "plugins" / "cache" / "claude-project-manager"
+    dirs: list[Path] = []
+    for name in plugin_names:
+        resolved = _resolve_plugin_dir(cache_dir, name)
+        if resolved is not None:
+            dirs.append(resolved)
+    return dirs
+
+
 def _run_install(args: Any, console: Console) -> int:
     if not check_marketplace_registered():
         console.print("[yellow]Marketplace not registered — registering...[/]")
@@ -100,8 +118,28 @@ def _run_install(args: Any, console: Console) -> int:
         return 0
 
     hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
-    plugin_dirs: list[Path] = []  # compute_hooks_diff tolerates empty
+    # Resolve plugin dirs from selected plugin names so compute_hooks_diff can
+    # read each plugin's default-hooks.yaml.  Passing [] would cause
+    # merge_defaults to return {} and show every hook as "to remove".
+    selected_names = [name for name, _action in actions]
+    plugin_dirs = _resolve_plugin_dirs(selected_names)
     diffs = compute_hooks_diff(hooks_yaml, plugin_dirs)
+
+    # NOTE — Issue 2 (resync runbook): _emit_resync_runbooks in app.py is
+    # migrate-specific: it takes migration runner objects with resync_failures
+    # (Todoist api_token errors) and MigrationOutcome lists.  InstallResult
+    # carries plain FailureRecord objects (plugin install errors) — a completely
+    # different shape.  No runbook emission applies to the install/update/
+    # reinstall/uninstall flows.  Deferred: migrate-only concern, documented here.
+
+    # NOTE — Issue 3 (review_config_diff): in pre-P3, ConfigDiffScreen ran
+    # inside the Textual integration-config wizard (integration_config.py) after
+    # the user filled in credentials.  The Rich replacement (flow/config_diff.py
+    # review_config_diff) is defined but has no call site here because the P3
+    # install flow does not run the integration wizard — plugin installs happen
+    # without touching service configs.  Wiring review_config_diff requires
+    # porting the full integration wizard to Rich, which is out of scope for P3.
+    # Deferred: needs a Rich integration-wizard port before it can be called.
     decision = review_hooks_diff(diffs, console)
     if decision is None:
         console.print("[dim]Cancelled at hooks review.[/dim]")

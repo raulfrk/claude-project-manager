@@ -236,6 +236,77 @@ class TestInstall:
         assert code == 0
         mock_exec.assert_not_called()
 
+    def test_install_resolves_plugin_dirs_for_hooks_diff(self) -> None:
+        """_run_install must pass non-empty plugin_dirs to compute_hooks_diff.
+
+        Regression guard for the empty-list bug: when plugin_dirs=[] was passed,
+        merge_defaults returned {} and the diff treated every hook as "to remove".
+        Now _resolve_plugin_dirs is called with the selected plugin names so that
+        each plugin's default-hooks.yaml is read correctly.
+        """
+        from pathlib import Path
+
+        fake_dir = Path("/fake/cache/proj/1.0.0")
+
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="proj")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("proj", "install")],
+            ),
+            # _resolve_plugin_dirs returns one resolved dir for "proj"
+            patch(
+                "installer.flow.installer_flow._resolve_plugin_dirs",
+                return_value=[fake_dir],
+            ) as mock_resolve,
+            patch(
+                "installer.flow.installer_flow.compute_hooks_diff",
+                return_value=[],
+            ) as mock_hooks,
+            patch(
+                "installer.flow.installer_flow.review_hooks_diff",
+                return_value={"apply": set(), "remove": set()},
+            ),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+
+        assert code == 0
+        # _resolve_plugin_dirs must be called with the selected plugin names
+        mock_resolve.assert_called_once_with(["proj"])
+        # compute_hooks_diff must receive the resolved dirs, not []
+        _hooks_call_args = mock_hooks.call_args
+        passed_plugin_dirs = _hooks_call_args.args[1]
+        assert passed_plugin_dirs == [fake_dir], (
+            f"Expected plugin_dirs=[{fake_dir}] but got {passed_plugin_dirs!r} — "
+            "passing [] breaks hooks diff (merge_defaults returns empty dict)"
+        )
+
 
 # ── Update ─────────────────────────────────────────────────────────────────
 
