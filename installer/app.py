@@ -684,157 +684,139 @@ def run_migration_tui(
     backup_root: "Path",  # noqa: F821
     strict_resync: bool,
 ) -> int:
-    """Launch a standalone Textual app that drives the migration screens.
+    """Drive the migration flow via Rich prompts.
 
     Returns exit code: 0 success, 2 partial, 3 user quit.
     """
 
     from installer.flow.console import get_console
+    from installer.flow.migration_flow import (
+        prompt_migration_action,
+        prompt_migration_review,
+    )
     from installer.flow.migration_summary import (
         MigrationOutcome,
         show_migration_summary,
     )
     from installer.migrations.flat_todo import FlatTodoMigration
-    from installer.screens.migration_overview import MigrationOverviewScreen
-    from installer.screens.migration_review import MigrationReviewScreen
 
     outcomes: list[MigrationOutcome] = []
     _collected_runners: list[FlatTodoMigration] = []
     exit_code = 0
 
-    class MigrationApp(App):
-        def on_mount(self) -> None:
-            integration_map = _integration_badges(pending, integrations)
-            counts = {p.name: _count_parents_children(p) for p in pending}
-            self.push_screen(
-                MigrationOverviewScreen(
-                    pending=pending,
-                    integration_map=integration_map,
-                    counts=counts,
-                ),
-                self._after_overview,
+    console = get_console()
+
+    # Overview: let user decide to review, skip-all, or quit.
+    action = prompt_migration_action(
+        pending=list(pending),
+        integration_map=_integration_badges(pending, integrations),
+        counts={p.name: _count_parents_children(p) for p in pending},
+        console=console,
+    )
+    if action == "quit":
+        return 3
+    if action == "skip_all":
+        show_migration_summary([], console)
+        return 0
+
+    # Per-project loop.
+    for project in pending:
+        # Already at v2+: skip flat review, run sql-only phase unattended.
+        if project.current_version >= 2:
+            ok, err = _run_sql_phase(project, run_ts, backup_root)
+            outcomes.append(
+                MigrationOutcome(
+                    project=project.name,
+                    ok=ok,
+                    resync_partial=False,
+                    backup=str(backup_root / project.name),
+                    error=err,
+                )
             )
-
-        def _after_overview(self, result: tuple) -> None:
-            action, _payload = result
-            if action in ("skip_all", "quit"):
-                nonlocal exit_code
-                exit_code = 3 if action == "quit" else 0
-                self.exit()
-                return
-            self._review_next(iter(pending))
-
-        def _review_next(self, it) -> None:
-            nonlocal exit_code
-            try:
-                project = next(it)
-            except StopIteration:
-                # Summary is rendered post-Textual-exit via show_migration_summary.
-                # Textual owns the terminal during the app; Rich output works
-                # only after App.run() returns.
-                self.exit()
-                return
-
-            # Already at v2+: skip flat review, run sql-only phase unattended.
-            if project.current_version >= 2:
-                ok, err = _run_sql_phase(project, run_ts, backup_root)
-                outcomes.append(
-                    MigrationOutcome(
-                        project=project.name,
-                        ok=ok,
-                        resync_partial=False,
-                        backup=str(backup_root / project.name),
-                        error=err,
-                    )
-                )
-                _collected_runners.append(
-                    None
-                )  # keep zip(outcomes, _collected_runners) aligned
-                if not ok:
-                    exit_code = max(exit_code, 2)
-                self._review_next(it)
-                return
-
-            runner = FlatTodoMigration(
-                project=project,
-                run_ts=run_ts,
-                backup_root=backup_root,
-                integrations=integrations,
-                strict_resync=strict_resync,
-            )
-            plan = runner.plan()
-            self.push_screen(
-                MigrationReviewScreen(
-                    plan=plan,
-                    backup_preview=str(backup_root / project.name),
-                ),
-                lambda r, runner=runner, it=it: self._after_review(r, runner, it),
-            )
-
-        def _after_review(self, result, runner, it) -> None:
-            action, _ = result
-            nonlocal exit_code
-            if action == "skip":
-                runner.confirm(False)
-                outcomes.append(
-                    MigrationOutcome(
-                        project=runner.project.name,
-                        ok=True,
-                        resync_partial=False,
-                        backup="—",
-                    ),
-                )
-                self._review_next(it)
-                return
-            if action == "quit":
-                exit_code = 3
-                self.exit()
-                return
-            runner.confirm(True)
-            try:
-                runner.execute_local()
-                runner.commit()
-                partial = bool(runner.resync_failures)
-                outcomes.append(
-                    MigrationOutcome(
-                        project=runner.project.name,
-                        ok=True,
-                        resync_partial=partial,
-                        backup=str(runner.snapshot.dir) if runner.snapshot else "—",
-                    ),
-                )
-                _collected_runners.append(runner)
-                if partial:
-                    exit_code = max(exit_code, 2)
-
-                # Chain sql-only phase: flat commit → project now at v2 → run v2→v3.
-                refreshed = runner.project.refreshed()
-                sql_ok, sql_err = _run_sql_phase(refreshed, run_ts, backup_root)
-                if not sql_ok:
-                    exit_code = max(exit_code, 2)
-                    # Mutate the outcome entry in place to carry the sql-phase error.
-                    outcomes[-1] = dataclasses.replace(
-                        outcomes[-1],
-                        ok=False,
-                        error=f"sql-phase failed: {sql_err}",
-                    )
-            except Exception as e:
-                outcomes.append(
-                    MigrationOutcome(
-                        project=runner.project.name,
-                        ok=False,
-                        resync_partial=False,
-                        backup=str(runner.snapshot.dir) if runner.snapshot else "—",
-                        error=str(e),
-                    ),
-                )
-                _collected_runners.append(runner)
+            _collected_runners.append(
+                None
+            )  # keep zip(outcomes, _collected_runners) aligned
+            if not ok:
                 exit_code = max(exit_code, 2)
-            self._review_next(it)
+            continue
 
-    MigrationApp().run()
-    # Textual has exited; terminal is ours again. Print summary via Rich.
-    show_migration_summary(outcomes, get_console())
+        runner = FlatTodoMigration(
+            project=project,
+            run_ts=run_ts,
+            backup_root=backup_root,
+            integrations=integrations,
+            strict_resync=strict_resync,
+        )
+        plan = runner.plan()
+
+        review_action = prompt_migration_review(
+            plan=plan,
+            backup_preview=str(backup_root / project.name),
+            console=console,
+        )
+
+        if review_action == "quit":
+            runner.confirm(False)
+            exit_code = max(exit_code, 3)
+            break
+
+        if review_action == "skip":
+            runner.confirm(False)
+            outcomes.append(
+                MigrationOutcome(
+                    project=runner.project.name,
+                    ok=True,
+                    resync_partial=False,
+                    backup="—",
+                ),
+            )
+            # Do NOT append to _collected_runners for skips — zip() truncates to
+            # shorter list, so skipped projects are excluded from errors.log/runbooks.
+            continue
+
+        # review_action == "migrate"
+        runner.confirm(True)
+        try:
+            runner.execute_local()
+            runner.commit()
+            partial = bool(runner.resync_failures)
+            outcomes.append(
+                MigrationOutcome(
+                    project=runner.project.name,
+                    ok=True,
+                    resync_partial=partial,
+                    backup=str(runner.snapshot.dir) if runner.snapshot else "—",
+                ),
+            )
+            _collected_runners.append(runner)
+            if partial:
+                exit_code = max(exit_code, 2)
+
+            # Chain sql-only phase: flat commit → project now at v2 → run v2→v3.
+            refreshed = runner.project.refreshed()
+            sql_ok, sql_err = _run_sql_phase(refreshed, run_ts, backup_root)
+            if not sql_ok:
+                exit_code = max(exit_code, 2)
+                # Mutate the outcome entry in place to carry the sql-phase error.
+                outcomes[-1] = dataclasses.replace(
+                    outcomes[-1],
+                    ok=False,
+                    error=f"sql-phase failed: {sql_err}",
+                )
+        except Exception as e:
+            outcomes.append(
+                MigrationOutcome(
+                    project=runner.project.name,
+                    ok=False,
+                    resync_partial=False,
+                    backup=str(runner.snapshot.dir) if runner.snapshot else "—",
+                    error=str(e),
+                ),
+            )
+            _collected_runners.append(runner)
+            exit_code = max(exit_code, 2)
+
+    show_migration_summary(outcomes, console)
 
     # Write consolidated JSONL errors log
     errors_path = backup_root / "errors.log"
