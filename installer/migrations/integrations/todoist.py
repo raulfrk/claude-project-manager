@@ -61,15 +61,24 @@ class TodoistResync:
         if not actions:
             return result
         cfg = _load_cfg(project)
-        token = cfg["sync"]["todoist"].get("api_token")
+        token = _load_api_token(cfg)
         if not token:
             result.aborted = True
-            for a in actions:
-                result.failed.append(
-                    FailedAction(
-                        a, "ConfigError", "todoist api_token missing", retryable=False
+            # Single synthetic failure w/ runbook — not one-per-action spam.
+            result.failed.append(
+                FailedAction(
+                    actions[0],
+                    "ConfigError",
+                    (
+                        "todoist api_token not found in "
+                        "~/.claude/todoist.yaml or proj.yaml. Run "
+                        "`/proj:todoist-sync` on this project after "
+                        "migration completes to push the flat "
+                        "structure to Todoist."
                     ),
-                )
+                    retryable=False,
+                ),
+            )
             return result
 
         headers = {"Authorization": f"Bearer {token}"}

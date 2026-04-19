@@ -207,3 +207,91 @@ class TestLoadApiToken:
         # Should fall through to proj.yaml.
         cfg = {"sync": {"todoist": {"api_token": "tok-from-proj"}}}
         assert _load_api_token(cfg) == "tok-from-proj"
+
+
+class TestExecuteTokenResolution:
+    """``execute`` must use ``_load_api_token`` and emit a single runbook-bearing
+    ``FailedAction`` when no token is available."""
+
+    def test_aborts_with_runbook_when_no_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from installer.migrations.integrations.base import Action
+
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        # No todoist.yaml.
+        (fake_home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump({"sync": {"todoist": {"enabled": True}}})
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        root = tmp_path / "demo"
+        root.mkdir()
+        (root / "todos.yaml").write_text("[]\n")
+        project = PendingProject(
+            name="demo",
+            path=root,
+            schema_version_path=root / ".schema-version",
+            current_version=1,
+        )
+
+        actions = [
+            Action(kind="clear_parent", target_id="t-1", payload={"parent_id": None}),
+            Action(kind="clear_parent", target_id="t-2", payload={"parent_id": None}),
+            Action(kind="clear_parent", target_id="t-3", payload={"parent_id": None}),
+        ]
+
+        result = TodoistResync().execute(project, actions)
+
+        assert result.aborted is True
+        # Exactly one synthetic FailedAction — not one-per-action spam.
+        assert len(result.failed) == 1
+        fa = result.failed[0]
+        assert fa.error_class == "ConfigError"
+        assert "api_token not found" in fa.message
+        assert "/proj:todoist-sync" in fa.message
+
+    @respx.mock
+    def test_proceeds_when_todoist_yaml_has_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from installer.migrations.integrations.base import Action
+
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "todoist.yaml").write_text(
+            "api_token: tok-from-todoist\n"
+        )
+        # Enable flag lives in proj.yaml.
+        (fake_home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump({"sync": {"todoist": {"enabled": True}}})
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        root = tmp_path / "demo"
+        root.mkdir()
+        (root / "todos.yaml").write_text("[]\n")
+        project = PendingProject(
+            name="demo",
+            path=root,
+            schema_version_path=root / ".schema-version",
+            current_version=1,
+        )
+
+        respx.post("https://api.todoist.com/api/v1/sync").mock(
+            return_value=Response(200, json={"sync_status": {}})
+        )
+
+        actions = [
+            Action(
+                kind="clear_parent",
+                target_id="t-1",
+                payload={"parent_id": None},
+            ),
+        ]
+        result = TodoistResync().execute(project, actions)
+
+        assert result.aborted is False
+        assert len(result.ok) == 1
+        assert result.ok[0].target_id == "t-1"
