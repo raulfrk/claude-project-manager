@@ -1,4 +1,9 @@
-"""SVG golden-file snapshot tests for all TUI screens (baseline + transitions).
+"""SVG golden-file snapshot tests for remaining TUI screens.
+
+NOTE (2026-04-19, #672 phase 1): ProgressScreen removed — replaced by
+installer/flow/install_plan.py::execute_install_plan which uses Rich.
+Subsequent phases (P2-P7) will remove additional screens from this
+inventory.
 
 Each test renders a screen inside a minimal Textual App, exports an SVG
 screenshot, and compares it against a golden file in
