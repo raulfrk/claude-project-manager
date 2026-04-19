@@ -434,10 +434,9 @@ class TestTrelloWizardSpecs:
 
     def test_trello_enabled_requires_board_id(self) -> None:
         """Wizard-side: when sync.trello.enabled=True and default_board_id=='',
-        the advanced config screen must block exit. This is enforced by a
-        dedicated check in installer/screens/advanced_config.py — here we
-        assert the PromptSpec carries the gating condition so the screen can
-        surface the check.
+        flow.advanced_config must block exit. Enforced by a dedicated check in
+        installer/flow/advanced_config.py — here we assert the PromptSpec
+        carries the gating condition so the flow can surface the check.
         """
         specs = [
             s

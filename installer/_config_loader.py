@@ -1,9 +1,9 @@
 """Shared helpers for loading existing YAML config during installer wizard.
 
-Both the Rich CLI path (installer/wizard.py) and the Textual TUI path
-(installer/screens/*.py) use this module to read ~/.claude/proj.yaml,
-~/.claude/worktree.yaml, ~/.claude/todoist.yaml, ~/.claude/trello.yaml,
-and ~/.claude/jira.yaml and surface existing values as wizard defaults.
+The prompt_toolkit wizard + integration helpers (installer/flow/*.py) use this
+module to read ~/.claude/proj.yaml, ~/.claude/worktree.yaml,
+~/.claude/todoist.yaml, ~/.claude/trello.yaml, and ~/.claude/jira.yaml and
+surface existing values as wizard defaults.
 
 Contract:
 - load_existing_yaml(path) returns {} on missing or empty files, raises

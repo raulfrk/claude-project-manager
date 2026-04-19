@@ -1,8 +1,8 @@
 """Single source of truth for wizard prompt definitions.
 
-Both the Rich path (installer/wizard.py) and the Textual path
-(installer/screens/wizard.py + advanced_config.py) iterate PROJ_YAML_PROMPTS
-and dispatch to Rich Prompts or Textual widgets based on PromptSpec.type.
+The prompt_toolkit wizard + advanced_config (installer/flow/wizard.py +
+installer/flow/advanced_config.py) iterate PROJ_YAML_PROMPTS and render
+each spec via flow.form.run_form based on PromptSpec.type.
 
 Hard contract (conditions): `PromptSpec.condition` lambdas receive the
 proj.yaml bucket ONLY, regardless of the spec's own `yaml_file`. A trello
@@ -361,9 +361,9 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
     ),
     # ---------- Basic tier (proj.yaml) — sync.trello ----------
     # Wizard-side gate: `sync.trello.enabled == True AND default_board_id == ""`
-    # must fail at wizard-save time. Enforcement point: the advanced config
-    # screen consumes this PromptSpec and blocks exit on empty board-id when
-    # trello is enabled (see installer/screens/advanced_config.py).
+    # must fail at wizard-save time. Enforcement point: flow.advanced_config
+    # consumes this PromptSpec and blocks exit on empty board-id when trello
+    # is enabled (see installer/flow/advanced_config.py).
     PromptSpec(
         label="Trello board ID",
         dotted_key="sync.trello.default_board_id",
@@ -396,7 +396,7 @@ PROJ_YAML_PROMPTS: list[PromptSpec] = [
     ),
     # ---------- Advanced tier (proj.yaml) — sync.trello.list_mappings ----------
     # Note: `sync.trello.default_list` and `sync.trello.on_delete` are owned
-    # by installer/screens/integration_config.py TrelloConfigScreen, NOT here.
+    # by flow.configure_trello (installer/flow/integration_config.py), NOT here.
     PromptSpec(
         label="Trello list — where newly created todos land",
         dotted_key="sync.trello.list_mappings.created",
@@ -474,8 +474,8 @@ WIZARD_EXCLUDED_FIELDS: set[str] = {
     "sync.trello.allowed_board_ids",
     "sync.jira.allowed_project_keys",
     "base_repos",
-    # Trello fields owned by TrelloConfigScreen / TrelloIntegrationScreen in
-    # installer/screens/integration_config.py, NOT by PROJ_YAML_PROMPTS.
+    # Trello fields owned by flow.configure_trello in
+    # installer/flow/integration_config.py, NOT by PROJ_YAML_PROMPTS.
     "sync.trello.enabled",
     "sync.trello.auto_sync",
     "sync.trello.default_list",
