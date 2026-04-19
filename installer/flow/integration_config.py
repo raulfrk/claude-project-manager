@@ -209,3 +209,94 @@ def configure_trello(console: Console) -> dict[str, Any] | None:
         ),
     ]
     return _run_integration_form("Trello", fields, _trello_validator, console)
+
+
+def _jira_base_url_validator(v: Any) -> str | None:
+    v = (v or "").strip()
+    if not v:
+        return "Base URL is required"
+    if not (v.startswith("http://") or v.startswith("https://")):
+        return "must start with http:// or https://"
+    return None
+
+
+def _jira_validator(values: dict[str, Any]) -> str | None:
+    base_url = (values.get("base_url") or "").strip().rstrip("/")
+    token = (values.get("personal_access_token") or "").strip()
+    if not base_url:
+        return "Base URL is required"
+    if not token:
+        return "Personal access token is required"
+    try:
+        resp = httpx.get(
+            f"{base_url}/rest/api/3/myself",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if resp.status_code == 401:
+            return "Invalid personal access token"
+        if resp.status_code != 200:
+            return f"Jira API error: {resp.status_code}"
+    except httpx.ConnectError:
+        return f"Cannot reach {base_url} — check URL and network"
+    except httpx.TimeoutException:
+        return "Jira API timeout"
+    return None
+
+
+def configure_jira(console: Console) -> dict[str, Any] | None:
+    """Jira integration config form. Returns dict or None on cancel."""
+    claude_home = Path.home() / ".claude"
+    jira_cfg = _load_yaml(claude_home / "jira.yaml")
+    proj_cfg = _load_yaml(claude_home / "proj.yaml")
+    # proj.yaml uses "jira.<key>" (not "sync.jira.<key>")
+    jira_section = proj_cfg.get("jira", {}) or {}
+
+    fields = [
+        FieldSpec(
+            key="base_url",
+            label="Base URL",
+            kind="text",
+            default=jira_cfg.get("base_url") or "",
+            help_text="e.g., https://yourcompany.atlassian.net",
+            validator=_jira_base_url_validator,
+        ),
+        FieldSpec(
+            key="default_user",
+            label="Username / Email",
+            kind="text",
+            default=jira_cfg.get("default_user") or "",
+        ),
+        FieldSpec(
+            key="personal_access_token",
+            label="Personal Access Token",
+            kind="password",
+            default=jira_cfg.get("personal_access_token") or "",
+        ),
+        FieldSpec(
+            key="default_project",
+            label="Default Project Key",
+            kind="text",
+            default=jira_cfg.get("default_project") or "",
+            help_text="e.g., PROJ, TEAM",
+        ),
+        FieldSpec(
+            key="sync_enabled",
+            label="Enable Jira sync",
+            kind="bool",
+            default=bool(jira_section.get("enabled", False)),
+        ),
+        FieldSpec(
+            key="auto_sync",
+            label="Auto-sync on todo changes",
+            kind="bool",
+            default=bool(jira_section.get("auto_sync", True)),
+        ),
+    ]
+    result = _run_integration_form("Jira", fields, _jira_validator, console)
+    if result is None:
+        return None
+    # B3 fix: normalize trailing slash on submit
+    if "base_url" in result:
+        result["base_url"] = (result["base_url"] or "").strip().rstrip("/")
+    return result

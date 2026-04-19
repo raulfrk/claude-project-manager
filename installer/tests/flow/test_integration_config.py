@@ -6,7 +6,11 @@ import pytest
 import yaml
 from rich.console import Console
 
-from installer.flow.integration_config import configure_todoist, configure_trello
+from installer.flow.integration_config import (
+    configure_jira,
+    configure_todoist,
+    configure_trello,
+)
 
 
 class TestConfigureTodoist:
@@ -318,3 +322,147 @@ class TestConfigureTrello:
             "default_list": "Todo",
             "on_delete": "archive",
         }
+
+
+class TestConfigureJira:
+    def test_cancel_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+        with patch("installer.flow.integration_config.run_form", return_value=None):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            assert configure_jira(console) is None
+
+    def test_defaults_from_existing_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Existing creds in jira.yaml MUST pre-fill fields."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "jira.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "base_url": "https://co.atlassian.net",
+                    "default_user": "u@example.com",
+                    "personal_access_token": "pat-xyz",
+                    "default_project": "PROJ",
+                }
+            )
+        )
+        (fake_home / ".claude" / "proj.yaml").write_text(
+            yaml.safe_dump({"jira": {"enabled": True, "auto_sync": False}})
+        )
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        captured: list = []
+
+        def _capture(fields, console, **k):
+            captured.extend(fields)
+            return None
+
+        with patch("installer.flow.integration_config.run_form", side_effect=_capture):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            configure_jira(console)
+
+        by_key = {f.key: f for f in captured}
+        assert by_key["base_url"].default == "https://co.atlassian.net"
+        assert by_key["default_user"].default == "u@example.com"
+        assert by_key["personal_access_token"].default == "pat-xyz"
+        assert by_key["default_project"].default == "PROJ"
+        assert by_key["sync_enabled"].default is True
+        assert by_key["auto_sync"].default is False
+
+    def test_base_url_validator_rejects_bad_scheme(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """B1: base_url must start with http:// or https://."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        captured: list = []
+
+        def _capture(fields, console, **k):
+            captured.extend(fields)
+            return None
+
+        with patch("installer.flow.integration_config.run_form", side_effect=_capture):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            configure_jira(console)
+
+        base_url_field = [f for f in captured if f.key == "base_url"][0]
+        assert base_url_field.validator is not None
+        # Valid inputs
+        assert base_url_field.validator("https://x.atlassian.net") is None
+        assert base_url_field.validator("http://internal-jira") is None
+        # Invalid inputs
+        assert base_url_field.validator("ftp://bad") is not None
+        assert base_url_field.validator("no-scheme.example.com") is not None
+        assert base_url_field.validator("") is not None
+
+    def test_trailing_slash_normalized_on_submit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """B3: trailing / stripped from base_url on submit."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+        with (
+            patch(
+                "installer.flow.integration_config.run_form",
+                return_value={
+                    "base_url": "https://jira.example.com/",
+                    "default_user": "u",
+                    "personal_access_token": "t",
+                    "default_project": "P",
+                    "sync_enabled": True,
+                    "auto_sync": True,
+                },
+            ),
+            patch(
+                "installer.flow.integration_config._jira_validator",
+                return_value=None,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = configure_jira(console)
+        assert result is not None
+        assert result["base_url"] == "https://jira.example.com"  # no trailing slash
+
+    def test_sync_disabled_skips_validation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        validator_called = {"n": 0}
+
+        def _fake_validator(values):
+            validator_called["n"] += 1
+            return None
+
+        with (
+            patch(
+                "installer.flow.integration_config.run_form",
+                return_value={
+                    "base_url": "",
+                    "default_user": "",
+                    "personal_access_token": "",
+                    "default_project": "",
+                    "sync_enabled": False,
+                    "auto_sync": True,
+                },
+            ),
+            patch(
+                "installer.flow.integration_config._jira_validator",
+                side_effect=_fake_validator,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            result = configure_jira(console)
+        assert result is not None
+        assert result["sync_enabled"] is False
+        assert validator_called["n"] == 0
