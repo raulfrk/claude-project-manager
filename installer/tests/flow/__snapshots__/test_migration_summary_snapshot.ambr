@@ -1,0 +1,26 @@
+# serializer version: 1
+# name: test_migration_summary_all_ok_snapshot
+  '''
+  Results  ✓ 2 ok  ◐ 0 partial-resync  ✗ 0 failed
+  ┏━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┓
+  ┃ Status ┃ Project ┃ Backup ┃ Details ┃
+  ┡━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
+  │ ✓      │ alpha   │ b1     │         │
+  │ ✓      │ beta    │ b2     │         │
+  └────────┴─────────┴────────┴─────────┘
+  
+  '''
+# ---
+# name: test_migration_summary_mixed_snapshot
+  '''
+  Results  ✓ 1 ok  ◐ 1 partial-resync  ✗ 1 failed
+  ┏━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┓
+  ┃ Status ┃ Project ┃ Backup ┃ Details ┃
+  ┡━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
+  │ ✓      │ alpha   │ b1     │         │
+  │ ◐      │ beta    │ b2     │         │
+  │ ✗      │ gamma   │ b3     │ boom    │
+  └────────┴─────────┴────────┴─────────┘
+  
+  '''
+# ---

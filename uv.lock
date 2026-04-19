@@ -257,6 +257,7 @@ test = [
     { name = "pytest-mock" },
     { name = "pytest-textual-snapshot" },
     { name = "respx" },
+    { name = "syrupy" },
     { name = "textual" },
 ]
 
@@ -284,6 +285,7 @@ test = [
     { name = "pytest-mock", specifier = ">=3.14" },
     { name = "pytest-textual-snapshot", specifier = ">=1.0" },
     { name = "respx", specifier = ">=0.22" },
+    { name = "syrupy", specifier = ">=5.0" },
     { name = "textual", extras = ["dev"], specifier = ">=0.80" },
 ]
 
