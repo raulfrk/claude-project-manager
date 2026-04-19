@@ -1,0 +1,40 @@
+# serializer version: 1
+# name: test_dry_run_snapshot
+  '''
+  Dry-run preview
+  Local diff (sample of first 3 children):
+    - id=1.1  parent=1  → tags+=group:1
+    - id=1.2  parent=1  → tags+=group:1
+  
+  Remote actions:
+    todoist (0 actions)
+    trello (0 actions)
+  
+  '''
+# ---
+# name: test_overview_snapshot
+  '''
+  2 projects need migration to schema_version=2.
+  ┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┓
+  ┃ Project ┃ Parents ┃ Children ┃ Remote  ┃
+  ┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━┩
+  │ alpha   │ 2       │ 3        │ todoist │
+  │ beta    │ 0       │ 0        │ –       │
+  └─────────┴─────────┴──────────┴─────────┘
+  r=review + migrate   s=skip all   q=quit
+  
+  '''
+# ---
+# name: test_review_snapshot
+  '''
+  
+  Plan preview — alpha
+    • 1 parent todos → flat with group:<id>
+    • 2 children → top-level with group:<parent>
+    • No parent/children fields after migration
+  Remote resync  Todoist: 0  Trello: 0  Jira: 0
+  Backup: /tmp/backup/alpha
+  m=migrate  s=skip  d=dry-run preview  q=quit
+  
+  '''
+# ---
