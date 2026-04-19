@@ -5,6 +5,11 @@ installer/flow/install_plan.py::execute_install_plan which uses Rich.
 Subsequent phases (P2-P7) will remove additional screens from this
 inventory.
 
+NOTE (2026-04-19, #672 phase 2): SummaryScreen, MigrationOverviewScreen,
+MigrationReviewScreen removed — replaced by installer/flow/ helpers
+(main.py failure loop + migration_flow.prompt_migration_action +
+prompt_migration_review).
+
 Each test renders a screen inside a minimal Textual App, exports an SVG
 screenshot, and compares it against a golden file in
 ``installer/tests/e2e/snapshots/``.
