@@ -22,22 +22,21 @@ The installer has these ``Screen`` subclasses under ``installer/screens/``:
     3. ``detection.py``       -> DetectionScreen
     4. ``update.py``          -> UpdateScreen
     5. ``confirm.py``         -> ConfirmScreen
-    6. ``progress.py``        -> ProgressScreen   (AUTO_FOCUS = "")
-    7. ``integration_config.py``
+    6. ``integration_config.py``
         - BaseIntegrationScreen (abstract)
         - TodoistConfigScreen
         - TrelloConfigScreen
         - JiraConfigScreen
-    8. ``config_diff.py``     -> ConfigDiffScreen
-    9. ``hooks_diff.py``      -> HooksDiffScreen
+    7. ``config_diff.py``     -> ConfigDiffScreen
+    8. ``hooks_diff.py``      -> HooksDiffScreen
 
 The baseline snapshots below cover: plugin_select, wizard, detection,
-update, confirm, progress, todoist_config, config_diff.
+update, confirm, todoist_config, config_diff.
 
 Per-screen transition snapshots live in sibling files:
 
-    * ``test_snapshots_confirm_progress.py`` — confirm variants + progress
-      state-based snapshots (no focus transitions — AUTO_FOCUS = "").
+    * ``test_snapshots_confirm_progress.py`` — confirm variants + focus
+      transitions.
     * ``test_snapshots_integration.py``     — Todoist / Trello / Jira
       config focus + error states.
     * ``test_snapshots_diff.py``            — ConfigDiff + HooksDiff focus
@@ -75,11 +74,6 @@ MUST assert ``pilot.app.focused.id == <expected>`` before exporting.
         #btn-confirm    primary (default focus = first focusable = confirm)
         #btn-cancel     secondary
         variants via ``confirm_variant=`` kwarg: "primary" | "warning" | "error"
-
-    ProgressScreen:
-        AUTO_FOCUS = ""   *** no focusable widgets — state-based only ***
-        State is driven by ``.advance()``, ``.write_log()``, and the internal
-        ``--complete`` CSS class.
 
     BaseIntegrationScreen (Todoist/Trello/Jira):
         #btn-continue        primary ("Confirm" label, auto-focused on_mount)
@@ -122,7 +116,6 @@ from installer.detect import InstallState
 from installer.screens.confirm import ConfirmOption, ConfirmScreen
 from installer.screens.detection import DetectionScreen, PluginDetectionRow
 from installer.screens.plugin_select import PluginSelectScreen
-from installer.screens.progress import ProgressScreen
 from installer.screens.update import UpdateScreen
 from installer.screens.wizard import WizardScreen
 
@@ -441,37 +434,7 @@ async def test_confirm_snapshot() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. ProgressScreen -- mid-progress state (3/5 steps done)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_progress_snapshot() -> None:
-    """Snapshot of a progress screen at 3/5 steps with log lines."""
-    app = _ScreenHost()
-    async with app.run_test(size=_TERM_SIZE) as pilot:
-        screen = ProgressScreen(description="Installing plugins...", total=5)
-        app.push_screen(screen)
-        await pilot.pause()
-
-        # Simulate mid-progress state
-        screen.write_log("[bold]Checking marketplace...[/bold]")
-        screen.write_log("  [green]Marketplace registered.[/green]")
-        screen.advance(1, detail="Marketplace ready")
-        screen.write_log("  Installing proj...")
-        screen.write_log("  [green]proj installed[/green]")
-        screen.advance(1, detail="Installed proj")
-        screen.write_log("  Installing hooks...")
-        screen.write_log("  [green]hooks installed[/green]")
-        screen.advance(1, detail="Installed hooks")
-        await pilot.pause()
-
-        svg = app.export_screenshot()
-        _assert_snapshot(svg, "progress")
-
-
-# ---------------------------------------------------------------------------
-# 7. TodoistConfigScreen -- integration config form
+# 6. TodoistConfigScreen -- integration config form
 # ---------------------------------------------------------------------------
 
 

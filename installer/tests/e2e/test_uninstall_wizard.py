@@ -46,7 +46,7 @@ class TestUninstallFlow:
     async def test_uninstall_full_flow(
         self, e2e_app, mock_detect, mock_plugin_cli, monkeypatch
     ):
-        """Uninstall: DetectionScreen -> continue -> ConfirmScreen -> confirm -> ProgressScreen."""
+        """Uninstall: DetectionScreen -> continue -> ConfirmScreen -> confirm."""
         _patch_version_lookups(monkeypatch)
         app: InstallerApp = e2e_app(mode="uninstall")
         async with app.run_test(size=(120, 40)) as pilot:

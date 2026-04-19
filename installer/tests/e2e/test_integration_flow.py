@@ -1,6 +1,6 @@
 """End-to-end tests for the integration config flow.
 
-Covers: PluginSelectScreen -> WizardScreen -> TodoistConfigScreen -> ProgressScreen,
+Covers: PluginSelectScreen -> WizardScreen -> TodoistConfigScreen,
 skip button, config persistence, and screen geometry.
 """
 

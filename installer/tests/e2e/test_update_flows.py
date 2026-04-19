@@ -46,7 +46,7 @@ def _patch_installed_version(monkeypatch, mapping: dict[str, str | None]):
 
 
 # ---------------------------------------------------------------------------
-# 1. Update flow: Detection -> UpdateScreen -> select -> ProgressScreen
+# 1. Update flow: Detection -> UpdateScreen -> select
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +112,7 @@ async def test_update_flow_detection_to_progress(
 
 
 # ---------------------------------------------------------------------------
-# 2. Reinstall flow: Detection -> ConfirmScreen -> ProgressScreen
+# 2. Reinstall flow: Detection -> ConfirmScreen
 # ---------------------------------------------------------------------------
 
 
