@@ -83,19 +83,20 @@ class TestSpecificExceptionsApp:
     """Bare except Exception replaced with specific exception types."""
 
     def test_specific_exceptions_in_source(self):
-        """The orphan-cleanup handler in main.py catches specific exceptions, not bare Exception.
+        """The orphan-cleanup handler in installer_flow.py catches specific exceptions, not bare Exception.
 
         Regression guard: cleanup_orphaned_plugin_caches was moved from
-        app._run_status_install_worker (deleted in 970d960) to main.py's
-        TUI post-exit branch. The handler must catch specific OS/JSON errors,
-        not a bare Exception, and the try-block must exist (non-vacuous check).
+        app._run_status_install_worker (deleted in 970d960) through main.py's
+        TUI post-exit block, and finally into run_installer_flow/_post_execute_cleanup
+        in installer/flow/installer_flow.py. The handler must catch specific OS/JSON
+        errors, not a bare Exception, and the try-block must exist (non-vacuous check).
         """
         import ast
         import inspect
 
-        from installer import main as main_mod
+        from installer.flow import installer_flow as flow_mod
 
-        source = inspect.getsource(main_mod)
+        source = inspect.getsource(flow_mod)
         tree = ast.parse(source)
 
         # Find the except handler(s) near cleanup_orphaned_plugin_caches.
@@ -112,7 +113,7 @@ class TestSpecificExceptionsApp:
 
         assert found, (
             "No try-block wrapping cleanup_orphaned_plugin_caches found in "
-            "installer/main.py — was the call removed or the guard dropped?"
+            "installer/flow/installer_flow.py — was the call removed or the guard dropped?"
         )
 
         for node in found:

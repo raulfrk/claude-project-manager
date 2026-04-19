@@ -437,24 +437,21 @@ class TestMain:
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
     @patch("installer.main.check_root")
-    @patch("installer.main.InstallerApp")
+    @patch("installer.main.run_installer_flow", return_value=EXIT_SUCCESS)
     @patch("installer.main.build_parser")
     def test_main_default_mode_uses_tui(
-        self, mock_parser, mock_app_cls, _root, _prereq, _lock, _release
+        self, mock_parser, mock_flow, _root, _prereq, _lock, _release
     ):
-        """Default (no --no-tui) launches InstallerApp."""
+        """Default (no --no-tui) calls run_installer_flow."""
         args = _make_args(no_tui=False)
         mock_parser.return_value.parse_args.return_value = args
         _lock.return_value = MagicMock()
-        # Ensure post-exit branch doesn't execute any real subprocesses.
-        mock_app_inst = mock_app_cls.return_value
-        mock_app_inst.install_plan = None
-        mock_app_inst.reinstall_message = None
-        mock_app_inst.full_cleanup = False
         result = main()
         assert result == EXIT_SUCCESS
-        mock_app_cls.assert_called_once_with(mode="install", args=args)
-        mock_app_cls.return_value.run.assert_called_once()
+        mock_flow.assert_called_once()
+        call_args = mock_flow.call_args[0]
+        assert call_args[0] == "install"
+        assert call_args[1] is args
 
     @patch("installer.main.release_lock")
     @patch("installer.main.acquire_lock")
@@ -593,85 +590,67 @@ class TestMain:
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
     @patch("installer.main.check_root")
-    @patch("installer.main.InstallerApp")
+    @patch("installer.main.run_installer_flow", return_value=EXIT_SUCCESS)
     @patch("installer.main.build_parser")
     def test_main_tui_reinstall_mode(
-        self, mock_parser, mock_app_cls, _root, _prereq, _lock, _release
+        self, mock_parser, mock_flow, _root, _prereq, _lock, _release
     ):
         args = _make_args(no_tui=False, reinstall=True)
         mock_parser.return_value.parse_args.return_value = args
         _lock.return_value = MagicMock()
         main()
-        mock_app_cls.assert_called_once_with(mode="reinstall", args=args)
+        call_args = mock_flow.call_args[0]
+        assert call_args[0] == "reinstall"
+        assert call_args[1] is args
 
     @patch("installer.main.release_lock")
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
     @patch("installer.main.check_root")
-    @patch("installer.main.InstallerApp")
+    @patch("installer.main.run_installer_flow", return_value=EXIT_SUCCESS)
     @patch("installer.main.build_parser")
     def test_main_tui_uninstall_mode(
-        self, mock_parser, mock_app_cls, _root, _prereq, _lock, _release
+        self, mock_parser, mock_flow, _root, _prereq, _lock, _release
     ):
         args = _make_args(no_tui=False, uninstall=True)
         mock_parser.return_value.parse_args.return_value = args
         _lock.return_value = MagicMock()
         main()
-        mock_app_cls.assert_called_once_with(mode="uninstall", args=args)
+        call_args = mock_flow.call_args[0]
+        assert call_args[0] == "uninstall"
+        assert call_args[1] is args
 
-    @patch("installer.main.cleanup_orphaned_plugin_caches", return_value=[])
-    @patch("installer.main.execute_install_plan")
-    @patch("installer.main.check_marketplace_registered", return_value=True)
     @patch("installer.main.release_lock")
     @patch("installer.main.acquire_lock")
     @patch("installer.main.check_prerequisites")
     @patch("installer.main.check_root")
-    @patch("installer.main.InstallerApp")
+    @patch("installer.main.run_installer_flow", return_value=EXIT_SUCCESS)
     @patch("installer.main.build_parser")
-    def test_tui_install_path_calls_orphan_cleanup(
+    def test_tui_install_path_calls_run_installer_flow(
         self,
         mock_parser,
-        mock_app_cls,
+        mock_flow,
         _root,
         _prereq,
         _lock,
         _release,
-        _mock_marketplace,
-        mock_exec_plan,
-        mock_cleanup,
     ):
-        """TUI install path must invoke cleanup_orphaned_plugin_caches after execute_install_plan.
+        """TUI install path delegates entirely to run_installer_flow.
 
-        Regression guard for 970d960: _run_status_install_worker was deleted
-        and its orphan-cleanup call was silently lost. This asserts the call
-        was restored in main.py's post-exit branch.
+        Orphan cleanup, execute_install_plan, and full_cleanup are all handled
+        inside run_installer_flow — main.py no longer has a post-exit block.
         """
-        from installer.flow.install_plan import InstallResult
-
         args = _make_args(no_tui=False)
         mock_parser.return_value.parse_args.return_value = args
         _lock.return_value = MagicMock()
 
-        # Give the mock app a non-None install_plan so the cleanup branch fires.
-        fake_plan = MagicMock()
-        mock_app_inst = mock_app_cls.return_value
-        mock_app_inst.install_plan = fake_plan
-        mock_app_inst.reinstall_message = None
-        mock_app_inst.full_cleanup = False
-
-        # execute_install_plan returns a clean result (no failures).
-        mock_exec_plan.return_value = InstallResult()
-
         result = main()
 
         assert result == EXIT_SUCCESS
-        # Orphan cleanup must have been called exactly once on the TUI path.
-        mock_cleanup.assert_called_once()
-        call_args = mock_cleanup.call_args[0]
-        # First arg: cache_root ends with plugins/cache
-        assert str(call_args[0]).endswith("plugins/cache")
-        # Second arg: installed_plugins.json path
-        assert str(call_args[1]).endswith("installed_plugins.json")
+        mock_flow.assert_called_once()
+        call_args = mock_flow.call_args[0]
+        assert call_args[0] == "install"
+        assert call_args[1] is args
 
 
 # ===================================================================

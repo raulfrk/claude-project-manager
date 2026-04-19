@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import sys
-from pathlib import Path
 from typing import IO
 
 from rich.console import Console
@@ -14,7 +12,6 @@ from rich.prompt import Confirm
 from installer.cleanup import (
     _cache_dir_for_reinstall,
     _marketplace_path_for_reinstall,
-    cleanup_orphaned_plugin_caches,
     prune_orphaned_plugins,
     prune_stale_versions,
     scan_stale_cache,
@@ -29,9 +26,8 @@ from installer.errors import (
     check_root,
     release_lock,
 )
-from installer.app import InstallerApp
 from installer.flow.console import get_console
-from installer.flow.install_plan import execute_install_plan
+from installer.flow.installer_flow import run_installer_flow
 from installer.plugin_cli import (
     add_marketplace,
     check_marketplace_registered,
@@ -347,80 +343,8 @@ def main() -> int:
             else:
                 return _install(args)
         else:
-            # Textual TUI flow — app builds an InstallPlan and exits;
-            # side-effectful work runs here after the terminal is released.
-            app = InstallerApp(mode=mode, args=args)
-            app.run()
-
-            console = get_console()
-
-            # Error-only reinstall paths (can't-query / no-plugins)
-            if app.reinstall_message is not None:
-                console.print(app.reinstall_message)
-
-            if app.install_plan is not None:
-                branch = getattr(args, "branch", None)
-
-                # Marketplace check prelude (formerly in _run_status_install_worker)
-                if mode == "install":
-                    with console.status("[bold]Checking marketplace...[/bold]"):
-                        registered = check_marketplace_registered()
-                    if not registered:
-                        branch_msg = f" (branch: {branch})" if branch else ""
-                        console.print(f"Adding marketplace...{branch_msg}")
-                        add_marketplace(branch=branch)
-                        console.print("[green]Marketplace registered.[/green]")
-                    elif branch:
-                        console.print(f"Re-adding marketplace for branch: {branch}")
-                        remove_marketplace()
-                        add_marketplace(branch=branch)
-                        console.print(
-                            f"[green]Marketplace updated to branch {branch}.[/green]"
-                        )
-                    else:
-                        console.print("[dim]Marketplace already registered.[/dim]")
-
-                result = execute_install_plan(app.install_plan, console)
-
-                # Restore orphan-cache cleanup that was lost when
-                # _run_status_install_worker was deleted in 970d960.
-                # Runs unconditionally after install actions (even on partial
-                # failure), matching the ordering of the old worker.
-                _cache_root = Path.home() / ".claude" / "plugins" / "cache"
-                _installed_json = (
-                    Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-                )
-                try:
-                    removed = cleanup_orphaned_plugin_caches(
-                        _cache_root, _installed_json
-                    )
-                    if removed:
-                        for _name in removed:
-                            console.print(f"  [dim]removed orphan: {_name}[/dim]")
-                except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-                    console.print(f"  [yellow]cleanup skipped: {exc}[/yellow]")
-
-                if result.failure_count:
-                    for failure in result.failures:
-                        console.print(
-                            f"[red]✗[/red] {failure.plugin_id} ({failure.action}): "
-                            f"{failure.error}"
-                        )
-                    return EXIT_ERROR
-
-            # full_cleanup: remove managed section from CLAUDE.md post-exit
-            if app.full_cleanup:
-                from claudemd import remove_managed_section
-
-                claude_md = Path.home() / ".claude" / "CLAUDE.md"
-                if remove_managed_section(claude_md):
-                    console.print(
-                        "[green]✓[/green] Removed managed section from CLAUDE.md"
-                    )
-                else:
-                    console.print("[dim]No managed section in CLAUDE.md[/dim]")
-
-            return EXIT_SUCCESS
+            # Rich-based flow via run_installer_flow
+            return run_installer_flow(mode, args, get_console())
 
     except KeyboardInterrupt:
         print("\nCancelled.")
