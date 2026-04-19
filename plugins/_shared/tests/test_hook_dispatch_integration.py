@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import httpx
@@ -55,17 +56,45 @@ def _error_transport() -> httpx.MockTransport:
 _RealAsyncClient = httpx.AsyncClient
 
 
-def _patch_client_factory(transport: httpx.MockTransport):
-    """Patch httpx.AsyncClient constructor to create fresh clients with the given transport.
+class _StackedPatches:
+    """ContextManager that enters multiple patch() objects together."""
 
-    Each call to AsyncClient() returns a new instance (avoids 'cannot reopen' errors).
-    Uses saved reference to real AsyncClient to avoid recursive mock calls.
+    def __init__(self, *patches):
+        self._patches = patches
+        self._stack: ExitStack | None = None
+
+    def __enter__(self):
+        self._stack = ExitStack()
+        for p in self._patches:
+            self._stack.enter_context(p)
+        return self
+
+    def __exit__(self, *exc):
+        assert self._stack is not None
+        return self._stack.__exit__(*exc)
+
+
+def _patch_client_factory(transport: httpx.MockTransport):
+    """Patch httpx.AsyncClient + bypass _resolve_hooks_transport short-circuit.
+
+    Each AsyncClient() call returns a new instance (avoids 'cannot reopen'
+    errors). Uses saved reference to real AsyncClient to avoid recursive mock
+    calls. `_resolve_hooks_transport` is patched to return a non-None
+    transport so the null-transport short-circuit (added for todo 669) doesn't
+    prevent httpx from running — the returned transport value is irrelevant
+    since AsyncClient is also patched to use the real transport.
     """
 
     def factory(**kwargs):
         return _RealAsyncClient(transport=transport)
 
-    return patch("hook_dispatch.dispatch.httpx.AsyncClient", side_effect=factory)
+    return _StackedPatches(
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            return_value=("http://localhost/hook", transport),
+        ),
+        patch("hook_dispatch.dispatch.httpx.AsyncClient", side_effect=factory),
+    )
 
 
 # ── Test: tool call dispatches correct payload to hooks server ────────────────

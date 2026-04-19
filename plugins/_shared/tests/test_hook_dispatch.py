@@ -112,7 +112,18 @@ async def test_hooks_unreachable_returns_result(mock_mcp, caplog):
     async def resilient_tool() -> str:
         return "ok"
 
-    with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
+    # Bypass the null-transport short-circuit (added for todo 669) so the
+    # ConnectError path in _dispatch_hook is exercised. In CI neither
+    # ~/.claude/sockets/router nor /tmp sockets exist, so without this patch
+    # _resolve_hooks_transport returns (url, None) and dispatch never reaches
+    # httpx.AsyncClient.
+    with (
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            return_value=("http://localhost/hook", MagicMock()),
+        ),
+        patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls,
+    ):
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.ConnectError("refused")
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -136,7 +147,14 @@ async def test_hooks_timeout_returns_result(mock_mcp, caplog):
     async def timeout_tool() -> str:
         return "done"
 
-    with patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls:
+    # Bypass the null-transport short-circuit so the TimeoutException path runs.
+    with (
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            return_value=("http://localhost/hook", MagicMock()),
+        ),
+        patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls,
+    ):
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.TimeoutException("timed out")
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -367,8 +385,14 @@ async def test_dispatch_payload_format_unix(mock_mcp, tmp_path, monkeypatch):
     async def payload_tool() -> dict:
         return {"status": "ok"}
 
+    # _resolve_hooks_transport checks the sock file exists (it doesn't in CI);
+    # patch it to return a non-None transport so dispatch reaches httpx.
     with (
         patch("pathlib.Path.home", return_value=tmp_path),
+        patch(
+            "hook_dispatch.dispatch._resolve_hooks_transport",
+            return_value=("http://localhost/hook", MagicMock()),
+        ),
         patch("hook_dispatch.dispatch.httpx.AsyncClient") as mock_client_cls,
     ):
         mock_resp = MagicMock()
