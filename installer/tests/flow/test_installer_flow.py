@@ -147,6 +147,11 @@ class TestInstall:
                 return_value=[("proj", "install")],
             ),
             patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp/tracking"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
                 "installer.flow.installer_flow.compute_hooks_diff",
                 return_value=[],
             ),
@@ -222,6 +227,11 @@ class TestInstall:
                 return_value=[("proj", "install")],
             ),
             patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp/tracking"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
                 "installer.flow.installer_flow.compute_hooks_diff",
                 return_value=[MagicMock()],  # non-empty, so hooks review fires
             ),
@@ -235,6 +245,134 @@ class TestInstall:
             code = run_installer_flow("install", _Args(), console)
         assert code == 0
         mock_exec.assert_not_called()
+
+    def test_install_cancel_at_wizard(self) -> None:
+        """Wizard returns None → exit 0, no further calls (no hooks diff, no exec)."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="proj")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("proj", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value=None,  # user cancelled
+            ),
+            patch(
+                "installer.flow.installer_flow.compute_hooks_diff",
+            ) as mock_hooks,
+            patch("installer.flow.installer_flow.execute_install_plan") as mock_exec,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+        assert code == 0
+        mock_hooks.assert_not_called()
+        mock_exec.assert_not_called()
+
+    def test_install_cancel_at_integration_config(self) -> None:
+        """configure_todoist returns None → exit 0, hooks diff + exec not called."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="todoist")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("todoist", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp/tracking"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
+                "installer.flow.installer_flow.configure_todoist",
+                return_value=None,  # user cancelled
+            ),
+            patch(
+                "installer.flow.installer_flow.compute_hooks_diff",
+            ) as mock_hooks,
+            patch("installer.flow.installer_flow.execute_install_plan") as mock_exec,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+        assert code == 0
+        mock_hooks.assert_not_called()
+        mock_exec.assert_not_called()
+
+    def test_install_skips_wizard_when_no_proj_plugins(self) -> None:
+        """Only 'worktree' selected → wizard NOT called (worktree is in _WIZARD_PLUGINS)."""
+        # Use a plugin that is NOT in _WIZARD_PLUGINS, e.g. a hypothetical "sandbox"
+        # Actually worktree IS in _WIZARD_PLUGINS per spec. Use a non-wizard plugin.
+        # The only way to skip wizard is to have no _WIZARD_PLUGINS members selected.
+        # Per spec, _WIZARD_PLUGINS = {"proj","router","todoist","trello","jira","worktree"}.
+        # So we use a plugin name outside that set (e.g. "perms").
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[MagicMock(name="perms")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("perms", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+            ) as mock_wizard,
+            patch(
+                "installer.flow.installer_flow.compute_hooks_diff",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.review_hooks_diff",
+                return_value={"apply": set(), "remove": set()},
+            ),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["perms@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("install", _Args(), console)
+        assert code == 0
+        mock_wizard.assert_not_called()
 
     def test_install_resolves_plugin_dirs_for_hooks_diff(self) -> None:
         """_run_install must pass non-empty plugin_dirs to compute_hooks_diff.
@@ -265,6 +403,11 @@ class TestInstall:
                 "installer.flow.installer_flow.select_plugin_actions",
                 return_value=[("proj", "install")],
             ),
+            patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp/tracking"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
             # _resolve_plugin_dirs returns one resolved dir for "proj"
             patch(
                 "installer.flow.installer_flow._resolve_plugin_dirs",

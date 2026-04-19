@@ -27,9 +27,15 @@ from installer.flow.install_plan import (
     InstallPlan,
     execute_install_plan,
 )
+from installer.flow.integration_config import (
+    configure_jira,
+    configure_todoist,
+    configure_trello,
+)
 from installer.flow.plugin_select import select_plugin_actions
 from installer.flow.pre_install_phase import pre_install_phase
 from installer.flow.update import select_updates
+from installer.flow.wizard import run_wizard
 from installer.hooks_diff import apply_diffs, compute_hooks_diff
 from installer.plugin_cli import (
     add_marketplace,
@@ -39,6 +45,99 @@ from installer.plugin_cli import (
 )
 from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
+
+_WIZARD_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "worktree"}
+
+
+class _WizardState:
+    """Lightweight state passed to run_wizard. Only installed_plugins is read."""
+
+    def __init__(self, installed_plugins: list[str]) -> None:
+        self.installed_plugins = installed_plugins
+
+
+def _write_wizard_result(result: dict[str, Any]) -> None:
+    """Write wizard dict to bucket-partitioned yaml files."""
+    from installer._config_loader import load_existing_yaml
+    from installer._config_writer import partition_answers_by_bucket, write_bucket
+
+    buckets = partition_answers_by_bucket(result)
+    claude_home = Path.home() / ".claude"
+    for bucket_name, answers in buckets.items():
+        if not answers:
+            continue
+        path = claude_home / f"{bucket_name}.yaml"
+        try:
+            existing = load_existing_yaml(path) if path.exists() else {}
+        except Exception:
+            existing = {}
+        write_bucket(path, existing, answers, bucket=bucket_name)
+
+
+def _write_integration_result(service: str, result: dict[str, Any]) -> None:
+    """Split result dict into credential yaml + proj.yaml sync section."""
+    import yaml
+
+    from installer._config_loader import load_existing_yaml
+
+    claude_home = Path.home() / ".claude"
+    service_yaml = claude_home / f"{service}.yaml"
+    proj_yaml = claude_home / "proj.yaml"
+
+    try:
+        existing_service = (
+            load_existing_yaml(service_yaml) if service_yaml.exists() else {}
+        )
+        existing_proj = load_existing_yaml(proj_yaml) if proj_yaml.exists() else {}
+    except Exception:
+        existing_service = {}
+        existing_proj = {}
+
+    CRED_FIELDS: dict[str, list[str]] = {
+        "todoist": ["api_token"],
+        "trello": ["api_key", "token"],
+        "jira": [
+            "base_url",
+            "default_user",
+            "personal_access_token",
+            "default_project",
+        ],
+    }
+    SYNC_FIELDS: dict[str, list[str]] = {
+        "todoist": ["enabled", "auto_sync", "root_only"],
+        "trello": ["enabled", "auto_sync", "default_list", "on_delete"],
+        "jira": ["enabled", "auto_sync"],
+    }
+
+    # Write service credentials yaml
+    for field in CRED_FIELDS[service]:
+        if field in result:
+            existing_service[field] = result[field]
+    service_yaml.parent.mkdir(parents=True, exist_ok=True)
+    service_yaml.write_text(yaml.safe_dump(existing_service, sort_keys=False))
+
+    # Write sync settings to proj.yaml
+    # Jira uses top-level "jira"; Todoist/Trello use "sync.<service>"
+    if service == "jira":
+        section_path = ["jira"]
+    else:
+        section_path = ["sync", service]
+
+    cursor = existing_proj
+    for key in section_path[:-1]:
+        if key not in cursor or not isinstance(cursor[key], dict):
+            cursor[key] = {}
+        cursor = cursor[key]
+    target_section: dict[str, Any] = cursor.setdefault(section_path[-1], {})
+
+    for field in SYNC_FIELDS[service]:
+        # sync_enabled in result → "enabled" in yaml
+        src_key = "sync_enabled" if field == "enabled" else field
+        if src_key in result:
+            target_section[field] = result[src_key]
+
+    proj_yaml.parent.mkdir(parents=True, exist_ok=True)
+    proj_yaml.write_text(yaml.safe_dump(existing_proj, sort_keys=False))
 
 
 def _name_to_id_map() -> dict[str, str]:
@@ -117,11 +216,34 @@ def _run_install(args: Any, console: Console) -> int:
         console.print("[dim]No actions selected.[/dim]")
         return 0
 
+    # 2a. Run wizard if any proj-relevant plugins selected
+    selected_names = [name for name, _action in actions]
+    if any(name in _WIZARD_PLUGINS for name in selected_names):
+        wizard_state = _WizardState(installed_plugins=selected_names)
+        wizard_result = run_wizard(wizard_state, args, console)
+        if wizard_result is None:
+            console.print("[dim]Cancelled at wizard.[/dim]")
+            return 0
+        _write_wizard_result(wizard_result)
+
+    # 2b. Run integration configs for selected integration plugins
+    for service, configure_fn in (
+        ("todoist", configure_todoist),
+        ("trello", configure_trello),
+        ("jira", configure_jira),
+    ):
+        if service not in selected_names:
+            continue
+        result = configure_fn(console)
+        if result is None:
+            console.print(f"[dim]Cancelled at {service} config.[/dim]")
+            return 0
+        _write_integration_result(service, result)
+
     hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
     # Resolve plugin dirs from selected plugin names so compute_hooks_diff can
     # read each plugin's default-hooks.yaml.  Passing [] would cause
     # merge_defaults to return {} and show every hook as "to remove".
-    selected_names = [name for name, _action in actions]
     plugin_dirs = _resolve_plugin_dirs(selected_names)
     diffs = compute_hooks_diff(hooks_yaml, plugin_dirs)
 
