@@ -7,14 +7,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-class TestReinstallWorkerUsesAuthoritativePluginList:
-    """The reinstall worker removes marketplace, re-adds it, then installs plugins."""
+class TestPrepareAndReinstallBuildsInstallPlan:
+    """_prepare_and_reinstall builds an InstallPlan and exits the app."""
 
     @pytest.mark.asyncio
-    async def test_reinstall_uses_marketplace_remove_add(self):
-        """Worker must call remove_marketplace, add_marketplace, then install each plugin."""
+    async def test_reinstall_builds_plan_with_installed_plugins(self):
+        """_prepare_and_reinstall must build a reinstall plan with authoritative plugins."""
         from installer.app import InstallerApp
         from installer.detect import InstallState
+        from installer.flow.install_plan import InstallPlan
 
         authoritative = [
             "proj@claude-project-manager",
@@ -25,128 +26,64 @@ class TestReinstallWorkerUsesAuthoritativePluginList:
             patch(
                 "installer.app.get_installed_plugins",
                 return_value=authoritative,
-            ) as mock_get,
-            patch("installer.app.remove_marketplace") as mock_remove,
-            patch("installer.app.add_marketplace") as mock_add,
-            patch("installer.app.install_plugin") as mock_install,
-        ):
-            app = InstallerApp()
-            app._state = InstallState(
-                installed_plugins=["hooks", "proj", "router"],
-            )
-            app._branch = None
-
-            class _FakeProgress:
-                def __init__(self):
-                    self.logs: list[str] = []
-
-                async def wait_ready(self):
-                    return None
-
-                def write_log(self, msg: str) -> None:
-                    self.logs.append(msg)
-
-                def advance(self, steps: int = 1, detail: str = "") -> None:
-                    return None
-
-            progress = _FakeProgress()
-            await app._run_reinstall_worker(
-                authoritative, progress, reset_configs=False
-            )
-
-            mock_get.assert_not_called()  # queried upstream by _prepare_and_reinstall
-            mock_remove.assert_called_once()
-            mock_add.assert_called_once_with(branch=None)
-            install_ids = [c.args[0] for c in mock_install.call_args_list]
-            assert install_ids == authoritative
-            assert "hooks" not in install_ids
-
-    @pytest.mark.asyncio
-    async def test_reinstall_empty_install(self):
-        """With no installed plugins, worker logs a message and makes zero calls."""
-        from installer.app import InstallerApp
-        from installer.detect import InstallState
-        from installer.screens.progress import ProgressScreen
-
-        with (
-            patch(
-                "installer.app.get_installed_plugins",
-                return_value=[],
             ),
-            patch("installer.app.remove_marketplace") as mock_remove,
-            patch("installer.app.install_plugin") as mock_install,
+            patch("installer.app.get_available_plugins", return_value=authoritative),
         ):
             app = InstallerApp()
-            app._state = InstallState(installed_plugins=["hooks"])
-
-            captured: list[ProgressScreen] = []
-            logs: list[str] = []
-
-            def fake_push_screen(screen, callback=None):
-                captured.append(screen)
-
-                async def _wait_ready():
-                    return None
-
-                def _write_log(msg: str) -> None:
-                    logs.append(msg)
-
-                def _advance(steps: int = 1, detail: str = "") -> None:
-                    return None
-
-                screen.wait_ready = _wait_ready  # type: ignore[method-assign]
-                screen.write_log = _write_log  # type: ignore[method-assign]
-                screen.advance = _advance  # type: ignore[method-assign]
-
-            app.push_screen = fake_push_screen  # type: ignore[method-assign]
+            app._state = InstallState(installed_plugins=["hooks", "proj", "router"])
+            app.exit = MagicMock()  # type: ignore[method-assign]
 
             await app._prepare_and_reinstall(reset_configs=False)
 
-            mock_install.assert_not_called()
-            mock_remove.assert_not_called()
-            assert any("Nothing to reinstall" in msg for msg in logs)
+            app.exit.assert_called_once()
+            assert app.install_plan is not None
+            assert isinstance(app.install_plan, InstallPlan)
+            # Both plugins should be in the plan as reinstall actions
+            action_ids = [a.plugin_id for a in app.install_plan.actions]
+            action_kinds = [a.action for a in app.install_plan.actions]
+            assert "proj@claude-project-manager" in action_ids
+            assert "router@claude-project-manager" in action_ids
+            assert all(k == "reinstall" for k in action_kinds)
 
     @pytest.mark.asyncio
-    async def test_reinstall_worker_aborts_on_remove_marketplace_failure(self):
-        """If remove_marketplace fails, worker logs error and skips install phase."""
+    async def test_reinstall_empty_sets_message_and_exits(self):
+        """With no installed plugins, sets reinstall_message and exits."""
+        from installer.app import InstallerApp
+        from installer.detect import InstallState
+
+        with patch("installer.app.get_installed_plugins", return_value=[]):
+            app = InstallerApp()
+            app._state = InstallState(installed_plugins=[])
+            app.exit = MagicMock()  # type: ignore[method-assign]
+
+            await app._prepare_and_reinstall(reset_configs=False)
+
+            app.exit.assert_called_once()
+            assert app.install_plan is None
+            assert app.reinstall_message is not None
+            assert "Nothing to reinstall" in app.reinstall_message
+
+    @pytest.mark.asyncio
+    async def test_reinstall_query_failure_sets_message_and_exits(self):
+        """If get_installed_plugins fails, sets error reinstall_message and exits."""
         from installer.app import InstallerApp
         from installer.detect import InstallState
         from installer.errors import InstallerError
 
-        plugins = ["proj@claude-project-manager"]
-
-        with (
-            patch(
-                "installer.app.remove_marketplace",
-                side_effect=InstallerError("network error"),
-            ) as mock_remove,
-            patch("installer.app.add_marketplace") as mock_add,
-            patch("installer.app.install_plugin") as mock_install,
+        with patch(
+            "installer.app.get_installed_plugins",
+            side_effect=InstallerError("CLI timeout"),
         ):
             app = InstallerApp()
-            app._state = InstallState(installed_plugins=["proj"])
-            app._branch = None
+            app._state = InstallState(installed_plugins=[])
+            app.exit = MagicMock()  # type: ignore[method-assign]
 
-            class _FakeProgress:
-                def __init__(self):
-                    self.logs: list[str] = []
+            await app._prepare_and_reinstall(reset_configs=False)
 
-                async def wait_ready(self):
-                    return None
-
-                def write_log(self, msg: str) -> None:
-                    self.logs.append(msg)
-
-                def advance(self, steps: int = 1, detail: str = "") -> None:
-                    return None
-
-            progress = _FakeProgress()
-            await app._run_reinstall_worker(plugins, progress, reset_configs=False)
-
-            mock_remove.assert_called_once()
-            mock_add.assert_not_called()
-            mock_install.assert_not_called()
-            assert any("Failed" in log or "failed" in log for log in progress.logs)
+            app.exit.assert_called_once()
+            assert app.install_plan is None
+            assert app.reinstall_message is not None
+            assert "Failed to query installed plugins" in app.reinstall_message
 
 
 class TestOnProgressDone:
@@ -189,45 +126,21 @@ class TestOnProgressDone:
         assert updated == ["Install complete."]
 
 
-class _StubProgress:
-    """Minimal progress-screen stand-in used by the status install worker tests."""
+class TestStartStatusInstall:
+    """Exercise ``InstallerApp._start_status_install`` — now builds InstallPlan."""
 
-    def __init__(self) -> None:
-        self.logs: list[str] = []
-        self.advances: list[tuple[int, str]] = []
-
-    async def wait_ready(self) -> None:  # noqa: D401
-        return None
-
-    def write_log(self, msg: str) -> None:
-        self.logs.append(msg)
-
-    def advance(self, n: int = 1, *, detail: str = "") -> None:
-        self.advances.append((n, detail))
-
-
-class TestStatusInstallWorker:
-    """Exercise ``InstallerApp._run_status_install_worker`` directly."""
-
-    @pytest.mark.asyncio
-    async def test_status_install_worker_dispatches_actions(
+    def test_start_status_install_builds_plan_and_exits(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """_start_status_install must build an InstallPlan and call exit()."""
         from installer.app import InstallerApp
+        from installer.flow.install_plan import InstallPlan
 
-        install_mock = MagicMock(return_value=None)
-        uninstall_mock = MagicMock(return_value=None)
-        monkeypatch.setattr("installer.app.install_plugin", install_mock)
-        monkeypatch.setattr("installer.app.uninstall_plugin", uninstall_mock)
-        monkeypatch.setattr("installer.app.check_marketplace_registered", lambda: True)
-        monkeypatch.setattr("installer.app.add_marketplace", lambda branch=None: None)
-        monkeypatch.setattr("installer.app.remove_marketplace", lambda: None)
         monkeypatch.setattr(
             "installer.app.get_available_plugins",
             lambda: [
                 "router@claude-project-manager",
                 "proj@claude-project-manager",
-                "trello@claude-project-manager",
                 "jira@claude-project-manager",
             ],
         )
@@ -237,84 +150,40 @@ class TestStatusInstallWorker:
         )
 
         app = InstallerApp()
-        # Prevent SummaryScreen push during the unit test (no running loop).
-        monkeypatch.setattr(app, "_push_summary", lambda outcomes: None)
-
-        progress = _StubProgress()
-        actions = [
+        app.exit = MagicMock()  # type: ignore[method-assign]
+        app._pending_actions = [
             ("router", "install"),
             ("proj", "reinstall"),
-            ("trello", "skip"),
             ("jira", "uninstall"),
         ]
-        outcomes = await app._run_status_install_worker(actions, progress)
 
-        # trello/skip is dropped by PluginStatusScreen before reaching the
-        # worker in real flow, but the worker itself must ignore unknown
-        # actions gracefully.
-        assert install_mock.call_count == 2  # router install, proj install (reinstall)
-        assert (
-            uninstall_mock.call_count == 2
-        )  # proj uninstall (reinstall), jira uninstall
+        app._start_status_install()
 
-        status_by_name = {o.name: o for o in outcomes}
-        assert status_by_name["router"].status == "ok"
-        assert status_by_name["proj"].status == "ok"
-        assert status_by_name["jira"].status == "ok"
-        assert "trello" not in status_by_name  # skip was ignored
+        app.exit.assert_called_once()
+        assert isinstance(app.install_plan, InstallPlan)
+        action_kinds = {a.plugin_id: a.action for a in app.install_plan.actions}
+        assert action_kinds["router@claude-project-manager"] == "install"
+        assert action_kinds["proj@claude-project-manager"] == "reinstall"
+        assert action_kinds["jira@claude-project-manager"] == "uninstall"
 
-    @pytest.mark.asyncio
-    async def test_status_install_worker_partial_failure(
+    def test_start_status_install_empty_exits_without_plan(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """With no pending actions, must exit without building a plan."""
         from installer.app import InstallerApp
-        from installer.errors import InstallerError
-
-        def _install(plugin_id: str) -> None:
-            if plugin_id.startswith("router"):
-                raise InstallerError("network timeout")
-
-        install_mock = MagicMock(side_effect=_install)
-        uninstall_mock = MagicMock(return_value=None)
-        monkeypatch.setattr("installer.app.install_plugin", install_mock)
-        monkeypatch.setattr("installer.app.uninstall_plugin", uninstall_mock)
-        monkeypatch.setattr("installer.app.check_marketplace_registered", lambda: True)
-        monkeypatch.setattr("installer.app.add_marketplace", lambda branch=None: None)
-        monkeypatch.setattr("installer.app.remove_marketplace", lambda: None)
-        monkeypatch.setattr(
-            "installer.app.get_available_plugins",
-            lambda: [
-                "router@claude-project-manager",
-                "proj@claude-project-manager",
-                "trello@claude-project-manager",
-                "jira@claude-project-manager",
-            ],
-        )
-        monkeypatch.setattr("installer.app.get_installed_plugins", lambda: [])
 
         app = InstallerApp()
-        monkeypatch.setattr(app, "_push_summary", lambda outcomes: None)
+        app.exit = MagicMock()  # type: ignore[method-assign]
+        app._pending_actions = []
 
-        progress = _StubProgress()
-        actions = [
-            ("router", "install"),
-            ("proj", "install"),
-            ("trello", "install"),
-            ("jira", "install"),
-        ]
-        outcomes = await app._run_status_install_worker(actions, progress)
+        app._start_status_install()
 
-        assert len(outcomes) == 4
-        by_name = {o.name: o for o in outcomes}
-        assert by_name["router"].status == "failed"
-        assert by_name["router"].error == "network timeout"
-        assert by_name["proj"].status == "ok"
-        assert by_name["trello"].status == "ok"
-        assert by_name["jira"].status == "ok"
+        app.exit.assert_called_once()
+        assert app.install_plan is None
 
 
 class TestPrepareAndReinstallPrunesStaleCache:
-    """_prepare_and_reinstall runs scan + prune before calling install worker."""
+    """_prepare_and_reinstall runs scan + prune before building the install plan."""
 
     @pytest.mark.asyncio
     async def test_prepare_and_reinstall_prunes_stale_cache(
@@ -345,15 +214,13 @@ class TestPrepareAndReinstallPrunesStaleCache:
             "installer.app._marketplace_path_for_reinstall", lambda: mp, raising=False
         )
 
-        # Stub install worker
-        async def _stub_worker(self, plugins, progress, reset_configs):
-            return None
-
-        monkeypatch.setattr(
-            InstallerApp, "_run_reinstall_worker", _stub_worker, raising=True
-        )
         monkeypatch.setattr(
             "installer.app.get_installed_plugins",
+            lambda: ["proj@claude-project-manager"],
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "installer.app.get_available_plugins",
             lambda: ["proj@claude-project-manager"],
             raising=False,
         )
@@ -366,20 +233,9 @@ class TestPrepareAndReinstallPrunesStaleCache:
             InstallerApp, "_confirm_orphans", _confirm_yes, raising=False
         )
 
-        # Stub push_screen + state
         app = InstallerApp(mode="reinstall")
         app._state = type("S", (), {})()
-        app.push_screen = lambda *a, **kw: None
-
-        # Stub wait_ready on any progress screen
-        from installer.screens.progress import ProgressScreen
-
-        async def _stub_wait_ready(self):
-            return None
-
-        monkeypatch.setattr(
-            ProgressScreen, "wait_ready", _stub_wait_ready, raising=False
-        )
+        app.exit = MagicMock()  # type: ignore[method-assign]
 
         await app._prepare_and_reinstall(reset_configs=False)
 
@@ -387,6 +243,9 @@ class TestPrepareAndReinstallPrunesStaleCache:
         assert not (cache / "proj" / "3.0.0").exists()
         assert (cache / "proj" / "5.0.0").is_dir()
         assert not (cache / "sandbox").exists()
+        # Plan was built and app exited
+        assert app.exit.called
+        assert app.install_plan is not None
 
 
 class TestTodosYamlWrapperHandling:
@@ -460,17 +319,17 @@ class TestTodosYamlWrapperHandling:
         assert _count_parents_children(_Proj()) == (0, 0)
 
 
-class TestUpdateWorker:
-    """Exercise ``InstallerApp._run_update_worker`` directly."""
+class TestOnUpdateSelected:
+    """Exercise ``InstallerApp._on_update_selected`` — now builds InstallPlan."""
 
-    @pytest.mark.asyncio
-    async def test_update_worker_uses_qualified_plugin_id(
+    def test_update_selected_builds_plan_with_qualified_ids(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """_on_update_selected must build an update plan with qualified plugin IDs."""
         from installer.app import InstallerApp
+        from installer.detect import InstallState
+        from installer.flow.install_plan import InstallPlan
 
-        update_mock = MagicMock(return_value=None)
-        monkeypatch.setattr("installer.app.update_plugin", update_mock)
         monkeypatch.setattr(
             "installer.app.get_available_plugins",
             lambda: [
@@ -489,54 +348,63 @@ class TestUpdateWorker:
         )
 
         app = InstallerApp()
-        progress = _StubProgress()
-        await app._run_update_worker(["proj"], progress)
+        app._state = InstallState(installed_plugins=["proj", "router", "worktree"])
+        app.exit = MagicMock()  # type: ignore[method-assign]
 
-        assert update_mock.call_count == 1
-        assert update_mock.call_args.args == ("proj@claude-project-manager",)
+        app._on_update_selected(["proj"])
 
-    @pytest.mark.asyncio
-    async def test_update_worker_fallback_when_plugin_absent_from_lists(
+        app.exit.assert_called_once()
+        assert isinstance(app.install_plan, InstallPlan)
+        assert len(app.install_plan.actions) == 1
+        assert app.install_plan.actions[0].plugin_id == "proj@claude-project-manager"
+        assert app.install_plan.actions[0].action == "update"
+
+    def test_update_selected_fallback_when_plugin_absent_from_lists(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """When plugin is not in available/installed lists, falls back to default ID."""
         from installer.app import InstallerApp
+        from installer.detect import InstallState
 
-        update_mock = MagicMock(return_value=None)
-        monkeypatch.setattr("installer.app.update_plugin", update_mock)
         monkeypatch.setattr("installer.app.get_available_plugins", lambda: [])
         monkeypatch.setattr("installer.app.get_installed_plugins", lambda: [])
 
         app = InstallerApp()
-        progress = _StubProgress()
-        await app._run_update_worker(["weird_plugin"], progress)
+        app._state = InstallState(installed_plugins=[])
+        app.exit = MagicMock()  # type: ignore[method-assign]
 
-        assert update_mock.call_count == 1
-        assert update_mock.call_args.args == ("weird_plugin@claude-project-manager",)
+        app._on_update_selected(["weird_plugin"])
 
-    @pytest.mark.asyncio
-    async def test_update_worker_continues_when_enumeration_fails(
+        assert app.install_plan is not None
+        assert (
+            app.install_plan.actions[0].plugin_id
+            == "weird_plugin@claude-project-manager"
+        )
+        assert app.install_plan.actions[0].action == "update"
+
+    def test_update_selected_enumeration_failure_falls_back_gracefully(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """If get_available_plugins raises, fallback IDs are used — no crash."""
         from installer.app import InstallerApp
+        from installer.detect import InstallState
         from installer.errors import InstallerError
 
-        update_mock = MagicMock(return_value=None)
-        monkeypatch.setattr("installer.app.update_plugin", update_mock)
-
-        def _raise() -> list[str]:
-            raise InstallerError("CLI timeout")
-
-        monkeypatch.setattr("installer.app.get_available_plugins", _raise)
+        monkeypatch.setattr(
+            "installer.app.get_available_plugins",
+            lambda: (_ for _ in ()).throw(InstallerError("CLI timeout")),
+        )
         monkeypatch.setattr("installer.app.get_installed_plugins", lambda: [])
 
         app = InstallerApp()
-        progress = _StubProgress()
-        await app._run_update_worker(["proj"], progress)
+        app._state = InstallState(installed_plugins=[])
+        app.exit = MagicMock()  # type: ignore[method-assign]
 
-        # Fallback still applied; no crash.
-        assert update_mock.call_count == 1
-        assert update_mock.call_args.args == ("proj@claude-project-manager",)
-        assert any("name resolution failed" in log for log in progress.logs)
+        app._on_update_selected(["proj"])
+
+        assert app.install_plan is not None
+        assert app.install_plan.actions[0].plugin_id == "proj@claude-project-manager"
+        assert app.install_plan.actions[0].action == "update"
 
 
 class TestEmitResyncRunbooks:

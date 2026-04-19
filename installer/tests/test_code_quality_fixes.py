@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,7 +19,7 @@ class TestAsyncUninstallConfirmed:
 
     @pytest.mark.asyncio
     async def test_prepare_and_uninstall_calls_get_installed_off_thread(self):
-        """get_installed_plugins must run via asyncio.to_thread."""
+        """get_installed_plugins must run via asyncio.to_thread; plan is built + exit called."""
         from installer.app import InstallerApp
         from installer.detect import InstallState
         from installer.screens.confirm import ConfirmResult
@@ -31,31 +31,25 @@ class TestAsyncUninstallConfirmed:
                 "installer.app.get_installed_plugins",
                 return_value=plugins,
             ) as mock_get,
-            patch("installer.app.uninstall_plugin"),
+            patch(
+                "installer.app.get_available_plugins",
+                return_value=plugins,
+            ),
         ):
             app = InstallerApp()
             app._state = InstallState(installed_plugins=["proj"])
-
-            # Stub push_screen + call_later so we don't need a running Textual app
-            progress_holder: list = []
-
-            def fake_call_later(fn, *args, **kwargs):
-                # capture the progress screen
-                if args:
-                    progress_holder.append(args[0])
-
-            app.call_later = fake_call_later  # type: ignore[method-assign]
-            app.push_screen = MagicMock()  # type: ignore[method-assign]
+            app.exit = MagicMock()  # type: ignore[method-assign]
 
             result = ConfirmResult(confirmed=True, options={"full_cleanup": False})
 
-            # Patch _run_uninstall_worker to a no-op coroutine
-            app._run_uninstall_worker = AsyncMock()  # type: ignore[method-assign]
-
             await app._prepare_and_uninstall(result)
 
-            # get_installed_plugins was called (via asyncio.to_thread in production)
-            mock_get.assert_called_once()
+            # get_installed_plugins was called (via asyncio.to_thread in production;
+            # also called again by _build_install_plan for name→ID resolution).
+            assert mock_get.called
+            # App built an install plan and exited
+            assert app.install_plan is not None
+            app.exit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_prepare_and_uninstall_exits_when_no_plugins(self):

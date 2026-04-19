@@ -20,10 +20,10 @@ from rich.progress import (
 )
 
 from installer.errors import InstallerError
-from installer.plugin_cli import install_plugin, uninstall_plugin
+from installer.plugin_cli import install_plugin, uninstall_plugin, update_plugin
 
 
-Action = Literal["install", "uninstall", "reinstall"]
+Action = Literal["install", "update", "uninstall", "reinstall"]
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,8 @@ def execute_install_plan(plan: InstallPlan, console: Console) -> InstallResult:
             try:
                 if action.action == "install":
                     install_plugin(action.plugin_id)
+                elif action.action == "update":
+                    update_plugin(action.plugin_id)
                 elif action.action == "uninstall":
                     uninstall_plugin(action.plugin_id)
                 elif action.action == "reinstall":

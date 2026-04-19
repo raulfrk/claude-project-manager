@@ -137,13 +137,15 @@ class TestIntegrationScreenNavigation:
             # Should have moved past TodoistConfigScreen
             assert not isinstance(app.screen, TodoistConfigScreen)
 
-            # Wait for install to complete
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
+            )
 
 
 class TestIntegrationConfigFlow:
@@ -172,13 +174,15 @@ class TestIntegrationConfigFlow:
             # Should have moved past integration (no validation needed)
             assert not isinstance(app.screen, TodoistConfigScreen)
 
-            # Wait for install
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
+            )
 
             # Verify proj.yaml has sync.todoist.enabled = false
             proj_yaml = mock_home / ".claude" / "proj.yaml"
@@ -228,13 +232,15 @@ class TestIntegrationConfigFlow:
             # Should have moved past integration (first-time, no diff screen)
             assert not isinstance(app.screen, TodoistConfigScreen)
 
-            # Wait for install
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
+            )
 
             # Verify todoist.yaml was written with token
             todoist_yaml = mock_home / ".claude" / "todoist.yaml"
@@ -277,10 +283,10 @@ class TestIntegrationConfigPersistence:
                 if not isinstance(app.screen, TodoistConfigScreen):
                     break
 
-            # Wait for install
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
             # Verify todoist.yaml
@@ -319,10 +325,10 @@ class TestIntegrationConfigPersistence:
                 if not isinstance(app.screen, TodoistConfigScreen):
                     break
 
-            # Wait for install
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
             proj_yaml = mock_home / ".claude" / "proj.yaml"

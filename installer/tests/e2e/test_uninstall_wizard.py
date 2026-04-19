@@ -89,16 +89,18 @@ class TestUninstallFlow:
             await pilot.click(btn_confirm)
             await pilot.pause()
 
-            # Step 5: With mocked plugin_cli functions the worker completes
-            # instantly, so ProgressScreen may already have auto-dismissed.
-            # Verify the flow executed by checking remove_marketplace was called.
+            # Step 5: New model: app builds InstallPlan + exits; execute_install_plan
+            # runs in main.py post-exit. Verify the plan was built with uninstall actions.
             for _ in range(20):
                 await pilot.pause()
-                if mock_plugin_cli["remove_marketplace"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["remove_marketplace"].called, (
-                "remove_marketplace was never called — uninstall flow did not complete"
+            assert app.install_plan is not None, (
+                "install_plan was never set — uninstall flow did not complete"
+            )
+            assert all(a.action == "uninstall" for a in app.install_plan.actions), (
+                "Expected all actions to be 'uninstall'"
             )
 
     @pytest.mark.asyncio
@@ -169,17 +171,16 @@ class TestUninstallFlow:
             await pilot.click(btn_confirm)
             await pilot.pause()
 
-            # With mocked plugin_cli functions the worker completes instantly,
-            # so ProgressScreen may already have auto-dismissed.
-            # Verify the uninstall flow executed.
+            # New model: app builds InstallPlan + exits; verify the plan is populated.
             for _ in range(20):
                 await pilot.pause()
-                if mock_plugin_cli["remove_marketplace"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["remove_marketplace"].called, (
-                "remove_marketplace was never called — uninstall flow did not complete"
+            assert app.install_plan is not None, (
+                "install_plan was never set — uninstall flow did not complete"
             )
+            assert all(a.action == "uninstall" for a in app.install_plan.actions)
 
     @pytest.mark.asyncio
     async def test_uninstall_cancel_at_detection(

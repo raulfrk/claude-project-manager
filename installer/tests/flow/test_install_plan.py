@@ -105,6 +105,26 @@ def test_execute_continues_after_failure(monkeypatch) -> None:
     assert result.failures[0].plugin_id == "b@m"
 
 
+def test_execute_update_calls_update_plugin(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_update(pid: str) -> None:
+        calls.append(("update", pid))
+
+    monkeypatch.setattr("installer.flow.install_plan.update_plugin", fake_update)
+
+    plan = InstallPlan(
+        description="Test plan",
+        actions=[InstallAction(plugin_id="a@m", action="update")],
+    )
+    console = Console(record=True, width=80, force_terminal=False, no_color=True)
+    result = execute_install_plan(plan, console)
+
+    assert calls == [("update", "a@m")]
+    assert result.success_count == 1
+    assert result.failure_count == 0
+
+
 def test_execute_empty_plan(monkeypatch) -> None:
     # No-op — empty plan should not raise.
     plan = InstallPlan(description="Empty", actions=[])

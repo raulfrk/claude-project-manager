@@ -1,6 +1,6 @@
 """End-to-end tests for the fresh install flow.
 
-Covers: PluginStatusScreen -> WizardScreen -> ProgressScreen,
+Covers: PluginStatusScreen -> WizardScreen -> InstallPlan exit,
 empty selection exit, wizard cancel, and default preselection.
 """
 
@@ -49,11 +49,11 @@ def _install_only(screen, names: set[str]) -> None:
 
 
 class TestFullInstallFlow:
-    """PluginSelectScreen -> WizardScreen -> ProgressScreen end-to-end."""
+    """PluginSelectScreen -> WizardScreen -> InstallPlan exit end-to-end."""
 
     @pytest.mark.asyncio
     async def test_full_install_flow(self, e2e_app, _fresh_install, mock_plugin_cli):
-        """Fresh install: select plugins -> wizard -> progress -> completes."""
+        """Fresh install: select plugins -> wizard -> app exits with install_plan."""
         app: InstallerApp = e2e_app(mode="install")
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -85,19 +85,19 @@ class TestFullInstallFlow:
             await pilot.pause()
             await pilot.pause()
 
-            # Wait for the install worker to complete.
-            # With mocked plugin_cli functions the worker completes instantly,
-            # so ProgressScreen may already have auto-dismissed.  Instead of
-            # asserting a transient screen state, verify the flow executed by
-            # checking the mocked install_plugin was called.
+            # Wait for the app to exit with an install plan.
+            # The new model: app builds InstallPlan + exits; execute_install_plan
+            # runs in main.py post-exit. Check install_plan is populated.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called, (
-                "install_plugin was never called — install flow did not complete"
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
             )
+            action_names = {a.plugin_id.split("@")[0] for a in app.install_plan.actions}
+            assert "proj" in action_names or "router" in action_names
 
     @pytest.mark.asyncio
     async def test_geometry_on_each_screen(
@@ -132,16 +132,14 @@ class TestFullInstallFlow:
             await pilot.pause()
             await pilot.pause()
 
-            # Wait for the install worker to complete.
-            # ProgressScreen auto-dismisses instantly with mocked functions,
-            # so verify the flow completed instead of asserting the transient screen.
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called, (
-                "install_plugin was never called — install flow did not complete"
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
             )
 
 
@@ -224,13 +222,13 @@ class TestStatusScreenDefaults:
 
 
 class TestFlowViaStatusScreen:
-    """Full pilot-driven install through PluginStatusScreen -> wizard -> summary."""
+    """Full pilot-driven install through PluginStatusScreen -> wizard -> install_plan exit."""
 
     @pytest.mark.asyncio
     async def test_install_flow_via_status_screen(
         self, e2e_app, _fresh_install, mock_plugin_cli
     ):
-        """Status screen -> wizard -> summary with install_plugin called."""
+        """Status screen -> wizard -> app exits with install_plan populated."""
         app: InstallerApp = e2e_app(mode="install")
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -252,9 +250,9 @@ class TestFlowViaStatusScreen:
 
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            assert mock_plugin_cli["install_plugin"].called, (
-                "install_plugin was never called — flow did not reach the worker"
+            assert app.install_plan is not None, (
+                "install_plan was never set — flow did not reach _start_status_install"
             )

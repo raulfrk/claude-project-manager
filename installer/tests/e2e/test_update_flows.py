@@ -96,16 +96,18 @@ async def test_update_flow_detection_to_progress(
         await pilot.click("#btn-update-all")
         await pilot.pause()
 
-        # With mocked plugin_cli functions the worker completes instantly,
-        # so ProgressScreen may already have auto-dismissed.  Verify the
-        # flow executed by checking update_plugin was called.
+        # New model: app builds InstallPlan + exits; execute_install_plan runs
+        # in main.py post-exit. Verify the plan was built with update actions.
         for _ in range(20):
             await pilot.pause()
-            if mock_plugin_cli["update_plugin"].called:
+            if app.install_plan is not None:
                 break
 
-        assert mock_plugin_cli["update_plugin"].called, (
-            "update_plugin was never called — update flow did not complete"
+        assert app.install_plan is not None, (
+            "install_plan was never set — update flow did not complete"
+        )
+        assert all(a.action == "update" for a in app.install_plan.actions), (
+            "Expected all actions to be 'update'"
         )
 
 
@@ -156,16 +158,18 @@ async def test_reinstall_flow_detection_to_progress(
         await pilot.click("#btn-confirm")
         await pilot.pause()
 
-        # With mocked plugin_cli functions the worker completes instantly,
-        # so ProgressScreen may already have auto-dismissed.  Verify the
-        # flow executed by checking uninstall_plugin and install_plugin were called.
+        # New model: app builds InstallPlan + exits; execute_install_plan runs
+        # in main.py post-exit. Verify the plan was built with reinstall actions.
         for _ in range(20):
             await pilot.pause()
-            if mock_plugin_cli["install_plugin"].called:
+            if app.install_plan is not None:
                 break
 
-        assert mock_plugin_cli["install_plugin"].called, (
-            "install_plugin was never called — reinstall flow did not complete"
+        assert app.install_plan is not None, (
+            "install_plan was never set — reinstall flow did not complete"
+        )
+        assert all(a.action == "reinstall" for a in app.install_plan.actions), (
+            "Expected all actions to be 'reinstall'"
         )
 
 
@@ -398,21 +402,19 @@ async def test_update_one_preserves_others(
         await pilot.click("#btn-update-selected")
         await pilot.pause()
 
-        # Wait for the update worker to complete.
+        # Wait for app to exit with install plan.
         for _ in range(30):
-            if mock_plugin_cli["update_plugin"].called:
+            if app.install_plan is not None:
                 break
             await pilot.pause()
 
-    # Only proj should have been updated.
-    update_calls = [
-        call.args[0] for call in mock_plugin_cli["update_plugin"].call_args_list
-    ]
-    assert update_calls == ["proj@claude-project-manager"], (
-        f"update_plugin called with unexpected args: {update_calls}"
+    # Only proj should be in the plan.
+    assert app.install_plan is not None, "install_plan was never set"
+    plan_ids = [a.plugin_id for a in app.install_plan.actions]
+    plan_actions = [a.action for a in app.install_plan.actions]
+    assert plan_ids == ["proj@claude-project-manager"], (
+        f"Expected only proj in plan, got: {plan_ids}"
     )
-    # uninstall_plugin must never be called during a selective update.
-    assert not mock_plugin_cli["uninstall_plugin"].called, (
-        f"uninstall_plugin must not be called during a selective update; "
-        f"got {mock_plugin_cli['uninstall_plugin'].call_args_list}"
+    assert all(a == "update" for a in plan_actions), (
+        f"Expected all actions to be 'update', got: {plan_actions}"
     )

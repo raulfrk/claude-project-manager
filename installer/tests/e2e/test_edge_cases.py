@@ -7,7 +7,6 @@ import json
 import pytest
 
 from installer.app import InstallerApp
-from installer.errors import InstallerError
 from installer.screens.plugin_select import PluginStatusScreen
 from installer.screens.wizard import WizardScreen
 
@@ -195,17 +194,13 @@ class TestWizardKeyboardNav:
 
 
 class TestInstallError:
-    """Mock install_plugin to raise InstallerError; verify ProgressScreen shows error."""
+    """App exits with install_plan; errors surface when execute_install_plan runs."""
 
     @pytest.mark.asyncio
-    async def test_install_plugin_error_shown_in_log(
+    async def test_install_plugin_error_propagated_via_plan(
         self, e2e_app, mock_plugin_cli, _fresh_install
     ):
-        """When install_plugin raises, the error message appears in the progress log."""
-        mock_plugin_cli["install_plugin"].side_effect = InstallerError(
-            "Connection refused"
-        )
-
+        """After wizard, app exits with an install_plan; errors surface in main.py."""
         app: InstallerApp = e2e_app(mode="install")
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -226,18 +221,17 @@ class TestInstallError:
             await pilot.click(btn)
             await pilot.pause()
 
-            # Wait for the install worker to run (and fail).
-            # With mocked plugin_cli functions the worker completes instantly,
-            # so ProgressScreen may already have auto-dismissed.
+            # Wait for app to exit with install plan.
             for _ in range(40):
                 await pilot.pause()
-                if mock_plugin_cli["install_plugin"].called:
+                if app.install_plan is not None:
                     break
 
-            # Verify install_plugin was called (it raises InstallerError)
-            assert mock_plugin_cli["install_plugin"].called, (
-                "install_plugin was never called — install flow did not complete"
+            # App exited with a plan; errors surface in main.py via execute_install_plan.
+            assert app.install_plan is not None, (
+                "install_plan was never set — install flow did not complete"
             )
+            assert len(app.install_plan.actions) > 0
 
 
 # ---------------------------------------------------------------------------
