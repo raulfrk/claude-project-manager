@@ -537,3 +537,112 @@ class TestUpdateWorker:
         assert update_mock.call_count == 1
         assert update_mock.call_args.args == ("proj@claude-project-manager",)
         assert any("name resolution failed" in log for log in progress.logs)
+
+
+class TestEmitResyncRunbooks:
+    """Verify the runbook-surfacing helper emits a user-readable block
+    when any collected runner has a resync_failure whose message indicates
+    a missing Todoist api_token."""
+
+    def test_runbook_printed_when_token_missing(self) -> None:
+        import io
+
+        from installer.app import _emit_resync_runbooks
+        from installer.migrations.integrations.base import Action, FailedAction
+        from installer.screens.migration_progress import MigrationOutcome
+
+        class _Runner:
+            def __init__(self, failures: list[FailedAction]) -> None:
+                self.resync_failures = failures
+
+        action = Action(
+            kind="clear_parent", target_id="t-1", payload={"parent_id": None}
+        )
+        failures = [
+            FailedAction(
+                action,
+                "ConfigError",
+                (
+                    "todoist api_token not found in "
+                    "~/.claude/todoist.yaml or proj.yaml. Run "
+                    "`/proj:todoist-sync` on this project after "
+                    "migration completes to push the flat structure "
+                    "to Todoist."
+                ),
+                retryable=False,
+            )
+        ]
+        runners = [_Runner(failures)]
+        outcomes = [
+            MigrationOutcome(project="demo", ok=True, resync_partial=True, backup="—")
+        ]
+
+        buf = io.StringIO()
+        _emit_resync_runbooks(runners, outcomes, stream=buf)
+
+        text = buf.getvalue()
+        assert "Todoist resync skipped" in text
+        assert "api_token not found" in text
+        assert "/proj:todoist-sync" in text
+        assert "demo" in text  # project name listed
+
+    def test_runbook_silent_when_no_token_errors(self) -> None:
+        import io
+
+        from installer.app import _emit_resync_runbooks
+        from installer.migrations.integrations.base import Action, FailedAction
+        from installer.screens.migration_progress import MigrationOutcome
+
+        class _Runner:
+            def __init__(self, failures: list[FailedAction]) -> None:
+                self.resync_failures = failures
+
+        # Some other failure, not token-missing.
+        action = Action(
+            kind="clear_parent", target_id="t-1", payload={"parent_id": None}
+        )
+        failures = [
+            FailedAction(action, "HTTPStatusError", "status=500", retryable=True)
+        ]
+        runners = [_Runner(failures)]
+        outcomes = [
+            MigrationOutcome(project="demo", ok=True, resync_partial=True, backup="—")
+        ]
+
+        buf = io.StringIO()
+        _emit_resync_runbooks(runners, outcomes, stream=buf)
+        assert buf.getvalue() == ""
+
+    def test_runbook_lists_all_affected_projects(self) -> None:
+        import io
+
+        from installer.app import _emit_resync_runbooks
+        from installer.migrations.integrations.base import Action, FailedAction
+        from installer.screens.migration_progress import MigrationOutcome
+
+        class _Runner:
+            def __init__(self, failures: list[FailedAction]) -> None:
+                self.resync_failures = failures
+
+        action = Action(
+            kind="clear_parent", target_id="t-1", payload={"parent_id": None}
+        )
+        token_fail = FailedAction(
+            action,
+            "ConfigError",
+            "todoist api_token not found — run /proj:todoist-sync",
+            retryable=False,
+        )
+        runners = [_Runner([token_fail]), _Runner([]), _Runner([token_fail])]
+        outcomes = [
+            MigrationOutcome(project="alpha", ok=True, resync_partial=True, backup="—"),
+            MigrationOutcome(project="beta", ok=True, resync_partial=False, backup="—"),
+            MigrationOutcome(project="gamma", ok=True, resync_partial=True, backup="—"),
+        ]
+
+        buf = io.StringIO()
+        _emit_resync_runbooks(runners, outcomes, stream=buf)
+        text = buf.getvalue()
+        assert "alpha" in text
+        assert "beta" not in text  # no token failure → not listed
+        assert "gamma" in text

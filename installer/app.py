@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -1026,7 +1027,44 @@ def run_migration_tui(
                     + "\n",
                 )
 
+    _emit_resync_runbooks(_collected_runners, outcomes)
     return exit_code
+
+
+def _emit_resync_runbooks(
+    collected_runners: list,
+    outcomes: list,
+    stream=None,
+) -> None:
+    """Print a user-visible runbook after migration when any runner had a
+    Todoist api_token-missing failure. Silent otherwise.
+
+    Called after MigrationApp exits so stdout/stderr reach the terminal.
+    """
+    if stream is None:
+        stream = sys.stderr
+
+    affected_projects: list[str] = []
+    for outcome, runner in zip(outcomes, collected_runners):
+        failures = getattr(runner, "resync_failures", [])
+        if any("api_token not found" in fail.message for fail in failures):
+            affected_projects.append(outcome.project)
+
+    if not affected_projects:
+        return
+
+    print(
+        "\n⚠ Todoist resync skipped — api_token not found in "
+        "~/.claude/todoist.yaml or proj.yaml.",
+        file=stream,
+    )
+    print(
+        "  Run `/proj:todoist-sync` on each affected project to push "
+        "the flat structure to Todoist:",
+        file=stream,
+    )
+    for name in affected_projects:
+        print(f"    - {name}", file=stream)
 
 
 def _unwrap_todos(raw: object) -> list[dict]:
