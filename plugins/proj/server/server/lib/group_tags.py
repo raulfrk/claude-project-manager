@@ -17,3 +17,13 @@ def parent_id_from_tags(tags: list[str]) -> str | None:
             if pid:
                 return pid
     return None
+
+
+def strip_group_tags(tags: list[str]) -> list[str]:
+    """Return ``tags`` without any ``group:*`` entries.
+
+    Use when surfacing tags to an external integration (Todoist labels, Trello
+    labels, Jira labels) — ``group:<parent_id>`` is internal flat-model state
+    and must not leak into third-party sync targets per 624 contract.
+    """
+    return [t for t in tags if not t.startswith(_GROUP_PREFIX)]

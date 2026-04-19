@@ -22,7 +22,7 @@ import httpx
 
 from server.lib import storage
 from server.lib.enums import TERMINAL_STATUSES, TodoStatus
-from server.lib.group_tags import parent_id_from_tags
+from server.lib.group_tags import parent_id_from_tags, strip_group_tags
 from server.lib.ids import next_todo_id
 from server.lib.models import JsonValue, ProjConfig, Todo
 from server.lib.retry import retry_link
@@ -105,7 +105,7 @@ def _content_differs(local: Todo, task: dict[str, JsonValue]) -> bool:
         return True
     todoist_labels = _parse_todoist_labels(task)
     # Group tags are local-only; exclude them from the Todoist comparison.
-    local_todoist_tags = [t for t in local.tags if not t.startswith("group:")]
+    local_todoist_tags = strip_group_tags(local.tags)
     if sorted(local_todoist_tags) != sorted(todoist_labels):
         logger.warning(
             "content_differs[%s]: labels %r != %r",
@@ -775,7 +775,7 @@ def compute_diff(
             "content": todo.title,
             "priority": todoist_priority,
             "description": todo.notes,
-            "labels": todo.tags,
+            "labels": strip_group_tags(todo.tags),
         }
         if todo.due_date:
             entry["dueString"] = todo.due_date
@@ -795,7 +795,7 @@ def compute_diff(
             "content": todo.title,
             "priority": todoist_priority,
             "description": todo.notes,
-            "labels": todo.tags,
+            "labels": strip_group_tags(todo.tags),
             "_parent_local_id": parent_id_from_tags(todo.tags),
         }
         if todo.due_date:
@@ -822,7 +822,7 @@ def compute_diff(
                     "content": local_todo.title,
                     "priority": todoist_priority,
                     "description": local_todo.notes,
-                    "labels": local_todo.tags,
+                    "labels": strip_group_tags(local_todo.tags),
                 }
                 if local_todo.due_date:
                     update_entry_push["dueString"] = local_todo.due_date

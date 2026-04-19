@@ -2075,3 +2075,105 @@ def test_full_sync_reads_no_parent_field(monkeypatch: pytest.MonkeyPatch) -> Non
         compute_diff([], cfg, "testproj")
 
     assert accesses == [], f"Sync path read deprecated fields: {accesses}"
+
+
+class TestPushLabelsStripGroupTags:
+    """660: push paths must strip ``group:*`` from labels before sending to Todoist.
+
+    Covers three call sites in compute_diff:
+      - push_create (unlinked root)  — line ~778
+      - push_create_phase2 (unlinked child of unlinked root) — line ~798
+      - push_update (linked todo with local newer) — line ~825
+    """
+
+    def test_push_create_strips_group_tags(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # Parent has todoist_task_id; child has group:1 tag.
+        # → child goes through push_create (unlinked_roots branch) w/ parent
+        # resolved from todoist_task_id on parent.
+        parent = Todo(
+            id="1",
+            title="Linked parent",
+            created=today,
+            updated=today,
+            todoist_task_id="t-parent",
+        )
+        child = Todo(
+            id="1.1",
+            title="Child",
+            created=today,
+            updated=today,
+            tags=["feature", "group:1", "urgent"],
+        )
+        storage.save_todos(cfg, name, [parent, child])
+
+        todoist_tasks = [_make_todoist_task("t-parent", "Linked parent")]
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert len(plan.push_create) == 1, (
+            f"expected child in push_create (parent already linked); got {plan.push_create}"
+        )
+        entry = plan.push_create[0]
+        assert entry["labels"] == ["feature", "urgent"], (
+            f"group:* must be stripped from labels; got {entry['labels']}"
+        )
+
+    def test_push_create_phase2_strips_group_tags(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # Parent + child, both unlinked. Parent → push_create; child → push_create_phase2.
+        parent = Todo(id="1", title="Parent", created=today, updated=today)
+        child = Todo(
+            id="1.1",
+            title="Child",
+            created=today,
+            updated=today,
+            tags=["feature", "group:1"],
+        )
+        storage.save_todos(cfg, name, [parent, child])
+
+        plan = compute_diff([], cfg, name)
+
+        assert len(plan.push_create_phase2) == 1
+        entry = plan.push_create_phase2[0]
+        assert entry["labels"] == ["feature"], (
+            f"group:* must be stripped from phase2 labels; got {entry['labels']}"
+        )
+
+    def test_push_update_strips_group_tags(self, cfg_with_project: tuple[ProjConfig, str]) -> None:
+        cfg, name = cfg_with_project
+        today = str(date.today())
+
+        # Linked todo w/ group:* tag — local is newer, so push_update fires
+        todo = Todo(
+            id="1",
+            title="Linked task",
+            created=today,
+            updated="2099-12-31T23:59:59Z",  # much newer than todoist task
+            tags=["feature", "group:2"],
+            todoist_task_id="t-linked",
+            notes="new notes",
+        )
+        storage.save_todos(cfg, name, [todo])
+
+        todoist_tasks = [
+            _make_todoist_task(
+                "t-linked",
+                "Linked task",
+                updated_at="2020-01-01T00:00:00Z",
+                description="old notes",
+            )
+        ]
+
+        plan = compute_diff(todoist_tasks, cfg, name)
+
+        assert len(plan.push_update) == 1, f"expected 1 push_update, got {plan.push_update}"
+        entry = plan.push_update[0]
+        assert entry["labels"] == ["feature"], (
+            f"group:* must be stripped from push_update labels; got {entry['labels']}"
+        )
