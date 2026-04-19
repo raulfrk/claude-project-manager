@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
+from pathlib import Path
 from typing import IO
 
 from rich.console import Console
@@ -12,6 +14,7 @@ from rich.prompt import Confirm
 from installer.cleanup import (
     _cache_dir_for_reinstall,
     _marketplace_path_for_reinstall,
+    cleanup_orphaned_plugin_caches,
     prune_orphaned_plugins,
     prune_stale_versions,
     scan_stale_cache,
@@ -379,6 +382,24 @@ def main() -> int:
 
                 result = execute_install_plan(app.install_plan, console)
 
+                # Restore orphan-cache cleanup that was lost when
+                # _run_status_install_worker was deleted in 970d960.
+                # Runs unconditionally after install actions (even on partial
+                # failure), matching the ordering of the old worker.
+                _cache_root = Path.home() / ".claude" / "plugins" / "cache"
+                _installed_json = (
+                    Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+                )
+                try:
+                    removed = cleanup_orphaned_plugin_caches(
+                        _cache_root, _installed_json
+                    )
+                    if removed:
+                        for _name in removed:
+                            console.print(f"  [dim]removed orphan: {_name}[/dim]")
+                except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+                    console.print(f"  [yellow]cleanup skipped: {exc}[/yellow]")
+
                 if result.failure_count:
                     for failure in result.failures:
                         console.print(
@@ -389,8 +410,6 @@ def main() -> int:
 
             # full_cleanup: remove managed section from CLAUDE.md post-exit
             if app.full_cleanup:
-                from pathlib import Path
-
                 from claudemd import remove_managed_section
 
                 claude_md = Path.home() / ".claude" / "CLAUDE.md"

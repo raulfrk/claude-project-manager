@@ -73,7 +73,9 @@ class TestAsyncUninstallConfirmed:
 
 
 # ---------------------------------------------------------------------------
-# 475.67 — specific exceptions in app.py
+# 475.67 — specific exceptions in main.py (relocated from app.py; 970d960
+#          moved cleanup_orphaned_plugin_caches to the main.py TUI post-exit
+#          branch — the test must follow the call site)
 # ---------------------------------------------------------------------------
 
 
@@ -81,16 +83,24 @@ class TestSpecificExceptionsApp:
     """Bare except Exception replaced with specific exception types."""
 
     def test_specific_exceptions_in_source(self):
-        """The orphan-cleanup handler catches specific exceptions, not bare Exception."""
+        """The orphan-cleanup handler in main.py catches specific exceptions, not bare Exception.
+
+        Regression guard: cleanup_orphaned_plugin_caches was moved from
+        app._run_status_install_worker (deleted in 970d960) to main.py's
+        TUI post-exit branch. The handler must catch specific OS/JSON errors,
+        not a bare Exception, and the try-block must exist (non-vacuous check).
+        """
         import ast
         import inspect
 
-        from installer import app as app_mod
+        from installer import main as main_mod
 
-        source = inspect.getsource(app_mod)
+        source = inspect.getsource(main_mod)
         tree = ast.parse(source)
 
-        # Find the except handler(s) near cleanup_orphaned_plugin_caches
+        # Find the except handler(s) near cleanup_orphaned_plugin_caches.
+        # At least one try-block wrapping the call must exist (non-vacuous).
+        found: list[ast.Try] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Try):
                 continue
@@ -98,6 +108,14 @@ class TestSpecificExceptionsApp:
             try_source = ast.dump(node)
             if "cleanup_orphaned_plugin_caches" not in try_source:
                 continue
+            found.append(node)
+
+        assert found, (
+            "No try-block wrapping cleanup_orphaned_plugin_caches found in "
+            "installer/main.py — was the call removed or the guard dropped?"
+        )
+
+        for node in found:
             # First handler should NOT be bare "except Exception"
             handler = node.handlers[0]
             assert handler.type is not None, "Handler must not be bare except"

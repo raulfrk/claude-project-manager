@@ -614,6 +614,58 @@ class TestMain:
         main()
         mock_app_cls.assert_called_once_with(mode="uninstall", args=args)
 
+    @patch("installer.main.cleanup_orphaned_plugin_caches", return_value=[])
+    @patch("installer.main.execute_install_plan")
+    @patch("installer.main.release_lock")
+    @patch("installer.main.acquire_lock")
+    @patch("installer.main.check_prerequisites")
+    @patch("installer.main.check_root")
+    @patch("installer.main.InstallerApp")
+    @patch("installer.main.build_parser")
+    def test_tui_install_path_calls_orphan_cleanup(
+        self,
+        mock_parser,
+        mock_app_cls,
+        _root,
+        _prereq,
+        _lock,
+        _release,
+        mock_exec_plan,
+        mock_cleanup,
+    ):
+        """TUI install path must invoke cleanup_orphaned_plugin_caches after execute_install_plan.
+
+        Regression guard for 970d960: _run_status_install_worker was deleted
+        and its orphan-cleanup call was silently lost. This asserts the call
+        was restored in main.py's post-exit branch.
+        """
+        from installer.flow.install_plan import InstallResult
+
+        args = _make_args(no_tui=False)
+        mock_parser.return_value.parse_args.return_value = args
+        _lock.return_value = MagicMock()
+
+        # Give the mock app a non-None install_plan so the cleanup branch fires.
+        fake_plan = MagicMock()
+        mock_app_inst = mock_app_cls.return_value
+        mock_app_inst.install_plan = fake_plan
+        mock_app_inst.reinstall_message = None
+        mock_app_inst.full_cleanup = False
+
+        # execute_install_plan returns a clean result (no failures).
+        mock_exec_plan.return_value = InstallResult()
+
+        result = main()
+
+        assert result == EXIT_SUCCESS
+        # Orphan cleanup must have been called exactly once on the TUI path.
+        mock_cleanup.assert_called_once()
+        call_args = mock_cleanup.call_args[0]
+        # First arg: cache_root ends with plugins/cache
+        assert str(call_args[0]).endswith("plugins/cache")
+        # Second arg: installed_plugins.json path
+        assert str(call_args[1]).endswith("installed_plugins.json")
+
 
 # ===================================================================
 # app.py unit-testable helpers
