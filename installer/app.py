@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import sys
@@ -1051,12 +1052,10 @@ def run_migration_tui(
                 sql_ok, sql_err = _run_sql_phase(refreshed, run_ts, backup_root)
                 if not sql_ok:
                     exit_code = max(exit_code, 2)
-                    # Mutate the outcome entry to carry the sql-phase error.
-                    outcomes[-1] = MigrationOutcome(
-                        project=outcomes[-1].project,
+                    # Mutate the outcome entry in place to carry the sql-phase error.
+                    outcomes[-1] = dataclasses.replace(
+                        outcomes[-1],
                         ok=False,
-                        resync_partial=outcomes[-1].resync_partial,
-                        backup=outcomes[-1].backup,
                         error=f"sql-phase failed: {sql_err}",
                     )
             except Exception as e:
