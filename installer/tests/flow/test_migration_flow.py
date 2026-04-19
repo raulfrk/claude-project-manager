@@ -4,8 +4,12 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from installer.flow.migration_flow import prompt_migration_action
-from installer.migrations.types import PendingProject
+from installer.flow.migration_flow import (
+    prompt_migration_action,
+    prompt_migration_review,
+    show_dry_run_preview,
+)
+from installer.migrations.types import MigrationPlan, PendingProject, TodoRef
 
 
 def _p(name: str) -> PendingProject:
@@ -68,3 +72,84 @@ class TestPromptMigrationAction:
         assert "2" in text  # parents column
         assert "3" in text  # children column
         assert "todoist" in text or "trello" in text
+
+
+def _make_plan() -> MigrationPlan:
+    parent = TodoRef(id="1", title="parent")
+    c1 = TodoRef(id="1.1", title="c1", parent="1")
+    c2 = TodoRef(id="1.2", title="c2", parent="1")
+    return MigrationPlan(
+        project=_p("alpha"),
+        parents=[parent],
+        children=[c1, c2],
+        integration_actions={"todoist": [], "trello": []},
+    )
+
+
+class TestPromptMigrationReview:
+    def test_migrate_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # First prompt -> 'm', confirm dialog -> 'y'.
+        calls = iter(["m", "y"])
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        result = prompt_migration_review(
+            plan=_make_plan(),
+            backup_preview="/tmp/backup/alpha",
+            console=console,
+        )
+        assert result == "migrate"
+
+    def test_migrate_declined_maps_to_skip(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = iter(["m", "n"])
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        result = prompt_migration_review(
+            plan=_make_plan(),
+            backup_preview="/tmp/backup/alpha",
+            console=console,
+        )
+        assert result == "skip"
+
+    def test_skip_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "s")
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        assert (
+            prompt_migration_review(
+                plan=_make_plan(), backup_preview="/tmp/bk/alpha", console=console
+            )
+            == "skip"
+        )
+
+    def test_quit_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "q")
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        assert (
+            prompt_migration_review(
+                plan=_make_plan(), backup_preview="/tmp/bk/alpha", console=console
+            )
+            == "quit"
+        )
+
+    def test_dry_run_then_migrate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # First prompt -> 'd' (dry-run), then Press Enter (empty), then 'm' at the
+        # main prompt again, then 'y' at confirm.
+        calls = iter(["d", "", "m", "y"])
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        result = prompt_migration_review(
+            plan=_make_plan(),
+            backup_preview="/tmp/bk/alpha",
+            console=console,
+        )
+        assert result == "migrate"
+
+
+class TestShowDryRunPreview:
+    def test_renders_plan(self) -> None:
+        console = Console(record=True, width=80, force_terminal=False, no_color=True)
+        show_dry_run_preview(_make_plan(), console)
+        text = console.export_text()
+        assert "children" in text.lower() or "1.1" in text
+        assert "todoist" in text.lower() or "trello" in text.lower()
