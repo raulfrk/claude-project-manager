@@ -20,9 +20,6 @@ log = logging.getLogger(__name__)
 
 MIGRATION_ROOT = Path.home() / ".claude" / "migrations"
 
-# Inclusive upper bound for "needs sql-only migration"
-_SQL_ONLY_MAX_VERSION = 2
-
 
 def run_pending_migrations(
     projects: list[dict],
@@ -39,9 +36,13 @@ def run_pending_migrations(
     run_ts = dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     pending = list(discover_pending(projects))
     if not pending:
-        log.info("no projects need migration")
+        total = len(projects)
+        print(
+            f"No projects need migration. All {total} project(s) already at schema v3."
+        )
         return 0
 
+    print(f"Migrating {len(pending)} project(s) to schema v3...")
     lock_path = MIGRATION_ROOT / ".lock"
     try:
         with MigrationLock(lock_path):
@@ -57,62 +58,16 @@ def run_pending_migrations(
         return 2
 
 
-def run_sql_only_migration(
-    projects: list[dict],
-    *,
-    strict_resync: bool = False,
-    backup_retain_days: int | None = None,
-) -> int:
-    """Run only the v2→v3 SQL-only migration.
-
-    Errors if any project is still at v1 (flat-todo migration must run first).
-    Returns exit code: 0 success, 1 v1 projects detected, 2 partial failure.
-    """
-    from installer.migrations.sql_only import SqlOnlyMigration
-
-    run_ts = dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    pending = list(discover_pending(projects))
-    if not pending:
-        log.info("no projects need sql-only migration")
-        return 0
-
-    # Check for v1 projects
-    v1_projects = [p for p in pending if p.current_version <= 1]
-    if v1_projects:
-        names = ", ".join(p.name for p in v1_projects)
-        print(
-            f"Error: projects still at schema_version 1: {names}. "
-            "Run `cpm-install --migrate` first."
-        )
-        return 1
-
-    backup_root = MIGRATION_ROOT / run_ts
-    failures = 0
-    for p in pending:
-        if p.current_version > _SQL_ONLY_MAX_VERSION:
-            log.debug("%s: already at v3, skipping", p.name)
-            continue
-        runner = SqlOnlyMigration(project=p, run_ts=run_ts, backup_root=backup_root)
-        try:
-            runner.plan()
-            runner.confirm()
-            runner.execute_local()
-            runner.commit()
-            print(f"  {p.name}: migrated to v3")
-        except Exception as exc:
-            log.error("%s: sql-only migration failed: %s", p.name, exc, exc_info=True)
-            print(f"  {p.name}: FAILED — {exc}")
-            failures += 1
-
-    if backup_retain_days is not None:
-        _prune_old_backups(backup_retain_days)
-
-    return 2 if failures else 0
-
-
 def run_dry_run(projects: list[dict]) -> int:
     run_ts = dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     pending = list(discover_pending(projects))
+    if not pending:
+        total = len(projects)
+        print(
+            f"No projects need migration. All {total} project(s) already at "
+            f"schema v3. Dry-run is a no-op."
+        )
+        return 0
     integrations = _default_integrations()
     plans = []
     for p in pending:
@@ -144,7 +99,7 @@ def _run_with_lock(
         print("Projects pending:")
         for p in pending:
             print(f"  - {p.name}  (schema_version {p.current_version} → 2)")
-        print("\nRun `installer --migrate-flat` in an interactive terminal.")
+        print("\nRun `cpm-install --migrate` in an interactive terminal.")
         return 0
 
     # Interactive mode: hand off to TUI driver (implemented in Task 18 via app.py hook)

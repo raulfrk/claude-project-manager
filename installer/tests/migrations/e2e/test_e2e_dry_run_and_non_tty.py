@@ -12,7 +12,7 @@ import pytest
 def test_dry_run_writes_report_exits_zero(home_with_projects: Path) -> None:
     env = {**os.environ, "HOME": str(home_with_projects)}
     r = subprocess.run(
-        [sys.executable, "-m", "installer.main", "--migrate-flat-dry-run"],
+        [sys.executable, "-m", "installer.main", "--migrate", "--dry-run"],
         capture_output=True,
         text=True,
         env=env,
@@ -33,7 +33,7 @@ def test_non_tty_exits_with_warning(
 ) -> None:
     env = {**os.environ, "HOME": str(home_with_projects)}
     r = subprocess.run(
-        [sys.executable, "-m", "installer.main", "--migrate-flat"],
+        [sys.executable, "-m", "installer.main", "--migrate"],
         capture_output=True,
         text=True,
         env=env,

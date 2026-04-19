@@ -276,40 +276,21 @@ def main() -> int:
         # Safety checks
         check_root()
 
-        # Migration-only shortcuts — bypass the install TUI (and the Claude CLI
-        # prerequisite check) entirely. Running a flat-todo migration does not
-        # require the Claude CLI to be installed.
-        # getattr() is defensive: existing tests stub `parser.parse_args()` with
-        # a bare Namespace and don't know about the 636 migration flags.
-        # --migrate-dry-run / --migrate-flat-dry-run (alias)
-        if getattr(args, "migrate_dry_run", False) or getattr(
-            args, "migrate_flat_dry_run", False
-        ):
-            from installer.cli import load_project_list
-            from installer.migrations.entry import run_dry_run
-
-            return run_dry_run(load_project_list())
-
-        # --migrate-sql-only
-        if getattr(args, "migrate_sql_only", False):
+        # Migration shortcut — bypasses the install TUI + Claude CLI
+        # prerequisite check. Running a migration does not require Claude CLI.
+        # getattr() is defensive: tests stub parser.parse_args() with bare
+        # Namespaces that don't know about these flags.
+        if getattr(args, "migrate", False):
             import sys as _sys
 
             from installer.cli import load_project_list
-            from installer.migrations.entry import run_sql_only_migration
-
-            return run_sql_only_migration(
-                load_project_list(),
-                strict_resync=getattr(args, "strict_resync", False),
-                backup_retain_days=getattr(args, "backup_retain", None),
+            from installer.migrations.entry import (
+                run_dry_run,
+                run_pending_migrations,
             )
 
-        # --migrate / --migrate-flat (alias)
-        if getattr(args, "migrate", False) or getattr(args, "migrate_flat", False):
-            import sys as _sys
-
-            from installer.cli import load_project_list
-            from installer.migrations.entry import run_pending_migrations
-
+            if getattr(args, "dry_run", False):
+                return run_dry_run(load_project_list())
             return run_pending_migrations(
                 load_project_list(),
                 interactive=_sys.stdin.isatty(),

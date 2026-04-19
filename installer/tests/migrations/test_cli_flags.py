@@ -16,10 +16,13 @@ def test_help_lists_migrate_flags() -> None:
         text=True,
         check=True,
     )
-    assert "--migrate-flat" in r.stdout
-    assert "--migrate-flat-dry-run" in r.stdout
+    assert "--migrate" in r.stdout
+    assert "--dry-run" in r.stdout
     assert "--backup-retain" in r.stdout
     assert "--strict-resync" in r.stdout
+    # Consolidated: old flag names should be gone.
+    assert "--migrate-flat" not in r.stdout
+    assert "--migrate-sql-only" not in r.stdout
 
 
 def test_dry_run_flag_exits_zero_without_mutation(
@@ -52,7 +55,7 @@ def test_dry_run_flag_exits_zero_without_mutation(
     monkeypatch.setenv("HOME", str(home))
 
     r = subprocess.run(
-        [sys.executable, "-m", "installer.main", "--migrate-flat-dry-run"],
+        [sys.executable, "-m", "installer.main", "--migrate", "--dry-run"],
         capture_output=True,
         text=True,
         env={"HOME": str(home), "PATH": __import__("os").environ["PATH"]},

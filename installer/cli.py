@@ -74,27 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--migrate",
         action="store_true",
-        help="Run the full migration chain (v1→v2→v3) for any project needing upgrade.",
+        help="Run the full migration chain (v1→v2→v3) for any project needing upgrade. Idempotent.",
     )
     parser.add_argument(
-        "--migrate-flat",
+        "--dry-run",
         action="store_true",
-        help="Alias for --migrate (kept for backward-compat).",
-    )
-    parser.add_argument(
-        "--migrate-sql-only",
-        action="store_true",
-        help="Run only the v2→v3 SQL-only migration (errors if any project is still v1).",
-    )
-    parser.add_argument(
-        "--migrate-dry-run",
-        action="store_true",
-        help="Print a dry-run report of what migration would do, no mutation.",
-    )
-    parser.add_argument(
-        "--migrate-flat-dry-run",
-        action="store_true",
-        help="Alias for --migrate-dry-run (kept for backward-compat).",
+        help="With --migrate: print a dry-run report, no mutation.",
     )
     parser.add_argument(
         "--backup-retain",
