@@ -9,7 +9,7 @@ from installer.flow.confirm import ConfirmOption, confirm_with_options
 
 def test_confirm_primary_snapshot(snapshot, monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot of confirm dialog with primary variant and options."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+    monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: True)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     confirm_with_options(
         title="Reinstall?",
@@ -24,7 +24,7 @@ def test_confirm_error_variant_snapshot(
     snapshot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Snapshot of confirm dialog with error variant, no options."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+    monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: False)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     confirm_with_options(
         title="Uninstall?",

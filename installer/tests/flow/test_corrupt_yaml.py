@@ -16,17 +16,17 @@ def _errors() -> dict[str, Exception]:
 
 class TestShowCorruptYamlAndConfirm:
     def test_continue(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert show_corrupt_yaml_and_confirm(_errors(), console) is True
 
     def test_cancel(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert show_corrupt_yaml_and_confirm(_errors(), console) is False
 
     def test_renders_bucket_and_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         show_corrupt_yaml_and_confirm(_errors(), console)
         text = console.export_text()
@@ -42,9 +42,9 @@ class TestShowCorruptYamlAndConfirm:
 
         def fake_ask(*a, **k):
             prompt_called["n"] += 1
-            return "y"
+            return True
 
-        monkeypatch.setattr("rich.prompt.Prompt.ask", fake_ask)
+        monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", fake_ask)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert show_corrupt_yaml_and_confirm({}, console) is True
         assert prompt_called["n"] == 0

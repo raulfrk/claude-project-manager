@@ -31,7 +31,7 @@ def _rows() -> list[PluginDetectionRow]:
 
 class TestShowDetectionAndConfirm:
     def test_confirmed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = show_detection_and_confirm(
             state=_state(tmp_path),
@@ -42,7 +42,7 @@ class TestShowDetectionAndConfirm:
         assert result is True
 
     def test_cancelled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert (
             show_detection_and_confirm(
@@ -57,7 +57,7 @@ class TestShowDetectionAndConfirm:
     def test_table_content(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         show_detection_and_confirm(
             state=_state(tmp_path),
@@ -75,7 +75,7 @@ class TestShowDetectionAndConfirm:
         assert "outdated" in text or "up-to-date" in text or "not installed" in text
 
     def test_empty_rows(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = show_detection_and_confirm(
             state=_state(tmp_path),

@@ -11,7 +11,8 @@ from typing import Literal
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+
+from installer.flow.yn import ask_yn
 
 
 Variant = Literal["primary", "warning", "error"]
@@ -52,24 +53,11 @@ def confirm_with_options(
     border_style = _VARIANT_STYLE.get(variant, "cyan")
     console.print(Panel(message, title=title, border_style=border_style))
 
-    proceed = Prompt.ask(
-        f"{confirm_label}?",
-        choices=["y", "n"],
-        default="y",
-        console=console,
-    )
-    if proceed != "y":
+    if not ask_yn(f"{confirm_label}?", default=True, console=console):
         return ConfirmResult(confirmed=False, options={})
 
     option_values: dict[str, bool] = {}
     for opt in options:
-        default = "y" if opt.default else "n"
-        ans = Prompt.ask(
-            opt.label,
-            choices=["y", "n"],
-            default=default,
-            console=console,
-        )
-        option_values[opt.key] = ans == "y"
+        option_values[opt.key] = ask_yn(opt.label, default=opt.default, console=console)
 
     return ConfirmResult(confirmed=True, options=option_values)

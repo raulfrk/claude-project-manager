@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
 from rich.syntax import Syntax
+
+from installer.flow.yn import ask_yn
 
 
 def review_config_diff(service_name: str, diff_text: str, console: Console) -> bool:
@@ -25,5 +26,4 @@ def review_config_diff(service_name: str, diff_text: str, console: Console) -> b
     syntax = Syntax(diff_text, "diff", theme="ansi_dark", line_numbers=False)
     console.print(Panel(syntax, border_style="cyan"))
 
-    proceed = Prompt.ask("Apply?", choices=["y", "n"], default="y", console=console)
-    return proceed == "y"
+    return ask_yn("Apply?", default=True, console=console)

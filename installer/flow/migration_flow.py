@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
 
+from installer.flow.yn import ask_yn
 from installer.migrations.types import MigrationPlan, PendingProject
 
 
@@ -105,14 +106,16 @@ def prompt_migration_review(
 
         if choice == "m":
             total_actions = sum(len(v) for v in plan.integration_actions.values())
-            confirm = Prompt.ask(
-                f"Proceed with {total_actions} remote actions across "
-                f"{len(plan.integration_actions)} integrations?",
-                choices=["y", "n"],
-                default="y",
-                console=console,
+            return (
+                "migrate"
+                if ask_yn(
+                    f"Proceed with {total_actions} remote actions across "
+                    f"{len(plan.integration_actions)} integrations?",
+                    default=True,
+                    console=console,
+                )
+                else "skip"
             )
-            return "migrate" if confirm == "y" else "skip"
         if choice == "s":
             return "skip"
         if choice == "q":

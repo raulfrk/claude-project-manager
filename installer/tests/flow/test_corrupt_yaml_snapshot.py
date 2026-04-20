@@ -15,7 +15,7 @@ _FAKE_HOME = Path("/home/ci-user")
 
 def test_corrupt_yaml_snapshot(snapshot, monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot of corrupt YAML error display."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+    monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", lambda *a, **k: True)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     errors = {
         "proj": Exception("bad token at line 5"),
@@ -30,7 +30,7 @@ def test_corrupt_yaml_cancel_snapshot(
     snapshot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Snapshot of corrupt YAML with cancel response."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+    monkeypatch.setattr("installer.flow.corrupt_yaml.ask_yn", lambda *a, **k: False)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     errors = {
         "proj": Exception("bad token at line 5"),

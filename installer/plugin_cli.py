@@ -15,12 +15,17 @@ _TIMEOUT = 60
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run *cmd* and return the result, raising on failure or timeout."""
     try:
+        # stdin=DEVNULL isolates the child from our controlling TTY. Without
+        # this, any child that probes stdin (e.g. an Ink/Node CLI calling
+        # process.stdin.setRawMode(true)) can leave our terminal in raw mode
+        # after it exits — Enter then echoes as ^M and input() hangs.
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=False,
             timeout=_TIMEOUT,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as exc:
         raise InstallerError(

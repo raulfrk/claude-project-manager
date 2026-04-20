@@ -11,7 +11,8 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+
+from installer.flow.yn import ask_yn
 
 
 def show_corrupt_yaml_and_confirm(
@@ -40,10 +41,4 @@ def show_corrupt_yaml_and_confirm(
         body = f"[bold]{bucket}.yaml[/bold]\n{path}\nReason: {original}"
         console.print(Panel(body, border_style="yellow"))
 
-    proceed = Prompt.ask(
-        "Continue with defaults?",
-        choices=["y", "n"],
-        default="n",
-        console=console,
-    )
-    return proceed == "y"
+    return ask_yn("Continue with defaults?", default=False, console=console)

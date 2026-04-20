@@ -9,7 +9,7 @@ from installer.flow.config_diff import review_config_diff
 
 def test_config_diff_snapshot(snapshot, monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot of config diff for a service."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+    monkeypatch.setattr("installer.flow.config_diff.ask_yn", lambda *a, **k: True)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     diff_text = (
         "--- /home/user/.claude/proj.yaml\n"

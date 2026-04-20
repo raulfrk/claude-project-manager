@@ -36,6 +36,8 @@ from installer.plugin_cli import (
     install_plugin,
     remove_marketplace,
 )
+from installer.flow.yn import install_confirm_patch
+from installer.tty_guard import tty_guard
 from installer.uninstall import cleanup_config_files
 from installer.tui import load_plugins, select_plugins
 from installer.wizard import run_wizard
@@ -267,6 +269,17 @@ def _uninstall(args) -> int:
 
 def main() -> int:
     """Parse arguments and dispatch to the appropriate flow."""
+    # Widen Rich's Confirm to accept yes/no + case-insensitive before any
+    # prompt fires. Idempotent.
+    install_confirm_patch()
+    # tty_guard wraps the whole run: if any subprocess or interactive dialog
+    # leaks raw-mode termios (ICRNL cleared → Enter echoes as ^M, input() hangs),
+    # the user's shell is restored before we exit.
+    with tty_guard():
+        return _main_inner()
+
+
+def _main_inner() -> int:
     lock_fh: IO | None = None
 
     try:

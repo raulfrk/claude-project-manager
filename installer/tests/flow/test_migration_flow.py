@@ -88,9 +88,11 @@ def _make_plan() -> MigrationPlan:
 
 class TestPromptMigrationReview:
     def test_migrate_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # First prompt -> 'm', confirm dialog -> 'y'.
-        calls = iter(["m", "y"])
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        # Action prompt -> 'm' (letter choice), then yes/no confirm -> yes.
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "m")
+        monkeypatch.setattr(
+            "installer.flow.migration_flow.ask_yn", lambda *a, **k: True
+        )
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = prompt_migration_review(
             plan=_make_plan(),
@@ -102,8 +104,10 @@ class TestPromptMigrationReview:
     def test_migrate_declined_maps_to_skip(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = iter(["m", "n"])
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "m")
+        monkeypatch.setattr(
+            "installer.flow.migration_flow.ask_yn", lambda *a, **k: False
+        )
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = prompt_migration_review(
             plan=_make_plan(),
@@ -133,10 +137,13 @@ class TestPromptMigrationReview:
         )
 
     def test_dry_run_then_migrate(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # First prompt -> 'd' (dry-run), then Press Enter (empty), then 'm' at the
-        # main prompt again, then 'y' at confirm.
-        calls = iter(["d", "", "m", "y"])
+        # Letter prompts: 'd' (dry-run), empty (press-enter-to-return), 'm'.
+        # Yes/no confirm after 'm' -> yes.
+        calls = iter(["d", "", "m"])
         monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        monkeypatch.setattr(
+            "installer.flow.migration_flow.ask_yn", lambda *a, **k: True
+        )
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = prompt_migration_review(
             plan=_make_plan(),

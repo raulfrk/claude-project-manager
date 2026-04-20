@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rich.console import Console
-from rich.prompt import Prompt
 from rich.table import Table
+
+from installer.flow.yn import ask_yn
 
 if TYPE_CHECKING:
     from installer.detect import InstallState
@@ -73,5 +74,4 @@ def show_detection_and_confirm(
         )
     console.print(table)
 
-    proceed = Prompt.ask("Continue?", choices=["y", "n"], default="y", console=console)
-    return proceed == "y"
+    return ask_yn("Continue?", default=True, console=console)

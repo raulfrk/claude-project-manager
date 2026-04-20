@@ -16,17 +16,17 @@ _DIFF = """\
 
 class TestReviewConfigDiff:
     def test_apply(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.config_diff.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert review_config_diff("Todoist", _DIFF, console) is True
 
     def test_cancel(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.config_diff.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert review_config_diff("Todoist", _DIFF, console) is False
 
     def test_renders_service_and_diff(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.config_diff.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         review_config_diff("Todoist", _DIFF, console)
         text = console.export_text()
@@ -40,9 +40,9 @@ class TestReviewConfigDiff:
 
         def fake_ask(*a, **k):
             count["n"] += 1
-            return "y"
+            return True
 
-        monkeypatch.setattr("rich.prompt.Prompt.ask", fake_ask)
+        monkeypatch.setattr("installer.flow.config_diff.ask_yn", fake_ask)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         assert review_config_diff("Todoist", "", console) is True
         assert count["n"] == 0

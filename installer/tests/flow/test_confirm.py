@@ -6,7 +6,7 @@ from installer.flow.confirm import ConfirmOption, ConfirmResult, confirm_with_op
 
 class TestConfirmWithOptions:
     def test_confirmed_no_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Proceed?", message="Do the thing?", options=[], console=console
@@ -16,7 +16,7 @@ class TestConfirmWithOptions:
         assert result.options == {}
 
     def test_cancelled_no_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Proceed?", message="Do the thing?", options=[], console=console
@@ -27,8 +27,10 @@ class TestConfirmWithOptions:
     def test_confirmed_with_option_accepted(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = iter(["y", "y"])
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        calls = iter([True, True])
+        monkeypatch.setattr(
+            "installer.flow.confirm.ask_yn", lambda *a, **k: next(calls)
+        )
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Reinstall?",
@@ -42,8 +44,10 @@ class TestConfirmWithOptions:
     def test_confirmed_with_option_declined(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = iter(["y", "n"])
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(calls))
+        calls = iter([True, False])
+        monkeypatch.setattr(
+            "installer.flow.confirm.ask_yn", lambda *a, **k: next(calls)
+        )
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Reinstall?",
@@ -59,9 +63,9 @@ class TestConfirmWithOptions:
 
         def fake_ask(*args, **kwargs):
             call_count["n"] += 1
-            return "n"
+            return False
 
-        monkeypatch.setattr("rich.prompt.Prompt.ask", fake_ask)
+        monkeypatch.setattr("installer.flow.confirm.ask_yn", fake_ask)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Reinstall?",
@@ -73,7 +77,7 @@ class TestConfirmWithOptions:
         assert call_count["n"] == 1
 
     def test_message_rendered(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+        monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: False)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         confirm_with_options(
             title="My Title",
@@ -86,7 +90,7 @@ class TestConfirmWithOptions:
         assert "My specific message" in text
 
     def test_variant_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+        monkeypatch.setattr("installer.flow.confirm.ask_yn", lambda *a, **k: True)
         console = Console(record=True, width=80, force_terminal=False, no_color=True)
         result = confirm_with_options(
             title="Uninstall?",

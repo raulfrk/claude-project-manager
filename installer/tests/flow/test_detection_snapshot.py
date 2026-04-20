@@ -34,7 +34,7 @@ def test_detection_snapshot(
     snapshot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Snapshot of detection table with mixed version states."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "y")
+    monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: True)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     show_detection_and_confirm(
         state=_state(tmp_path),
@@ -49,7 +49,7 @@ def test_detection_cancel_snapshot(
     snapshot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Snapshot of detection table with cancel response."""
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: "n")
+    monkeypatch.setattr("installer.flow.detection.ask_yn", lambda *a, **k: False)
     console = Console(record=True, width=80, force_terminal=False, no_color=True)
     show_detection_and_confirm(
         state=_state(tmp_path),
