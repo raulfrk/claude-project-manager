@@ -594,22 +594,77 @@ def register(app: FastMCP) -> None:
         return json.dumps(result)
 
 
+def _git_worktree_main_root(cwd: Path) -> Path | None:
+    """If cwd is inside a git worktree, return the main repo's working tree.
+
+    Uses ``git rev-parse --git-common-dir`` which returns the main repo's .git
+    directory even when called from a linked worktree. Returns None if cwd is
+    not inside any git repo or on any failure (missing git binary, timeout).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    if not out:
+        return None
+    common_dir = Path(out)
+    if not common_dir.is_absolute():
+        common_dir = (cwd / common_dir).resolve()
+    else:
+        common_dir = common_dir.resolve()
+    # common_dir is typically .../repo/.git — parent is the main working tree
+    if common_dir.name == ".git":
+        return common_dir.parent
+    return common_dir
+
+
 def ctx_detect_project_name(cwd: str) -> str | None:
-    """Return the project name that matches cwd, or None."""
+    """Return the project name that matches cwd, or None.
+
+    Resolution order:
+      1. Direct path-prefix match against any tracked repo.
+      2. If cwd is inside a git worktree, resolve to the main repo's root
+         and match that against tracked repos.
+    """
+    if not cwd:
+        return None
     if not storage.config_exists():
         return None
     cfg = storage.load_config()
     index = storage.load_index(cfg)
-    cwd_path = Path(cwd).resolve()
-    for name, entry in index.projects.items():
-        if entry.archived:
-            continue
-        try:
-            meta = storage.load_meta(cfg, name)
+    try:
+        cwd_path = Path(cwd).resolve()
+    except OSError:
+        return None
+
+    def _match(path: Path) -> str | None:
+        for name, entry in index.projects.items():
+            if entry.archived:
+                continue
+            try:
+                meta = storage.load_meta(cfg, name)
+            except FileNotFoundError:
+                continue
             for repo in meta.repos:
                 repo_path = Path(repo.path).resolve()
-                if cwd_path == repo_path or cwd_path.is_relative_to(repo_path):
+                if path == repo_path or path.is_relative_to(repo_path):
                     return name
-        except FileNotFoundError:
-            continue
+        return None
+
+    direct = _match(cwd_path)
+    if direct is not None:
+        return direct
+
+    main_root = _git_worktree_main_root(cwd_path)
+    if main_root is not None and main_root != cwd_path:
+        return _match(main_root)
     return None
