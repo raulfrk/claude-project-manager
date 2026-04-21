@@ -51,6 +51,11 @@ def _check_auth_style(request: httpx.Request, contract: EndpointContract) -> Non
         assert auth_header.lower().startswith("bearer "), (
             f"Expected Bearer auth, got Authorization: {auth_header!r}"
         )
+    elif contract.auth_style == "basic":
+        auth_header = request.headers.get("authorization", "")
+        assert auth_header.startswith("Basic "), (
+            f"Expected Basic auth, got Authorization: {auth_header!r}"
+        )
     elif contract.auth_style == "query_params":
         url_str = str(request.url)
         assert "?" in url_str, "Expected query_params auth style but URL has no query string"

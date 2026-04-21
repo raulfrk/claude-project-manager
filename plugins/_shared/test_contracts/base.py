@@ -23,7 +23,7 @@ class EndpointContract:
     """Headers that must be present, e.g. {"Authorization": "Bearer {token}"}."""
 
     auth_style: str
-    """Authentication style: "bearer" or "query_params"."""
+    """Authentication style: "bearer", "basic", or "query_params"."""
 
     request_schema: dict[str, object] | None
     """JSON schema for request body. None for GET/DELETE."""
