@@ -41,14 +41,16 @@ def register(mcp: FastMCP) -> None:
         clauses: list[str] = []
         if cql is None:
             if space_key:
-                clauses.append(f"space = {space_key}")
+                clauses.append(f'space = "{_escape_cql_literal(space_key)}"')
             if type:
-                clauses.append(f"type = {type}")
+                clauses.append(f'type = "{_escape_cql_literal(type)}"')
         if clauses:
             effective_cql = effective_cql + " AND " + " AND ".join(clauses)
 
         if client.config.allowed_spaces and "space" not in effective_cql.lower():
-            space_clause = " OR ".join(f"space = {k}" for k in client.config.allowed_spaces)
+            space_clause = " OR ".join(
+                f'space = "{_escape_cql_literal(k)}"' for k in client.config.allowed_spaces
+            )
             effective_cql = f"({effective_cql}) AND ({space_clause})"
 
         effective_limit = limit or client.config.default_max_results

@@ -54,7 +54,7 @@ def test_search_injects_space_filter_when_space_key_given(search_tool) -> None:
         search_tool(text="foo", space_key="DOCS")
 
     cql = client.get.call_args.kwargs["params"]["cql"]
-    assert "space = DOCS" in cql
+    assert 'space = "DOCS"' in cql
 
 
 def test_search_envelope_shape(search_tool) -> None:
@@ -133,3 +133,42 @@ def test_search_cql_none_and_text_none_raises(search_tool) -> None:
         pytest.raises(ValueError, match="Either cql or text"),
     ):
         search_tool()
+
+
+def test_search_escapes_double_quote_in_space_key(search_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {"results": [], "size": 0, "totalSize": 0, "_links": {}}
+    client.config = MagicMock(allowed_spaces=[], default_max_results=25)
+    client.check_space_allowed = MagicMock()
+
+    with patch("server.tools.search.get_client", return_value=client):
+        search_tool(text="foo", space_key='A" OR x="B')
+
+    cql = client.get.call_args.kwargs["params"]["cql"]
+    # Raw `"` must not appear unescaped within the space_key value
+    assert 'space = "A\\" OR x=\\"B"' in cql
+
+
+def test_search_escapes_double_quote_in_type(search_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {"results": [], "size": 0, "totalSize": 0, "_links": {}}
+    client.config = MagicMock(allowed_spaces=[], default_max_results=25)
+
+    with patch("server.tools.search.get_client", return_value=client):
+        search_tool(text="foo", type='page" OR type="blogpost')
+
+    cql = client.get.call_args.kwargs["params"]["cql"]
+    assert 'type = "page\\" OR type=\\"blogpost"' in cql
+
+
+def test_search_allowed_spaces_injection_is_quoted(search_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {"results": [], "size": 0, "totalSize": 0, "_links": {}}
+    client.config = MagicMock(allowed_spaces=['A"MAL', "B"], default_max_results=25)
+
+    with patch("server.tools.search.get_client", return_value=client):
+        search_tool(text="foo")
+
+    cql = client.get.call_args.kwargs["params"]["cql"]
+    assert 'space = "A\\"MAL"' in cql
+    assert 'space = "B"' in cql
