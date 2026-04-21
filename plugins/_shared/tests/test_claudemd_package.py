@@ -188,6 +188,12 @@ class TestManagedSectionContent:
         assert "superpowers:verification-before-completion" in MANAGED_SECTION
         assert "fall back silently" in MANAGED_SECTION or "falls back silently" in MANAGED_SECTION
 
+    def test_post_wt_create_sync_rule(self):
+        assert "Sync worktree to remote after" in MANAGED_SECTION
+        assert "wt_create" in MANAGED_SECTION
+        assert "git fetch origin" in MANAGED_SECTION
+        assert "git reset --hard origin/" in MANAGED_SECTION
+
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
         assert "run_in_background=true" in MANAGED_SECTION
