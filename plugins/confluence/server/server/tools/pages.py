@@ -142,6 +142,17 @@ def _register_get_page_tree(mcp: FastMCP) -> None:
         Builds nested structure from flat descendant list.
         """
         client = get_client()
+
+        # Resolve root page's space + enforce allowed_spaces
+        root_info = client.get(
+            f"/content/{root_page_id}",
+            params={"expand": "space"},
+        )
+        root_space_key = root_info.get("space", {}).get("key")
+        if root_space_key:
+            client.check_space_allowed(root_space_key)
+        root_title = root_info.get("title")
+
         params: dict[str, Any] = {
             "depth": str(depth),
             "expand": "ancestors",
@@ -156,7 +167,7 @@ def _register_get_page_tree(mcp: FastMCP) -> None:
         nodes: dict[str, dict[str, Any]] = {
             root_page_id: {
                 "page_id": root_page_id,
-                "title": None,
+                "title": root_title,
                 "children": [],
             }
         }

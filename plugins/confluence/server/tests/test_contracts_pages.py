@@ -144,9 +144,13 @@ def _tree_tool(client, monkeypatch):
 class TestTreeContract:
     @respx.mock
     def test_cloud(self, cloud_client, monkeypatch):
-        payload = {"results": [], "size": 0, "_links": {}}
+        root_payload = {"id": "10", "title": "root", "space": {"key": "DOCS"}, "_links": {}}
+        desc_payload = {"results": [], "size": 0, "_links": {}}
+        respx.get(f"{cloud_client.api_base}/content/10").mock(
+            return_value=build_success_response(c.GET_PAGE_CLOUD, root_payload)
+        )
         route = respx.get(f"{cloud_client.api_base}/content/10/descendant/page").mock(
-            return_value=build_success_response(c.TREE_CLOUD, payload)
+            return_value=build_success_response(c.TREE_CLOUD, desc_payload)
         )
 
         tool = _tree_tool(cloud_client, monkeypatch)
@@ -157,9 +161,13 @@ class TestTreeContract:
 
     @respx.mock
     def test_server(self, server_client, monkeypatch):
-        payload = {"results": [], "size": 0, "_links": {}}
+        root_payload = {"id": "10", "title": "root", "space": {"key": "DOCS"}, "_links": {}}
+        desc_payload = {"results": [], "size": 0, "_links": {}}
+        respx.get(f"{server_client.api_base}/content/10").mock(
+            return_value=build_success_response(c.GET_PAGE_SERVER, root_payload)
+        )
         route = respx.get(f"{server_client.api_base}/content/10/descendant/page").mock(
-            return_value=build_success_response(c.TREE_SERVER, payload)
+            return_value=build_success_response(c.TREE_SERVER, desc_payload)
         )
 
         tool = _tree_tool(server_client, monkeypatch)
