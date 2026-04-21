@@ -46,3 +46,42 @@ class TestAttachmentsContract:
 
         req = route.calls[0].request
         assert_request_matches_contract(req, c.LIST_ATTACHMENTS_SERVER)
+
+
+def _cm_tool(client, monkeypatch):
+    from mcp.server.fastmcp import FastMCP
+
+    from server.tools.comments import register
+
+    app = FastMCP("test")
+    register(app)
+    monkeypatch.setattr("server.tools.comments.get_client", lambda: client)
+    return app._tool_manager._tools["confluence_list_comments"].fn
+
+
+class TestCommentsContract:
+    @respx.mock
+    def test_cloud(self, cloud_client, monkeypatch):
+        payload = {"results": [], "size": 0, "_links": {}}
+        route = respx.get(f"{cloud_client.api_base}/content/42/child/comment").mock(
+            return_value=build_success_response(c.LIST_COMMENTS_CLOUD, payload)
+        )
+
+        tool = _cm_tool(cloud_client, monkeypatch)
+        tool(page_id="42")
+
+        req = route.calls[0].request
+        assert_request_matches_contract(req, c.LIST_COMMENTS_CLOUD)
+
+    @respx.mock
+    def test_server(self, server_client, monkeypatch):
+        payload = {"results": [], "size": 0, "_links": {}}
+        route = respx.get(f"{server_client.api_base}/content/42/child/comment").mock(
+            return_value=build_success_response(c.LIST_COMMENTS_SERVER, payload)
+        )
+
+        tool = _cm_tool(server_client, monkeypatch)
+        tool(page_id="42")
+
+        req = route.calls[0].request
+        assert_request_matches_contract(req, c.LIST_COMMENTS_SERVER)

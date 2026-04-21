@@ -4,7 +4,7 @@ from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from mcp.server.fastmcp import FastMCP
 
-from server.tools import attachments, init, pages, search, spaces
+from server.tools import attachments, comments, init, pages, search, spaces
 
 mcp = FastMCP("confluence")
 enable_hook_dispatch(mcp, exclude={"confluence_init"})
@@ -14,6 +14,7 @@ pages.register(mcp)
 search.register(mcp)
 spaces.register(mcp)
 attachments.register(mcp)
+comments.register(mcp)
 
 
 def main() -> None:
