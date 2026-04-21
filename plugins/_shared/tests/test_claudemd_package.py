@@ -180,6 +180,14 @@ class TestManagedSectionContent:
         assert "No depth cap" in MANAGED_SECTION
         assert "3-10 subtasks per agent" in MANAGED_SECTION
 
+    def test_prefer_superpowers_rule(self):
+        assert "Prefer superpowers skills" in MANAGED_SECTION
+        assert 'enabledPlugins["superpowers@superpowers-marketplace"]' in MANAGED_SECTION
+        assert "superpowers:brainstorming" in MANAGED_SECTION
+        assert "superpowers:systematic-debugging" in MANAGED_SECTION
+        assert "superpowers:verification-before-completion" in MANAGED_SECTION
+        assert "fall back silently" in MANAGED_SECTION or "falls back silently" in MANAGED_SECTION
+
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
         assert "run_in_background=true" in MANAGED_SECTION
