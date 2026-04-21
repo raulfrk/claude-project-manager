@@ -86,19 +86,24 @@ def _install(args) -> int:
     # 2. Run the setup wizard
     run_wizard(selected, skip=args.skip_wizard)
 
-    # 3. Ensure marketplace is registered (with optional branch)
-    branch = getattr(args, "branch", None)
+    # 3. Ensure marketplace is registered (optionally from a local clone)
+    source, branch = _resolve_marketplace_source(args)
+    source_is_local = getattr(args, "local_marketplace", False)
     with console.status("[bold]Checking marketplace registration..."):
         if not check_marketplace_registered():
             branch_msg = f" (branch: {branch})" if branch else ""
-            console.print(f"Marketplace not registered. Adding...{branch_msg}")
-            add_marketplace(branch=branch)
+            source_msg = " from local clone" if source_is_local else ""
+            console.print(
+                f"Marketplace not registered. Adding{source_msg}...{branch_msg}"
+            )
+            add_marketplace(source=source, branch=branch)
             console.print("[green]Marketplace registered.[/green]")
-        elif branch:
-            console.print(f"Re-adding marketplace for branch: {branch}")
+        elif source_is_local or branch:
+            label = "local clone" if source_is_local else f"branch {branch}"
+            console.print(f"Re-adding marketplace from {label}")
             remove_marketplace()
-            add_marketplace(branch=branch)
-            console.print(f"[green]Marketplace updated to branch {branch}.[/green]")
+            add_marketplace(source=source, branch=branch)
+            console.print(f"[green]Marketplace updated from {label}.[/green]")
         else:
             console.print("[dim]Marketplace already registered.[/dim]")
 

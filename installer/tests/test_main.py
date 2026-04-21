@@ -189,7 +189,7 @@ class TestInstall:
         result = _install(args)
         assert result == EXIT_SUCCESS
         _remove_mp.assert_called_once()
-        _add_mp.assert_called_once_with(branch="dev")
+        _add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch="dev")
 
     @patch("installer.main.add_marketplace")
     @patch("installer.main.install_plugin")
@@ -203,7 +203,97 @@ class TestInstall:
         """Marketplace is auto-added when not registered."""
         args = _make_args(plugins=["proj"])
         _install(args)
-        _add_mp.assert_called_once_with(branch=None)
+        _add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch=None)
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch(
+        "installer.main.get_available_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.check_marketplace_registered", return_value=False)
+    @patch("installer.main.run_wizard")
+    @patch("installer.main.ensure_local_clone")
+    def test_install_with_local_marketplace_adds_local_path(
+        self,
+        mock_ensure,
+        _wizard,
+        _check_mp,
+        mock_remove,
+        mock_add,
+        _avail,
+        _installed,
+        _install_plugin,
+    ):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
+        args = _make_args(plugins=["proj"], local_marketplace=True)
+        result = _install(args)
+        assert result == EXIT_SUCCESS
+        mock_ensure.assert_called_once_with(branch=None)
+        mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
+        mock_remove.assert_not_called()
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch(
+        "installer.main.get_available_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.check_marketplace_registered", return_value=True)
+    @patch("installer.main.run_wizard")
+    @patch("installer.main.ensure_local_clone")
+    def test_install_local_marketplace_when_already_registered_removes_and_readds(
+        self,
+        mock_ensure,
+        _wizard,
+        _check_mp,
+        mock_remove,
+        mock_add,
+        _avail,
+        _installed,
+        _install_plugin,
+    ):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
+        args = _make_args(plugins=["proj"], local_marketplace=True)
+        _install(args)
+        mock_remove.assert_called_once()
+        mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch(
+        "installer.main.get_available_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.check_marketplace_registered", return_value=False)
+    @patch("installer.main.run_wizard")
+    @patch("installer.main.ensure_local_clone")
+    def test_install_local_marketplace_with_branch_passes_branch_to_ensure(
+        self,
+        mock_ensure,
+        _wizard,
+        _check_mp,
+        mock_add,
+        _avail,
+        _installed,
+        _install_plugin,
+    ):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
+        args = _make_args(plugins=["proj"], local_marketplace=True, branch="dev")
+        _install(args)
+        mock_ensure.assert_called_once_with(branch="dev")
+        mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
 
 # ===================================================================
