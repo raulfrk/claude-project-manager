@@ -231,7 +231,7 @@ def _reinstall(args) -> int:
     elif source_is_local:
         label = "from local clone"
     elif branch:
-        label = f"(branch: {branch})"
+        label = f"from branch {branch}"
     else:
         label = ""
     status_msg = f" {label}" if label else ""

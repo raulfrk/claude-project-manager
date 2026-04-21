@@ -467,6 +467,33 @@ class TestReinstall:
         mock_ensure.assert_called_once_with(branch="dev")
         mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing", return_value=InstallState())
+    @patch(
+        "installer.main.get_installed_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.run_wizard")
+    def test_reinstall_with_branch_only(
+        self,
+        _wizard,
+        _installed,
+        _detect,
+        _display,
+        _scan,
+        mock_remove,
+        mock_add,
+        _install_plugin,
+    ):
+        args = _make_args(reinstall=True, branch="dev")
+        _reinstall(args)
+        mock_remove.assert_called_once()
+        mock_add.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch="dev")
+
 
 def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, capsys):
     """_reinstall runs scan + prune_stale_versions + prune_orphaned_plugins before install loop."""
