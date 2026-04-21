@@ -117,3 +117,9 @@ def get_client() -> ConfluenceClient:
     if _cached_client is None:
         _cached_client = ConfluenceClient(load_config())
     return _cached_client
+
+
+def reset_client() -> None:
+    """Clear the cached client (so next get_client() rebuilds from current config)."""
+    global _cached_client
+    _cached_client = None

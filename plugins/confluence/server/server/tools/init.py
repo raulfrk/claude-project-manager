@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from server.lib.client import reset_client
 from server.lib.config import DEFAULT_CONFIG_PATH
 
 if TYPE_CHECKING:
@@ -41,5 +42,6 @@ def register(mcp: FastMCP) -> None:
             data["personal_access_token"] = personal_access_token
 
         cfg_path.write_text(yaml.safe_dump(data, sort_keys=True))
+        reset_client()
 
         return {"status": "ok", "config_path": str(cfg_path)}

@@ -54,3 +54,20 @@ def test_init_writes_server_yaml(init_tool) -> None:
     assert data["deployment"] == "server"
     assert data["personal_access_token"] == "pat"
     assert data.get("email") is None
+
+
+def test_init_resets_cached_client(init_tool) -> None:
+    import server.lib.client as client_mod
+
+    # Seed a sentinel object
+    sentinel = object()
+    client_mod._cached_client = sentinel  # type: ignore[assignment]
+
+    tool, _cfg_path = init_tool
+    tool(
+        deployment="server",
+        base_url="https://c.example.com",
+        personal_access_token="pat",
+    )
+
+    assert client_mod._cached_client is None
