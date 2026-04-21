@@ -315,10 +315,10 @@ def _resolve_plugin_dirs(plugin_names: list[str]) -> list[Path]:
 
 
 def _run_install(args: Any, console: Console) -> int:
-    source, branch = _resolve_source_locally(args)
-    source_is_local = getattr(args, "local_marketplace", False)
-    raw_branch = getattr(args, "branch", None)
     try:
+        source, branch = _resolve_source_locally(args)
+        source_is_local = getattr(args, "local_marketplace", False)
+        raw_branch = getattr(args, "branch", None)
         if not check_marketplace_registered():
             if source_is_local and raw_branch:
                 console.print(
@@ -479,25 +479,25 @@ def _run_reinstall(
     ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
 
     # Swap marketplace source if --local-marketplace or --branch is set.
-    # Mirrors installer.main::_reinstall behavior so plugins get reinstalled
-    # from the selected source.
-    source, branch = _resolve_source_locally(args)
-    source_is_local = getattr(args, "local_marketplace", False)
-    raw_branch = getattr(args, "branch", None)
-    if source_is_local or branch:
-        if source_is_local and raw_branch:
-            label = f"local clone (branch {raw_branch})"
-        elif source_is_local:
-            label = "local clone"
-        else:
-            label = f"branch {branch}"
-        try:
+    # Fires only when the flag or --branch is supplied; otherwise leave the
+    # current registration intact.
+    try:
+        source, branch = _resolve_source_locally(args)
+        source_is_local = getattr(args, "local_marketplace", False)
+        raw_branch = getattr(args, "branch", None)
+        if source_is_local or branch:
+            if source_is_local and raw_branch:
+                label = f"local clone (branch {raw_branch})"
+            elif source_is_local:
+                label = "local clone"
+            else:
+                label = f"branch {branch}"
             console.print(f"[yellow]Re-registering marketplace from {label}...[/]")
             remove_marketplace()
             add_marketplace(source=source, branch=branch)
-        except InstallerError as exc:
-            console.print(f"[red]Failed to re-register marketplace:[/] {exc}")
-            return 1
+    except InstallerError as exc:
+        console.print(f"[red]Failed to re-register marketplace:[/] {exc}")
+        return 1
 
     name_to_id = _name_to_id_map()
     plan_actions = [

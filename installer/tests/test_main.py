@@ -295,6 +295,15 @@ class TestInstall:
         mock_ensure.assert_called_once_with(branch="dev")
         mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
+    @patch("installer.main.ensure_local_clone")
+    def test_install_local_marketplace_clone_failure_returns_error(self, mock_ensure):
+        """ensure_local_clone failure → clean error + EXIT_ERROR, not uncaught raise."""
+        mock_ensure.side_effect = InstallerError("git not found on PATH")
+        args = _make_args(plugins=["proj"], local_marketplace=True)
+        # Should NOT raise — should return EXIT_ERROR w/ clean message
+        result = _install(args)
+        assert result == EXIT_ERROR
+
 
 # ===================================================================
 # _reinstall dispatch
@@ -493,6 +502,26 @@ class TestReinstall:
         _reinstall(args)
         mock_remove.assert_called_once()
         mock_add.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch="dev")
+
+    @patch(
+        "installer.main.get_installed_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.detect_existing", return_value=InstallState())
+    @patch("installer.main.display_detection")
+    @patch("installer.main.ensure_local_clone")
+    def test_reinstall_local_marketplace_clone_failure_returns_error(
+        self,
+        mock_ensure,
+        _display,
+        _detect,
+        _installed,
+    ):
+        """ensure_local_clone failure → clean error + EXIT_ERROR, not uncaught raise."""
+        mock_ensure.side_effect = InstallerError("git not found on PATH")
+        args = _make_args(reinstall=True, local_marketplace=True)
+        result = _reinstall(args)
+        assert result == EXIT_ERROR
 
 
 def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, capsys):

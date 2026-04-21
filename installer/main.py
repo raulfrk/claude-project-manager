@@ -87,7 +87,11 @@ def _install(args) -> int:
     run_wizard(selected, skip=args.skip_wizard)
 
     # 3. Ensure marketplace is registered (optionally from a local clone)
-    source, branch = _resolve_marketplace_source(args)
+    try:
+        source, branch = _resolve_marketplace_source(args)
+    except InstallerError as exc:
+        console.print(f"[red]Failed to prepare marketplace source:[/] {exc}")
+        return EXIT_ERROR
     source_is_local = getattr(args, "local_marketplace", False)
     # For display: keep the raw branch so users see it even when source is local
     # (branch is consumed by ensure_local_clone and passed as None to add_marketplace).
@@ -185,7 +189,11 @@ def _reinstall(args) -> int:
         return EXIT_SUCCESS
 
     plugins = list(installed)
-    source, branch = _resolve_marketplace_source(args)
+    try:
+        source, branch = _resolve_marketplace_source(args)
+    except InstallerError as exc:
+        console.print(f"[red]Failed to prepare marketplace source:[/] {exc}")
+        return EXIT_ERROR
     source_is_local = getattr(args, "local_marketplace", False)
     raw_branch = getattr(args, "branch", None)
 
