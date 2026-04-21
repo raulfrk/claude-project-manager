@@ -133,3 +133,12 @@ class TestDefaultBranch:
             "ref refs/remotes/origin/HEAD is not a symbolic ref"
         )
         assert _default_branch(tmp_path) == "main"
+
+    @patch("installer.local_marketplace._run_git")
+    def test_handles_branch_with_slash(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _default_branch
+
+        mock_run_git.return_value = MagicMock(
+            stdout="refs/remotes/origin/feature/auth\n"
+        )
+        assert _default_branch(tmp_path) == "feature/auth"

@@ -17,6 +17,7 @@ LOCAL_CLONE_DIR = (
 )
 _HTTPS_SOURCE = "https://github.com/raulfrk/claude-project-manager.git"
 _GIT_TIMEOUT = 120  # seconds
+_DEFAULT_BRANCH_FALLBACK = "main"
 
 
 def _run_git(args: list[str], *, cwd: Path | None) -> subprocess.CompletedProcess[str]:
@@ -66,9 +67,6 @@ def _is_valid_clone(path: Path) -> bool:
     return result.stdout.strip() == _HTTPS_SOURCE
 
 
-_DEFAULT_BRANCH_FALLBACK = "main"
-
-
 def _default_branch(repo_dir: Path) -> str:
     """Return the repo's default branch by resolving ``origin/HEAD``.
 
@@ -82,5 +80,5 @@ def _default_branch(repo_dir: Path) -> str:
         )
     except InstallerError:
         return _DEFAULT_BRANCH_FALLBACK
-    # Output: "refs/remotes/origin/<branch>"
-    return result.stdout.strip().rsplit("/", 1)[-1]
+    # Output: "refs/remotes/origin/<branch>" — may include nested slashes
+    return result.stdout.strip().removeprefix("refs/remotes/origin/")
