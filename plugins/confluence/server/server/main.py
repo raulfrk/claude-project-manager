@@ -4,8 +4,12 @@ from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from mcp.server.fastmcp import FastMCP
 
+from server.tools import init
+
 mcp = FastMCP("confluence")
 enable_hook_dispatch(mcp, exclude={"confluence_init"})
+
+init.register(mcp)
 
 
 def main() -> None:
