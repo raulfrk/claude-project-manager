@@ -7,8 +7,8 @@ import subprocess
 
 from installer.errors import InstallerError
 
-_MARKETPLACE_NAME = "claude-project-manager"
-_MARKETPLACE_SOURCE = "raulfrk/claude-project-manager"
+MARKETPLACE_NAME = "claude-project-manager"
+MARKETPLACE_SOURCE = "raulfrk/claude-project-manager"
 _TIMEOUT = 60
 
 
@@ -50,7 +50,7 @@ def format_output(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def check_marketplace_registered(
-    name: str = _MARKETPLACE_NAME,
+    name: str = MARKETPLACE_NAME,
 ) -> bool:
     """Return ``True`` if *name* appears in ``claude plugin marketplace list``."""
     result = _run(["claude", "plugin", "marketplace", "list"])
@@ -62,7 +62,7 @@ def check_marketplace_registered(
 
 
 def add_marketplace(
-    source: str = _MARKETPLACE_SOURCE, branch: str | None = None
+    source: str = MARKETPLACE_SOURCE, branch: str | None = None
 ) -> None:
     """Register marketplace via ``claude plugin marketplace add``.
 
@@ -73,13 +73,13 @@ def add_marketplace(
     _run(["claude", "plugin", "marketplace", "add", ref])
 
 
-def remove_marketplace(name: str = _MARKETPLACE_NAME) -> None:
+def remove_marketplace(name: str = MARKETPLACE_NAME) -> None:
     """Remove marketplace via ``claude plugin marketplace remove``."""
     _run(["claude", "plugin", "marketplace", "remove", name], check=False)
 
 
 def get_installed_plugins(
-    marketplace: str = _MARKETPLACE_NAME,
+    marketplace: str = MARKETPLACE_NAME,
 ) -> list[str]:
     """Return plugin IDs installed from *marketplace* (e.g. ``router@claude-project-manager``)."""
     result = _run(["claude", "plugin", "list", "--json"])
@@ -96,7 +96,7 @@ def get_installed_plugins(
 
 
 def get_installed_plugin_versions(
-    marketplace: str = _MARKETPLACE_NAME,
+    marketplace: str = MARKETPLACE_NAME,
 ) -> dict[str, str]:
     """Return {plugin_name: version} for plugins installed from *marketplace*."""
     result = _run(["claude", "plugin", "list", "--json"])
@@ -118,7 +118,7 @@ def get_installed_plugin_versions(
 
 
 def get_available_plugins(
-    marketplace: str = _MARKETPLACE_NAME,
+    marketplace: str = MARKETPLACE_NAME,
 ) -> list[str]:
     """Return plugin IDs available from *marketplace* (e.g. ``router@claude-project-manager``)."""
     result = _run(["claude", "plugin", "list", "--available", "--json"])

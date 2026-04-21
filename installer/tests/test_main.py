@@ -47,20 +47,20 @@ def _make_args(**overrides) -> argparse.Namespace:
 
 
 from installer.main import _resolve_marketplace_source  # noqa: E402
-from installer.plugin_cli import _MARKETPLACE_SOURCE  # noqa: E402
+from installer.plugin_cli import MARKETPLACE_SOURCE  # noqa: E402
 
 
 class TestResolveMarketplaceSource:
     def test_default_uses_github_short_ref(self):
         args = _make_args()
         source, branch = _resolve_marketplace_source(args)
-        assert source == _MARKETPLACE_SOURCE
+        assert source == MARKETPLACE_SOURCE
         assert branch is None
 
     def test_branch_without_local_passes_through(self):
         args = _make_args(branch="dev")
         source, branch = _resolve_marketplace_source(args)
-        assert source == _MARKETPLACE_SOURCE
+        assert source == MARKETPLACE_SOURCE
         assert branch == "dev"
 
     @patch("installer.main.ensure_local_clone")
@@ -189,7 +189,7 @@ class TestInstall:
         result = _install(args)
         assert result == EXIT_SUCCESS
         _remove_mp.assert_called_once()
-        _add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch="dev")
+        _add_mp.assert_called_once_with(source=MARKETPLACE_SOURCE, branch="dev")
 
     @patch("installer.main.add_marketplace")
     @patch("installer.main.install_plugin")
@@ -203,7 +203,7 @@ class TestInstall:
         """Marketplace is auto-added when not registered."""
         args = _make_args(plugins=["proj"])
         _install(args)
-        _add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch=None)
+        _add_mp.assert_called_once_with(source=MARKETPLACE_SOURCE, branch=None)
 
     @patch("installer.main.install_plugin")
     @patch("installer.main.get_installed_plugins", return_value=[])
@@ -344,7 +344,7 @@ class TestReinstall:
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
         mock_remove_mp.assert_called_once()
-        mock_add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch=None)
+        mock_add_mp.assert_called_once_with(source=MARKETPLACE_SOURCE, branch=None)
         mock_install.assert_called_once_with("proj")
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
@@ -501,7 +501,7 @@ class TestReinstall:
         args = _make_args(reinstall=True, branch="dev")
         _reinstall(args)
         mock_remove.assert_called_once()
-        mock_add.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch="dev")
+        mock_add.assert_called_once_with(source=MARKETPLACE_SOURCE, branch="dev")
 
     @patch(
         "installer.main.get_installed_plugins",

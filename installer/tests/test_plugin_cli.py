@@ -10,8 +10,8 @@ import pytest
 
 from installer.errors import InstallerError
 from installer.plugin_cli import (
-    _MARKETPLACE_NAME,
-    _MARKETPLACE_SOURCE,
+    MARKETPLACE_NAME,
+    MARKETPLACE_SOURCE,
     add_marketplace,
     check_marketplace_registered,
     format_output,
@@ -37,7 +37,7 @@ class TestCheckMarketplaceRegistered:
         result = subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=f"  ❯ {_MARKETPLACE_NAME}\n    Source: GitHub\n",
+            stdout=f"  ❯ {MARKETPLACE_NAME}\n    Source: GitHub\n",
             stderr="",
         )
         with patch(_PATCH_TARGET, return_value=result):
@@ -96,7 +96,7 @@ class TestAddMarketplace:
                 "plugin",
                 "marketplace",
                 "add",
-                _MARKETPLACE_SOURCE,
+                MARKETPLACE_SOURCE,
             ]
 
     def test_custom_source(self):
@@ -115,7 +115,7 @@ class TestAddMarketplace:
         with patch(_PATCH_TARGET, return_value=result) as mock_run:
             add_marketplace(branch="dev")
             args = mock_run.call_args[0][0]
-            assert f"{_MARKETPLACE_SOURCE}#dev" in args
+            assert f"{MARKETPLACE_SOURCE}#dev" in args
 
     def test_branch_none_no_ref(self):
         result = subprocess.CompletedProcess(
@@ -124,7 +124,7 @@ class TestAddMarketplace:
         with patch(_PATCH_TARGET, return_value=result) as mock_run:
             add_marketplace(branch=None)
             args = mock_run.call_args[0][0]
-            assert _MARKETPLACE_SOURCE in args
+            assert MARKETPLACE_SOURCE in args
             assert "#" not in args[-1]
 
     def test_failure_raises(self):
@@ -169,7 +169,7 @@ class TestRemoveMarketplace:
                 "plugin",
                 "marketplace",
                 "remove",
-                _MARKETPLACE_NAME,
+                MARKETPLACE_NAME,
             ]
 
     def test_failure_does_not_raise(self):
@@ -193,8 +193,8 @@ class TestGetInstalledPlugins:
     def test_parses_json_output(self):
         data = {
             "installed": [
-                {"id": f"sandbox@{_MARKETPLACE_NAME}"},
-                {"id": f"proj@{_MARKETPLACE_NAME}"},
+                {"id": f"sandbox@{MARKETPLACE_NAME}"},
+                {"id": f"proj@{MARKETPLACE_NAME}"},
                 {"id": "other@different-marketplace"},
             ]
         }
@@ -204,8 +204,8 @@ class TestGetInstalledPlugins:
         with patch(_PATCH_TARGET, return_value=result):
             plugins = get_installed_plugins()
             assert plugins == [
-                f"sandbox@{_MARKETPLACE_NAME}",
-                f"proj@{_MARKETPLACE_NAME}",
+                f"sandbox@{MARKETPLACE_NAME}",
+                f"proj@{MARKETPLACE_NAME}",
             ]
 
     def test_empty_json(self):
@@ -242,8 +242,8 @@ class TestGetAvailablePlugins:
     def test_parses_json_output(self):
         data = {
             "available": [
-                {"pluginId": f"hooks@{_MARKETPLACE_NAME}"},
-                {"pluginId": f"proj@{_MARKETPLACE_NAME}"},
+                {"pluginId": f"hooks@{MARKETPLACE_NAME}"},
+                {"pluginId": f"proj@{MARKETPLACE_NAME}"},
                 {"pluginId": "other@different-marketplace"},
             ]
         }
@@ -253,8 +253,8 @@ class TestGetAvailablePlugins:
         with patch(_PATCH_TARGET, return_value=result):
             plugins = get_available_plugins()
             assert plugins == [
-                f"hooks@{_MARKETPLACE_NAME}",
-                f"proj@{_MARKETPLACE_NAME}",
+                f"hooks@{MARKETPLACE_NAME}",
+                f"proj@{MARKETPLACE_NAME}",
             ]
 
     def test_empty_available(self):
@@ -293,13 +293,13 @@ class TestInstallPlugin:
             args=[], returncode=0, stdout="", stderr=""
         )
         with patch(_PATCH_TARGET, return_value=result) as mock_run:
-            install_plugin(f"sandbox@{_MARKETPLACE_NAME}")
+            install_plugin(f"sandbox@{MARKETPLACE_NAME}")
             args = mock_run.call_args[0][0]
             assert args == [
                 "claude",
                 "plugin",
                 "install",
-                f"sandbox@{_MARKETPLACE_NAME}",
+                f"sandbox@{MARKETPLACE_NAME}",
             ]
 
     def test_failure_raises(self):
@@ -313,7 +313,7 @@ class TestInstallPlugin:
             patch(_PATCH_TARGET, return_value=result),
             pytest.raises(InstallerError, match="Command failed"),
         ):
-            install_plugin(f"sandbox@{_MARKETPLACE_NAME}")
+            install_plugin(f"sandbox@{MARKETPLACE_NAME}")
 
     def test_timeout_raises(self):
         with (
@@ -323,7 +323,7 @@ class TestInstallPlugin:
             ),
             pytest.raises(InstallerError, match="timed out"),
         ):
-            install_plugin(f"sandbox@{_MARKETPLACE_NAME}")
+            install_plugin(f"sandbox@{MARKETPLACE_NAME}")
 
 
 # ============================================================================
@@ -337,13 +337,13 @@ class TestUpdatePlugin:
             args=[], returncode=0, stdout="", stderr=""
         )
         with patch(_PATCH_TARGET, return_value=result) as mock_run:
-            update_plugin(f"proj@{_MARKETPLACE_NAME}")
+            update_plugin(f"proj@{MARKETPLACE_NAME}")
             args = mock_run.call_args[0][0]
             assert args == [
                 "claude",
                 "plugin",
                 "update",
-                f"proj@{_MARKETPLACE_NAME}",
+                f"proj@{MARKETPLACE_NAME}",
             ]
 
     def test_failure_raises(self):
@@ -354,7 +354,7 @@ class TestUpdatePlugin:
             stderr="fail",
         )
         with patch(_PATCH_TARGET, return_value=result), pytest.raises(InstallerError):
-            update_plugin(f"proj@{_MARKETPLACE_NAME}")
+            update_plugin(f"proj@{MARKETPLACE_NAME}")
 
     def test_timeout_raises(self):
         with (
@@ -364,7 +364,7 @@ class TestUpdatePlugin:
             ),
             pytest.raises(InstallerError, match="timed out"),
         ):
-            update_plugin(f"proj@{_MARKETPLACE_NAME}")
+            update_plugin(f"proj@{MARKETPLACE_NAME}")
 
 
 # ============================================================================
@@ -378,13 +378,13 @@ class TestUninstallPlugin:
             args=[], returncode=0, stdout="", stderr=""
         )
         with patch(_PATCH_TARGET, return_value=result) as mock_run:
-            uninstall_plugin(f"sandbox@{_MARKETPLACE_NAME}")
+            uninstall_plugin(f"sandbox@{MARKETPLACE_NAME}")
             args = mock_run.call_args[0][0]
             assert args == [
                 "claude",
                 "plugin",
                 "uninstall",
-                f"sandbox@{_MARKETPLACE_NAME}",
+                f"sandbox@{MARKETPLACE_NAME}",
             ]
 
     def test_failure_does_not_raise(self):
@@ -396,7 +396,7 @@ class TestUninstallPlugin:
             stderr="err",
         )
         with patch(_PATCH_TARGET, return_value=result):
-            uninstall_plugin(f"sandbox@{_MARKETPLACE_NAME}")  # should not raise
+            uninstall_plugin(f"sandbox@{MARKETPLACE_NAME}")  # should not raise
 
     def test_timeout_raises(self):
         with (
@@ -406,7 +406,7 @@ class TestUninstallPlugin:
             ),
             pytest.raises(InstallerError, match="timed out"),
         ):
-            uninstall_plugin(f"sandbox@{_MARKETPLACE_NAME}")
+            uninstall_plugin(f"sandbox@{MARKETPLACE_NAME}")
 
 
 # ============================================================================
@@ -449,7 +449,7 @@ class TestGetInstalledPluginsEdgeCases:
     def test_list_format_data(self):
         """When JSON data is a list instead of dict with 'installed' key."""
         data = [
-            {"id": f"proj@{_MARKETPLACE_NAME}"},
+            {"id": f"proj@{MARKETPLACE_NAME}"},
             {"id": "other@different"},
         ]
         result = subprocess.CompletedProcess(
@@ -457,14 +457,14 @@ class TestGetInstalledPluginsEdgeCases:
         )
         with patch(_PATCH_TARGET, return_value=result):
             plugins = get_installed_plugins()
-            assert plugins == [f"proj@{_MARKETPLACE_NAME}"]
+            assert plugins == [f"proj@{MARKETPLACE_NAME}"]
 
     def test_missing_id_field_skipped(self):
         """Plugin entries without 'id' key are skipped."""
         data = {
             "installed": [
                 {"name": "no-id-field"},
-                {"id": f"proj@{_MARKETPLACE_NAME}"},
+                {"id": f"proj@{MARKETPLACE_NAME}"},
             ]
         }
         result = subprocess.CompletedProcess(
@@ -472,7 +472,7 @@ class TestGetInstalledPluginsEdgeCases:
         )
         with patch(_PATCH_TARGET, return_value=result):
             plugins = get_installed_plugins()
-            assert plugins == [f"proj@{_MARKETPLACE_NAME}"]
+            assert plugins == [f"proj@{MARKETPLACE_NAME}"]
 
 
 # ============================================================================
@@ -484,8 +484,8 @@ class TestGetInstalledPluginVersions:
     def test_parses_versions(self):
         data = {
             "installed": [
-                {"id": f"proj@{_MARKETPLACE_NAME}", "version": "4.0.0"},
-                {"id": f"router@{_MARKETPLACE_NAME}", "version": "2.2.0"},
+                {"id": f"proj@{MARKETPLACE_NAME}", "version": "4.0.0"},
+                {"id": f"router@{MARKETPLACE_NAME}", "version": "2.2.0"},
                 {"id": "other@different", "version": "1.0.0"},
             ]
         }
@@ -499,8 +499,8 @@ class TestGetInstalledPluginVersions:
     def test_missing_version_skipped(self):
         data = {
             "installed": [
-                {"id": f"proj@{_MARKETPLACE_NAME}", "version": "4.0.0"},
-                {"id": f"router@{_MARKETPLACE_NAME}"},
+                {"id": f"proj@{MARKETPLACE_NAME}", "version": "4.0.0"},
+                {"id": f"router@{MARKETPLACE_NAME}"},
             ]
         }
         result = subprocess.CompletedProcess(
@@ -519,7 +519,7 @@ class TestGetInstalledPluginVersions:
 
     def test_list_format_data(self):
         data = [
-            {"id": f"proj@{_MARKETPLACE_NAME}", "version": "3.0.0"},
+            {"id": f"proj@{MARKETPLACE_NAME}", "version": "3.0.0"},
             {"id": "other@different", "version": "1.0.0"},
         ]
         result = subprocess.CompletedProcess(

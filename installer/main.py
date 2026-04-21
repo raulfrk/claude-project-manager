@@ -42,7 +42,7 @@ from installer.uninstall import cleanup_config_files
 from installer.tui import load_plugins, select_plugins
 from installer.wizard import run_wizard
 from installer.local_marketplace import ensure_local_clone
-from installer.plugin_cli import _MARKETPLACE_SOURCE
+from installer.plugin_cli import MARKETPLACE_SOURCE
 
 # Exit codes
 EXIT_SUCCESS = 0
@@ -65,7 +65,7 @@ def _resolve_marketplace_source(args) -> tuple[str, str | None]:
         branch = getattr(args, "branch", None)
         local_path = ensure_local_clone(branch=branch)
         return (str(local_path), None)
-    return (_MARKETPLACE_SOURCE, getattr(args, "branch", None))
+    return (MARKETPLACE_SOURCE, getattr(args, "branch", None))
 
 
 def _install(args) -> int:
