@@ -41,11 +41,31 @@ from installer.tty_guard import tty_guard
 from installer.uninstall import cleanup_config_files
 from installer.tui import load_plugins, select_plugins
 from installer.wizard import run_wizard
+from installer.local_marketplace import ensure_local_clone
+from installer.plugin_cli import _MARKETPLACE_SOURCE
 
 # Exit codes
 EXIT_SUCCESS = 0
 EXIT_CANCELLED = 1
 EXIT_ERROR = 2
+
+
+def _resolve_marketplace_source(args) -> tuple[str, str | None]:
+    """Return (source, branch) to pass to ``add_marketplace``.
+
+    With ``--local-marketplace`` set, clones (or updates) the repo locally
+    and returns the absolute path as the marketplace source. The branch is
+    returned as ``None`` because ``ensure_local_clone`` already checks out
+    the target branch inside the clone.
+
+    Without ``--local-marketplace``, returns the hardcoded GitHub short ref
+    and passes the raw ``--branch`` flag through.
+    """
+    if getattr(args, "local_marketplace", False):
+        branch = getattr(args, "branch", None)
+        local_path = ensure_local_clone(branch=branch)
+        return (str(local_path), None)
+    return (_MARKETPLACE_SOURCE, getattr(args, "branch", None))
 
 
 def _install(args) -> int:

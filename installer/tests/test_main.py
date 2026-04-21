@@ -35,9 +35,56 @@ def _make_args(**overrides) -> argparse.Namespace:
         "verbose": False,
         "no_tui": True,
         "branch": None,
+        "local_marketplace": False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
+
+
+# ===================================================================
+# _resolve_marketplace_source
+# ===================================================================
+
+
+from installer.main import _resolve_marketplace_source  # noqa: E402
+from installer.plugin_cli import _MARKETPLACE_SOURCE  # noqa: E402
+
+
+class TestResolveMarketplaceSource:
+    def test_default_uses_github_short_ref(self):
+        args = _make_args()
+        source, branch = _resolve_marketplace_source(args)
+        assert source == _MARKETPLACE_SOURCE
+        assert branch is None
+
+    def test_branch_without_local_passes_through(self):
+        args = _make_args(branch="dev")
+        source, branch = _resolve_marketplace_source(args)
+        assert source == _MARKETPLACE_SOURCE
+        assert branch == "dev"
+
+    @patch("installer.main.ensure_local_clone")
+    def test_local_marketplace_returns_local_path_and_no_branch(self, mock_ensure):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/local-marketplace")
+        args = _make_args(local_marketplace=True)
+        source, branch = _resolve_marketplace_source(args)
+        mock_ensure.assert_called_once_with(branch=None)
+        assert source == "/home/x/.cache/cpm/local-marketplace"
+        assert branch is None
+
+    @patch("installer.main.ensure_local_clone")
+    def test_local_marketplace_passes_branch_to_ensure_clone(self, mock_ensure):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/local-marketplace")
+        args = _make_args(local_marketplace=True, branch="dev")
+        source, branch = _resolve_marketplace_source(args)
+        mock_ensure.assert_called_once_with(branch="dev")
+        assert source == "/home/x/.cache/cpm/local-marketplace"
+        # Branch returned as None because clone is already on that branch
+        assert branch is None
 
 
 # ===================================================================
