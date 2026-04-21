@@ -107,3 +107,29 @@ class TestIsValidClone:
         (tmp_path / ".git").mkdir()
         mock_run_git.side_effect = InstallerError("no origin")
         assert _is_valid_clone(tmp_path) is False
+
+
+class TestDefaultBranch:
+    @patch("installer.local_marketplace._run_git")
+    def test_returns_branch_name_from_symref(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _default_branch
+
+        mock_run_git.return_value = MagicMock(stdout="refs/remotes/origin/dev\n")
+        assert _default_branch(tmp_path) == "dev"
+
+    @patch("installer.local_marketplace._run_git")
+    def test_strips_refs_remotes_origin_prefix(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _default_branch
+
+        mock_run_git.return_value = MagicMock(stdout="refs/remotes/origin/main\n")
+        assert _default_branch(tmp_path) == "main"
+
+    @patch("installer.local_marketplace._run_git")
+    def test_falls_back_to_main_when_symref_not_set(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _default_branch
+
+        # origin/HEAD is not always set in a fresh clone without --origin-head
+        mock_run_git.side_effect = InstallerError(
+            "ref refs/remotes/origin/HEAD is not a symbolic ref"
+        )
+        assert _default_branch(tmp_path) == "main"

@@ -64,3 +64,23 @@ def _is_valid_clone(path: Path) -> bool:
     except InstallerError:
         return False
     return result.stdout.strip() == _HTTPS_SOURCE
+
+
+_DEFAULT_BRANCH_FALLBACK = "main"
+
+
+def _default_branch(repo_dir: Path) -> str:
+    """Return the repo's default branch by resolving ``origin/HEAD``.
+
+    Falls back to ``main`` if ``origin/HEAD`` is not set (some clones skip
+    ``--origin-head`` resolution).
+    """
+    try:
+        result = _run_git(
+            ["symbolic-ref", "refs/remotes/origin/HEAD"],
+            cwd=repo_dir,
+        )
+    except InstallerError:
+        return _DEFAULT_BRANCH_FALLBACK
+    # Output: "refs/remotes/origin/<branch>"
+    return result.stdout.strip().rsplit("/", 1)[-1]
