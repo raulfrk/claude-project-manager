@@ -89,9 +89,13 @@ def _install(args) -> int:
     # 3. Ensure marketplace is registered (optionally from a local clone)
     source, branch = _resolve_marketplace_source(args)
     source_is_local = getattr(args, "local_marketplace", False)
+    # For display: keep the raw branch so users see it even when source is local
+    # (branch is consumed by ensure_local_clone and passed as None to add_marketplace).
+    raw_branch = getattr(args, "branch", None)
+    display_branch = raw_branch if source_is_local else branch
     with console.status("[bold]Checking marketplace registration..."):
         if not check_marketplace_registered():
-            branch_msg = f" (branch: {branch})" if branch else ""
+            branch_msg = f" (branch: {display_branch})" if display_branch else ""
             source_msg = " from local clone" if source_is_local else ""
             console.print(
                 f"Marketplace not registered. Adding{source_msg}...{branch_msg}"
@@ -99,7 +103,12 @@ def _install(args) -> int:
             add_marketplace(source=source, branch=branch)
             console.print("[green]Marketplace registered.[/green]")
         elif source_is_local or branch:
-            label = "local clone" if source_is_local else f"branch {branch}"
+            if source_is_local and raw_branch:
+                label = f"local clone (branch {raw_branch})"
+            elif source_is_local:
+                label = "local clone"
+            else:
+                label = f"branch {branch}"
             console.print(f"Re-adding marketplace from {label}")
             remove_marketplace()
             add_marketplace(source=source, branch=branch)
