@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 def register(mcp: FastMCP) -> None:
     _register_get_page(mcp)
+    _register_list_pages(mcp)
 
 
 def _register_get_page(mcp: FastMCP) -> None:
@@ -88,3 +89,41 @@ def _register_get_page(mcp: FastMCP) -> None:
                 {"id": a.get("id"), "title": a.get("title")} for a in raw.get("ancestors", [])
             ]
         return out
+
+
+def _register_list_pages(mcp: FastMCP) -> None:
+    @mcp.tool()
+    def confluence_list_pages(
+        space_key: str,
+        limit: int | None = None,
+        start: int = 0,
+    ) -> dict[str, Any]:
+        """List pages in a space."""
+        client = get_client()
+        client.check_space_allowed(space_key)
+
+        effective_limit = limit or client.config.default_max_results
+        params = {
+            "type": "page",
+            "spaceKey": space_key,
+            "limit": effective_limit,
+            "start": start,
+        }
+        raw = client.get("/content", params=params)
+
+        results = [
+            {
+                "page_id": p.get("id"),
+                "title": p.get("title"),
+                "url": p.get("_links", {}).get("webui"),
+            }
+            for p in raw.get("results", [])
+        ]
+        has_next = bool(raw.get("_links", {}).get("next"))
+        next_start = (start + effective_limit) if has_next else None
+
+        return {
+            "results": results,
+            "count": len(results),
+            "next_start": next_start,
+        }

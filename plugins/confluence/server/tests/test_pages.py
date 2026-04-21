@@ -166,3 +166,33 @@ def test_get_page_enforces_allowed_spaces_after_fetch(get_page_tool) -> None:
         pytest.raises(SpaceNotAllowedError),
     ):
         get_page_tool(page_id="42")
+
+
+@pytest.fixture()
+def list_pages_tool():
+    mcp = FastMCP("test")
+    pages_mod.register(mcp)
+    return mcp._tool_manager._tools["confluence_list_pages"].fn
+
+
+def test_list_pages_envelope(list_pages_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {
+        "results": [
+            {"id": "1", "title": "p1", "_links": {"webui": "/p1"}},
+            {"id": "2", "title": "p2", "_links": {"webui": "/p2"}},
+        ],
+        "size": 2,
+        "_links": {"next": "/content?..."},
+    }
+    client.config = MagicMock(default_max_results=25)
+    client.check_space_allowed = MagicMock()
+
+    with patch("server.tools.pages.get_client", return_value=client):
+        result = list_pages_tool(space_key="DOCS")
+
+    params = client.get.call_args.kwargs["params"]
+    assert params["spaceKey"] == "DOCS"
+    assert params["type"] == "page"
+    assert result["count"] == 2
+    assert result["next_start"] == 25
