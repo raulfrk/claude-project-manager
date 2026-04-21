@@ -29,7 +29,7 @@ Project management plugins for Claude Code -- track todos, manage permissions, a
 /proj:status
 ```
 
-Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`.
+Install additional plugins as needed: `worktree`, `trello`, `jira`, `todoist`, `confluence`.
 
 ### Installer Wizard (recommended)
 
@@ -90,6 +90,17 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 /proj:trello-sync       # Bidirectional Trello sync
 /proj:jira-sync         # Pull Jira issues to local projects
 /proj:sandbox           # Manage sandbox permissions (setup, sync, audit)
+```
+
+**Confluence:**
+
+```
+/confluence:search      # Search Confluence content via CQL or text
+/confluence:page        # Fetch Confluence page as markdown
+/confluence:spaces      # List Confluence spaces
+/confluence:pages       # List pages in a Confluence space
+/confluence:tree        # Fetch descendant page tree
+/confluence:metadata    # Attachments + comments for a page
 ```
 
 ---

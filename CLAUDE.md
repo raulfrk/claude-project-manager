@@ -5,13 +5,14 @@
 
 ## Overview
 
-Claude Code plugin marketplace for project management workflows. Seven plugins:
+Claude Code plugin marketplace for project management workflows. Eight plugins:
 - `worktree` — git worktree management
 - `proj` — full project lifecycle (todos, notes, git, Todoist/Trello/Jira sync); includes sandbox tools for managing `settings.json`
 - `trello` — Trello MCP server (boards, cards, checklists, labels, comments, attachments)
 - `jira` — Jira MCP server (issues, projects, epics, bulk operations)
 - `router` — central MCP-to-MCP router (formerly `hooks`); schema-based param mapping, auto-registration, and recovery
 - `todoist` — Todoist task and project management via REST API
+- `confluence` — read-only Confluence (Cloud + Server/DC) search + page fetch via REST API
 - `zoxide` — zoxide frecency database integration (boost, remove, query paths)
 
 ## Overhaul Plan
@@ -72,6 +73,7 @@ Single-todo completion continues to use `mcp__proj__todo_complete`.
 | jira | 19105 |
 | todoist | 19106 |
 | zoxide | 19107 |
+| confluence | 19108 |
 
 **`enable_hook_dispatch()`** (source: `plugins/_shared/hook_dispatch/dispatch.py`): called in each plugin's `main.py` **before** any `register()` calls. Monkey-patches `mcp.tool()` on the FastMCP instance so all subsequently registered tools get a post-execution wrapper. The patch intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms. After the original tool function returns, the wrapper calls `_dispatch_hook()` which serializes the result and POSTs to the router server. If the router server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged. Tool exceptions propagate without dispatch.
 
