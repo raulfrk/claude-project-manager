@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "confluence-mcp-server"
+version = "1.0.0"
+description = "MCP server for read-only Confluence Cloud + Server/Data Center access via REST API"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.28",
+    "pyyaml>=6.0",
+    "claude-hook-transport",
+]
+
+[project.scripts]
+confluence-server = "server.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[tool.uv.sources]
+claude-hook-transport = { path = "../../_shared" }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "basedpyright>=1.2",
+    "pre-commit>=3.7",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=7.0",
+    "pytest-xdist>=3.5",
+    "pytest-mock>=3.14",
+    "respx>=0.22",
+]
+lint = [
+    "bandit>=1.7",
+    "pip-audit>=2.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "S"]
+ignore = ["S603", "S607"]  # subprocess calls are intentional
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+"tests/*" = ["TC003"]  # runtime Path usage fine in tests
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+reportUnusedFunction = false  # @mcp.tool() decorated functions flagged as unused
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportPrivateUsage = false
+reportMissingTypeStubs = false
+reportUnnecessaryIsInstance = false
+reportUnknownParameterType = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto"]
+
+[tool.coverage.run]
+branch = true
+omit = ["*/tests/*", "server/main.py"]

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "confluence": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
+      "env": {
+        "CONFLUENCE_CONFIG": "~/.claude/confluence.yaml"
+      }
+    }
+  }
+}

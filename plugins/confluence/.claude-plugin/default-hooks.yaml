@@ -1,0 +1,2 @@
+# Confluence is a read-only integration — no auto-sync hooks.
+hooks: []
