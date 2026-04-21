@@ -89,71 +89,102 @@ The source gist is deliberately abstract. It specifies architectural principles 
 
 ## 4. Architecture
 
+**Design stance**: wiki is a standalone plugin. Proj integration is **optional sugar** — proj-aware skills that inject active-project scope + orchestrate session-ingest flows. Wiki must be fully usable with proj uninstalled, disabled, or simply not loaded.
+
+### 4.1 Two operational modes
+
+**Standalone mode** — wiki only, no proj required:
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ User invokes skill: /proj:wiki-query "hooks plugin rationale" │
-└──────────────┬───────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ User: /wiki:query "hooks plugin rationale"           │
+│       /wiki:ingest https://gist.github.com/karpathy  │
+│       /wiki:lint                                     │
+└──────────────┬───────────────────────────────────────┘
                │
                ▼
-┌─────────────────────────────┐     ┌──────────────────────────┐
-│ plugins/proj/skills/         │     │ plugins/wiki/             │
-│  wiki-query/SKILL.md         │     │  server/server/           │
-│   1. detect active project   │───▶ │   tools/                  │
-│   2. spawn subagent w/       │     │    page.py                │
-│      query prompt            │     │    index.py               │
-│   3. render answer+citations │     │    log.py                 │
-└─────────────────────────────┘     │    lint.py                │
-                                     │    scope.py               │
-      Router hook fires:             │                           │
-      notes_append →                  │  FastMCP server           │
-      wiki_log_append                 │  run_dual()               │
-                                     └────────┬──────────────────┘
-                                              │
-                                              ▼
-                                     ┌──────────────────────────┐
-                                     │ ~/.claude/wiki/           │
-                                     │  index.md                 │
-                                     │  log.md                   │
-                                     │  pages/<category>/*.md    │
-                                     │  config.yaml              │
-                                     │  .lock                    │
-                                     └──────────────────────────┘
+┌─────────────────────────────┐
+│ plugins/wiki/skills/         │
+│  query/SKILL.md              │
+│  ingest/SKILL.md             │      ┌─────────────────┐
+│  lint/SKILL.md               │────▶ │ wiki MCP tools   │
+│  init/SKILL.md               │      │ (persistence +   │
+│  bootstrap/SKILL.md          │      │  pure-data)      │
+│  promote/SKILL.md            │      └────────┬────────┘
+└─────────────────────────────┘               │
+                                                ▼
+                                     ┌──────────────────┐
+                                     │ ~/.claude/wiki/   │
+                                     │  index.md         │
+                                     │  log.md           │
+                                     │  pages/<cat>/*.md │
+                                     │  config.yaml      │
+                                     │  .lock            │
+                                     └──────────────────┘
 ```
 
-**Plugins**:
-- New `plugins/wiki/` — MCP server w/ persistence + pure-data tools.
-- Proj plugin adds thin skills (`/proj:wiki-*`) orchestrating wiki via MCP calls.
-- Router hook registered: `notes_append` → `wiki_log_append` (pure-data forwarding).
-- Session auto-ingest is skill-integrated inside `/proj:save` (see §8.2 + §9.4); not a router hook.
-- Standalone `/wiki:*` skills for non-project contexts (e.g. global-scope gist ingests).
+**Proj-integrated mode** — same wiki, plus proj-side orchestration:
+```
+┌──────────────────────────────────────────────────────┐
+│ User: /proj:wiki-query "hooks plugin rationale"      │
+│       (inherits active project scope auto-injection) │
+└──────────────┬───────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│ plugins/proj/skills/         │
+│  wiki-query/SKILL.md         │
+│   1. detect active project   │──▶ same wiki MCP tools
+│   2. inject scope filter     │    + same /wiki:query subagent logic
+│   3. call wiki synthesis     │
+│   4. render w/ citations     │
+└─────────────────────────────┘
 
-**Wiki plugin does not depend on proj**. Wiki operates standalone for global content. Proj-side skills wrap wiki tools w/ active-project awareness.
++ Router hook: notes_append → wiki_log_append (pure-data)
++ /proj:save invokes wiki ingest subagent at end of flow (skill-integrated, §8.2)
+```
 
-**Config** (`~/.claude/proj.yaml` gains `wiki` section):
+### 4.2 Plugin structure
+
+- **`plugins/wiki/`** (new) — the plugin. FastMCP server w/ persistence + pure-data tools. Own skills (`/wiki:*`) implementing all end-user operations. Own config (`~/.claude/wiki.yaml`). Fully self-contained.
+- **`plugins/proj/`** (modified) — adds optional wiki-aware skills (`/proj:wiki-*`) + one router hook (`notes_append` → `wiki_log_append`) + optional `/proj:save` ingest step. All guarded by `sync.wiki.enabled` flag in proj.yaml.
+- Wiki has **zero hard dependency on proj**. Proj has an **optional soft dependency on wiki** (only active when `sync.wiki.enabled: true`).
+
+### 4.3 Config split
+
+**Wiki runtime config** (`~/.claude/wiki.yaml`) — standalone, owned by wiki plugin:
 ```yaml
 wiki:
-  enabled: false                        # default off; user opts in via /proj:wiki-init
+  enabled: false                        # master switch; default off
   wiki_dir: ~/.claude/wiki
   bootstrap_completed: false
-  replace_notes_md: false               # flip to true after bootstrap
-  auto_ingest_sessions: false
-  capture_notes_as_log: false
-  default_scope: auto                   # auto-detects active project
-  lint_on_ingest: false
   reingest_cooldown_hours: 24
-  bootstrap_docs: []                    # per-project list of design docs to ingest
+  lint_on_ingest: false
+  default_scope: global                 # standalone default; proj overrides when active
 ```
 
-Wiki-local config (`~/.claude/wiki/config.yaml`):
+**Wiki-local schema config** (`~/.claude/wiki/config.yaml`) — inside the wiki itself:
 ```yaml
 schema_version: 1
 required_frontmatter: [title, tags, links_to, scope, sources, last_ingested]
 categories: [concepts, decisions, references, gotchas, entities]
 lint:
   stale_after_days: 90
-  orphan_min_page_count: 3              # don't flag orphans in tiny wikis
+  orphan_min_page_count: 3
   contradiction_check: true
 ```
+
+**Proj-side integration flags** (`~/.claude/proj.yaml`) — only present when using proj-integrated mode:
+```yaml
+sync:
+  wiki:
+    enabled: false                      # opt-in per project
+    auto_ingest_sessions: false         # /proj:save → ingest subagent
+    capture_notes_as_log: false         # notes_append → wiki_log_append hook
+    replace_notes_md: false             # redirect notes_append to wiki entirely
+    bootstrap_docs: []                  # per-project design docs to bootstrap
+```
+
+These flags follow the existing cpm pattern (`sync.todoist.*`, `sync.trello.*`). They live in proj.yaml because they describe *how proj integrates with wiki for a given project*. They are absent/ignored when using wiki standalone.
 
 ---
 
@@ -300,30 +331,38 @@ All tools live in `plugins/wiki/server/server/tools/`. Pure persistence + pure-d
 
 ## 7. Skills
 
-### 7.1 Proj plugin skills (`plugins/proj/skills/`)
+### 7.1 Wiki plugin skills (`plugins/wiki/skills/`) — primary surface
 
-| Skill | Purpose | Notes |
+These are the end-user skills. Every wiki operation has a corresponding `/wiki:*` skill that works regardless of whether proj is installed or loaded.
+
+| Skill | Purpose | Scope default |
 |---|---|---|
-| `/proj:wiki-init` | Create `~/.claude/wiki/` + config.yaml + empty index.md + log.md; set `wiki.enabled=true` in proj.yaml | One-time per installation |
-| `/proj:wiki-ingest <source>` | Ingest URL / file / "session:<path>" / "note:<text>" into wiki | Auto-injects `scope=project:<active>` |
-| `/proj:wiki-query <question>` | Query wiki + synthesize answer w/ citations | No scope filter default; `--scope project` narrows |
-| `/proj:wiki-lint` | Run full lint (Tier 1 data + Tier 2 semantic) + interactive fix prompts | On-demand |
-| `/proj:wiki-bootstrap` | One-shot bulk import from existing project knowledge (NOTES.md, sessions/, todo req+research, design docs) | Team-orchestrated subagents per source type |
-| `/proj:wiki-promote <page>` | Add `global` to page's scope tags | Thin wrapper on `wiki_page_write` |
+| `/wiki:init` | Create `~/.claude/wiki/` + config.yaml + empty index.md + log.md; set `wiki.enabled=true` in wiki.yaml | — |
+| `/wiki:ingest <source>` | Ingest URL / file / "session:<path>" / "note:<text>" into wiki | `global` |
+| `/wiki:query <question>` | Query wiki + synthesize answer w/ citations | No scope filter — reads all |
+| `/wiki:lint` | Run full lint (Tier 1 data + Tier 2 semantic) + interactive fix prompts | — |
+| `/wiki:bootstrap` | Bulk import from a directory or file list; prompts for scope interactively | User-specified |
+| `/wiki:promote <page>` | Add `global` to page's scope tags (or remove project-specific scopes) | — |
 
 All skills are LLM-driven — their SKILL.md files contain step-by-step prose prompts describing the synthesis protocol. They call MCP tools for persistence only.
 
-### 7.2 Wiki plugin skills (`plugins/wiki/skills/`)
+### 7.2 Proj plugin skills (`plugins/proj/skills/`) — optional integration sugar
 
-For standalone use w/o a project context:
+These skills exist only when using wiki in proj-integrated mode. They are **thin wrappers around the `/wiki:*` skills above** that auto-inject active-project scope + pre-fill project-specific sources. Each is guarded by `sync.wiki.enabled: true` in proj.yaml — if wiki integration is off, the skill prints "wiki integration disabled; use /wiki:* skills directly" + exits.
 
-| Skill | Wrapper | Notes |
+| Skill | Delegates to | Added value |
 |---|---|---|
-| `/wiki:ingest <source>` | → subagent + MCP | scope=global default |
-| `/wiki:query <question>` | → subagent + MCP | No scope filter |
-| `/wiki:lint` | → subagent + MCP | On-demand |
+| `/proj:wiki-ingest <source>` | `/wiki:ingest` | Auto-injects `scope=project:<active>` |
+| `/proj:wiki-query <question>` | `/wiki:query` | Optional `--scope project` flag narrows to active project |
+| `/proj:wiki-lint` | `/wiki:lint` | Filters lint findings to active project scope by default |
+| `/proj:wiki-bootstrap` | `/wiki:bootstrap` | Auto-discovers proj sources: NOTES.md, sessions/, todo req+research, `sync.wiki.bootstrap_docs` |
+| `/proj:wiki-promote <page>` | `/wiki:promote` | — |
 
-These skills invoke the same subagent protocols as the proj-side versions; the difference is scope defaulting.
+**Users who never use proj can use `/wiki:*` exclusively.** Users who use proj get `/proj:wiki-*` as convenience shortcuts + session auto-ingest via `/proj:save`.
+
+### 7.3 Why both exist
+
+Duplication is deliberate. The `/wiki:*` skills are the contract — they define every operation precisely. The `/proj:wiki-*` skills are pre-configured call-sites optimized for the common case of "I'm working on a project, I want wiki ops scoped to it." Removing the `/wiki:*` skills would make wiki proj-dependent. Removing the `/proj:wiki-*` skills would push scope-injection boilerplate onto every user working in a project context.
 
 ---
 
@@ -339,7 +378,7 @@ hooks:
     trigger_tool: notes_append
     target_tool: wiki_log_append
     server: wiki
-    condition: "wiki.enabled and wiki.capture_notes_as_log"
+    condition: "sync.wiki.enabled and sync.wiki.capture_notes_as_log"
     param_mapping:
       action: "note"
       title: "{source_result.first_line}"
@@ -347,7 +386,7 @@ hooks:
     blocking: false
 ```
 
-This is the only router hook in v1: `notes_append` → `wiki_log_append`. Both are MCP tools. Pure data forwarding. No synthesis.
+This is the only router hook in v1: `notes_append` → `wiki_log_append`. Both are MCP tools. Pure data forwarding. No synthesis. Registered by the **proj plugin** (not the wiki plugin) because proj owns `notes_append` + the hook only makes sense when proj is present.
 
 ### 8.2 Non-hookable integrations (session auto-ingest)
 
@@ -424,12 +463,14 @@ ERROR HANDLING:
 - Re-running `/proj:wiki-ingest <same-source>` within `reingest_cooldown_hours` (default 24) → returns existing pages w/o rewrite unless `--force`.
 - Sources tracked by `sources[*].ref` URI; re-ingest updates `ingested_at` timestamp.
 
-### 9.4 Session auto-ingest (skill-integrated, v1)
+### 9.4 Session auto-ingest (skill-integrated, v1, proj-mode only)
+
+Standalone wiki has no concept of sessions — this subsection describes behavior when using proj-integrated mode.
 
 Implemented inside `/proj:save` skill itself, not via router hook (see §8.2). Flow:
 
 1. `/proj:save` does its normal work: write session file, update NOTES.md, bump meta.yaml timestamp.
-2. If `wiki.enabled and wiki.auto_ingest_sessions`: skill reads the freshly-written session file.
+2. If `sync.wiki.enabled and sync.wiki.auto_ingest_sessions`: skill reads the freshly-written session file.
 3. Skill spawns ingest subagent w/ `source="session:<session-file>"` + `scope=project:<active>`.
 4. Subagent runs the same protocol as §9.1 but w/ section-aware extraction since session files have known structure:
    - "Key Decisions" → `decisions/<date>-<slug>.md` pages
@@ -437,7 +478,7 @@ Implemented inside `/proj:save` skill itself, not via router hook (see §8.2). F
    - "Related Todos" → no new pages; just `links_to` updates on existing concept pages
 5. Subagent returns summary; skill renders it alongside normal `/proj:save` output.
 
-If the ingest subagent fails, `/proj:save` still succeeds (session file + NOTES.md already written). User can manually retry via `/proj:wiki-ingest session:<file>`.
+If the ingest subagent fails, `/proj:save` still succeeds (session file + NOTES.md already written). User can manually retry via `/proj:wiki-ingest session:<file>` or `/wiki:ingest session:<file>`.
 
 ---
 
@@ -529,16 +570,18 @@ Driven by `/proj:wiki-lint` skill after Tier 1. Each check spawns a subagent:
 
 Subagents run in parallel via TeamCreate.
 
-### 11.3 `/proj:wiki-lint` skill flow
+### 11.3 Lint skill flow
+
+`/wiki:lint` (standalone) + `/proj:wiki-lint` (proj-integrated) share the same core flow; the only difference is the `file-todo` option, which is available only in proj-integrated mode.
 
 ```
 1. Skill calls all Tier 1 MCP tools (parallel).
 2. Skill collects Tier 1 findings.
 3. Skill spawns Tier 2 subagents (parallel team).
 4. Skill aggregates + presents findings in report form.
-5. For each finding: user prompted [fix / file-todo / skip]
+5. For each finding: user prompted [fix / file-todo (proj mode only) / skip]
    - "fix" → skill calls wiki_page_write or wiki_page_delete
-   - "file-todo" → skill calls todo_add in proj to track fix
+   - "file-todo" → skill calls todo_add in proj to track fix (proj-integrated mode only)
    - "skip" → no action
 6. wiki_log_append(action="lint", title="full").
 ```
@@ -553,14 +596,19 @@ On-demand only. No automatic/scheduled lint in v1. Config flag `wiki.lint_on_ing
 
 ### 12.1 What changes for existing users
 
+Migration matters only for users adopting **proj-integrated mode**. Users who install wiki standalone have no existing data to migrate — the wiki starts empty + they populate it via `/wiki:ingest` or `/wiki:bootstrap` w/ their own source paths.
+
+Below: proj-integrated migration.
+
 | File/feature | Current | After | Migration |
 |---|---|---|---|
-| `NOTES.md` | Chronological prose notes, appended via `notes_append` | Deprecated; wiki's `log.md` + pages take over | Bootstrap reads existing NOTES.md → creates wiki pages + log entries |
-| `sessions/*.md` | Per-session archive | Unchanged (stays as raw audit trail) | Auto-ingest on `/proj:save` going forward |
+| `NOTES.md` | Chronological prose notes, appended via `notes_append` | Deprecated when `sync.wiki.replace_notes_md: true`; wiki's `log.md` + pages take over | `/proj:wiki-bootstrap` reads existing NOTES.md → creates wiki pages + log entries |
+| `sessions/*.md` | Per-session archive | Unchanged (stays as raw audit trail) | Auto-ingest on `/proj:save` going forward when `sync.wiki.auto_ingest_sessions: true` |
 | `todos/{id}/requirements.md` + `research.md` | Per-todo content | Unchanged (stays per-todo) | Optionally bootstrapped into wiki as `concepts/` pages w/ `sources: [todo:<id>]` |
 | Design docs (e.g. `overhaul-requirements.md`) | Raw files | Unchanged (stays in tracking dir) | Bootstrapped into wiki pages per section |
 | `proj_search_knowledge` | grep over notes/requirements/research/decisions | Unchanged (coexists w/ wiki_query) | No migration |
-| `proj.yaml` | No wiki config | Adds `wiki:` section | Default opt-out; user runs `/proj:wiki-init` to enable |
+| `proj.yaml` | No wiki config | Adds `sync.wiki:` integration section | Default opt-out; user runs `/proj:wiki-enable` or edits yaml directly |
+| `~/.claude/wiki.yaml` | Does not exist | Created by `/wiki:init` | New file; standalone wiki config |
 | `memory/unified-recall-proposal.md` | Pending 26-day-old memory | Superseded | Mark deprecated; move to `memory/archive/` w/ pointer to this spec |
 
 ### 12.2 Bootstrap flow (`/proj:wiki-bootstrap`)
@@ -601,15 +649,22 @@ Run once per project (idempotent — can rerun, dedups by source ref).
    - wiki.auto_ingest_sessions: true
 ```
 
-### 12.3 Per-project enablement gate
+### 12.3 First-time enablement flows
 
-Wiki is opt-in per project. First-time flow:
-
-1. `/proj:wiki-init` — creates wiki directory + sets `wiki.enabled=true` in proj.yaml.
-2. `/proj:wiki-bootstrap` — ingests existing knowledge, flips runtime flags.
+**Standalone (no proj)**:
+1. `/wiki:init` — creates `~/.claude/wiki/` + `~/.claude/wiki.yaml` w/ `enabled: true`.
+2. `/wiki:ingest <source>` or `/wiki:bootstrap <dir-or-file-list>` — populate.
 3. From here, wiki operates normally.
 
-Rollback: flip flags to `false`; `notes_append` re-enables NOTES.md write path. Wiki directory can be deleted; proj is unaffected.
+**Proj-integrated (per project)**:
+1. `/wiki:init` if not already done.
+2. Enable integration in proj.yaml: `sync.wiki.enabled: true` + flags. Or run a convenience skill `/proj:wiki-enable` that writes the flags.
+3. `/proj:wiki-bootstrap` — ingests existing project knowledge; flips `sync.wiki.auto_ingest_sessions: true` + `sync.wiki.replace_notes_md: true` as post-bootstrap default.
+4. From here, wiki integrates w/ proj on this project.
+
+**Rollback**:
+- Proj integration off: flip `sync.wiki.enabled: false`; `notes_append` re-enables NOTES.md write path. Wiki + its content remain untouched.
+- Wiki off entirely: flip `wiki.enabled: false` in wiki.yaml. `/wiki:*` + `/proj:wiki-*` skills exit w/ "wiki disabled". Wiki directory can be deleted; proj is unaffected.
 
 ### 12.4 Sunset the unified-recall-proposal
 
@@ -719,22 +774,26 @@ For handoff to `superpowers:writing-plans` — not a full plan, just a suggested
 - Atomic lock infrastructure
 - Unit tests
 
-**Phase 2: Lint tools + basic skills** (~200 LOC, ~1 week)
+**Phase 2: Lint tools + standalone skills** (~250 LOC, ~1 week)
 - `wiki_lint_orphans/broken_links/stale/schema/duplicates`
-- `/proj:wiki-init` skill
-- `/proj:wiki-lint` skill (Tier 1 only)
-- `/wiki:query` + `/proj:wiki-query` skill (model-centric synthesis)
+- `/wiki:init` skill (creates wiki dir + wiki.yaml)
+- `/wiki:query` skill (model-centric synthesis)
+- `/wiki:lint` skill (Tier 1 only)
+- Standalone wiki is fully usable at end of Phase 2
 
-**Phase 3: Ingest + session integration** (~300 LOC, ~2 weeks)
-- `/proj:wiki-ingest` + `/wiki:ingest` skill
+**Phase 3: Ingest + standalone bootstrap** (~300 LOC, ~2 weeks)
+- `/wiki:ingest` skill (URL / file / note)
+- `/wiki:bootstrap` skill (standalone: user specifies source dirs or file list)
+- `/wiki:promote` skill
 - Subagent protocol + prompts
-- Router hooks for session auto-ingest
-- `notes_append` retargeting flag
 
-**Phase 4: Bootstrap + Tier 2 lint** (~400 LOC, ~2 weeks)
-- `/proj:wiki-bootstrap` skill w/ team-orchestrated subagents
+**Phase 4: Proj integration + Tier 2 lint** (~400 LOC, ~2 weeks)
+- `/proj:wiki-*` wrapper skills (ingest/query/lint/bootstrap/promote)
+- `/proj:wiki-enable` convenience skill (writes sync.wiki.* flags in proj.yaml)
+- Router hook: `notes_append` → `wiki_log_append`
+- `/proj:save` wiki ingest step (when sync.wiki.auto_ingest_sessions)
 - Tier 2 lint subagents (contradictions, deprecation, missing cross-refs)
-- `/proj:wiki-promote`
+- Proj-specific bootstrap source discovery (NOTES.md, sessions/, todos/*)
 - Migration tooling for existing NOTES.md + sessions
 - Sunset unified-recall-proposal.md
 
@@ -769,20 +828,23 @@ For handoff to `superpowers:writing-plans` — not a full plan, just a suggested
 ## Appendix A: Directory at-a-glance
 
 ```
-~/.claude/wiki/
-├── index.md                     # catalog; machine-maintained
-├── log.md                       # ledger; append-only
-├── config.yaml                  # schema + lint rules
-├── .lock                        # fcntl lock file
-├── pages/
-│   ├── concepts/*.md
-│   ├── decisions/*.md
-│   ├── references/*.md
-│   ├── gotchas/*.md
-│   └── entities/*.md
-└── attachments/                 # optional binaries
+~/.claude/
+├── wiki.yaml                    # wiki runtime config (standalone-owned)
+├── proj.yaml                    # proj config; gains optional sync.wiki.* section
+└── wiki/                        # the wiki itself
+    ├── index.md                 # catalog; machine-maintained
+    ├── log.md                   # ledger; append-only
+    ├── config.yaml              # schema + lint rules
+    ├── .lock                    # fcntl lock file
+    ├── pages/
+    │   ├── concepts/*.md
+    │   ├── decisions/*.md
+    │   ├── references/*.md
+    │   ├── gotchas/*.md
+    │   └── entities/*.md
+    └── attachments/             # optional binaries
 
-plugins/wiki/
+plugins/wiki/                     # standalone plugin
 ├── plugin.json
 ├── marketplace.json
 ├── server/
@@ -796,20 +858,24 @@ plugins/wiki/
 │           ├── lint.py          # orphans/stale/broken/schema/dupes
 │           ├── scope.py         # detect
 │           └── links.py         # resolve
-├── hooks/
-│   └── hooks.json               # router registrations
-└── skills/
-    ├── ingest/SKILL.md          # /wiki:ingest
-    ├── query/SKILL.md           # /wiki:query
-    └── lint/SKILL.md            # /wiki:lint
+└── skills/                      # primary end-user surface (/wiki:*)
+    ├── init/SKILL.md
+    ├── ingest/SKILL.md
+    ├── query/SKILL.md
+    ├── lint/SKILL.md
+    ├── bootstrap/SKILL.md
+    └── promote/SKILL.md
 
-plugins/proj/skills/             # new skills
-├── wiki-init/SKILL.md
-├── wiki-ingest/SKILL.md
-├── wiki-query/SKILL.md
-├── wiki-lint/SKILL.md
-├── wiki-bootstrap/SKILL.md
-└── wiki-promote/SKILL.md
+plugins/proj/                    # existing plugin; adds optional wiki integration
+├── hooks/
+│   └── hooks.json               # adds wiki-log-on-notes-append entry
+└── skills/                      # optional integration sugar (/proj:wiki-*)
+    ├── wiki-enable/SKILL.md     # convenience: sets sync.wiki.* flags
+    ├── wiki-ingest/SKILL.md     # delegates to /wiki:ingest w/ scope
+    ├── wiki-query/SKILL.md      # delegates to /wiki:query
+    ├── wiki-lint/SKILL.md       # delegates to /wiki:lint
+    ├── wiki-bootstrap/SKILL.md  # delegates w/ proj source discovery
+    └── wiki-promote/SKILL.md    # delegates to /wiki:promote
 ```
 
 ## Appendix B: Glossary
