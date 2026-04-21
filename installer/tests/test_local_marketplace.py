@@ -233,10 +233,19 @@ class TestEnsureLocalClone:
     def test_creates_parent_dir_before_clone(
         self, mock_run_git, _which, tmp_path, monkeypatch
     ):
+        """Verify parent dir exists at the moment `git clone` is invoked."""
         from installer.local_marketplace import ensure_local_clone
 
         clone_dir = tmp_path / "deeply" / "nested" / "mk"
         monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", clone_dir)
-        mock_run_git.return_value = MagicMock(stdout="", stderr="")
+
+        parent_existed_at_clone = {"value": False}
+
+        def capture(args, *, cwd):
+            if args[0] == "clone":
+                parent_existed_at_clone["value"] = clone_dir.parent.exists()
+            return MagicMock(stdout="", stderr="")
+
+        mock_run_git.side_effect = capture
         ensure_local_clone(branch=None)
-        assert clone_dir.parent.exists()
+        assert parent_existed_at_clone["value"] is True

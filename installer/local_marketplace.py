@@ -91,8 +91,8 @@ def ensure_local_clone(branch: str | None = None) -> Path:
     Behavior:
     - ``git`` missing on PATH → ``InstallerError``.
     - Dir missing: parent created, then ``git clone _HTTPS_SOURCE LOCAL_CLONE_DIR``,
-      followed by ``git checkout <branch>`` and ``git reset --hard origin/<branch>``
-      when ``branch`` differs from the clone's initial HEAD.
+      followed by ``git fetch origin``, ``git checkout <branch>``, and
+      ``git reset --hard origin/<branch>``.
     - Dir exists and is a valid clone: ``git fetch origin``, ``git checkout <branch>``,
       ``git reset --hard origin/<branch>``.
     - Dir exists but is not a valid clone (stray files or wrong remote):
