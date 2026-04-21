@@ -69,7 +69,11 @@ reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto"]
+addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=80", "-n", "auto", "--ignore=tests/e2e"]
+markers = [
+    "e2e_cloud: live Cloud E2E tests (requires CONFLUENCE_E2E_CLOUD=1)",
+    "e2e_server: live Server/DC E2E tests (requires CONFLUENCE_E2E_SERVER=1)",
+]
 
 [tool.coverage.run]
 branch = true
