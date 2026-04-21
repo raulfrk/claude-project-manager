@@ -7,6 +7,7 @@ marketplace source (used by --local-marketplace).
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -82,3 +83,48 @@ def _default_branch(repo_dir: Path) -> str:
         return _DEFAULT_BRANCH_FALLBACK
     # Output: "refs/remotes/origin/<branch>" — may include nested slashes
     return result.stdout.strip().removeprefix("refs/remotes/origin/")
+
+
+def ensure_local_clone(branch: str | None = None) -> Path:
+    """Ensure a valid clone at ``LOCAL_CLONE_DIR`` on the given branch.
+
+    Behavior:
+    - ``git`` missing on PATH → ``InstallerError``.
+    - Dir missing: parent created, then ``git clone _HTTPS_SOURCE LOCAL_CLONE_DIR``,
+      followed by ``git checkout <branch>`` and ``git reset --hard origin/<branch>``
+      when ``branch`` differs from the clone's initial HEAD.
+    - Dir exists and is a valid clone: ``git fetch origin``, ``git checkout <branch>``,
+      ``git reset --hard origin/<branch>``.
+    - Dir exists but is not a valid clone (stray files or wrong remote):
+      ``InstallerError`` with guidance to delete the path.
+
+    When ``branch`` is ``None``, resolves the remote's default branch via
+    ``_default_branch`` and uses that.
+
+    Returns the absolute path to the clone.
+    """
+    if shutil.which("git") is None:
+        raise InstallerError("git not found on PATH")
+
+    dest = LOCAL_CLONE_DIR
+
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _run_git(["clone", _HTTPS_SOURCE, str(dest)], cwd=None)
+        target = branch or _default_branch(dest)
+        _run_git(["fetch", "origin"], cwd=dest)
+        _run_git(["checkout", target], cwd=dest)
+        _run_git(["reset", "--hard", f"origin/{target}"], cwd=dest)
+        return dest
+
+    if not _is_valid_clone(dest):
+        raise InstallerError(
+            f"Cache dir at {dest} is not a valid clone of {_HTTPS_SOURCE}. "
+            f"Delete it and retry."
+        )
+
+    target = branch or _default_branch(dest)
+    _run_git(["fetch", "origin"], cwd=dest)
+    _run_git(["checkout", target], cwd=dest)
+    _run_git(["reset", "--hard", f"origin/{target}"], cwd=dest)
+    return dest
