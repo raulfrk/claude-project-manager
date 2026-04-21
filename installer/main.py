@@ -185,7 +185,9 @@ def _reinstall(args) -> int:
         return EXIT_SUCCESS
 
     plugins = list(installed)
-    branch = getattr(args, "branch", None)
+    source, branch = _resolve_marketplace_source(args)
+    source_is_local = getattr(args, "local_marketplace", False)
+    raw_branch = getattr(args, "branch", None)
 
     console.print(f"\n[bold]Reinstalling:[/bold] {', '.join(plugins)}")
 
@@ -224,10 +226,18 @@ def _reinstall(args) -> int:
         remove_marketplace()
     console.print("  [green]✓[/green] Marketplace removed")
 
-    branch_msg = f" (branch: {branch})" if branch else ""
-    with console.status(f"[bold]Re-adding marketplace{branch_msg}...[/bold]"):
-        add_marketplace(branch=branch)
-    console.print(f"  [green]✓[/green] Marketplace re-added{branch_msg}")
+    if source_is_local and raw_branch:
+        label = f"from local clone (branch {raw_branch})"
+    elif source_is_local:
+        label = "from local clone"
+    elif branch:
+        label = f"(branch: {branch})"
+    else:
+        label = ""
+    status_msg = f" {label}" if label else ""
+    with console.status(f"[bold]Re-adding marketplace{status_msg}...[/bold]"):
+        add_marketplace(source=source, branch=branch)
+    console.print(f"  [green]✓[/green] Marketplace re-added{status_msg}")
 
     results: dict[str, bool] = {}
     for name in plugins:

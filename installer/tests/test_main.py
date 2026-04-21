@@ -335,7 +335,7 @@ class TestReinstall:
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
         mock_remove_mp.assert_called_once()
-        mock_add_mp.assert_called_once_with(branch=None)
+        mock_add_mp.assert_called_once_with(source=_MARKETPLACE_SOURCE, branch=None)
         mock_install.assert_called_once_with("proj")
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
@@ -401,6 +401,71 @@ class TestReinstall:
         result = _reinstall(args)
         assert result == EXIT_SUCCESS
         assert mock_install.call_count == 2  # both proj and hooks reinstalled
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing", return_value=InstallState())
+    @patch(
+        "installer.main.get_installed_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.run_wizard")
+    @patch("installer.main.ensure_local_clone")
+    def test_reinstall_with_local_marketplace_adds_local_path(
+        self,
+        mock_ensure,
+        _wizard,
+        _installed,
+        _detect,
+        _display,
+        _scan,
+        mock_remove,
+        mock_add,
+        _install_plugin,
+    ):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
+        args = _make_args(reinstall=True, local_marketplace=True)
+        result = _reinstall(args)
+        mock_remove.assert_called_once()
+        mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
+        assert result == EXIT_SUCCESS
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing", return_value=InstallState())
+    @patch(
+        "installer.main.get_installed_plugins",
+        return_value=["proj@claude-project-manager"],
+    )
+    @patch("installer.main.run_wizard")
+    @patch("installer.main.ensure_local_clone")
+    def test_reinstall_local_marketplace_with_branch(
+        self,
+        mock_ensure,
+        _wizard,
+        _installed,
+        _detect,
+        _display,
+        _scan,
+        mock_remove,
+        mock_add,
+        _install_plugin,
+    ):
+        from pathlib import Path
+
+        mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
+        args = _make_args(reinstall=True, local_marketplace=True, branch="dev")
+        _reinstall(args)
+        mock_ensure.assert_called_once_with(branch="dev")
+        mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
 
 def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, capsys):
