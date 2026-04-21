@@ -101,6 +101,22 @@ claude-project-manager/
 
 ## Running Tests
 
+### Before running tests
+
+Local tests require the `test` dependency group to be installed. Run
+`just sync` (which runs `uv sync --all-groups` across every plugin and
+the installer) once after a fresh checkout. The canonical local
+workflow is:
+
+```console
+just sync   # installs deps including the `test` group
+just test   # runs pytest across all plugins + installer
+```
+
+Running `uv run pytest` directly without syncing the `test` group first
+results in collection errors (missing `claudemd` module) because that
+module lives in `plugins/_shared` and is installed as a dev dependency.
+
 Each plugin has its own test suite. Tests run with pytest and pytest-xdist for parallelism.
 
 ```console
