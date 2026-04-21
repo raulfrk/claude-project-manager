@@ -70,7 +70,7 @@ def _resolve_marketplace_source(args) -> tuple[str, str | None]:
     if getattr(args, "local_marketplace", False):
         local_path = ensure_local_clone(branch=getattr(args, "branch", None))
         return (str(local_path), None)  # clone already on target branch
-    return (_MARKETPLACE_SOURCE, getattr(args, "branch", None))
+    return (MARKETPLACE_SOURCE, getattr(args, "branch", None))
 ```
 
 Both `_install()` and `_reinstall()` call this helper instead of reading `args.branch` directly.
@@ -96,7 +96,7 @@ The existing condition was `elif branch:`. Extended to `elif args.local_marketpl
 Currently:
 
 ```python
-def add_marketplace(source: str = _MARKETPLACE_SOURCE, branch: str | None = None) -> None:
+def add_marketplace(source: str = MARKETPLACE_SOURCE, branch: str | None = None) -> None:
     ref = f"{source}#{branch}" if branch else source
     _run(["claude", "plugin", "marketplace", "add", ref])
 ```
@@ -176,7 +176,7 @@ Integration tests in `installer/tests/test_main_local_marketplace.py`:
 13. `_install(args)` with `--local-marketplace --branch dev` passes `branch="dev"` to `ensure_local_clone` and `branch=None` to `add_marketplace`.
 14. `_install(args)` with `--local-marketplace` and marketplace already registered: calls `remove_marketplace` then `add_marketplace` (not just `add_marketplace` alone).
 15. `_reinstall(args)` with `--local-marketplace` uses local path as source in `add_marketplace`.
-16. `_resolve_marketplace_source` without `--local-marketplace` returns `(_MARKETPLACE_SOURCE, args.branch)` (backward compat).
+16. `_resolve_marketplace_source` without `--local-marketplace` returns `(MARKETPLACE_SOURCE, args.branch)` (backward compat).
 
 All git calls are mocked via `subprocess.run` patching — no network, no real clone.
 
@@ -185,4 +185,4 @@ All git calls are mocked via `subprocess.run` patching — no network, no real c
 - Cloning from a URL other than `raulfrk/claude-project-manager`. Hardcoded source is intentional per brainstorming.
 - Cleaning up the clone dir on `--uninstall --full-cleanup`. Can be added later as a separate todo.
 - Pointing at a directory that the user already has (no clone, just register). Separate feature.
-- Changing `_MARKETPLACE_SOURCE` to a URL form; it stays as the GitHub short ref for the default flow.
+- Changing `MARKETPLACE_SOURCE` to a URL form; it stays as the GitHub short ref for the default flow.

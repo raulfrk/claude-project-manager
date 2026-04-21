@@ -660,20 +660,20 @@ Append to `installer/tests/test_main.py` (above the existing `TestInstall` class
 
 ```python
 from installer.main import _resolve_marketplace_source
-from installer.plugin_cli import _MARKETPLACE_SOURCE
+from installer.plugin_cli import MARKETPLACE_SOURCE
 
 
 class TestResolveMarketplaceSource:
     def test_default_uses_github_short_ref(self):
         args = _make_args()
         source, branch = _resolve_marketplace_source(args)
-        assert source == _MARKETPLACE_SOURCE
+        assert source == MARKETPLACE_SOURCE
         assert branch is None
 
     def test_branch_without_local_passes_through(self):
         args = _make_args(branch="dev")
         source, branch = _resolve_marketplace_source(args)
-        assert source == _MARKETPLACE_SOURCE
+        assert source == MARKETPLACE_SOURCE
         assert branch == "dev"
 
     @patch("installer.main.ensure_local_clone")
@@ -750,7 +750,7 @@ Open `installer/main.py`. After the existing imports (around line 43, after `fro
 
 ```python
 from installer.local_marketplace import ensure_local_clone
-from installer.plugin_cli import _MARKETPLACE_SOURCE
+from installer.plugin_cli import MARKETPLACE_SOURCE
 ```
 
 Then, after the `EXIT_ERROR = 2` line (around line 48) and before `def _install(args)`, add:
@@ -771,7 +771,7 @@ def _resolve_marketplace_source(args) -> tuple[str, str | None]:
         branch = getattr(args, "branch", None)
         local_path = ensure_local_clone(branch=branch)
         return (str(local_path), None)
-    return (_MARKETPLACE_SOURCE, getattr(args, "branch", None))
+    return (MARKETPLACE_SOURCE, getattr(args, "branch", None))
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
