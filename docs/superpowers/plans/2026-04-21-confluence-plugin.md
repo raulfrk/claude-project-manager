@@ -167,7 +167,7 @@ touch plugins/confluence/server/tests/contracts/__init__.py
 touch plugins/confluence/server/tests/e2e/__init__.py
 ```
 
-- [ ] **Step 2: Write `plugin.json`**
+- [ ] **Step 2: Write `plugin.json`** — delegates to `.mcp.json` per jira/trello pattern
 
 Create `plugins/confluence/.claude-plugin/plugin.json`:
 ```json
@@ -175,21 +175,14 @@ Create `plugins/confluence/.claude-plugin/plugin.json`:
   "name": "confluence",
   "description": "Read-only Confluence Cloud + Server/Data Center access via REST API.",
   "version": "1.0.0",
-  "author": {"name": "raulfrk"},
-  "license": "MIT",
-  "mcpServers": {
-    "confluence": {
-      "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
-      "env": {
-        "CONFLUENCE_CONFIG": "~/.claude/confluence.yaml"
-      }
-    }
-  }
+  "author": {
+    "name": "raulfrk"
+  },
+  "mcpServers": "./.mcp.json"
 }
 ```
 
-- [ ] **Step 3: Write `.mcp.json`**
+- [ ] **Step 3: Write `.mcp.json`** — passes 2 positional args that `start.sh` requires (`server_dir`, `entrypoint_name`)
 
 Create `plugins/confluence/.mcp.json`:
 ```json
@@ -197,10 +190,15 @@ Create `plugins/confluence/.mcp.json`:
   "mcpServers": {
     "confluence": {
       "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "confluence-server"
+      ],
       "env": {
         "CONFLUENCE_CONFIG": "~/.claude/confluence.yaml"
-      }
+      },
+      "timeout": 120
     }
   }
 }
@@ -214,27 +212,11 @@ Create `plugins/confluence/.claude-plugin/default-hooks.yaml`:
 hooks: []
 ```
 
-- [ ] **Step 5: Write `start.sh`**
+- [ ] **Step 5: Write `start.sh`** — copy `plugins/jira/start.sh` byte-for-byte (complex _shared resolution + shared-venv fallback logic). Do NOT hand-write a simplified version.
 
-Pattern copied from `plugins/jira/start.sh`. Create `plugins/confluence/start.sh`:
+Run:
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-cd "$(dirname "$0")/server"
-
-# Ensure _shared is available
-if [[ ! -d "../../_shared" ]]; then
-  echo "missing plugins/_shared — aborting" >&2
-  exit 1
-fi
-
-# Create venv on first run
-if [[ ! -d ".venv" ]]; then
-  uv sync --frozen
-fi
-
-exec uv run --frozen confluence-server
+cp plugins/jira/start.sh plugins/confluence/start.sh
 ```
 
 Run:
