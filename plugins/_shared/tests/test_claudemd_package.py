@@ -190,7 +190,7 @@ class TestManagedSectionContent:
 
     def test_post_wt_create_sync_rule(self):
         assert "Sync worktree to remote after" in MANAGED_SECTION
-        assert "wt_create" in MANAGED_SECTION
+        assert "mcp__plugin_worktree_worktree__wt_create" in MANAGED_SECTION
         assert "git fetch origin" in MANAGED_SECTION
         assert "git reset --hard origin/" in MANAGED_SECTION
 
