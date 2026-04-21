@@ -75,8 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--local-marketplace",
         action="store_true",
         help=(
-            "Clone the marketplace repo into a local cache and register it as "
-            "the marketplace source instead of pulling from GitHub directly."
+            "Clone the marketplace repo into ~/.cache/claude-project-manager/"
+            "local-marketplace and register that path as the Claude Code "
+            "marketplace source. Combines with --branch to select the branch "
+            "checked out in the clone. Works with --reinstall and "
+            "--skip-wizard."
         ),
     )
 

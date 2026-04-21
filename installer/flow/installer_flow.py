@@ -43,9 +43,18 @@ from installer.plugin_cli import (
     check_marketplace_registered,
     get_available_plugins,
     get_installed_plugins,
+    remove_marketplace,
 )
 from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
+
+
+def _resolve_source_locally(args: Any) -> tuple[str, str | None]:
+    """Lazy import to avoid circular dependency w/ installer.main."""
+    from installer.main import _resolve_marketplace_source
+
+    return _resolve_marketplace_source(args)
+
 
 _WIZARD_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "worktree"}
 
@@ -306,14 +315,40 @@ def _resolve_plugin_dirs(plugin_names: list[str]) -> list[Path]:
 
 
 def _run_install(args: Any, console: Console) -> int:
-    if not check_marketplace_registered():
-        console.print("[yellow]Marketplace not registered — registering...[/]")
-        try:
-            branch = getattr(args, "branch", None)
-            add_marketplace(branch=branch)
-        except InstallerError as exc:
-            console.print(f"[red]Failed to register marketplace:[/] {exc}")
-            return 1
+    source, branch = _resolve_source_locally(args)
+    source_is_local = getattr(args, "local_marketplace", False)
+    raw_branch = getattr(args, "branch", None)
+    try:
+        if not check_marketplace_registered():
+            if source_is_local and raw_branch:
+                console.print(
+                    f"[yellow]Marketplace not registered — registering from "
+                    f"local clone (branch {raw_branch})...[/]"
+                )
+            elif source_is_local:
+                console.print(
+                    "[yellow]Marketplace not registered — registering from local clone...[/]"
+                )
+            elif branch:
+                console.print(
+                    f"[yellow]Marketplace not registered — registering from branch {branch}...[/]"
+                )
+            else:
+                console.print("[yellow]Marketplace not registered — registering...[/]")
+            add_marketplace(source=source, branch=branch)
+        elif source_is_local or branch:
+            if source_is_local and raw_branch:
+                label = f"local clone (branch {raw_branch})"
+            elif source_is_local:
+                label = "local clone"
+            else:
+                label = f"branch {branch}"
+            console.print(f"[yellow]Re-registering marketplace from {label}...[/]")
+            remove_marketplace()
+            add_marketplace(source=source, branch=branch)
+    except InstallerError as exc:
+        console.print(f"[red]Failed to register marketplace:[/] {exc}")
+        return 1
 
     statuses = build_plugin_status_list()
     actions = select_plugin_actions(statuses, console)
@@ -442,6 +477,28 @@ def _run_reinstall(
         console.print("[dim]Nothing to reinstall.[/dim]")
         return 0
     ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+
+    # Swap marketplace source if --local-marketplace or --branch is set.
+    # Mirrors installer.main::_reinstall behavior so plugins get reinstalled
+    # from the selected source.
+    source, branch = _resolve_source_locally(args)
+    source_is_local = getattr(args, "local_marketplace", False)
+    raw_branch = getattr(args, "branch", None)
+    if source_is_local or branch:
+        if source_is_local and raw_branch:
+            label = f"local clone (branch {raw_branch})"
+        elif source_is_local:
+            label = "local clone"
+        else:
+            label = f"branch {branch}"
+        try:
+            console.print(f"[yellow]Re-registering marketplace from {label}...[/]")
+            remove_marketplace()
+            add_marketplace(source=source, branch=branch)
+        except InstallerError as exc:
+            console.print(f"[red]Failed to re-register marketplace:[/] {exc}")
+            return 1
+
     name_to_id = _name_to_id_map()
     plan_actions = [
         InstallAction(plugin_id=_resolve_id(n, name_to_id), action="reinstall")
