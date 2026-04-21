@@ -128,3 +128,42 @@ class TestListPagesContract:
 
         req = route.calls[0].request
         assert_request_matches_contract(req, c.LIST_PAGES_SERVER)
+
+
+def _tree_tool(client, monkeypatch):
+    from mcp.server.fastmcp import FastMCP
+
+    from server.tools.pages import register
+
+    app = FastMCP("test")
+    register(app)
+    monkeypatch.setattr("server.tools.pages.get_client", lambda: client)
+    return app._tool_manager._tools["confluence_get_page_tree"].fn
+
+
+class TestTreeContract:
+    @respx.mock
+    def test_cloud(self, cloud_client, monkeypatch):
+        payload = {"results": [], "size": 0, "_links": {}}
+        route = respx.get(f"{cloud_client.api_base}/content/10/descendant/page").mock(
+            return_value=build_success_response(c.TREE_CLOUD, payload)
+        )
+
+        tool = _tree_tool(cloud_client, monkeypatch)
+        tool(root_page_id="10")
+
+        req = route.calls[0].request
+        assert_request_matches_contract(req, c.TREE_CLOUD)
+
+    @respx.mock
+    def test_server(self, server_client, monkeypatch):
+        payload = {"results": [], "size": 0, "_links": {}}
+        route = respx.get(f"{server_client.api_base}/content/10/descendant/page").mock(
+            return_value=build_success_response(c.TREE_SERVER, payload)
+        )
+
+        tool = _tree_tool(server_client, monkeypatch)
+        tool(root_page_id="10")
+
+        req = route.calls[0].request
+        assert_request_matches_contract(req, c.TREE_SERVER)

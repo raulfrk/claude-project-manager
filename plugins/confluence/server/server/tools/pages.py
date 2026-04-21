@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 def register(mcp: FastMCP) -> None:
     _register_get_page(mcp)
     _register_list_pages(mcp)
+    _register_get_page_tree(mcp)
 
 
 def _register_get_page(mcp: FastMCP) -> None:
@@ -127,3 +128,59 @@ def _register_list_pages(mcp: FastMCP) -> None:
             "count": len(results),
             "next_start": next_start,
         }
+
+
+def _register_get_page_tree(mcp: FastMCP) -> None:
+    @mcp.tool()
+    def confluence_get_page_tree(
+        root_page_id: str,
+        depth: str | int = "all",
+        max_nodes: int = 200,
+    ) -> dict[str, Any]:
+        """Fetch descendant-page tree rooted at root_page_id.
+
+        Builds nested structure from flat descendant list.
+        """
+        client = get_client()
+        params: dict[str, Any] = {
+            "depth": str(depth),
+            "expand": "ancestors",
+            "limit": min(max_nodes + 1, 200),
+        }
+        raw = client.get(f"/content/{root_page_id}/descendant/page", params=params)
+
+        all_results = raw.get("results", [])
+        truncated = len(all_results) > max_nodes
+        results_in_scope = all_results[:max_nodes]
+
+        nodes: dict[str, dict[str, Any]] = {
+            root_page_id: {
+                "page_id": root_page_id,
+                "title": None,
+                "children": [],
+            }
+        }
+        for p in results_in_scope:
+            pid = p.get("id")
+            if pid == root_page_id:
+                continue
+            nodes[pid] = {"page_id": pid, "title": p.get("title"), "children": []}
+
+        for p in results_in_scope:
+            pid = p.get("id")
+            if pid == root_page_id:
+                continue
+            ancestors = p.get("ancestors", [])
+            parent_id = ancestors[-1].get("id") if ancestors else root_page_id
+            if parent_id == pid or parent_id not in nodes:
+                parent_id = root_page_id
+            if pid in nodes:
+                nodes[parent_id]["children"].append(nodes[pid])
+
+        out: dict[str, Any] = {
+            "root_page_id": root_page_id,
+            "tree": nodes[root_page_id],
+        }
+        if truncated:
+            out["truncated"] = True
+        return out
