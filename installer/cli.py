@@ -72,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--local-marketplace",
+        action="store_true",
+        help=(
+            "Clone the marketplace repo into a local cache and register it as "
+            "the marketplace source instead of pulling from GitHub directly."
+        ),
+    )
+
+    parser.add_argument(
         "--migrate",
         action="store_true",
         help="Run the full migration chain (v1→v2→v3) for any project needing upgrade. Idempotent.",

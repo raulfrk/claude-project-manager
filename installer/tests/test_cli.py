@@ -20,6 +20,7 @@ class TestBuildParser:
         assert args.plugins is None
         assert args.skip_wizard is False
         assert args.verbose is False
+        assert args.local_marketplace is False
 
     def test_reinstall_flag(self):
         parser = build_parser()
@@ -95,3 +96,25 @@ class TestBuildParser:
         with pytest.raises(SystemExit) as exc_info:
             parser.parse_args(["--version"])
         assert exc_info.value.code == 0
+
+    def test_local_marketplace_default_false(self):
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.local_marketplace is False
+
+    def test_local_marketplace_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--local-marketplace"])
+        assert args.local_marketplace is True
+
+    def test_local_marketplace_with_branch(self):
+        parser = build_parser()
+        args = parser.parse_args(["--local-marketplace", "--branch", "dev"])
+        assert args.local_marketplace is True
+        assert args.branch == "dev"
+
+    def test_local_marketplace_with_reinstall(self):
+        parser = build_parser()
+        args = parser.parse_args(["--reinstall", "--local-marketplace"])
+        assert args.local_marketplace is True
+        assert args.reinstall is True
