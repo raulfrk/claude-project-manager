@@ -68,6 +68,23 @@
       ]
     },
     {
+      "name": "confluence",
+      "source": "./plugins/confluence",
+      "description": "Read-only Confluence Cloud + Server/Data Center access via REST API.",
+      "version": "1.0.0",
+      "author": {
+        "name": "raulfrk"
+      },
+      "license": "MIT",
+      "category": "integrations",
+      "keywords": [
+        "confluence",
+        "atlassian",
+        "docs",
+        "wiki"
+      ]
+    },
+    {
       "name": "jira",
       "source": "./plugins/jira",
       "description": "Read-only Jira Server issue and project access via REST API.",

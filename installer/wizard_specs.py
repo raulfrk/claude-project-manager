@@ -18,7 +18,7 @@ from typing import Any, Callable, Literal
 
 from installer._config_loader import get_nested
 
-YamlFile = Literal["proj", "worktree", "todoist", "trello", "jira"]
+YamlFile = Literal["proj", "worktree", "todoist", "trello", "jira", "confluence"]
 PromptType = Literal["bool", "str", "int", "choice"]
 Tier = Literal["basic", "advanced"]
 

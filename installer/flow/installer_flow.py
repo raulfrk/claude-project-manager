@@ -29,6 +29,7 @@ from installer.flow.install_plan import (
     execute_install_plan,
 )
 from installer.flow.integration_config import (
+    configure_confluence,
     configure_jira,
     configure_todoist,
     configure_trello,
@@ -93,6 +94,7 @@ _INTEGRATION_CRED_FIELDS: dict[str, list[str]] = {
         "personal_access_token",
         "default_project",
     ],
+    "confluence": ["base_url", "email", "api_token", "personal_access_token"],
 }
 # Dotted-key prefix for sync settings in proj.yaml.
 # Jira uses top-level "jira.<field>"; Todoist/Trello use "sync.<service>.<field>".
@@ -100,11 +102,13 @@ _INTEGRATION_SYNC_PREFIX: dict[str, str] = {
     "todoist": "sync.todoist",
     "trello": "sync.trello",
     "jira": "jira",
+    "confluence": "sync.confluence",
 }
 _INTEGRATION_SYNC_FIELDS: dict[str, list[str]] = {
     "todoist": ["enabled", "auto_sync", "root_only"],
     "trello": ["enabled", "auto_sync", "default_list", "on_delete"],
     "jira": ["enabled", "auto_sync"],
+    "confluence": ["enabled"],
 }
 
 
@@ -371,6 +375,7 @@ def _run_install(args: Any, console: Console) -> int:
         ("todoist", configure_todoist),
         ("trello", configure_trello),
         ("jira", configure_jira),
+        ("confluence", configure_confluence),
     ):
         if service not in selected_names:
             continue

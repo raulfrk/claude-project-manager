@@ -244,6 +244,127 @@ def _jira_validator(values: dict[str, Any]) -> str | None:
     return None
 
 
+def _confluence_base_url_validator(v: Any) -> str | None:
+    v = (v or "").strip()
+    if not v:
+        return "Base URL is required"
+    if not (v.startswith("http://") or v.startswith("https://")):
+        return "must start with http:// or https://"
+    return None
+
+
+def _confluence_validator(values: dict[str, Any]) -> str | None:
+    from urllib.parse import urlparse
+
+    base_url = (values.get("base_url") or "").strip().rstrip("/")
+    deployment = values.get("deployment", "auto")
+    if not base_url:
+        return "Base URL is required"
+
+    # Resolve effective deployment
+    effective = deployment
+    if effective == "auto":
+        host = urlparse(base_url).hostname or ""
+        effective = "cloud" if host.endswith(".atlassian.net") else "server"
+
+    if effective == "cloud":
+        email = (values.get("email") or "").strip()
+        api_token = (values.get("api_token") or "").strip()
+        if not email or not api_token:
+            return "Email and API token are required for Cloud deployment"
+        api_base = f"{base_url}/wiki/rest/api"
+        auth: tuple[str, str] | None = (email, api_token)
+        headers: dict[str, str] = {}
+    else:
+        pat = (values.get("personal_access_token") or "").strip()
+        if not pat:
+            return "Personal Access Token is required for Server/Data Center deployment"
+        api_base = f"{base_url}/rest/api"
+        auth = None
+        headers = {"Authorization": f"Bearer {pat}"}
+
+    try:
+        resp = httpx.get(
+            f"{api_base}/space",
+            params={"limit": 1},
+            auth=auth,
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 401:
+            return "Invalid credentials — check email/token"
+        if resp.status_code == 403:
+            return "Access forbidden — check permissions"
+        if resp.status_code != 200:
+            return f"Confluence API error: {resp.status_code}"
+    except httpx.ConnectError:
+        return f"Cannot reach {base_url} — check URL and network"
+    except httpx.TimeoutException:
+        return "Confluence API timeout"
+    return None
+
+
+def configure_confluence(console: Console) -> dict[str, Any] | None:
+    """Confluence integration config form. Returns dict or None on cancel."""
+    claude_home = Path.home() / ".claude"
+    confluence_cfg = _load_yaml(claude_home / "confluence.yaml")
+    proj_cfg = _load_yaml(claude_home / "proj.yaml")
+    sync_section = (proj_cfg.get("sync", {}) or {}).get("confluence", {}) or {}
+
+    fields = [
+        FieldSpec(
+            key="base_url",
+            label="Base URL",
+            kind="text",
+            default=confluence_cfg.get("base_url") or "",
+            help_text="e.g., https://example.atlassian.net or https://confluence.company.com",
+            validator=_confluence_base_url_validator,
+        ),
+        FieldSpec(
+            key="deployment",
+            label="Deployment type",
+            kind="select",
+            default=confluence_cfg.get("deployment") or "auto",
+            choices=["auto", "cloud", "server"],
+            help_text="auto = detect from URL (.atlassian.net → cloud, else server)",
+        ),
+        FieldSpec(
+            key="email",
+            label="Email (Cloud only)",
+            kind="text",
+            default=confluence_cfg.get("email") or "",
+            help_text="Atlassian account email — required for Cloud deployment",
+        ),
+        FieldSpec(
+            key="api_token",
+            label="API Token (Cloud only)",
+            kind="password",
+            default=confluence_cfg.get("api_token") or "",
+            help_text="Get from https://id.atlassian.com/manage-profile/security/api-tokens",
+        ),
+        FieldSpec(
+            key="personal_access_token",
+            label="Personal Access Token (Server/DC only)",
+            kind="password",
+            default=confluence_cfg.get("personal_access_token") or "",
+            help_text="Required for Server/Data Center deployment",
+        ),
+        FieldSpec(
+            key="sync_enabled",
+            label="Enable Confluence integration",
+            kind="bool",
+            default=bool(sync_section.get("enabled", False)),
+        ),
+    ]
+    result = _run_integration_form("Confluence", fields, _confluence_validator, console)
+    if result is None:
+        return None
+    # Normalize trailing slash on submit
+    if "base_url" in result:
+        result["base_url"] = (result["base_url"] or "").strip().rstrip("/")
+    return result
+
+
 def configure_jira(console: Console) -> dict[str, Any] | None:
     """Jira integration config form. Returns dict or None on cancel."""
     claude_home = Path.home() / ".claude"

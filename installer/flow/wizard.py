@@ -20,7 +20,7 @@ from installer._config_loader import ConfigLoadError, load_existing_yaml
 from installer.flow.form import FieldSpec, run_form
 from installer.wizard_specs import PROJ_YAML_PROMPTS, get_distinct_yaml_files
 
-_PROJ_PLUGINS = {"proj", "router", "todoist", "trello", "jira"}
+_PROJ_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "confluence"}
 
 
 def _spec_to_field_kind(spec_type: str, sensitive: bool) -> str:

@@ -56,6 +56,8 @@ worktree_integration: true
 sync:
   todoist:
     root_only: false
+  confluence:
+    enabled: false
   trello:
     default_board_id: ""
     proj_label_name: "proj"
