@@ -48,3 +48,19 @@ def _run_git(args: list[str], *, cwd: Path | None) -> subprocess.CompletedProces
             f"git failed (exit {result.returncode}): {' '.join(cmd)}\n{detail}"
         )
     return result
+
+
+def _is_valid_clone(path: Path) -> bool:
+    """Return True if *path* is an existing clone of ``_HTTPS_SOURCE``.
+
+    Checks:
+    - ``path`` exists and contains a ``.git`` entry
+    - ``git -C <path> remote get-url origin`` returns ``_HTTPS_SOURCE``
+    """
+    if not (path / ".git").exists():
+        return False
+    try:
+        result = _run_git(["remote", "get-url", "origin"], cwd=path)
+    except InstallerError:
+        return False
+    return result.stdout.strip() == _HTTPS_SOURCE

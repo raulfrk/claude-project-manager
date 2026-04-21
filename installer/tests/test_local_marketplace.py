@@ -69,3 +69,41 @@ class TestRunGit:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         _run_git(["status"], cwd=Path("/tmp/x"))
         assert mock_run.call_args.kwargs["cwd"] == Path("/tmp/x")
+
+
+class TestIsValidClone:
+    def test_false_when_dir_missing(self, tmp_path):
+        from installer.local_marketplace import _is_valid_clone
+
+        assert _is_valid_clone(tmp_path / "missing") is False
+
+    def test_false_when_not_a_git_repo(self, tmp_path):
+        from installer.local_marketplace import _is_valid_clone
+
+        # A dir with contents but no .git
+        (tmp_path / "file.txt").write_text("hi")
+        assert _is_valid_clone(tmp_path) is False
+
+    @patch("installer.local_marketplace._run_git")
+    def test_false_when_origin_url_mismatches(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _is_valid_clone
+
+        (tmp_path / ".git").mkdir()
+        mock_run_git.return_value = MagicMock(stdout="git@github.com:other/repo.git\n")
+        assert _is_valid_clone(tmp_path) is False
+
+    @patch("installer.local_marketplace._run_git")
+    def test_true_when_origin_url_matches(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _HTTPS_SOURCE, _is_valid_clone
+
+        (tmp_path / ".git").mkdir()
+        mock_run_git.return_value = MagicMock(stdout=f"{_HTTPS_SOURCE}\n")
+        assert _is_valid_clone(tmp_path) is True
+
+    @patch("installer.local_marketplace._run_git")
+    def test_false_when_git_command_fails(self, mock_run_git, tmp_path):
+        from installer.local_marketplace import _is_valid_clone
+
+        (tmp_path / ".git").mkdir()
+        mock_run_git.side_effect = InstallerError("no origin")
+        assert _is_valid_clone(tmp_path) is False
