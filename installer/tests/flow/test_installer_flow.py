@@ -149,6 +149,37 @@ class TestReinstall:
         assert (claude / "proj.yaml").exists()
         assert (claude / "worktree.yaml").exists()
 
+    def test_reinstall_calls_ensure_managed_section(self) -> None:
+        """_run_reinstall must refresh managed CLAUDE.md before executing reinstall."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": False},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section") as mock_ems,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("reinstall", _Args(), console)
+        assert code == 0
+        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
+
 
 # ── Uninstall ──────────────────────────────────────────────────────────────
 
@@ -245,7 +276,7 @@ class TestInstall:
                 "installer.flow.installer_flow.review_hooks_diff",
                 return_value={"apply": set(), "remove": set()},
             ),
-            patch("installer.flow.installer_flow.ensure_managed_section"),
+            patch("installer.flow.installer_flow.ensure_managed_section") as mock_ems,
             patch(
                 "installer.flow.installer_flow.get_installed_plugins",
                 return_value=[],
@@ -268,6 +299,7 @@ class TestInstall:
             a.plugin_id == "proj@claude-project-manager" and a.action == "install"
             for a in plan.actions
         )
+        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
 
     def test_install_cancelled_at_plugin_select(self) -> None:
         with (
@@ -673,6 +705,44 @@ class TestUpdate:
             console = Console(width=80, force_terminal=False, no_color=True)
             code = run_installer_flow("update", _Args(), console)
         assert code == 0
+
+    def test_update_calls_ensure_managed_section(self) -> None:
+        """_run_update must refresh managed CLAUDE.md before executing updates."""
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.compare_versions",
+                return_value={"proj": ("1.0.0", "1.1.0")},
+            ),
+            patch(
+                "installer.flow.installer_flow.select_updates",
+                return_value=["proj"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section") as mock_ems,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("update", _Args(), console)
+        assert code == 0
+        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
 
 
 # ── Integration config diff gate (todo 682) ────────────────────────────────

@@ -412,6 +412,7 @@ def _run_update(args: Any, pre_state: Any, console: Console) -> int:
     if not selected:
         console.print("[dim]No updates selected.[/dim]")
         return 0
+    ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
     name_to_id = _name_to_id_map()
     plan_actions = [
         InstallAction(
@@ -440,6 +441,7 @@ def _run_reinstall(
     if not installed_names:
         console.print("[dim]Nothing to reinstall.[/dim]")
         return 0
+    ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
     name_to_id = _name_to_id_map()
     plan_actions = [
         InstallAction(plugin_id=_resolve_id(n, name_to_id), action="reinstall")
