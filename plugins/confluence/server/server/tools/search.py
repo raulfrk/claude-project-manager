@@ -10,6 +10,11 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+def _escape_cql_literal(s: str) -> str:
+    """Escape backslash + double-quote for use inside a CQL double-quoted literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def register(mcp: FastMCP) -> None:
     @mcp.tool()
     def confluence_search(
@@ -25,16 +30,16 @@ def register(mcp: FastMCP) -> None:
 
         Either `cql` (raw CQL) OR `text` (wrapped as text search) must be given.
         """
-        if not cql and not text:
+        if cql is None and text is None:
             raise ValueError("Either cql or text must be provided")
 
         client = get_client()
         if space_key:
             client.check_space_allowed(space_key)
 
-        effective_cql = cql or f'text ~ "{text}"'
+        effective_cql = cql if cql is not None else f'text ~ "{_escape_cql_literal(text)}"'  # type: ignore[arg-type]
         clauses: list[str] = []
-        if not cql:
+        if cql is None:
             if space_key:
                 clauses.append(f"space = {space_key}")
             if type:

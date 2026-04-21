@@ -101,3 +101,35 @@ def test_search_enforces_allowed_spaces(search_tool) -> None:
         pytest.raises(SpaceNotAllowedError),
     ):
         search_tool(text="foo", space_key="ENG")
+
+
+def test_search_escapes_double_quote_in_text(search_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {"results": [], "size": 0, "totalSize": 0, "_links": {}}
+    client.config = MagicMock(allowed_spaces=[], default_max_results=25)
+
+    with patch("server.tools.search.get_client", return_value=client):
+        search_tool(text='foo" OR type=user OR "bar')
+
+    cql = client.get.call_args.kwargs["params"]["cql"]
+    assert 'text ~ "foo\\" OR type=user OR \\"bar"' in cql
+
+
+def test_search_escapes_backslash_in_text(search_tool) -> None:
+    client = MagicMock()
+    client.get.return_value = {"results": [], "size": 0, "totalSize": 0, "_links": {}}
+    client.config = MagicMock(allowed_spaces=[], default_max_results=25)
+
+    with patch("server.tools.search.get_client", return_value=client):
+        search_tool(text="path\\foo")
+
+    cql = client.get.call_args.kwargs["params"]["cql"]
+    assert 'text ~ "path\\\\foo"' in cql
+
+
+def test_search_cql_none_and_text_none_raises(search_tool) -> None:
+    with (
+        patch("server.tools.search.get_client", return_value=MagicMock()),
+        pytest.raises(ValueError, match="Either cql or text"),
+    ):
+        search_tool()
