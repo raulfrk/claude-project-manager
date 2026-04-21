@@ -2,15 +2,8 @@
   "name": "confluence",
   "description": "Read-only Confluence Cloud + Server/Data Center access via REST API.",
   "version": "1.0.0",
-  "author": {"name": "raulfrk"},
-  "license": "MIT",
-  "mcpServers": {
-    "confluence": {
-      "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
-      "env": {
-        "CONFLUENCE_CONFIG": "~/.claude/confluence.yaml"
-      }
-    }
-  }
+  "author": {
+    "name": "raulfrk"
+  },
+  "mcpServers": "./.mcp.json"
 }

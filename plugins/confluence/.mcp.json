@@ -2,10 +2,15 @@
   "mcpServers": {
     "confluence": {
       "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "confluence-server"
+      ],
       "env": {
         "CONFLUENCE_CONFIG": "~/.claude/confluence.yaml"
-      }
+      },
+      "timeout": 120
     }
   }
 }
