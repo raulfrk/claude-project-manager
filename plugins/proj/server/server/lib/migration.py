@@ -130,10 +130,17 @@ def migrate_yaml_to_sqlite(cfg: ProjConfig, project_name: str) -> dict[str, int 
     archive_objs = [Todo.from_dict(t) for t in archive_list]  # type: ignore[arg-type]
 
     # Open DB, init schema, migrate in one transaction
+    # Explicit BEGIN/COMMIT — the connection runs with isolation_level=None
+    # (autocommit), so `with conn:` is a no-op. Without an explicit
+    # transaction, a mid-migration exception would leave a half-populated
+    # DB that the existence check at the top of this fn would then mark as
+    # "already_migrated", masking data loss. Matches the pattern used by
+    # sql_todos.save_todos and sql_archive.archive_and_remove_todos.
     db_file = ensure_db(cfg, project_name)
     conn = get_connection(db_file)
     try:
-        with conn:
+        conn.execute("BEGIN")
+        try:
             # Insert active todos
             if todos_objs:
                 rows = []
@@ -210,6 +217,10 @@ def migrate_yaml_to_sqlite(cfg: ProjConfig, project_name: str) -> dict[str, int 
                     "INSERT INTO decisions (timestamp, text, todo_id, tags) VALUES (?, ?, ?, ?)",
                     (timestamp, text, todo_id, tags),
                 )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
     finally:
         conn.close()
 

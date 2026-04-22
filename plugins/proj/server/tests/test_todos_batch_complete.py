@@ -277,6 +277,13 @@ def test_archive_and_remove_todos_atomic_no_empty_window(cfg: ProjConfig, tmp_pa
         stop_reader.set()
         rt.join(timeout=5)
 
+    # Guard against vacuous pass if the reader never got scheduled.
+    assert len(observed_counts) >= 20, (
+        f"Reader captured too few observations ({len(observed_counts)}); "
+        f"test is racing itself — increase archive iteration count or "
+        f"check scheduler pressure."
+    )
+
     # Reader should NEVER have seen an empty-todos window.
     # Pre-archive = 6, post-archive (remaining) = 3, after restore = 6.
     # Any count other than 3 or 6 indicates an intermediate-state leak.
