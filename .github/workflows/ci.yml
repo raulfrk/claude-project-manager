@@ -66,6 +66,8 @@ jobs:
             path: plugins/jira/server
           - plugin: todoist
             path: plugins/todoist/server
+          - plugin: confluence
+            path: plugins/confluence/server
           - plugin: _shared
             path: plugins/_shared
     name: test (${{ matrix.plugin }})
