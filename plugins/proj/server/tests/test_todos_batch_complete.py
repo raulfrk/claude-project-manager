@@ -230,6 +230,64 @@ async def test_atomic_save_single_write(project_with_todos, mcp_app, monkeypatch
 
 
 @pytest.mark.xdist_group("serial")
+def test_archive_and_remove_todos_atomic_no_empty_window(cfg: ProjConfig, tmp_path: Path):
+    """storage.archive_and_remove_todos must not expose an empty-todos window.
+
+    Regression test for 698. The prior impl used ``with conn:`` under
+    ``isolation_level=None`` (autocommit) which is a no-op for transactions.
+    The DELETE+INSERT ran as separate autocommit statements, exposing an
+    empty window that concurrent readers observed.
+
+    This test spawns a reader thread that reads todos in a tight loop while
+    the main thread runs archive_and_remove_todos. If atomicity holds, the
+    reader sees counts of EITHER pre-archive (6) OR post-archive (3), never
+    the intermediate empty state (0).
+    """
+    setup_project(cfg, "myapp", str(tmp_path))
+    todos = [_make_todo(str(i)) for i in range(1, 7)]
+    storage.save_todos(cfg, "myapp", todos)
+
+    # Pre-archive count must be 6.
+    assert len(storage.load_todos(cfg, "myapp")) == 6
+
+    observed_counts: list[int] = []
+    stop_reader = threading.Event()
+
+    def reader() -> None:
+        while not stop_reader.is_set():
+            try:
+                count = len(storage.load_todos(cfg, "myapp"))
+                observed_counts.append(count)
+            except Exception:
+                pass  # schema_version transient errors during test setup are OK
+
+    rt = threading.Thread(target=reader)
+    rt.start()
+    try:
+        # Race the archive against ~many reader iterations.
+        for _ in range(20):
+            # Reset state so we can run multiple iterations.
+            storage.save_todos(cfg, "myapp", todos)
+            to_archive = todos[:3]
+            remaining = todos[3:]
+            storage.archive_and_remove_todos(cfg, "myapp", remaining, to_archive)
+            # Restore for next iteration.
+            storage.save_todos(cfg, "myapp", todos)
+    finally:
+        stop_reader.set()
+        rt.join(timeout=5)
+
+    # Reader should NEVER have seen an empty-todos window.
+    # Pre-archive = 6, post-archive (remaining) = 3, after restore = 6.
+    # Any count other than 3 or 6 indicates an intermediate-state leak.
+    unexpected = [c for c in observed_counts if c not in {3, 6}]
+    assert not unexpected, (
+        f"Reader saw non-atomic counts: {set(unexpected)} "
+        f"(total observations: {len(observed_counts)})"
+    )
+
+
+@pytest.mark.xdist_group("serial")
 def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
     """Two threads calling todo_batch_complete must serialize under _BATCH_COMPLETE_LOCK."""
     from server.tools import todos as todos_mod
@@ -243,6 +301,7 @@ def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
     assert isinstance(todos_mod._BATCH_COMPLETE_LOCK, type(threading.Lock()))
 
     errors: list[Exception] = []
+    responses: dict[str, str] = {}
 
     def worker(ids: list[str]) -> None:
         try:
@@ -256,6 +315,7 @@ def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
             import asyncio
 
             result = asyncio.run(call_tool(app, "todo_complete", todo_ids=ids))
+            responses[",".join(ids)] = result
             _ = json.loads(result)
         except Exception as e:
             errors.append(e)
@@ -270,7 +330,9 @@ def test_concurrent_saves_serialize(cfg: ProjConfig, tmp_path: Path):
     # All 6 ids eventually archived (leaves).
     archived = storage.load_archived_todos(cfg, "myapp")
     archived_ids = {t.id for t in archived}
-    assert archived_ids >= {"1", "2", "3", "4", "5", "6"}
+    assert archived_ids >= {"1", "2", "3", "4", "5", "6"}, (
+        f"archived_ids={archived_ids} | responses={responses}"
+    )
 
 
 # ─── Family archival walk ───────────────────────────────────────────────────

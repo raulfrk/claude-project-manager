@@ -80,8 +80,15 @@ def archive_and_remove_todos(
     """
     db_file = ensure_db(cfg, project_name)
     conn = get_connection(db_file)
+    # Explicit BEGIN/COMMIT — the connection runs with isolation_level=None
+    # (autocommit), so `with conn:` is a no-op and each execute() would
+    # commit independently. That exposes an empty-todos window between the
+    # DELETE and the INSERT, which concurrent readers (e.g. Phase 1c
+    # pre-lock validation in _batch_complete) observe as missing ids and
+    # error out.
     try:
-        with conn:  # auto-commit on success, auto-rollback on exception
+        conn.execute("BEGIN")
+        try:
             # 1. Upsert archived todos into archive_todos
             if to_archive:
                 _insert_archive_sql = (
@@ -109,6 +116,10 @@ def archive_and_remove_todos(
                     _insert_todos_sql,
                     [_todo_to_row(t, project_name) for t in remaining],
                 )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
     finally:
         conn.close()
 
