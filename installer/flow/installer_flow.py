@@ -51,6 +51,7 @@ from installer.plugin_cli import (
 from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
 
+
 def _resolve_source_locally(args: Any) -> tuple[str, str | None]:
     """Lazy import to avoid circular dependency w/ installer.main."""
     from installer.main import _resolve_marketplace_source
