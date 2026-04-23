@@ -4,7 +4,7 @@ from hook_dispatch import enable_hook_dispatch
 from hook_transport import run_dual
 from mcp.server.fastmcp import FastMCP
 
-from server.tools import index, links, log, page, scope
+from server.tools import index, links, lint, log, page, scope, search
 
 mcp = FastMCP("wiki")
 enable_hook_dispatch(mcp)
@@ -14,6 +14,8 @@ index.register(mcp)
 log.register(mcp)
 links.register(mcp)
 scope.register(mcp)
+search.register(mcp)
+lint.register(mcp)
 
 
 def main() -> None:
