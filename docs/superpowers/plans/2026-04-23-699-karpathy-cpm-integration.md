@@ -97,12 +97,12 @@ Expected structure:
 
 If the file deviates from this structure, **stop** and re-evaluate the plan with the user — the rules below assume this layout.
 
-### Task 3: Add forrestchang 4-principle backbone (rules 15-18)
+### Task 3: Add forrestchang 4-principle backbone (rules 16-19)
 
 **Files:**
 - Modify: `plugins/_shared/claudemd/managed_section.md` (insert after current rule on line 20)
 
-- [ ] **Step 1: Append rules 15-18 before the end marker**
+- [ ] **Step 1: Append rules 16-19 before the end marker**
 
 Use Edit tool to insert these 4 rules between the last existing rule (line 20, the wiki+proj_search rule) and the `<!-- claude-project-manager:end -->` marker on line 21.
 
@@ -112,7 +112,7 @@ The new content (caveman-ultra phrasing, attributed inline):
 - **Think before coding** — Don't assume; don't hide confusion; surface tradeoffs. Before impl: state assumptions explicit (uncertain → ask); multi-interpretations → present, don't pick silently; simpler approach exists → push back; unclear → stop + ask. See rule 4 for batching the asks. *(Source: Karpathy late-2025 LLM-coding-pitfalls tweet, distilled by forrestchang/andrej-karpathy-skills MIT.)*
 - **Simplicity first** — Min code that solves problem. No features beyond ask. No abstractions for single-use code. No "flexibility"/"configurability" not requested. No err handling for impossible scenarios. 200 lines could be 50 → rewrite. Senior-eng overcomplicated test: yes → simplify. *(Source: same.)*
 - **Surgical changes** — Touch only what task requires. No drive-by refactor. Match existing style. Notice unrelated dead code → mention, don't delete. Changes that orphan imports/vars/fns → remove only orphans you created. Test: every changed line traces directly to user request. See also rule 5 for patch-style API choice. *(Source: same.)*
-- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: "Add validation" → "Tests for invalid inputs, then make pass"; "Fix bug" → "Test that reproduces, then make pass"; "Refactor X" → "Tests pass before + after". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 13 for mid-task verification. *(Source: same.)*
+- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: "Add validation" → "Tests for invalid inputs, then make pass"; "Fix bug" → "Test that reproduces, then make pass"; "Refactor X" → "Tests pass before + after". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 14 for mid-task verification. *(Source: same.)*
 ```
 
 Edit operation:
@@ -121,7 +121,7 @@ Edit operation:
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/_shared/claudemd/managed_section.md",
     old_string="- **Wiki + proj_search are primary knowledge sources** — When you need project or domain info, first query `/wiki:query` (skip if wiki plugin disabled), then `mcp__plugin_proj_proj__proj_search_knowledge`, then fall back to `Explore` / `general-purpose` subagents for code-level search. These stores are authoritative; training priors and guesswork are not. Use before making claims, design decisions, or asking the user for information that might already be captured.\n<!-- claude-project-manager:end -->",
-    new_string="- **Wiki + proj_search are primary knowledge sources** — When you need project or domain info, first query `/wiki:query` (skip if wiki plugin disabled), then `mcp__plugin_proj_proj__proj_search_knowledge`, then fall back to `Explore` / `general-purpose` subagents for code-level search. These stores are authoritative; training priors and guesswork are not. Use before making claims, design decisions, or asking the user for information that might already be captured.\n- **Think before coding** — Don't assume; don't hide confusion; surface tradeoffs. Before impl: state assumptions explicit (uncertain → ask); multi-interpretations → present, don't pick silently; simpler approach exists → push back; unclear → stop + ask. See rule 4 for batching the asks. *(Source: Karpathy late-2025 LLM-coding-pitfalls tweet, distilled by forrestchang/andrej-karpathy-skills MIT.)*\n- **Simplicity first** — Min code that solves problem. No features beyond ask. No abstractions for single-use code. No \"flexibility\"/\"configurability\" not requested. No err handling for impossible scenarios. 200 lines could be 50 → rewrite. Senior-eng overcomplicated test: yes → simplify. *(Source: same.)*\n- **Surgical changes** — Touch only what task requires. No drive-by refactor. Match existing style. Notice unrelated dead code → mention, don't delete. Changes that orphan imports/vars/fns → remove only orphans you created. Test: every changed line traces directly to user request. See also rule 5 for patch-style API choice. *(Source: same.)*\n- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 13 for mid-task verification. *(Source: same.)*\n<!-- claude-project-manager:end -->",
+    new_string="- **Wiki + proj_search are primary knowledge sources** — When you need project or domain info, first query `/wiki:query` (skip if wiki plugin disabled), then `mcp__plugin_proj_proj__proj_search_knowledge`, then fall back to `Explore` / `general-purpose` subagents for code-level search. These stores are authoritative; training priors and guesswork are not. Use before making claims, design decisions, or asking the user for information that might already be captured.\n- **Think before coding** — Don't assume; don't hide confusion; surface tradeoffs. Before impl: state assumptions explicit (uncertain → ask); multi-interpretations → present, don't pick silently; simpler approach exists → push back; unclear → stop + ask. See rule 4 for batching the asks. *(Source: Karpathy late-2025 LLM-coding-pitfalls tweet, distilled by forrestchang/andrej-karpathy-skills MIT.)*\n- **Simplicity first** — Min code that solves problem. No features beyond ask. No abstractions for single-use code. No \"flexibility\"/\"configurability\" not requested. No err handling for impossible scenarios. 200 lines could be 50 → rewrite. Senior-eng overcomplicated test: yes → simplify. *(Source: same.)*\n- **Surgical changes** — Touch only what task requires. No drive-by refactor. Match existing style. Notice unrelated dead code → mention, don't delete. Changes that orphan imports/vars/fns → remove only orphans you created. Test: every changed line traces directly to user request. See also rule 5 for patch-style API choice. *(Source: same.)*\n- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 14 for mid-task verification. *(Source: same.)*\n<!-- claude-project-manager:end -->",
 )
 ```
 
@@ -133,30 +133,30 @@ grep -c "^- \*\*" plugins/_shared/claudemd/managed_section.md
 
 Expected: `18`
 
-### Task 4: Add cpm-layer additions (rules 19-23)
+### Task 4: Add cpm-layer additions (rules 20-24)
 
 **Files:**
 - Modify: `plugins/_shared/claudemd/managed_section.md`
 
-- [ ] **Step 1: Append rules 19-23 before the end marker**
+- [ ] **Step 1: Append rules 20-24 before the end marker**
 
 The new content:
 
 ```markdown
 - **Append-only log convention** — Record events/findings/decisions to project notes via `notes_append` w/ heading param. Heading prefix format: `## [YYYY-MM-DD HH:MM] {op} | {title}`. `op` ∈ {note, decision, incident, experiment, fix, refactor, checkpoint, save}. `grep "^## \[" notes.md | tail -10` works universally. Reserve `proj_decision_log` for structured A/B picks needing tag-based filtering. See also rule 3 for actionable findings → todos. *(Source: Karpathy nanochat dev/LOG.md + llm-wiki gist.)*
-- **Reset over recover** — Agent skips cases / fabricates completion / degrades reasoning during multi-step work → prefer `wt_remove` + new `wt_create` w/ tightened scope over patching trajectory. Use `/proj:checkpoint` for explicit invocation. See also rules 6 + 12 for worktree mechanics. *(Source: Howells swift-port writeup + Ronacher abort-before-compact.)*
+- **Reset over recover** — Agent skips cases / fabricates completion / degrades reasoning during multi-step work → prefer `wt_remove` + new `wt_create` w/ tightened scope over patching trajectory. Use `/proj:checkpoint` for explicit invocation. See also rules 6 + 13 for worktree mechanics. *(Source: Howells swift-port writeup + Ronacher abort-before-compact.)*
 - **Reproduce before fix** — Bug-fix tasks must produce reproducible failing test before patching code. No exceptions for "obvious" bugs. Test commit first, fix commit second. *(Source: Howells "told the agent not to fix any fuzzer crashes … but to investigate and create a test file which reproduces the crash".)*
 - **Principled across config scales** — Changes to plugins / shared infra reject point fixes that only help one config / profile / plugin. Must work across plugin matrix. Single-row fix → expand fix or document why asymmetry intentional. *(Source: Karpathy nanochat — "any candidate changes to the repo have to be principled enough that they work for all settings of depth".)*
 - **Mid-execution checkpoint rhythm** — During multi-step impl, suggest `/proj:checkpoint` when TaskCreate-tracked phase completes OR user pauses to evaluate. Asks: continue / reset+restart w/ tightened scope / tighten scope only. Don't require Claude to count tasks — anchor on phase-boundary signals or explicit user pause. *(Source: derived from Howells reset-over-recover + Karpathy autonomy-slider per task.)*
 ```
 
-Edit operation: same pattern as Task 3 — find the rule 18 closing line + end marker, replace with rule 18 + new rules 19-23 + end marker.
+Edit operation: same pattern as Task 3 — find the rule 19 closing line + end marker, replace with rule 19 + new rules 20-24 + end marker.
 
 ```python
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/_shared/claudemd/managed_section.md",
-    old_string="- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 13 for mid-task verification. *(Source: same.)*\n<!-- claude-project-manager:end -->",
-    new_string="- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 13 for mid-task verification. *(Source: same.)*\n- **Append-only log convention** — Record events/findings/decisions to project notes via `notes_append` w/ heading param. Heading prefix format: `## [YYYY-MM-DD HH:MM] {op} | {title}`. `op` ∈ {note, decision, incident, experiment, fix, refactor, checkpoint, save}. `grep \"^## \\[\" notes.md | tail -10` works universally. Reserve `proj_decision_log` for structured A/B picks needing tag-based filtering. See also rule 3 for actionable findings → todos. *(Source: Karpathy nanochat dev/LOG.md + llm-wiki gist.)*\n- **Reset over recover** — Agent skips cases / fabricates completion / degrades reasoning during multi-step work → prefer `wt_remove` + new `wt_create` w/ tightened scope over patching trajectory. Use `/proj:checkpoint` for explicit invocation. See also rules 6 + 12 for worktree mechanics. *(Source: Howells swift-port writeup + Ronacher abort-before-compact.)*\n- **Reproduce before fix** — Bug-fix tasks must produce reproducible failing test before patching code. No exceptions for \"obvious\" bugs. Test commit first, fix commit second. *(Source: Howells \"told the agent not to fix any fuzzer crashes … but to investigate and create a test file which reproduces the crash\".)*\n- **Principled across config scales** — Changes to plugins / shared infra reject point fixes that only help one config / profile / plugin. Must work across plugin matrix. Single-row fix → expand fix or document why asymmetry intentional. *(Source: Karpathy nanochat — \"any candidate changes to the repo have to be principled enough that they work for all settings of depth\".)*\n- **Mid-execution checkpoint rhythm** — During multi-step impl, suggest `/proj:checkpoint` when TaskCreate-tracked phase completes OR user pauses to evaluate. Asks: continue / reset+restart w/ tightened scope / tighten scope only. Don't require Claude to count tasks — anchor on phase-boundary signals or explicit user pause. *(Source: derived from Howells reset-over-recover + Karpathy autonomy-slider per task.)*\n<!-- claude-project-manager:end -->",
+    old_string="- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 14 for mid-task verification. *(Source: same.)*\n<!-- claude-project-manager:end -->",
+    new_string="- **Goal-driven execution** — Define success criteria. Loop until verified. Transform tasks → verifiable goals: \"Add validation\" → \"Tests for invalid inputs, then make pass\"; \"Fix bug\" → \"Test that reproduces, then make pass\"; \"Refactor X\" → \"Tests pass before + after\". Multi-step: `[step] → verify: [check]`. Strong criteria → loop independently; weak criteria → constant clarification. See also rule 14 for mid-task verification. *(Source: same.)*\n- **Append-only log convention** — Record events/findings/decisions to project notes via `notes_append` w/ heading param. Heading prefix format: `## [YYYY-MM-DD HH:MM] {op} | {title}`. `op` ∈ {note, decision, incident, experiment, fix, refactor, checkpoint, save}. `grep \"^## \\[\" notes.md | tail -10` works universally. Reserve `proj_decision_log` for structured A/B picks needing tag-based filtering. See also rule 3 for actionable findings → todos. *(Source: Karpathy nanochat dev/LOG.md + llm-wiki gist.)*\n- **Reset over recover** — Agent skips cases / fabricates completion / degrades reasoning during multi-step work → prefer `wt_remove` + new `wt_create` w/ tightened scope over patching trajectory. Use `/proj:checkpoint` for explicit invocation. See also rules 6 + 13 for worktree mechanics. *(Source: Howells swift-port writeup + Ronacher abort-before-compact.)*\n- **Reproduce before fix** — Bug-fix tasks must produce reproducible failing test before patching code. No exceptions for \"obvious\" bugs. Test commit first, fix commit second. *(Source: Howells \"told the agent not to fix any fuzzer crashes … but to investigate and create a test file which reproduces the crash\".)*\n- **Principled across config scales** — Changes to plugins / shared infra reject point fixes that only help one config / profile / plugin. Must work across plugin matrix. Single-row fix → expand fix or document why asymmetry intentional. *(Source: Karpathy nanochat — \"any candidate changes to the repo have to be principled enough that they work for all settings of depth\".)*\n- **Mid-execution checkpoint rhythm** — During multi-step impl, suggest `/proj:checkpoint` when TaskCreate-tracked phase completes OR user pauses to evaluate. Asks: continue / reset+restart w/ tightened scope / tighten scope only. Don't require Claude to count tasks — anchor on phase-boundary signals or explicit user pause. *(Source: derived from Howells reset-over-recover + Karpathy autonomy-slider per task.)*\n<!-- claude-project-manager:end -->",
 )
 ```
 
@@ -168,7 +168,7 @@ grep -c "^- \*\*" plugins/_shared/claudemd/managed_section.md
 
 Expected: `23`
 
-### Task 5: Add cross-references to existing rules 3, 5, 13
+### Task 5: Add cross-references to existing rules 3, 5, 14
 
 **Files:**
 - Modify: `plugins/_shared/claudemd/managed_section.md`
@@ -183,7 +183,7 @@ Find the rule 3 text and append a cross-reference at the end of the bullet (befo
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/_shared/claudemd/managed_section.md",
     old_string="If the user says to ignore a finding, do not auto-add it.",
-    new_string="If the user says to ignore a finding, do not auto-add it. For non-actionable findings or event records (no follow-up action needed), use `notes_append` w/ heading convention (rule 19) instead of creating a todo.",
+    new_string="If the user says to ignore a finding, do not auto-add it. For non-actionable findings or event records (no follow-up action needed), use `notes_append` w/ heading convention (rule 20) instead of creating a todo.",
 )
 ```
 
@@ -193,17 +193,17 @@ Edit(
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/_shared/claudemd/managed_section.md",
     old_string="This reduces payload size by 95%+ on large notes/requirements.",
-    new_string="This reduces payload size by 95%+ on large notes/requirements. See also rule 17 for diff-scope discipline (touch only what's needed).",
+    new_string="This reduces payload size by 95%+ on large notes/requirements. See also rule 18 for diff-scope discipline (touch only what's needed).",
 )
 ```
 
-- [ ] **Step 3: Cross-ref on existing rule 13 (Verify before asserting)**
+- [ ] **Step 3: Cross-ref on existing rule 14 (Verify before asserting)**
 
 ```python
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/_shared/claudemd/managed_section.md",
     old_string="This rule fires mid-task — not only at completion — and complements `superpowers:verification-before-completion` (which runs at the claim-work-done boundary).",
-    new_string="This rule fires mid-task — not only at completion — and complements `superpowers:verification-before-completion` (which runs at the claim-work-done boundary). See also rule 18 for pre-task verification framing (define success criteria up front).",
+    new_string="This rule fires mid-task — not only at completion — and complements `superpowers:verification-before-completion` (which runs at the claim-work-done boundary). See also rule 19 for pre-task verification framing (define success criteria up front).",
 )
 ```
 
@@ -213,7 +213,7 @@ Edit(
 grep -n "See also rule" plugins/_shared/claudemd/managed_section.md
 ```
 
-Expected: at least 5 matches (3 from this task: lines for rules 3, 5, 13; plus the 2 already inline in new rules 17 + 18 from Task 3).
+Expected: at least 5 matches (3 from this task: lines for rules 3, 5, 14; plus the 2 already inline in new rules 18 + 19 from Task 3).
 
 ### Task 6: Update top-level README.md w/ Karpathy alignment section
 
@@ -329,14 +329,14 @@ git status
 git commit -m "$(cat <<'EOF'
 feat(claudemd/699): managed-block additions for Karpathy alignment
 
-Add rules 15-23 to the cpm managed CLAUDE.md block:
+Add rules 16-24 to the cpm managed CLAUDE.md block:
 - Rules 15-18: forrestchang/andrej-karpathy-skills 4-principle backbone
   (Think Before Coding, Simplicity First, Surgical Changes,
   Goal-Driven Execution) verbatim w/ MIT attribution.
 - Rules 19-23: cpm-layer additions (append-only log convention,
   reset-over-recover, reproduce-before-fix, principled-across-
   config-scales, mid-execution checkpoint rhythm).
-- Cross-references added on existing rules 3, 5, 13.
+- Cross-references added on existing rules 3, 5, 14.
 
 Phase 1 of the 4-phase Karpathy CPM integration plan
 (docs/superpowers/specs/2026-04-23-karpathy-cpm-integration-design.md).
@@ -656,7 +656,7 @@ Replace with:
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/proj/skills/save/SKILL.md",
     old_string="**10.** `mcp__proj__notes_append` w/ one-line summary.",
-    new_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 19) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.",
+    new_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.",
 )
 ```
 
@@ -667,8 +667,8 @@ After step 10, before step 11 (Wiki auto-ingest):
 ```python
 Edit(
     file_path="/home/raul/projects/claude-project-manager/plugins/proj/skills/save/SKILL.md",
-    old_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 19) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.\n\n**11.** Wiki auto-ingest (if enabled):",
-    new_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 19) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.\n\n**10b.** Decision-log reminder (light prompt, single dismiss):\n - Step 8 logged 0 decisions (no Key Decisions in synthesis) → ask via `AskUserQuestion`: \"No decisions logged this session. Any to capture before save?\" Options: Yes / No.\n - Yes → user supplies decision text; call `mcp__proj__notes_append(heading=<short title>, op=\"decision\", text=<full text>)`. Optionally also call `mcp__proj__proj_decision_log` if user marks it as a structured A/B pick.\n - No → proceed silently to step 11.\n - Step 8 logged ≥1 decision → skip reminder.\n\n**11.** Wiki auto-ingest (if enabled):",
+    old_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.\n\n**11.** Wiki auto-ingest (if enabled):",
+    new_string="**10.** `mcp__proj__notes_append(heading=\"<session date>\", op=\"session\", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep \"^## \\[\" notes.md | tail -10`-friendly.\n\n**10b.** Decision-log reminder (light prompt, single dismiss):\n - Step 8 logged 0 decisions (no Key Decisions in synthesis) → ask via `AskUserQuestion`: \"No decisions logged this session. Any to capture before save?\" Options: Yes / No.\n - Yes → user supplies decision text; call `mcp__proj__notes_append(heading=<short title>, op=\"decision\", text=<full text>)`. Optionally also call `mcp__proj__proj_decision_log` if user marks it as a structured A/B pick.\n - No → proceed silently to step 11.\n - Step 8 logged ≥1 decision → skip reminder.\n\n**11.** Wiki auto-ingest (if enabled):",
 )
 ```
 
@@ -723,7 +723,7 @@ git commit -m "$(cat <<'EOF'
 feat(proj/699): notes_append heading param + /proj:save adoption
 
 Phase 2 of the Karpathy CPM integration. Implements the chronological
-log convention (managed-block rule 19, shipped in Phase 1):
+log convention (managed-block rule 20, shipped in Phase 1):
 
 - storage.append_note: new heading + op kwargs. When heading provided,
   uses '## [YYYY-MM-DD HH:MM] {op} | {title}' prefix. When absent,
@@ -825,7 +825,7 @@ Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/t
  - Diff cmd: `git diff <base-sha>..HEAD --stat` + `git diff <base-sha>..HEAD --name-only`.
 
 **4.** Surface diff:
- - revdiff available (rule 10 check: `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` AND `which revdiff` returns 0):
+ - revdiff available (rule 11 check: `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` AND `which revdiff` returns 0):
      - Invoke `revdiff:revdiff` skill w/ ref args `<base-sha> HEAD`.
  - Else: render inline — `git diff --stat` output + bullet summary per file (line counts, brief purpose).
 
@@ -843,7 +843,7 @@ Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/t
 
 **7.** Apply chosen action:
  - Continue → `cd <wt_path> && git notes add -m "checkpoint" HEAD`. `notes_append(op="checkpoint", heading="continue", text="<diff summary + decision rationale>")`.
- - Reset → `mcp__plugin_worktree_worktree__wt_remove(path=<old>)`; `mcp__plugin_worktree_worktree__wt_create(repo_label=<x>, branch=<old-branch>-v2, base="dev", path=<old>-v2)`. Sync per rule 12 (fetch + reset). `notes_append(op="checkpoint", heading="reset to v2: <user-supplied scope>", text="<reason>")`. Inform user new wt path.
+ - Reset → `mcp__plugin_worktree_worktree__wt_remove(path=<old>)`; `mcp__plugin_worktree_worktree__wt_create(repo_label=<x>, branch=<old-branch>-v2, base="dev", path=<old>-v2)`. Sync per rule 13 (fetch + reset). `notes_append(op="checkpoint", heading="reset to v2: <user-supplied scope>", text="<reason>")`. Inform user new wt path.
  - Tighten → `notes_append(op="checkpoint", heading="tightened: <constraint>", text="<full text>")`. Continue on same branch.
 
 **8.** "Checkpoint complete. Next action: <continue|reset|tighten>."
@@ -859,7 +859,7 @@ Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/t
 - No active project → display err, stop.
 - No worktrees → display err: "No worktrees found. Create via wt_create first.", stop.
 - `git notes` not supported (some configs disable) → fall back to base-branch divergence (step 3 fallback path) silently.
-- revdiff missing or fails to launch → fall back to inline diff render silently (per rule 10).
+- revdiff missing or fails to launch → fall back to inline diff render silently (per rule 11).
 - User cancels AskUserQuestion → no action; state preserved.
 - wt_create fails on reset path → display err, original worktree NOT removed (safety).
 
@@ -914,7 +914,7 @@ This checklist verifies `/proj:checkpoint` works end-to-end. User-interactive pr
 3. [ ] Provide a tightened-scope statement when prompted.
 4. [ ] Verify the original worktree is removed (`wt_list` no longer shows it).
 5. [ ] Verify a new worktree exists with branch suffix `-v2` (e.g. `feat/foo` → `feat/foo-v2`).
-6. [ ] Verify the new worktree was synced to remote (per rule 12).
+6. [ ] Verify the new worktree was synced to remote (per rule 13).
 7. [ ] Verify `notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | reset to v2: <scope>`.
 
 ### Scenario C: Reset path with custom suffix via $ARGUMENTS
@@ -1025,10 +1025,10 @@ feat(proj/699): /proj:checkpoint skill for mid-execution review
 
 Phase 3 of the Karpathy CPM integration. New skill that fills the
 "mid-execution continue/reset/tighten" decision surface (managed-block
-rules 20 + 23, shipped in Phase 1):
+rules 21 + 24, shipped in Phase 1):
 
 - plugins/proj/skills/checkpoint/SKILL.md (caveman ultra) — composes
-  proj_get_active, wt_list/wt_remove/wt_create, revdiff (per rule 10),
+  proj_get_active, wt_list/wt_remove/wt_create, revdiff (per rule 11),
   notes_append (Phase 2 heading convention), AskUserQuestion, git CLI.
 - Manual E2E checklist covers 6 scenarios (continue/reset/tighten +
   custom suffix + revdiff fallback + no-worktrees err path).
@@ -1102,10 +1102,10 @@ Per Phase 4 of the spec (docs/superpowers/specs/2026-04-23-karpathy-cpm-integrat
    - Target: at least one checkpoint per multi-step session with 3+ tasks
 
 3. Rule adherence (qualitative): manual review of last 10 multi-step sessions for:
-   - Drive-by-refactor incidents (rule 17 violations)
-   - Assumptions surfaced before coding vs picked silently (rule 15 adherence)
-   - Bug fixes preceded by failing test (rule 21 adherence)
-   - Reset-over-recover invocations on detected drift (rule 20)
+   - Drive-by-refactor incidents (rule 18 violations)
+   - Assumptions surfaced before coding vs picked silently (rule 16 adherence)
+   - Bug fixes preceded by failing test (rule 22 adherence)
+   - Reset-over-recover invocations on detected drift (rule 21)
    Score 0-3 per category per session.
 
 ## Deliverable
@@ -1179,10 +1179,10 @@ After executing each phase, verify:
 
 ## Notes
 
-- **Phase ordering matters.** Phase 2 is required before Phase 3 (checkpoint skill calls `notes_append(heading=..., op="checkpoint")`, which requires the Phase 2 extension). Phase 1 should land before Phase 2 (the managed-block rule 19 references the convention Phase 2 implements).
+- **Phase ordering matters.** Phase 2 is required before Phase 3 (checkpoint skill calls `notes_append(heading=..., op="checkpoint")`, which requires the Phase 2 extension). Phase 1 should land before Phase 2 (the managed-block rule 20 references the convention Phase 2 implements).
 - **Each phase ships independently** to dev with its own CI green moment.
 - **No worktree for the plan itself** — plan lives on `dev`. Worktrees are created per-phase for implementation.
-- **If a phase fails CI**, do NOT proceed to the next phase. Investigate root cause + fix on the same worktree. Per managed-block rule 20, if drift accumulates, prefer `wt_remove` + new `wt_create` over patching the failing trajectory.
+- **If a phase fails CI**, do NOT proceed to the next phase. Investigate root cause + fix on the same worktree. Per managed-block rule 21, if drift accumulates, prefer `wt_remove` + new `wt_create` over patching the failing trajectory.
 - **Caveman-ultra phrasing** in Phase 1 rules + Phase 3 SKILL.md is per project convention (see project CLAUDE.md). Not bargainable.
 - **forrestchang attribution** uses inline per-rule citations in the managed-block (`*(Source: ...)*` tail per rule). Per spec open-question resolution: this is the chosen attribution style.
 - **Existing decisions.json migration** is explicitly out of scope (spec non-goal). Leave as dual-source.
