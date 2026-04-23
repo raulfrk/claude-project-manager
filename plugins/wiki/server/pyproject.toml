@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "wiki-mcp-server"
+name = "wiki-server"
 version = "0.1.0"
 description = "MCP server for Karpathy-style LLM wiki"
 requires-python = ">=3.12"
@@ -63,7 +63,8 @@ reportPrivateUsage = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=72", "-n", "auto"]
+addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=85", "-n", "auto"]
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 branch = true
