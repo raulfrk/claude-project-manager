@@ -10,7 +10,7 @@
 #   2. installer at repo root second (cpm-install pyproject lives here).
 #   3. Remaining plugin servers in declaration order.
 
-_PLUGIN_DIRS := "plugins/router/server plugins/proj/server plugins/worktree/server plugins/todoist/server plugins/trello/server plugins/jira/server"
+_PLUGIN_DIRS := "plugins/router/server plugins/proj/server plugins/worktree/server plugins/todoist/server plugins/trello/server plugins/jira/server plugins/confluence/server plugins/wiki/server"
 
 default: help
 

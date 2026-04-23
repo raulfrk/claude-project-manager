@@ -345,3 +345,22 @@ class TestCheckLockfilesPinNewVersion:
         assert expected == "0.4.11"
         assert actual is None
         assert path == bogus_path
+
+
+class TestLockfilesRoster:
+    """Pin the LOCKFILES roster so a new plugin addition that forgets to extend it fails here."""
+
+    def test_lockfiles_roster_is_exhaustive(self) -> None:
+        expected = {
+            "uv.lock",
+            "plugins/_shared/uv.lock",
+            "plugins/router/server/uv.lock",
+            "plugins/proj/server/uv.lock",
+            "plugins/worktree/server/uv.lock",
+            "plugins/todoist/server/uv.lock",
+            "plugins/trello/server/uv.lock",
+            "plugins/jira/server/uv.lock",
+            "plugins/confluence/server/uv.lock",
+            "plugins/wiki/server/uv.lock",
+        }
+        assert set(check_shared_version.LOCKFILES) == expected

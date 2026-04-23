@@ -14,7 +14,8 @@ LOCKFILES: list[str] = [
     "plugins/todoist/server/uv.lock",
     "plugins/trello/server/uv.lock",
     "plugins/jira/server/uv.lock",
-    "plugins/confluence/server/uv.lock",  # NOTE: not in justfile `_PLUGIN_DIRS` — sync manually
+    "plugins/confluence/server/uv.lock",
+    "plugins/wiki/server/uv.lock",
 ]
 
 
