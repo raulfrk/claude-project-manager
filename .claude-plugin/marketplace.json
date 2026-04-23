@@ -85,6 +85,22 @@
       ]
     },
     {
+      "name": "wiki",
+      "source": "./plugins/wiki",
+      "description": "Karpathy-style LLM wiki: persistent markdown knowledge base with entity pages, cross-refs, + append-only log",
+      "version": "0.1.0",
+      "author": {
+        "name": "raulfrk"
+      },
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "wiki",
+        "knowledge-base",
+        "markdown"
+      ]
+    },
+    {
       "name": "jira",
       "source": "./plugins/jira",
       "description": "Read-only Jira Server issue and project access via REST API.",
