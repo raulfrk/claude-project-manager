@@ -6,25 +6,7 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from tests.conftest import call_tool
-
-
-def _write_page(wiki_dir: Path, category: str | None, slug: str, **fm_overrides) -> None:
-    base = {
-        "title": slug.replace("-", " ").title(),
-        "tags": [],
-        "links_to": [],
-        "scope": ["global"],
-        "sources": [],
-        "last_ingested": "2026-04-23T10:00:00Z",
-    }
-    base.update(fm_overrides)
-    fm_lines = "\n".join(f"{k}: {json.dumps(v)}" for k, v in base.items())
-    path = wiki_dir / "pages"
-    if category:
-        path = path / category
-    path.mkdir(parents=True, exist_ok=True)
-    (path / f"{slug}.md").write_text(f"---\n{fm_lines}\n---\nbody")
+from tests.conftest import _write_page, call_tool
 
 
 @pytest.mark.asyncio

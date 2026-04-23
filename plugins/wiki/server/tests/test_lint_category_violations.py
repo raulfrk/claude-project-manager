@@ -7,8 +7,7 @@ import pytest
 import yaml
 from mcp.server.fastmcp import FastMCP
 
-from tests.conftest import call_tool
-from tests.test_page_list import _write_page
+from tests.conftest import _write_page, call_tool
 
 
 @pytest.mark.asyncio
