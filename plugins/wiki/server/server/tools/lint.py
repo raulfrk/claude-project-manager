@@ -36,6 +36,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_lint_category_violations)
     mcp.tool()(wiki_lint_stale)
     mcp.tool()(wiki_lint_schema)
+    mcp.tool()(wiki_lint_duplicates)
 
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -337,3 +338,18 @@ def wiki_lint_schema() -> str:
                 }
             )
     return json.dumps({"violations": violations})
+
+
+def wiki_lint_duplicates() -> str:
+    """Pages whose filename stem (slug) collides (case-insensitive) across the wiki.
+
+    Returns JSON {duplicates: [[path_a, path_b, ...], ...]}.
+    """
+    cfg = config_mod.load_config()
+    wiki_dir = cfg.wiki_dir
+    by_slug: dict[str, list[str]] = {}
+    for md, _fm, _body in _iter_pages(wiki_dir):
+        key = md.stem.lower()
+        by_slug.setdefault(key, []).append(str(md))
+    duplicates = [sorted(paths) for paths in by_slug.values() if len(paths) > 1]
+    return json.dumps({"duplicates": duplicates})
