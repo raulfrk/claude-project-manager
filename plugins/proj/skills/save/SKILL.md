@@ -1,7 +1,7 @@
 ---
 name: save
 description: Save session notes, reconcile git activity with todos, and update project context. Use when asked "save session", "proj:save", or at the end of a work session.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, Bash, Write
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__plugin_wiki_wiki__wiki_scope_detect, Task, Read, Bash, Write
 ---
 
 
@@ -70,9 +70,19 @@ Save session ctx; reconcile git activity for active project.
 
 **10.** `mcp__proj__notes_append` w/ one-line summary.
 
-**11.** "Session saved to sessions/<filename>"
+**11.** Wiki auto-ingest (if enabled):
+ - `mcp__proj__config_load` → check `sync.wiki.enabled` + `sync.wiki.auto_ingest_sessions`.
+ - Both false → skip silently.
+ - Both true → spawn forked subagent via `Task`:
+     - `subagent_type="general-purpose"`
+     - `description="Wiki ingest session file"`
+     - `prompt` = contents of `plugins/wiki/skills/ingest/references/subagent-prompt.md` (read via `Read`) w/ `{source}` = `session:<tracking_dir>/<name>/sessions/<filename>`, `{scope}` = `project:<name>` (from step 1), `{wiki_config}` = JSON of `~/.claude/wiki.yaml` + `~/.claude/wiki/config.yaml` (read via `Read`).
+ - Subagent success → "Wiki ingest: N pages created, M updated."
+ - Subagent failure → warn: "Wiki ingest failed: <err>. Session file saved. Retry manually via `/wiki:ingest session:<path>`." + continue.
 
-**12.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Save: session")`.
+**12.** "Session saved to sessions/<filename>"
+
+**13.** Git tracking flush: `mcp__proj__tracking_git_flush(commit_message="Save: session")`.
 
 ## Prerequisites
 
