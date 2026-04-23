@@ -17,4 +17,8 @@ See full design spec at `docs/superpowers/specs/2026-04-21-karpathy-wiki-plugin-
 
 ## Phase status
 
-Phase 1 (this release): core MCP tools only (page CRUD, index, log, links, scope). No skills yet; no lint; no search.
+- **Phase 1** — core persistence tools (page CRUD, index, log, links, scope). ✅
+- **Phase 2** — BM25 search (`wiki_search_bm25`, `wiki_search_index_refresh`), 7 Tier-1 lint tools (`wiki_lint_*`), 3 standalone skills (`/wiki:init`, `/wiki:query`, `/wiki:lint`). ✅
+- **Phase 3** — ingest + bootstrap (URL, file, session, note, search, MCP sources). Pending.
+- **Phase 4** — proj touchpoints (router hook, `/proj:save` integration, wizard), Tier-2 semantic lint. Pending.
+- **Phase 5** — polish + docs. Pending.
