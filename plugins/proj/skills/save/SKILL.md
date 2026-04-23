@@ -16,7 +16,9 @@ Save session ctx; reconcile git activity for active project.
  - Suggestions returned → display. Each todo looking completed per commit msgs, ask user to confirm. `mcp__proj__todo_complete` for confirmed.
  - No suggestions → skip silently.
 
-**3.** Ask user: "Anything to add to session summary? (Enter to skip)"
+**3.** Note from `$ARGUMENTS`:
+ - `$ARGUMENTS` empty → no user note; skip to step 4.
+ - `$ARGUMENTS` non-empty → use the full string verbatim as the user note; include under "## User Note" in step 7's template.
 
 **4.** Synthesise session content from conversation. Extract:
  - Key Decisions: choices made this session
@@ -98,3 +100,8 @@ Active project must be loaded.
 ## Output
 
 `Session saved to sessions/<filename>`. Git reconciliation suggestions (if any). Session file w/ key decisions, todos, insights, open questions.
+
+## Usage
+
+- `/proj:save` → save w/o user note. No prompt.
+- `/proj:save <free-form note>` → save w/ user note = the full argument string.
