@@ -51,10 +51,11 @@ def wiki_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Pat
 @pytest.fixture
 def mcp_app(wiki_setup: dict[str, Path]) -> FastMCP:
     """FastMCP instance with wiki tools registered (expand as tools land)."""
-    from server.tools import page
+    from server.tools import log, page
 
     mcp: FastMCP = FastMCP("wiki-test")
     page.register(mcp)
+    log.register(mcp)
     return mcp
 
 
