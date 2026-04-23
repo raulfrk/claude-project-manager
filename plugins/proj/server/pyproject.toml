@@ -78,6 +78,12 @@ reportUnknownParameterType = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-v", "--tb=short", "--cov=server", "--cov-fail-under=72", "-n", "auto"]
+# pythonpath entries: source-tree fallback so pytest works even when the venv
+# isn't activated or fully synced (e.g. fresh worktree, global `pytest` shim).
+#   "."           — makes `import server` / `import cli` resolve from this dir
+#   "../../_shared" — parent of `hook_dispatch/` package (a path-dep of this
+#                     project but only available via venv install otherwise)
+pythonpath = [".", "../../_shared"]
 
 [tool.coverage.run]
 branch = true
