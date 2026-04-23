@@ -1,0 +1,5 @@
+# Wiki plugin hooks — populated in Phase 4 (proj integration).
+hooks: []
+servers: {}
+settings:
+  max_depth: 3

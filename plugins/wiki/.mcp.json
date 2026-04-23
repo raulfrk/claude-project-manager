@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh", "${CLAUDE_PLUGIN_ROOT}/server", "wiki-server"],
+      "env": {"WIKI_CONFIG": "~/.claude/wiki.yaml"},
+      "timeout": 120
+    }
+  }
+}

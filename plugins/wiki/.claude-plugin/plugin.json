@@ -1,0 +1,9 @@
+{
+  "name": "wiki",
+  "version": "0.1.0",
+  "description": "Karpathy-style LLM wiki: persistent, LLM-maintained markdown knowledge base with entity pages, cross-refs, + append-only log",
+  "author": {"name": "raulfrk"},
+  "license": "MIT",
+  "keywords": ["wiki", "knowledge-base", "markdown", "karpathy"],
+  "mcpServers": "./.mcp.json"
+}
