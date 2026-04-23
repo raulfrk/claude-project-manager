@@ -164,11 +164,13 @@ Optional proj touchpoints (only when proj installed + sync.wiki.enabled):
 wiki:
   enabled: false                        # master switch; default off
   wiki_dir: ~/.claude/wiki
-  bootstrap_completed: false
+  bootstrap_pending: false
   reingest_cooldown_hours: 24
   lint_on_ingest: false
   default_scope: global                 # standalone default; proj overrides when active
 ```
+
+> **Bootstrap field:** the wiki plugin tracks bootstrap state via a single field, `bootstrap_pending: bool` in `~/.claude/wiki.yaml`. The installer sets this `true` when the user defers `/wiki:bootstrap` to a later session; the skill clears it on successful completion. Earlier drafts of this spec referenced `bootstrap_completed` and `proj.yaml::sync.wiki.bootstrap_completed` — neither exists in the current impl. See follow-up todo for broader §4.3 YAML block drift (`wiki:` nesting key, `lint_on_ingest`, `default_scope` are in this example block but not in `WikiConfig`).
 
 **Wiki-local schema config** (`~/.claude/wiki/config.yaml`) — inside the wiki itself:
 ```yaml
@@ -379,8 +381,8 @@ All tools live in `plugins/wiki/server/server/tools/`. Pure persistence + pure-d
 | `wiki_lint_broken_links` | `[[link]]` refs w/ no matching page | — | `{broken: [{from, link}]}` |
 | `wiki_lint_broken_section_refs` | `[[page#section]]` refs where page exists but section heading does not | — | `{broken: [{from, link, resolved_page}]}` |
 | `wiki_lint_category_violations` | Pages whose directory or `category` frontmatter is not in configured profile categories | — | `{violations: [{page, found_category, configured: []}]}` |
-| `wiki_lint_stale` | Pages older than N days | `days` | `{stale: [page]}` |
-| `wiki_lint_schema` | Pages violating required frontmatter | — | `{violations: [{page, missing_fields}]}` |
+| `wiki_lint_stale` | Pages older than N days | `days` | `{stale: [{slug, path, last_ingested, age_days}]}` |
+| `wiki_lint_schema` | Pages violating required frontmatter | — | `{violations: [{page, path, missing_fields, invalid_fields}]}` |
 | `wiki_lint_duplicates` | Pages w/ colliding slugs | — | `{duplicates: [[page_a, page_b]]}` |
 
 **Concurrency**: all writes go through a shared file lock (`threading.Lock` + `fcntl.flock` on `~/.claude/wiki/.lock`). Matches `todo_batch_complete` pattern in proj.

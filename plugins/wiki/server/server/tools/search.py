@@ -65,6 +65,12 @@ def wiki_search_bm25(
 ) -> str:
     """BM25 keyword search over wiki pages. Filters applied post-ranking.
 
+    When category/tags/scope filters are set, the top `limit * 3` BM25 hits
+    are retrieved before filtering. On very large wikis with sparse target
+    categories (e.g. 5 matching pages ranked 61-65 with limit=60), this can
+    miss relevant pages. Consider raising `limit` or using tag-specific
+    indexes if the target category has few pages.
+
     Returns JSON {hits: [{slug, score, snippet, category, tags, scope}]}.
     """
     cfg = config_mod.load_config()
