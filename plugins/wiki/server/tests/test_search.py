@@ -2,29 +2,11 @@
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from tests.conftest import call_tool
-
-
-def _write_page(wiki_dir: Path, category: str, slug: str, body: str, **fm_extras: Any) -> None:
-    import yaml
-
-    fm: dict = {
-        "title": slug.replace("-", " ").title(),
-        "tags": [],
-        "links_to": [],
-        "scope": ["global"],
-        "sources": [],
-        "last_ingested": "2026-04-23T10:00:00Z",
-    }
-    fm.update(fm_extras)
-    path = wiki_dir / "pages" / category
-    path.mkdir(parents=True, exist_ok=True)
-    (path / f"{slug}.md").write_text(f"---\n{yaml.safe_dump(fm)}---\n{body}")
+from tests.conftest import _write_page, call_tool
 
 
 @pytest.mark.asyncio

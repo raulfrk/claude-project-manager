@@ -89,11 +89,18 @@ async def call_tool(app: FastMCP, tool_name: str, **kwargs: Any) -> str:
     return ""
 
 
-def _write_page(wiki_dir: Path, category: str | None, slug: str, **fm_overrides: Any) -> None:
+def _write_page(
+    wiki_dir: Path,
+    category: str | None,
+    slug: str,
+    body: str = "body",
+    **fm_overrides: Any,
+) -> None:
     """Write wiki page w/ default frontmatter + overridable fields.
 
-    Body always 'body'. Category None = flat layout. Use in tests needing
-    known page to exist without full wiki_page_write MCP path.
+    Body defaults to 'body'; pass `body=` to override (e.g. for search/lint
+    tests that need specific content). Category None = flat layout. Use in
+    tests needing known page to exist without full wiki_page_write MCP path.
     """
     import json
 
@@ -111,4 +118,4 @@ def _write_page(wiki_dir: Path, category: str | None, slug: str, **fm_overrides:
     if category:
         path = path / category
     path.mkdir(parents=True, exist_ok=True)
-    (path / f"{slug}.md").write_text(f"---\n{fm_lines}\n---\nbody")
+    (path / f"{slug}.md").write_text(f"---\n{fm_lines}\n---\n{body}")

@@ -9,24 +9,6 @@ from mcp.server.fastmcp import FastMCP
 from tests.conftest import _write_page, call_tool
 
 
-def _write_page_with_body(wiki_dir: Path, category: str, slug: str, body: str, **fm_extras) -> None:
-    """Like _write_page but sets body text (needed for inline [[wikilinks]] + section tests)."""
-    import yaml
-
-    fm = {
-        "title": slug.title(),
-        "tags": [],
-        "links_to": [],
-        "scope": ["global"],
-        "sources": [],
-        "last_ingested": "2026-04-23T10:00:00Z",
-    }
-    fm.update(fm_extras)
-    path = wiki_dir / "pages" / category
-    path.mkdir(parents=True, exist_ok=True)
-    (path / f"{slug}.md").write_text(f"---\n{yaml.safe_dump(fm)}---\n{body}")
-
-
 @pytest.mark.asyncio
 class TestWikiLintBrokenLinks:
     async def test_empty_wiki(self, mcp_app: FastMCP) -> None:
@@ -52,9 +34,7 @@ class TestWikiLintBrokenLinks:
     async def test_inline_wikilink_broken(
         self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
     ) -> None:
-        _write_page_with_body(
-            wiki_setup["wiki_dir"], "concepts", "a", "See [[nonexistent]] for more."
-        )
+        _write_page(wiki_setup["wiki_dir"], "concepts", "a", "See [[nonexistent]] for more.")
         result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_links"))
         assert any(b["link"] == "nonexistent" for b in result["broken"])
 
@@ -62,7 +42,7 @@ class TestWikiLintBrokenLinks:
         self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
     ) -> None:
         _write_page(wiki_setup["wiki_dir"], "concepts", "hooks-plugin", aliases=["hooks"])
-        _write_page_with_body(wiki_setup["wiki_dir"], "concepts", "b", "See [[hooks]] for details.")
+        _write_page(wiki_setup["wiki_dir"], "concepts", "b", "See [[hooks]] for details.")
         result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_links"))
         # [[hooks]] resolves via alias → not broken
         assert not any(b["link"] == "hooks" for b in result["broken"])
@@ -75,13 +55,13 @@ class TestWikiLintBrokenSectionRefs:
         assert result["broken"] == []
 
     async def test_section_present(self, mcp_app: FastMCP, wiki_setup: dict[str, Path]) -> None:
-        _write_page_with_body(
+        _write_page(
             wiki_setup["wiki_dir"],
             "concepts",
             "target",
             "# Target\n\n## Overview\n\nbody",
         )
-        _write_page_with_body(
+        _write_page(
             wiki_setup["wiki_dir"],
             "concepts",
             "a",
@@ -91,13 +71,13 @@ class TestWikiLintBrokenSectionRefs:
         assert result["broken"] == []
 
     async def test_section_missing(self, mcp_app: FastMCP, wiki_setup: dict[str, Path]) -> None:
-        _write_page_with_body(
+        _write_page(
             wiki_setup["wiki_dir"],
             "concepts",
             "target",
             "# Target\n\n## Overview\n\nbody",
         )
-        _write_page_with_body(
+        _write_page(
             wiki_setup["wiki_dir"],
             "concepts",
             "a",
@@ -114,7 +94,7 @@ class TestWikiLintBrokenSectionRefs:
         self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
     ) -> None:
         # When the page itself is missing, broken_links catches it — not broken_section_refs
-        _write_page_with_body(
+        _write_page(
             wiki_setup["wiki_dir"],
             "concepts",
             "a",
