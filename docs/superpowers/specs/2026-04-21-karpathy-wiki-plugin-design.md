@@ -161,16 +161,17 @@ Optional proj touchpoints (only when proj installed + sync.wiki.enabled):
 
 **Wiki runtime config** (`~/.claude/wiki.yaml`) — standalone, owned by wiki plugin:
 ```yaml
-wiki:
-  enabled: false                        # master switch; default off
-  wiki_dir: ~/.claude/wiki
-  bootstrap_pending: false
-  reingest_cooldown_hours: 24
-  lint_on_ingest: false
-  default_scope: global                 # standalone default; proj overrides when active
+enabled: false                          # master switch; default off
+wiki_dir: ~/.claude/wiki
+reingest_cooldown_hours: 24
+bootstrap_pending: false
+session_ingest:
+  section_map: {}                       # heading → wiki category map for /proj:save auto-ingest
 ```
 
-> **Bootstrap field:** the wiki plugin tracks bootstrap state via a single field, `bootstrap_pending: bool` in `~/.claude/wiki.yaml`. The installer sets this `true` when the user defers `/wiki:bootstrap` to a later session; the skill clears it on successful completion. Earlier drafts of this spec referenced `bootstrap_completed` and `proj.yaml::sync.wiki.bootstrap_completed` — neither exists in the current impl. See follow-up todo for broader §4.3 YAML block drift (`wiki:` nesting key, `lint_on_ingest`, `default_scope` are in this example block but not in `WikiConfig`).
+> **Bootstrap field:** the wiki plugin tracks bootstrap state via a single field, `bootstrap_pending: bool` in `~/.claude/wiki.yaml`. The installer sets this `true` when the user defers `/wiki:bootstrap` to a later session; the skill clears it on successful completion. Earlier drafts of this spec referenced `bootstrap_completed` and `proj.yaml::sync.wiki.bootstrap_completed` — neither exists in the current impl.
+
+> **Schema source of truth:** `WikiConfig` in `plugins/wiki/server/server/lib/models.py` is authoritative. Earlier drafts of this block listed `wiki:` as a top-level nesting key + `lint_on_ingest` / `default_scope` fields — none of which exist in impl. The block above matches what `/wiki:init` actually writes (`plugins/wiki/skills/init/SKILL.md` step 5). If a future change adds new runtime fields, update both `WikiConfig` and this block together.
 
 **Wiki-local schema config** (`~/.claude/wiki/config.yaml`) — inside the wiki itself:
 ```yaml
