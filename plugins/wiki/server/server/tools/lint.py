@@ -14,6 +14,7 @@ import yaml
 
 from server.lib import config as config_mod
 from server.lib import frontmatter as fm_mod
+from server.lib import profile as profile_mod
 from server.lib import storage
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_lint_orphans)
     mcp.tool()(wiki_lint_broken_links)
     mcp.tool()(wiki_lint_broken_section_refs)
+    mcp.tool()(wiki_lint_category_violations)
 
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -192,3 +194,42 @@ def wiki_lint_broken_section_refs() -> str:
                     }
                 )
     return json.dumps({"broken": broken})
+
+
+def wiki_lint_category_violations() -> str:
+    """Pages whose dir is not in active profile's configured categories.
+
+    Flat-layout pages (no category dir) under non-minimal profile also flagged w/
+    found_category=None. Minimal profile (empty categories) → no violations.
+    Missing profile config → skip (returns []).
+
+    Returns JSON {violations: [{page, found_category, configured, path}]}.
+    """
+    cfg = config_mod.load_config()
+    wiki_dir = cfg.wiki_dir
+    try:
+        profile = profile_mod.load_profile(wiki_dir)
+    except profile_mod.ProfileError:
+        return json.dumps({"violations": []})
+
+    # Minimal profile explicitly allows anything — skip check.
+    if not profile.categories:
+        return json.dumps({"violations": []})
+
+    configured = sorted(profile.categories)
+    configured_set = set(profile.categories)
+    pages_root = storage.pages_dir(wiki_dir)
+    violations: list[dict[str, Any]] = []
+    for md, _fm, _body in _iter_pages(wiki_dir):
+        rel = md.relative_to(pages_root)
+        cat = rel.parts[0] if len(rel.parts) > 1 else None
+        if cat is None or cat not in configured_set:
+            violations.append(
+                {
+                    "page": md.stem,
+                    "found_category": cat,
+                    "configured": configured,
+                    "path": str(md),
+                }
+            )
+    return json.dumps({"violations": violations})
