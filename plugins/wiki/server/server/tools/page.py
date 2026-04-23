@@ -60,9 +60,6 @@ def wiki_page_write(
     Returns JSON string with {path, created, updated, noop, warning?} or {error}.
     """
     cfg = config_mod.load_config()
-    if not cfg.enabled:
-        return json.dumps({"error": "wiki disabled; run /wiki:init first"})
-
     wiki_dir: Path = cfg.wiki_dir
     missing = _validate_frontmatter(frontmatter)
     if missing:

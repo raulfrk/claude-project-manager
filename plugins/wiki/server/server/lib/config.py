@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,14 @@ _DEFAULT_CONFIG_PATH = Path.home() / ".claude" / "wiki.yaml"
 
 
 def config_path() -> Path:
+    """Resolve wiki config path.
+
+    Reads WIKI_CONFIG env var if set (supports ~-expansion); falls back to
+    _DEFAULT_CONFIG_PATH otherwise. Matches the proj plugin's PROJ_CONFIG pattern.
+    """
+    env_override = os.environ.get("WIKI_CONFIG", "").strip()
+    if env_override:
+        return Path(env_override).expanduser()
     return _DEFAULT_CONFIG_PATH
 
 

@@ -9,6 +9,26 @@ from server.lib.config import config_exists, config_path, load_config, save_conf
 from server.lib.models import WikiConfig
 
 
+class TestConfigPathEnvOverride:
+    def test_wiki_config_env_var_overrides_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        override = tmp_path / "custom-wiki.yaml"
+        monkeypatch.setenv("WIKI_CONFIG", str(override))
+        assert config_path() == override
+
+    def test_wiki_config_env_var_expands_tilde(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WIKI_CONFIG", "~/custom.yaml")
+        assert config_path() == Path.home() / "custom.yaml"
+
+    def test_empty_wiki_config_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_cfg_path: Path
+    ) -> None:
+        monkeypatch.setenv("WIKI_CONFIG", "")
+        # Falls back to _DEFAULT_CONFIG_PATH (patched via wiki_cfg_path fixture)
+        assert config_path() == wiki_cfg_path
+
+
 class TestLoadConfig:
     def test_load_default_when_missing(self, wiki_cfg_path: Path) -> None:
         cfg = load_config()
