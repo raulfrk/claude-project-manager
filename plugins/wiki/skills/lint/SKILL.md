@@ -1,8 +1,8 @@
 ---
 name: lint
-description: Run Tier-1 lint on wiki — orphans / broken links / section refs / category violations / stale pages / schema / duplicates. Interactive fix prompts per finding. Use when user says "lint wiki", "wiki:lint", "check wiki health".
-allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion
-argument-hint: ""
+description: Run Tier-1 + Tier-2 lint on wiki. Tier-1: orphans / broken links / section refs / category violations / stale / schema / duplicates. Tier-2: contradictions / deprecation / missing cross-refs / category clusters (LLM-driven). Interactive fix prompts per finding. Use `--tier=1|2|all`.
+allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion, Task, TeamCreate, Read
+argument-hint: "[--tier=1|2|all]"
 ---
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
@@ -34,12 +34,43 @@ Run Tier-1 lint + interactive fix flow.
 
 Zero findings → print "Wiki clean. No lint issues." + stop.
 
-**3.** Per finding (grouped by check type), present + prompt user via `AskUserQuestion`:
+**3.** Parse `$ARGUMENTS` for `--tier` flag:
+ - `--tier=1` (default) → skip to step 6 (present Tier-1 only).
+ - `--tier=2` → skip Tier-1 summary; run only Tier-2 checks.
+ - `--tier=all` → run both.
+
+**4.** Tier-2 dispatch (`--tier=2` or `--tier=all`):
+ - Read each `plugins/wiki/skills/lint/references/tier2-*.md` template via `Read`.
+ - Substitute `{wiki_dir}` (read from `~/.claude/wiki.yaml::wiki_dir`) + `{current_categories}` (read from `~/.claude/wiki/config.yaml::categories`).
+ - `TeamCreate` w/ 4 general-purpose agents:
+    - Agent `contradictions`: prompt from `tier2-contradictions.md`
+    - Agent `deprecation`: prompt from `tier2-deprecation.md`
+    - Agent `cross-refs`: prompt from `tier2-missing-cross-refs.md`
+    - Agent `clusters`: prompt from `tier2-category-clusters.md`
+ - Wait for all 4. Collect JSON findings.
+
+**5.** Aggregate Tier-1 + Tier-2 findings. Present combined summary:
+
+| Tier | Check | Findings |
+|------|-------|----------|
+| 1 | Orphans | N |
+| 1 | Broken links | N |
+| 1 | Broken section refs | N |
+| 1 | Category violations | N |
+| 1 | Stale (>90d) | N |
+| 1 | Schema violations | N |
+| 1 | Duplicate slugs | N |
+| 2 | Contradictions | N |
+| 2 | Deprecation candidates | N |
+| 2 | Missing cross-refs | N |
+| 2 | Category clusters | N |
+
+**6.** Per finding (grouped by check type), present + prompt user via `AskUserQuestion`:
 - Question: `[<check>] <page-slug>: <detail>. Fix?`
 - Options: `fix` / `skip`
 - (Note: `file-todo` disabled in Phase 2; only `fix` + `skip` offered.)
 
-**4.** If user picks `fix`:
+**7.** If user picks `fix`:
 
 - **Orphan**: offer `delete page` (via `wiki_page_delete`) OR `leave` (mark intentional).
 - **Broken link**: offer `remove ref from source links_to` (via `wiki_page_get` → edit frontmatter → `wiki_page_write`) OR `create target page stub` (via `wiki_page_write`, mode=create, empty body, minimal frontmatter).
@@ -48,10 +79,14 @@ Zero findings → print "Wiki clean. No lint issues." + stop.
 - **Stale**: offer `refresh page` (prompt for updated `last_ingested`) OR `archive`.
 - **Schema violation**: offer `auto-fix missing fields w/ defaults` (e.g. `sources: []`, `tags: []`, `last_ingested: <now>`) OR `skip`.
 - **Duplicate**: print paths + ask user to rename one manually. No auto-fix.
+- **Contradiction**: offer `edit page A body` (via `wiki_page_get` + edit + `wiki_page_write(mode=update)`) OR `edit page B body` OR `add reconciliation note` (append to one page) OR `skip`.
+- **Deprecation candidate**: apply `recommended_action` from agent JSON: `delete` (via `wiki_page_delete`) OR `mark_deprecated` (set frontmatter `deprecated: true` + optionally `deprecated_in_favor_of: <slug>`) OR `merge_into:<target>` (copy body + links to target via `wiki_page_get` + `wiki_page_write(mode=update)` on target, then delete).
+- **Missing cross-ref**: insert `[[wikilink]]` into source page body via `wiki_page_get` + text edit + `wiki_page_write(mode=update)` + update frontmatter `links_to` list.
+- **Category cluster**: confirm cluster name + target pages. Update `~/.claude/wiki/config.yaml::categories` to add new category. Move each page via `wiki_page_delete` + `wiki_page_write(mode=create)` in new dir. Confirm full migration before any moves fire.
 
-**5.** After all findings processed: `wiki_log_append` w/ `action=lint`, `title=full`, `body="<N> fixed, <M> skipped"`.
+**8.** After all findings processed: `wiki_log_append` w/ `action=lint`, `title="full" | "tier-2"`, `body="<N> fixed, <M> skipped"`.
 
-**6.** Print final summary:
+**9.** Print final summary:
 ```
 Lint complete. <N> issues fixed, <M> skipped.
 ```
