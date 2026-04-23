@@ -373,7 +373,7 @@ All tools live in `plugins/wiki/server/server/tools/`. Pure persistence + pure-d
 | `wiki_log_read` | Read log entries | `since` (date), `action_filter`, `limit` | `{entries: [{date, action, title, body}]}` |
 | `wiki_scope_detect` | Resolve active project → scope tag + proj presence flag | — | `{scope: "project:<name>" \| "global", proj_present: bool}` |
 | `wiki_link_resolve` | Resolve `[[page]]` or `[[page#section]]` → file path + section anchor | `link` (slug / alias, optional `#section`) | `{resolved: path \| null, section_found: bool \| null, candidates: []}` |
-| `wiki_search_bm25` | BM25 keyword search over pages | `query`, optional `limit`, `category`, `tags`, `scope_filter` | `{hits: [{page, score, snippet}]}` |
+| `wiki_search_bm25` | BM25 keyword search over pages | `query`, optional `limit`, `category`, `tags`, `scope_filter` | `{hits: [{slug, score, snippet}]}` |
 | `wiki_search_index_refresh` | Rebuild BM25 sidecar index from `pages/` | — | `{pages_indexed, elapsed_ms}` |
 | `wiki_lint_orphans` | Pages w/ 0 inlinks + 0 outlinks | — | `{orphans: [page]}` |
 | `wiki_lint_broken_links` | `[[link]]` refs w/ no matching page | — | `{broken: [{from, link}]}` |

@@ -110,6 +110,39 @@ class TestWikiSearchBM25:
         result = json.loads(await call_tool(mcp_app, "wiki_search_bm25", query="gamma"))
         assert any(h["slug"] == "b" for h in result["hits"])
 
+    async def test_flat_layout_minimal_profile_returns_hits(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """Minimal-profile wiki w/ flat pages/ layout must still return BM25 hits."""
+        import yaml
+
+        # Switch to minimal profile (empty categories, flat pages/)
+        cfg_path = wiki_setup["wiki_dir"] / "config.yaml"
+        cfg_path.write_text(yaml.safe_dump({"schema_version": 1, "profile": "minimal"}))
+
+        # Write 3 flat pages (no category dir)
+        pages_dir = wiki_setup["wiki_dir"] / "pages"
+        for slug, body in [
+            ("hooks", "Hooks dispatch via router."),
+            ("cache", "Cache uses LRU."),
+            ("filler", "unrelated"),
+        ]:
+            fm = yaml.safe_dump(
+                {
+                    "title": slug.title(),
+                    "tags": [],
+                    "links_to": [],
+                    "scope": ["global"],
+                    "sources": [],
+                    "last_ingested": "2026-04-23T10:00:00Z",
+                }
+            )
+            (pages_dir / f"{slug}.md").write_text(f"---\n{fm}---\n{body}")
+
+        result = json.loads(await call_tool(mcp_app, "wiki_search_bm25", query="router"))
+        slugs = [h["slug"] for h in result["hits"]]
+        assert "hooks" in slugs, f"Expected 'hooks' in minimal-profile hits, got: {slugs}"
+
 
 @pytest.mark.asyncio
 class TestWikiSearchIndexRefresh:

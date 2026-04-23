@@ -42,8 +42,8 @@ def _extract_snippet(body: str, query_tokens: list[str]) -> str:
 def _page_metadata(
     wiki_dir: Path,
     slug: str,
-) -> tuple[str | None, dict[str, Any], str]:
-    """Return (category, frontmatter, body) for a given slug, or (None, {}, '') if missing."""
+) -> tuple[bool, str | None, dict[str, Any], str]:
+    """Return (found, category, frontmatter, body). category may be None for flat-layout pages."""
     pages_root = storage.pages_dir(wiki_dir)
     for md in pages_root.rglob(f"{slug}.md"):
         rel = md.relative_to(pages_root)
@@ -51,9 +51,9 @@ def _page_metadata(
         try:
             fm, body = fm_mod.parse(md.read_text())
         except fm_mod.FrontmatterError:
-            return None, {}, ""
-        return cat, fm, body
-    return None, {}, ""
+            return True, cat, {}, ""
+        return True, cat, fm, body
+    return False, None, {}, ""
 
 
 def wiki_search_bm25(
@@ -75,8 +75,8 @@ def wiki_search_bm25(
     tag_set = set(tags or [])
     results: list[dict[str, Any]] = []
     for hit in raw_hits:
-        cat, fm, body = _page_metadata(cfg.wiki_dir, hit["slug"])
-        if cat is None:
+        found, cat, fm, body = _page_metadata(cfg.wiki_dir, hit["slug"])
+        if not found:
             continue
         if category and cat != category:
             continue
