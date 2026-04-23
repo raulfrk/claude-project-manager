@@ -121,6 +121,36 @@ Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.aut
 - **MCP tool names**: `mcp__plugin_<name>_<name>__<tool_name>` (internal plugins), `mcp__<server>__<tool-name>` (external MCP servers)
 - **Git flush messages**: `"Action: subject"` pattern (`"Define: {todo-id}"`, `"Sync: Jira"`, `"Save: session"`)
 
+## Wiki Plugin Config Flags
+
+Wiki spans 4 config files. Full reference:
+
+**`~/.claude/wiki.yaml`** (wiki runtime config — owned by wiki plugin):
+- `enabled` — master switch. Wiki MCP tools no-op/return error when false.
+- `wiki_dir` — wiki root (default `~/.claude/wiki`).
+- `reingest_cooldown_hours` — dedup window for `/wiki:ingest <source>` re-runs (default 24).
+- `bootstrap_pending` — flag set by installer wizard; prompts user on next session to run `/wiki:bootstrap`.
+- `session_ingest.section_map` — map of session-file headings → wiki categories for `/proj:save` auto-ingest.
+
+**`~/.claude/wiki/config.yaml`** (wiki-local schema + lint config):
+- `schema_version: 1` — migration marker.
+- `profile` — one of `software`/`personal`/`research`/`minimal`/`custom`.
+- `categories` — required when `profile: custom`; list of category dir names.
+- `required_frontmatter` — list of page frontmatter fields enforced by `wiki_lint_schema`.
+- `lint.stale_after_days` — `wiki_lint_stale` threshold (default 90).
+- `lint.orphan_min_page_count` — skip orphan lint when wiki has fewer pages (default 3).
+
+**`~/.claude/proj.yaml::sync.wiki.*`** (proj→wiki integration gating):
+- `enabled` — master switch for proj→wiki integrations.
+- `auto_sync` — currently informational; reserved for future use.
+- `auto_ingest_sessions` — `/proj:save` spawns wiki ingest subagent on session file.
+- `capture_notes_as_log` — router hook `notes_append` → `wiki_log_append` fires.
+- `replace_notes_md` — (future) redirect `notes_append` to wiki entirely.
+- `bootstrap_docs` — per-project doc paths included by `/wiki:bootstrap` proj-aware mode.
+
+**`~/.claude/proj-session.yaml`** (proj session state — owned by proj, read by wiki):
+- `active: <project-name>` — session-scoped active project; wiki's `wiki_scope_detect` reads this to return `scope: project:<name>`. Cleared on `/proj:archive` or explicit clear.
+
 ## Skill Files
 
 New skills go in `plugins/<name>/skills/<skill-name>/SKILL.md`. Add new skills to the README skill reference table and the "Skills by category" list.
