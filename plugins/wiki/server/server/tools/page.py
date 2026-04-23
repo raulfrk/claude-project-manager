@@ -88,22 +88,22 @@ def wiki_page_write(
 
     new_content = fm_mod.dump(frontmatter, body)
 
-    # Idempotency: on upsert with identical existing content → no-op.
-    if mode == "upsert" and exists:
-        existing_raw = target.read_text()
-        existing_fm, existing_body = fm_mod.parse(existing_raw)
-        if _content_hash(existing_fm, existing_body) == _content_hash(frontmatter, body):
-            return json.dumps(
-                {
-                    "path": str(target),
-                    "created": False,
-                    "updated": False,
-                    "noop": True,
-                    "warning": warning,
-                }
-            )
-
     with storage.wiki_lock(wiki_dir):
+        # Idempotency (inside lock to avoid TOCTOU): on upsert with identical
+        # existing content → no-op.
+        if mode == "upsert" and exists:
+            existing_raw = target.read_text()
+            existing_fm, existing_body = fm_mod.parse(existing_raw)
+            if _content_hash(existing_fm, existing_body) == _content_hash(frontmatter, body):
+                return json.dumps(
+                    {
+                        "path": str(target),
+                        "created": False,
+                        "updated": False,
+                        "noop": True,
+                        "warning": warning,
+                    }
+                )
         storage.atomic_write(target, new_content)
 
     return json.dumps(

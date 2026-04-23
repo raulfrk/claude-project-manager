@@ -14,6 +14,9 @@ from server.lib import storage
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+else:
+    # At runtime, for FastMCP usage in register()
+    from mcp.server.fastmcp import FastMCP  # noqa: TC002
 
 INDEX_FILENAME = "index.md"
 RECENT_LIMIT = 10
@@ -21,7 +24,7 @@ RECENT_LIMIT = 10
 _CATEGORY_HEADER_RE = re.compile(r"^## (\S.+?) \((\d+)\)$", re.MULTILINE)
 
 
-def register(mcp: FastMCP) -> None:  # type: ignore[name-defined]
+def register(mcp: FastMCP) -> None:
     """Register wiki index tools."""
     mcp.tool()(wiki_index_read)
     mcp.tool()(wiki_index_rebuild)

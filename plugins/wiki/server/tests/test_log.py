@@ -46,10 +46,25 @@ class TestWikiLogAppend:
     async def test_append_preserves_prior_entries(
         self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
     ) -> None:
-        await call_tool(mcp_app, "wiki_log_append", action="ingest", title="first")
-        await call_tool(mcp_app, "wiki_log_append", action="lint", title="second")
+        await call_tool(
+            mcp_app,
+            "wiki_log_append",
+            action="ingest",
+            title="first",
+            body="first-body-content",
+        )
+        await call_tool(
+            mcp_app,
+            "wiki_log_append",
+            action="lint",
+            title="second",
+            body="second-body-content",
+        )
         content = (wiki_setup["wiki_dir"] / "log.md").read_text()
         assert content.index("first") < content.index("second")
+        # 706 follow-up: ensure prior-entry body survives the second append.
+        assert "first-body-content" in content
+        assert content.index("first-body-content") < content.index("second-body-content")
 
     async def test_body_optional(self, mcp_app: FastMCP, wiki_setup: dict[str, Path]) -> None:
         result = json.loads(

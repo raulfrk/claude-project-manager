@@ -366,7 +366,7 @@ All tools live in `plugins/wiki/server/server/tools/`. Pure persistence + pure-d
 | `wiki_page_write` | Atomic page create/update w/ frontmatter validation | `page` (slug), `frontmatter` (dict), `body` (str), `mode` (create/update/upsert) | `{path, created, updated}` |
 | `wiki_page_get` | Read single page | `page` (slug) | `{frontmatter, body}` or `{error: "not_found"}` |
 | `wiki_page_list` | List pages w/ filters | `scope_filter`, `category`, `tags`, `linked_from`, `linked_to`, `limit` | `{pages: [{title, slug, category, scope, tags, last_ingested}]}` |
-| `wiki_page_delete` | Delete page + update backlinks | `page` | `{deleted, backlinks_updated: []}` |
+| `wiki_page_delete` | Delete page + update backlinks | `page` (slug) | `{deleted, backlinks_updated: []}` |
 | `wiki_index_read` | Read index.md | — | `{content, categories, recent}` |
 | `wiki_index_rebuild` | Regenerate index.md from pages/ | — | `{entries_by_category, recent_count}` |
 | `wiki_log_append` | Append entry to log.md | `action`, `title`, `body` (optional detail) | `{entry}` |
