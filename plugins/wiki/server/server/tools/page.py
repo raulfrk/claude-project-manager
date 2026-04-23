@@ -26,6 +26,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_page_write)
     mcp.tool()(wiki_page_get)
     mcp.tool()(wiki_page_list)
+    mcp.tool()(wiki_page_delete)
 
 
 def _validate_frontmatter(fm: dict[str, Any]) -> list[str]:
@@ -213,3 +214,45 @@ def wiki_page_list(
         truncated = True
 
     return json.dumps({"pages": results, "truncated": truncated})
+
+
+def wiki_page_delete(slug: str, category: str | None) -> str:
+    """Delete a page and prune references to it from other pages' links_to frontmatter.
+
+    Args:
+        slug: page slug (filename stem, lowercase-with-dashes).
+        category: directory name under pages/. None = flat (minimal profile).
+
+    Returns JSON string with {deleted: True, backlinks_updated: [slug, ...], path} or {error}.
+    """
+    cfg = config_mod.load_config()
+    wiki_dir: Path = cfg.wiki_dir
+    target = storage.page_path(wiki_dir, category, slug)
+    if not target.exists():
+        return json.dumps({"error": "not_found", "path": str(target)})
+
+    updated_backlinks: list[str] = []
+    with storage.wiki_lock(wiki_dir):
+        # Find + update backlinks first, THEN delete the target
+        pages_root = storage.pages_dir(wiki_dir)
+        for md in pages_root.rglob("*.md"):
+            if md == target:
+                continue
+            try:
+                fm, body = fm_mod.parse(md.read_text())
+            except fm_mod.FrontmatterError:
+                continue
+            links: list[str] = cast("list[str]", fm.get("links_to", []) or [])
+            if slug in links:
+                new_links = [link for link in links if link != slug]
+                fm["links_to"] = new_links
+                storage.atomic_write(md, fm_mod.dump(fm, body))
+                updated_backlinks.append(md.stem)
+        target.unlink()
+    return json.dumps(
+        {
+            "deleted": True,
+            "backlinks_updated": updated_backlinks,
+            "path": str(target),
+        }
+    )
