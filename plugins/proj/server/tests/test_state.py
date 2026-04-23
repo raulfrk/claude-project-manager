@@ -15,6 +15,18 @@ from server.lib.state import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _redirect_session_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect state._SESSION_FILE to a tmp path for every test in this module.
+
+    Prevents any test from touching the user's real ~/.claude/proj-session.yaml —
+    including the non-fixture classes below that call clear_session_active in setup.
+    """
+    p = tmp_path / "proj-session.yaml"
+    monkeypatch.setattr(state, "_SESSION_FILE", p)
+    monkeypatch.setattr(state, "_session_active_project", None)
+
+
 class TestSessionState:
     def setup_method(self):
         clear_session_active()

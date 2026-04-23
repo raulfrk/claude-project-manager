@@ -119,7 +119,7 @@ hooks:
     server: wiki
     param_mapping:
       action: "note"
-      title: "${content}"
+      title: "${content_first_line}"
       body: "${content}"
     blocking: false
     condition: "sync.wiki.enabled and sync.wiki.capture_notes_as_log"

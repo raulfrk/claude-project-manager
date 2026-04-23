@@ -387,9 +387,19 @@ def register(app: FastMCP) -> None:
         cfg = require_config()
         name = state.resolve_project(project_name)
         if not name:
-            return "No active project."
+            return json.dumps({"status": "error", "error": "No active project."})
         storage.append_note(cfg, name, text)
-        return f"Note appended to {name}/NOTES.md."
+        # First line (stripped) for routing to log-entry titles that must be short.
+        first_line = (text.splitlines()[0].strip() if text.strip() else "")[:200]
+        return json.dumps(
+            {
+                "status": "appended",
+                "project_name": name,
+                "content": text,
+                "content_first_line": first_line,
+                "message": f"Note appended to {name}/NOTES.md.",
+            }
+        )
 
     @app.tool(description="Write or update CLAUDE.md in a project repo directory.")
     def claudemd_write(repo_path: str, content: str) -> str:
