@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import httpx
+import yaml
 from rich.console import Console
 
 from installer._config_loader import ConfigLoadError, load_existing_yaml
@@ -421,3 +422,170 @@ def configure_jira(console: Console) -> dict[str, Any] | None:
     if "base_url" in result:
         result["base_url"] = (result["base_url"] or "").strip().rstrip("/")
     return result
+
+
+def configure_wiki(
+    console: Console, proj_selected: bool = False
+) -> dict[str, Any] | None:
+    """Wiki integration config form. Returns dict or None on cancel.
+
+    No credential validation (wiki has no auth). Extra fields appear only when
+    proj is also being installed (for the sync.wiki.* gating flags).
+    """
+    claude_home = Path.home() / ".claude"
+    wiki_yaml = _load_yaml(claude_home / "wiki.yaml")
+    wiki_config_yaml = _load_yaml(claude_home / "wiki" / "config.yaml")
+    proj_yaml = _load_yaml(claude_home / "proj.yaml")
+    proj_sync_wiki = (proj_yaml.get("sync", {}) or {}).get("wiki", {}) or {}
+
+    fields = [
+        FieldSpec(
+            key="enabled",
+            label="Enable wiki plugin",
+            kind="bool",
+            default=bool(wiki_yaml.get("enabled", False)),
+            help_text="Master switch. Wiki MCP server serves requests when enabled.",
+        ),
+        FieldSpec(
+            key="profile",
+            label="Category profile",
+            kind="select",
+            choices=["software", "personal", "research", "minimal", "custom"],
+            default=str(wiki_config_yaml.get("profile", "software")),
+            help_text=(
+                "software: concepts/decisions/references/pitfalls/entities. "
+                "personal: journal/topics/people/places/lessons. "
+                "research: concepts/sources/findings/questions. "
+                "minimal: flat pages/, no subdirs. "
+                "custom: you define categories."
+            ),
+        ),
+        FieldSpec(
+            key="custom_categories",
+            label="Custom categories (comma-separated, only used if profile=custom)",
+            kind="text",
+            default=",".join(wiki_config_yaml.get("categories", []) or []),
+            help_text="Leave blank unless you picked 'custom' profile.",
+        ),
+        FieldSpec(
+            key="bootstrap_pending",
+            label="Queue /wiki:bootstrap for next session?",
+            kind="bool",
+            default=bool(wiki_yaml.get("bootstrap_pending", False)),
+            help_text=(
+                "If yes, sets a flag that prompts you on next Claude session. "
+                "The wizard cannot invoke LLM-driven skills directly."
+            ),
+        ),
+    ]
+    if proj_selected:
+        fields.extend(
+            [
+                FieldSpec(
+                    key="proj_auto_ingest_sessions",
+                    label="[proj] Auto-ingest /proj:save sessions into wiki",
+                    kind="bool",
+                    default=bool(proj_sync_wiki.get("auto_ingest_sessions", False)),
+                    help_text="Final step of /proj:save spawns wiki ingest subagent on session file.",
+                ),
+                FieldSpec(
+                    key="proj_capture_notes_as_log",
+                    label="[proj] Capture notes_append as wiki log entries",
+                    kind="bool",
+                    default=bool(proj_sync_wiki.get("capture_notes_as_log", False)),
+                    help_text="Router hook: every notes_append also appends a wiki log entry.",
+                ),
+            ]
+        )
+
+    # No validator; pass a no-op function
+    return _run_integration_form("Wiki", fields, lambda _: None, console)
+
+
+def _write_wiki_integration_result(result: dict[str, Any], proj_selected: bool) -> None:
+    """Write wiki config to 3 files + create category subdirs per profile."""
+    claude_home = Path.home() / ".claude"
+    wiki_home = claude_home / "wiki"
+    wiki_home.mkdir(parents=True, exist_ok=True)
+    (wiki_home / "pages").mkdir(exist_ok=True)
+
+    # 1. ~/.claude/wiki.yaml — preserve non-wizard keys
+    wiki_yaml_path = claude_home / "wiki.yaml"
+    existing_wiki = _load_yaml(wiki_yaml_path)
+    existing_wiki["enabled"] = bool(result["enabled"])
+    existing_wiki["wiki_dir"] = str(wiki_home)
+    existing_wiki.setdefault("reingest_cooldown_hours", 24)
+    existing_wiki["bootstrap_pending"] = bool(result.get("bootstrap_pending", False))
+    existing_wiki.setdefault("session_ingest", {"section_map": {}})
+    _atomic_write_yaml(wiki_yaml_path, existing_wiki)
+
+    # 2. ~/.claude/wiki/config.yaml
+    profile = str(result.get("profile", "software"))
+    config_yaml_path = wiki_home / "config.yaml"
+    config_data: dict[str, Any] = {
+        "schema_version": 1,
+        "profile": profile,
+        "required_frontmatter": [
+            "title",
+            "tags",
+            "links_to",
+            "scope",
+            "sources",
+            "last_ingested",
+        ],
+        "lint": {
+            "stale_after_days": 90,
+            "orphan_min_page_count": 3,
+        },
+    }
+    if profile == "custom":
+        raw = str(result.get("custom_categories", "") or "")
+        cats = [c.strip() for c in raw.split(",") if c.strip()]
+        if not cats:
+            cats = ["notes"]
+        config_data["categories"] = cats
+    _atomic_write_yaml(config_yaml_path, config_data)
+
+    # 3. Create category subdirs per profile
+    cat_map: dict[str, list[str]] = {
+        "software": ["concepts", "decisions", "references", "pitfalls", "entities"],
+        "personal": ["journal", "topics", "people", "places", "lessons"],
+        "research": ["concepts", "sources", "findings", "questions"],
+        "minimal": [],
+    }
+    if profile == "custom":
+        categories = config_data.get("categories", [])
+        if isinstance(categories, list):
+            cat_map["custom"] = [str(c) for c in categories]
+        else:
+            cat_map["custom"] = []
+    for cat in cat_map.get(profile, []):
+        (wiki_home / "pages" / cat).mkdir(exist_ok=True)
+
+    # 4. proj.yaml sync.wiki.* (only if proj is also being installed)
+    if proj_selected:
+        proj_yaml_path = claude_home / "proj.yaml"
+        existing_proj = _load_yaml(proj_yaml_path)
+        sync = existing_proj.setdefault("sync", {})
+        existing_wiki_sync = sync.get("wiki", {}) or {}
+        sync["wiki"] = {
+            "enabled": bool(result["enabled"]),
+            "auto_sync": True,
+            "auto_ingest_sessions": bool(
+                result.get("proj_auto_ingest_sessions", False)
+            ),
+            "capture_notes_as_log": bool(
+                result.get("proj_capture_notes_as_log", False)
+            ),
+            "replace_notes_md": bool(existing_wiki_sync.get("replace_notes_md", False)),
+            "bootstrap_docs": existing_wiki_sync.get("bootstrap_docs", []) or [],
+        }
+        _atomic_write_yaml(proj_yaml_path, existing_proj)
+
+
+def _atomic_write_yaml(path: Path, data: dict[str, Any]) -> None:
+    """Atomic yaml write via tmpfile + rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(yaml.safe_dump(data, sort_keys=False))
+    tmp.replace(path)

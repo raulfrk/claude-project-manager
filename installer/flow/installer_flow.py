@@ -33,6 +33,8 @@ from installer.flow.integration_config import (
     configure_jira,
     configure_todoist,
     configure_trello,
+    configure_wiki,
+    _write_wiki_integration_result,
 )
 from installer.flow.plugin_select import select_plugin_actions
 from installer.flow.pre_install_phase import pre_install_phase
@@ -49,7 +51,6 @@ from installer.plugin_cli import (
 from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
 
-
 def _resolve_source_locally(args: Any) -> tuple[str, str | None]:
     """Lazy import to avoid circular dependency w/ installer.main."""
     from installer.main import _resolve_marketplace_source
@@ -57,7 +58,7 @@ def _resolve_source_locally(args: Any) -> tuple[str, str | None]:
     return _resolve_marketplace_source(args)
 
 
-_WIZARD_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "worktree"}
+_WIZARD_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "worktree", "wiki"}
 
 
 class _WizardState:
@@ -394,6 +395,15 @@ def _run_install(args: Any, console: Console) -> int:
             _write_integration_result(service, result)
         else:
             console.print(f"[dim]Skipped {service} config write.[/dim]")
+
+    # 2c. Wiki is special — its proj-integration fields depend on whether proj is also being installed
+    if "wiki" in selected_names:
+        proj_selected = "proj" in selected_names
+        result = configure_wiki(console, proj_selected=proj_selected)
+        if result is None:
+            console.print("[dim]Cancelled at wiki config.[/dim]")
+            return 0
+        _write_wiki_integration_result(result, proj_selected)
 
     hooks_yaml = Path.home() / ".claude" / "hooks.yaml"
     # Resolve plugin dirs from selected plugin names so compute_hooks_diff can
