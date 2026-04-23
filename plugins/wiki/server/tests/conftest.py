@@ -59,7 +59,7 @@ def proj_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def mcp_app(wiki_setup: dict[str, Path]) -> FastMCP:
     """FastMCP instance with wiki tools registered (expand as tools land)."""
-    from server.tools import index, links, log, page, scope, search
+    from server.tools import index, links, lint, log, page, scope, search
 
     mcp: FastMCP = FastMCP("wiki-test")
     page.register(mcp)
@@ -68,6 +68,7 @@ def mcp_app(wiki_setup: dict[str, Path]) -> FastMCP:
     links.register(mcp)
     scope.register(mcp)
     search.register(mcp)
+    lint.register(mcp)
     return mcp
 
 
