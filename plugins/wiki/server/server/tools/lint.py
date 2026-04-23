@@ -26,12 +26,16 @@ else:
     from mcp.server.fastmcp import FastMCP  # noqa: TC002
 
 
+_DEFAULT_REQUIRED_FIELDS = ("title", "tags", "links_to", "scope", "sources", "last_ingested")
+
+
 def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_lint_orphans)
     mcp.tool()(wiki_lint_broken_links)
     mcp.tool()(wiki_lint_broken_section_refs)
     mcp.tool()(wiki_lint_category_violations)
     mcp.tool()(wiki_lint_stale)
+    mcp.tool()(wiki_lint_schema)
 
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -284,3 +288,52 @@ def wiki_lint_stale(days: int = 0) -> str:
                 }
             )
     return json.dumps({"stale": stale})
+
+
+def _load_required_fields(wiki_dir: Path) -> list[str]:
+    """Load required_frontmatter list from wiki/config.yaml. Returns defaults if absent."""
+    cfg_path = wiki_dir / "config.yaml"
+    if not cfg_path.exists():
+        return list(_DEFAULT_REQUIRED_FIELDS)
+    try:
+        raw_data = yaml.safe_load(cfg_path.read_text())
+        if raw_data is None:
+            return list(_DEFAULT_REQUIRED_FIELDS)
+        if not isinstance(raw_data, dict):
+            return list(_DEFAULT_REQUIRED_FIELDS)
+    except yaml.YAMLError:
+        return list(_DEFAULT_REQUIRED_FIELDS)
+    data: dict[str, Any] = raw_data  # type: ignore[assignment]
+    required: list[Any] = data.get("required_frontmatter", []) or []  # type: ignore[assignment]
+    return [str(f) for f in required]
+
+
+def wiki_lint_schema() -> str:
+    """Pages violating required_frontmatter.
+
+    A page violates schema when: (a) any required field is absent, OR (b) the
+    last_ingested value is not a parseable ISO-8601 datetime.
+
+    Returns JSON {violations: [{page, path, missing_fields, invalid_fields}]}.
+    """
+    cfg = config_mod.load_config()
+    wiki_dir = cfg.wiki_dir
+    required = _load_required_fields(wiki_dir)
+    violations: list[dict[str, Any]] = []
+    for md, fm, _ in _iter_pages(wiki_dir):
+        missing = [f for f in required if f not in fm]
+        invalid: list[str] = []
+        if "last_ingested" in fm:
+            li = str(fm.get("last_ingested", "") or "")
+            if li and _parse_iso_utc(li) is None:
+                invalid.append("last_ingested")
+        if missing or invalid:
+            violations.append(
+                {
+                    "page": md.stem,
+                    "path": str(md),
+                    "missing_fields": missing,
+                    "invalid_fields": invalid,
+                }
+            )
+    return json.dumps({"violations": violations})
