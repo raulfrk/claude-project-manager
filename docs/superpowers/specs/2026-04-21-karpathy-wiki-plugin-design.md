@@ -202,9 +202,9 @@ The cpm installer wizard acquires a "wiki" section when the wiki plugin is insta
 2. **Category profile?** — multiple-choice: `software` / `personal` / `research` / `minimal` / `custom`. Writes `profile` + `categories` to `~/.claude/wiki/config.yaml` (wiki-local schema config). `custom` prompts for a free-form category list.
 3. **Session-ingest section mapping?** (only if proj installed + `sync.wiki.auto_ingest_sessions` will be set) — maps session headings to wiki categories. Ships a per-profile default (e.g. software profile default: `Key Decisions → decisions`, `Insights Discovered → concepts|pitfalls`, `Related Todos → no-page:link-only`). User can edit. Stored as `session_ingest.section_map` in `wiki.yaml`.
 4. **Proj sync flags?** (only if proj installed) — `enabled`, `auto_ingest_sessions`, `capture_notes_as_log`. Writes `sync.wiki.*` in proj.yaml.
-5. **Bootstrap now?** `[y/n]` — offers to run `/wiki:bootstrap` on detected proj sources (when proj loaded) or on a user-specified directory (when standalone).
+5. **Queue bootstrap for next session?** `[y/n]` — the installer is a non-LLM Python process + cannot invoke `/wiki:bootstrap` (which spawns LLM subagents) directly. Instead, setting yes writes `wiki.bootstrap_pending: true` to `wiki.yaml`. A SessionStart hook (or the next `/wiki:*` invocation) detects the flag + prompts the user to run `/wiki:bootstrap` then. Setting no leaves the wiki empty until the user chooses to bootstrap manually.
 
-The wizard is the UX surface for everything configurable in §9.4 (session section mapping) + §5.1 (category profiles). All flags are also editable directly in the YAML files after install.
+The wizard is the UX surface for everything configurable in §9.4 (session section mapping) + §5.1 (category profiles). All flags are also editable directly in the YAML files after install. **Wizard never calls an LLM** — it only reads + writes YAML config. Operations needing synthesis (bootstrap, ingest) are deferred to skill invocations inside a Claude session.
 
 ---
 
@@ -464,7 +464,20 @@ Session ingest requires LLM synthesis (read session file → extract concepts/de
 
 ### 9.1 `/wiki:ingest <source>` flow
 
-**Supported source types** (LLM reads whichever matches the source prefix):
+**Source resolution is LLM-driven**: the subagent parses the user's `<source>` argument (free-form text or explicit prefix) + picks the right reader. Users never need to know prefix syntax — `/wiki:ingest the onboarding page from confluence about hiring` works as well as `/wiki:ingest mcp:confluence:page_get:space=HR,title=Onboarding`. Explicit prefixes still work for scripting + unambiguous dispatch.
+
+**Resolution algorithm** (subagent step 0, before any fetch):
+
+1. If source matches a known explicit prefix (`https://…`, `file:…`, `session:…`, `note:…`, `search:…`, `mcp:…`) → use the matching reader below directly.
+2. Else: LLM reads the free-form text + resolves to a concrete source:
+   - Mentions of "confluence"/"notion"/"jira"/"github"/"linear" + available MCP servers → pick the matching MCP server + infer the right tool from content (e.g. "page" → `page_get`, "issue/ticket" → `issue_get`).
+   - Mentions of "search for X online" → `search:X`.
+   - Mentions of "this file" / a concrete path → file read.
+   - A URL anywhere in the text → `WebFetch` on that URL.
+   - Ambiguous → subagent asks user via AskUserQuestion before fetching.
+3. Returned resolution is logged in the ingest output so user sees what the LLM picked.
+
+**Supported source forms**:
 
 | Source form | Reader | Notes |
 |---|---|---|
@@ -473,7 +486,8 @@ Session ingest requires LLM synthesis (read session file → extract concepts/de
 | `session:<path>` | `Read` | Proj session file (semantics identical to file path; flag enables section-aware extraction per wiki.yaml `session_ingest.section_map`) |
 | `note:<text>` | inline | Free-form note; no external fetch |
 | `search:<query>` | `WebSearch` | Runs web search; subagent picks top N results, ingests each |
-| `mcp:<server>:<tool>:<args>` | dynamic MCP call | Fetches content via any installed MCP server that returns document-like payloads (e.g. `mcp:confluence:page_get:space=X,title=Y`, `mcp:github:repo_readme:owner/repo`, `mcp:jira:issue_get:ISSUE-42`). Subagent calls the named tool + treats return value as source text. |
+| `mcp:<server>:<tool>:<args>` | dynamic MCP call | Explicit form: invokes the named MCP tool + treats return payload as source text. Preferred path when scripting; LLM resolves the same tool call from natural language otherwise. Works w/ any installed MCP server that returns document-like payloads (confluence, notion, jira, github, linear, …). |
+| Free-form natural language | LLM-resolved → one of the above | E.g. "the RFC page from confluence about hooks" → `mcp:confluence:...`. "the jira ticket PROJ-42" → `mcp:jira:jira_get_issue:PROJ-42`. "this morning's session notes" → disambiguate via AskUserQuestion. |
 
 1. Skill calls `wiki_scope_detect` → `scope = project:<active>` or `global`. User override via `--scope`.
 2. Skill spawns subagent (general-purpose, forked context) w/ detailed ingest prompt.
@@ -515,8 +529,20 @@ SOURCE READERS:
 - search:<query>:          WebSearch (top 3-5 results), then iterate as URL sources
 - mcp:<server>:<tool>:<a>: invoke the named MCP tool; treat return payload as source text
 
+SOURCE RESOLUTION (infer before reading):
+- If source starts with a known prefix above, use that reader directly.
+- Else parse the free-form text:
+    * Any http(s) URL present → WebFetch on it.
+    * Mentions of "confluence" / "notion" / "jira" / "github" / "linear"
+      + keywords like "page", "issue", "ticket", "repo" + available MCP
+      servers → infer mcp:<server>:<tool>:<args>.
+    * Mentions of "search for X online" or "look up X" → search:<query>.
+    * Mentions of "this file <path>" or bare filesystem path → Read.
+    * Ambiguous or missing required detail → AskUserQuestion to disambiguate.
+- Log the resolved source form in the ingest JSON summary.
+
 PROTOCOL:
-1. Read source using the matching reader above.
+1. Resolve source per SOURCE RESOLUTION above, then read using the matching reader.
 2. Extract 3-15 candidate entities covering the active profile's categories (from config.yaml).
 3. For each candidate: check for existing pages via wiki_page_list + wiki_link_resolve
    + wiki_search_bm25 if the wiki has grown past a few hundred pages.
