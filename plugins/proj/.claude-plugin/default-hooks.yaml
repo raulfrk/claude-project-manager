@@ -112,3 +112,14 @@ hooks:
       paths: "${paths}"
     blocking: true
     condition: "sandbox_integration"
+
+  - id: proj-wiki-log-on-notes-append
+    trigger_tool: notes_append
+    target_tool: wiki_log_append
+    server: wiki
+    param_mapping:
+      action: "note"
+      title: "${content}"
+      body: "${content}"
+    blocking: false
+    condition: "sync.wiki.enabled and sync.wiki.capture_notes_as_log"
