@@ -74,6 +74,7 @@ Single-todo completion continues to use `mcp__proj__todo_complete`.
 | todoist | 19106 |
 | zoxide | 19107 |
 | confluence | 19108 |
+| wiki | 19109 |
 
 **`enable_hook_dispatch()`** (source: `plugins/_shared/hook_dispatch/dispatch.py`): called in each plugin's `main.py` **before** any `register()` calls. Monkey-patches `mcp.tool()` on the FastMCP instance so all subsequently registered tools get a post-execution wrapper. The patch intercepts both `@mcp.tool` (no parens) and `@mcp.tool(name="x", ...)` decorator forms. After the original tool function returns, the wrapper calls `_dispatch_hook()` which serializes the result and POSTs to the router server. If the router server is unreachable (ConnectError/TimeoutException), the tool returns normally with a warning logged. Tool exceptions propagate without dispatch.
 
