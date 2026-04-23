@@ -9,17 +9,22 @@ class TestWikiSync:
     def test_from_dict_defaults(self) -> None:
         w = WikiSync.from_dict({})
         assert w.enabled is False
-        assert w.auto_sync is True
         assert w.auto_ingest_sessions is False
         assert w.capture_notes_as_log is False
         assert w.replace_notes_md is False
         assert w.bootstrap_docs == []
 
+    def test_from_dict_ignores_legacy_auto_sync(self) -> None:
+        # auto_sync was dropped (YAGNI); legacy proj.yaml files with this field
+        # should be silently ignored rather than raising an error.
+        w = WikiSync.from_dict({"enabled": True, "auto_sync": False})
+        assert w.enabled is True
+        assert not hasattr(w, "auto_sync")
+
     def test_from_dict_overrides(self) -> None:
         w = WikiSync.from_dict(
             {
                 "enabled": True,
-                "auto_sync": False,
                 "auto_ingest_sessions": True,
                 "capture_notes_as_log": True,
                 "replace_notes_md": True,
@@ -27,7 +32,6 @@ class TestWikiSync:
             }
         )
         assert w.enabled is True
-        assert w.auto_sync is False
         assert w.auto_ingest_sessions is True
         assert w.capture_notes_as_log is True
         assert w.replace_notes_md is True
@@ -36,7 +40,6 @@ class TestWikiSync:
     def test_to_dict_roundtrip(self) -> None:
         w = WikiSync(
             enabled=True,
-            auto_sync=True,
             auto_ingest_sessions=True,
             capture_notes_as_log=False,
             replace_notes_md=False,

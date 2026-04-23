@@ -32,14 +32,16 @@ def _read_active_from_session() -> str | None:
         return None
     try:
         with _SESSION_YAML_PATH.open() as f:
-            data = yaml.safe_load(f)  # type: ignore[misc]
+            data = yaml.safe_load(f)
     except yaml.YAMLError:
         return None
     if not isinstance(data, dict):
         return None
+    # yaml.safe_load returns Any; basedpyright loses narrowing after isinstance check.
     value = data.get("active")  # type: ignore[attr-defined]
     if not value:
         return None
+    # value is Any (propagated from yaml.safe_load); str() arg type unknown to basedpyright.
     return str(value)  # type: ignore[arg-type]
 
 

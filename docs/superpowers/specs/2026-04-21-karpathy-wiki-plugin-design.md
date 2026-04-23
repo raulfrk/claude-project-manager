@@ -436,17 +436,29 @@ Wiki integrates w/ proj via router hooks for **pure-data operations** (no synthe
 
 ```yaml
 hooks:
-  - id: wiki-log-on-notes-append
+  - id: proj-wiki-log-on-notes-append
     trigger_tool: notes_append
     target_tool: wiki_log_append
     server: wiki
     condition: "sync.wiki.enabled and sync.wiki.capture_notes_as_log"
     param_mapping:
       action: "note"
-      title: "{source_result.first_line}"
-      body: "{source_result.body}"
+      title: "${content_first_line}"
+      body: "${content}"
     blocking: false
 ```
+
+> **`notes_append` return-shape contract:** as of the wiki-plugin Phase 4a work (commit `d9faf8d`), `mcp__plugin_proj_proj__notes_append` returns JSON rather than plain string. Shape:
+> ```json
+> {
+>   "status": "appended",
+>   "project_name": "<name>",
+>   "content": "<full text appended>",
+>   "content_first_line": "<first line of content, trimmed>",
+>   "message": "Note appended to <name>/NOTES.md."
+> }
+> ```
+> The router hook above uses `${content_first_line}` for the log entry `title` and `${content}` for the body (router `${}` template substitution against the source result fields). Hooks that consume this tool must use these field names — not `source_result.first_line` / `source_result.body` (stale names from the original spec draft).
 
 This is the only router hook in v1: `notes_append` → `wiki_log_append`. Both are MCP tools. Pure data forwarding. No synthesis. Registered by the **proj plugin** (not the wiki plugin) because proj owns `notes_append` + the hook only makes sense when proj is present.
 

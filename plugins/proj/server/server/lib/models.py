@@ -274,7 +274,6 @@ class WikiSync:
     """Wiki plugin integration settings stored under sync.wiki in proj.yaml."""
 
     enabled: bool = False
-    auto_sync: bool = True
     auto_ingest_sessions: bool = False
     capture_notes_as_log: bool = False
     replace_notes_md: bool = False
@@ -283,7 +282,6 @@ class WikiSync:
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "enabled": self.enabled,
-            "auto_sync": self.auto_sync,
             "auto_ingest_sessions": self.auto_ingest_sessions,
             "capture_notes_as_log": self.capture_notes_as_log,
             "replace_notes_md": self.replace_notes_md,
@@ -296,7 +294,6 @@ class WikiSync:
         docs: list[str] = [str(d) for d in raw_docs] if isinstance(raw_docs, list) else []
         return cls(
             enabled=bool(data.get("enabled", False)),
-            auto_sync=bool(data.get("auto_sync", True)),
             auto_ingest_sessions=bool(data.get("auto_ingest_sessions", False)),
             capture_notes_as_log=bool(data.get("capture_notes_as_log", False)),
             replace_notes_md=bool(data.get("replace_notes_md", False)),
