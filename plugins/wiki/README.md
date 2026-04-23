@@ -35,8 +35,17 @@ Note: `wiki.yaml::enabled` ("wiki plugin ready") and `proj.yaml::sync.wiki.enabl
 - **Phase 3** — 3 more skills (`/wiki:ingest`, `/wiki:bootstrap`, `/wiki:promote`). Ingest accepts 6 source types (URL, file, `session:`, `note:`, `search:`, `mcp:`) + free-form natural language. Bootstrap is proj-aware. ✅
 - **Phase 4a** — proj integration foundation: session-active file persistence (`~/.claude/proj-session.yaml`, fixes scope detection), `WikiSync` dataclass in proj.yaml, router hook `notes_append` → `wiki_log_append`, `/proj:save` final step spawns wiki ingest subagent when enabled. ✅
 - **Phase 4b** — installer wizard gains wiki section: profile picker (software/personal/research/minimal/custom), bootstrap-queue flag, proj-integration toggles. Writes `wiki.yaml` + `wiki/config.yaml` + `proj.yaml::sync.wiki.*`. ✅
-- **Phase 4c** — Tier-2 semantic lint (contradictions, deprecation, missing cross-refs, category cluster suggestions). Pending.
+- **Phase 4c** — Tier-2 semantic lint: 4 LLM-driven checks dispatched in parallel via TeamCreate after Tier-1 (contradictions / deprecation / missing cross-refs / category clusters). Reference prompts at `plugins/wiki/skills/lint/references/tier2-*.md`. ✅
 - **Phase 5** — polish + docs. Pending.
+
+## Tier-2 lint references
+
+`/wiki:lint --tier=2` (or `--tier=all`) dispatches 4 subagents in parallel, one per reference file at `plugins/wiki/skills/lint/references/`:
+
+- `tier2-contradictions.md` — factual conflicts between tag-clustered pages.
+- `tier2-deprecation.md` — obsolete pages (stale + no inbound links).
+- `tier2-missing-cross-refs.md` — page titles appearing unwrapped in other page bodies.
+- `tier2-category-clusters.md` — tag clusters that could justify a new category.
 
 ## Ingest protocol references
 
