@@ -211,6 +211,14 @@ class TestManagedSectionContent:
         # Memory recall also in scope.
         assert "memory recall" in MANAGED_SECTION
 
+    def test_wiki_proj_search_knowledge_rule(self):
+        assert "Wiki + proj_search are primary knowledge sources" in MANAGED_SECTION
+        assert "/wiki:query" in MANAGED_SECTION
+        assert "mcp__plugin_proj_proj__proj_search_knowledge" in MANAGED_SECTION
+        assert "Explore" in MANAGED_SECTION
+        assert "general-purpose" in MANAGED_SECTION
+        assert "skip if wiki plugin disabled" in MANAGED_SECTION
+
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
         assert "run_in_background=true" in MANAGED_SECTION
