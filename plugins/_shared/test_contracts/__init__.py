@@ -6,6 +6,11 @@ from test_contracts.builders import (
     build_paginated_response,
     build_success_response,
 )
+from test_contracts.fixtures import (
+    discover_get_client_locations,
+    patch_get_client_everywhere,
+    setattr_get_client_everywhere,
+)
 from test_contracts.validators import (
     assert_request_matches_contract,
     assert_response_parses,
@@ -19,4 +24,7 @@ __all__ = [
     "build_error_response",
     "build_paginated_response",
     "build_success_response",
+    "discover_get_client_locations",
+    "patch_get_client_everywhere",
+    "setattr_get_client_everywhere",
 ]

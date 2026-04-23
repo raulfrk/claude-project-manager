@@ -5,30 +5,21 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from test_contracts.fixtures import patch_get_client_everywhere
 
 from server.lib.client import TrelloClient
 from server.lib.config import TrelloConfig
 
-# All modules that import get_client and need to be patched.
-_GET_CLIENT_LOCATIONS = [
-    "server.lib.client.get_client",
-    "server.tools.boards.get_client",
-    "server.tools.cards.get_client",
-    "server.tools.lists.get_client",
-    "server.tools.labels.get_client",
-    "server.tools.members.get_client",
-    "server.tools.comments.get_client",
-    "server.tools.checklists.get_client",
-    "server.tools.attachments.get_client",
-]
-
 
 @pytest.fixture()
 def mock_trello_client(mocker: pytest.MockerFixture) -> MagicMock:
-    """Patch get_client() everywhere to return a shared mock TrelloClient."""
+    """Patch get_client() across every tool module to return a shared mock.
+
+    Tool modules are autodiscovered under ``server.tools`` — no hand-maintained
+    location list to keep in sync when new tool modules are added.
+    """
     mock_client = MagicMock(spec=TrelloClient)
     # Provide a default config with empty whitelist so board tools work in tests
     mock_client._config = TrelloConfig(api_key="test_key", token="test_token", allowed_board_ids=[])
-    for loc in _GET_CLIENT_LOCATIONS:
-        mocker.patch(loc, return_value=mock_client)
+    patch_get_client_everywhere(mocker, return_value=mock_client)
     return mock_client
