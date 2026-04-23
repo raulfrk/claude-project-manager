@@ -1,0 +1,240 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Confluence Server / Data Center REST API (minimal subset)",
+    "version": "1",
+    "x-cpm-note": "Hand-authored from existing EndpointContract literals. No public OpenAPI spec available upstream."
+  },
+  "x-cpm-source": "manual",
+  "servers": [
+    {
+      "url": "https://conf.example.com"
+    }
+  ],
+  "paths": {
+    "/rest/api/content": {
+      "get": {
+        "operationId": "GET_PAGE_BY_TITLE_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_PAGE_BY_TITLE_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/content/{id}": {
+      "get": {
+        "operationId": "GET_PAGE_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_PAGE_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "object"
+                    },
+                    "body": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/content/{id}/child/attachment": {
+      "get": {
+        "operationId": "LIST_ATTACHMENTS_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for LIST_ATTACHMENTS_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/content/{id}/child/comment": {
+      "get": {
+        "operationId": "LIST_COMMENTS_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for LIST_COMMENTS_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/content/{id}/descendant/page": {
+      "get": {
+        "operationId": "TREE_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for TREE_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/search": {
+      "get": {
+        "operationId": "SEARCH_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for SEARCH_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "totalSize": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/space": {
+      "get": {
+        "operationId": "LIST_SPACES_SERVER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for LIST_SPACES_SERVER.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "type": "array"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

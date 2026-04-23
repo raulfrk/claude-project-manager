@@ -11,6 +11,15 @@ from test_contracts.fixtures import (
     patch_get_client_everywhere,
     setattr_get_client_everywhere,
 )
+from test_contracts.openapi import (
+    OpenAPISchemaValidator,
+    SpecError,
+    endpoint_contract,
+    is_manual_spec,
+    list_operations,
+    load,
+    validator_for,
+)
 from test_contracts.validators import (
     assert_request_matches_contract,
     assert_response_parses,
@@ -19,12 +28,19 @@ from test_contracts.validators import (
 __all__ = [
     "EndpointContract",
     "ErrorContract",
+    "OpenAPISchemaValidator",
+    "SpecError",
     "assert_request_matches_contract",
     "assert_response_parses",
     "build_error_response",
     "build_paginated_response",
     "build_success_response",
     "discover_get_client_locations",
+    "endpoint_contract",
+    "is_manual_spec",
+    "list_operations",
+    "load",
     "patch_get_client_everywhere",
     "setattr_get_client_everywhere",
+    "validator_for",
 ]

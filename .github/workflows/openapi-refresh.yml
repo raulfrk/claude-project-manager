@@ -1,0 +1,76 @@
+name: OpenAPI spec refresh
+
+# Monthly cron that pulls upstream OpenAPI specs for our integration plugins,
+# writes any changes to a feature branch, and opens a PR for human review.
+# Hand-authored specs (x-cpm-source: manual) are skipped.
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"  # first of each month, 06:00 UTC
+  workflow_dispatch:      # allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install _shared deps
+        working-directory: plugins/_shared
+        run: uv sync --group test
+
+      - name: Report diff vs upstream (does not write)
+        id: diff
+        working-directory: plugins/_shared
+        run: |
+          set +e
+          uv run python -m test_contracts.sync_openapi diff --all | tee /tmp/openapi-diff.txt
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-check hand-authored jira spec against WADL
+        continue-on-error: true
+        working-directory: plugins/_shared
+        run: uv run python -m test_contracts.sync_openapi cross-check --plugin jira | tee /tmp/openapi-jira-xcheck.txt
+
+      - name: Apply refresh (if upstream differs)
+        if: steps.diff.outputs.status == '1'
+        working-directory: plugins/_shared
+        run: uv run python -m test_contracts.sync_openapi refresh --all
+
+      - name: Create refresh PR
+        if: steps.diff.outputs.status == '1'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/openapi-refresh
+          commit-message: |
+            chore(tests): refresh vendored OpenAPI specs
+
+            Automated monthly refresh — see body for drift summary.
+          title: "chore(tests): refresh vendored OpenAPI specs"
+          body: |
+            Automated monthly refresh. Review the diff below — if any paths
+            were added, removed, or renamed upstream, contract tests may
+            need follow-up updates.
+
+            ### Diff summary
+            ```
+            $(cat /tmp/openapi-diff.txt)
+            ```
+
+            ### Jira DC WADL cross-check
+            ```
+            $(cat /tmp/openapi-jira-xcheck.txt || echo "(not generated)")
+            ```
+          labels: automated,openapi-refresh

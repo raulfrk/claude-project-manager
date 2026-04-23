@@ -250,7 +250,7 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.4.11"
+version = "0.4.12"
 source = { directory = "../../_shared" }
 dependencies = [
     { name = "httpx" },
@@ -267,6 +267,7 @@ requires-dist = [
 dev = [{ name = "basedpyright", specifier = ">=1.2" }]
 test = [
     { name = "httpx", specifier = ">=0.28" },
+    { name = "jsonschema", specifier = ">=4.21" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=7.0" },
 ]

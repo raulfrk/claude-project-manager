@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.11"
+version = "0.4.12"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,6 +24,7 @@ test = [
     "pytest>=8.0",
     "pytest-cov>=7.0",
     "httpx>=0.28",
+    "jsonschema>=4.21",
 ]
 
 [tool.ruff]
@@ -49,5 +50,11 @@ reportUnnecessaryIsInstance = false  # runtime guards for dynamic JSON/MCP data 
 reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov-fail-under=80"]
+testpaths = ["tests", "test_contracts/tests"]
+addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov-fail-under=80"]
+
+[tool.coverage.run]
+omit = [
+    # CLI tool — exercised manually + in the openapi-refresh GH Actions workflow.
+    "test_contracts/sync_openapi.py",
+]

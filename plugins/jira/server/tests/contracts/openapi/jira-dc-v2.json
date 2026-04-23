@@ -1,0 +1,1141 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Jira Server / Data Center REST API v2 (minimal subset)",
+    "version": "2",
+    "x-cpm-note": "Hand-authored from existing EndpointContract literals. No public OpenAPI spec available upstream."
+  },
+  "x-cpm-source": "manual",
+  "servers": [
+    {
+      "url": "https://jira.example.com"
+    }
+  ],
+  "paths": {
+    "/rest/agile/1.0/board/{boardId}/sprint": {
+      "get": {
+        "operationId": "GET_SPRINTS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_SPRINTS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "values": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "boardId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/agile/1.0/sprint/{sprintId}/issue": {
+      "post": {
+        "operationId": "MOVE_TO_SPRINT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for MOVE_TO_SPRINT (no body)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "issues": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sprintId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/attachment/{attachmentId}": {
+      "delete": {
+        "operationId": "DELETE_ATTACHMENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for DELETE_ATTACHMENT (no body)."
+          }
+        },
+        "parameters": [
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/component": {
+      "post": {
+        "operationId": "CREATE_COMPONENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for CREATE_COMPONENT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/field": {
+      "get": {
+        "operationId": "GET_FIELDS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_FIELDS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/issue": {
+      "post": {
+        "operationId": "CREATE_ISSUE",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for CREATE_ISSUE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "self": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "fields": {
+                    "type": "object",
+                    "properties": {
+                      "project": {
+                        "type": "object"
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "issuetype": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/issue/bulk": {
+      "post": {
+        "operationId": "BULK_CREATE",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for BULK_CREATE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "issues": {
+                      "type": "array"
+                    },
+                    "errors": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "issueUpdates": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/issue/{issueKey}": {
+      "put": {
+        "operationId": "BULK_UPDATE_SINGLE",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for BULK_UPDATE_SINGLE (no body)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "fields": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "GET_ISSUE",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_ISSUE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "fields": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/attachments": {
+      "post": {
+        "operationId": "ADD_ATTACHMENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for ADD_ATTACHMENT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/comment": {
+      "get": {
+        "operationId": "GET_ISSUE_COMMENTS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_ISSUE_COMMENTS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "comments": {
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "ADD_COMMENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for ADD_COMMENT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/comment/{commentId}": {
+      "delete": {
+        "operationId": "DELETE_COMMENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for DELETE_COMMENT (no body)."
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "UPDATE_COMMENT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for UPDATE_COMMENT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/transitions": {
+      "get": {
+        "operationId": "GET_TRANSITIONS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_TRANSITIONS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "transitions": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "TRANSITION_ISSUE",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for TRANSITION_ISSUE (no body)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "transition": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/watchers": {
+      "post": {
+        "operationId": "ADD_WATCHER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for ADD_WATCHER (no body)."
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "GET_WATCHERS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_WATCHERS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "watchCount": {
+                      "type": "integer"
+                    },
+                    "watchers": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "REMOVE_WATCHER",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for REMOVE_WATCHER (no body)."
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/worklog": {
+      "post": {
+        "operationId": "ADD_WORKLOG",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for ADD_WORKLOG.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "timeSpent": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "timeSpent": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "GET_WORKLOGS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_WORKLOGS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "worklogs": {
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issue/{issueKey}/worklog/{worklogId}": {
+      "delete": {
+        "operationId": "DELETE_WORKLOG",
+        "x-cpm-source": "manual",
+        "responses": {
+          "204": {
+            "description": "Success response for DELETE_WORKLOG (no body)."
+          }
+        },
+        "parameters": [
+          {
+            "name": "issueKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "worklogId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/issueLink": {
+      "post": {
+        "operationId": "LINK_ISSUES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for LINK_ISSUES (no body)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "type": {
+                    "type": "object"
+                  },
+                  "inwardIssue": {
+                    "type": "object"
+                  },
+                  "outwardIssue": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/issueLinkType": {
+      "get": {
+        "operationId": "GET_LINK_TYPES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_LINK_TYPES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "issueLinkTypes": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/issuetype": {
+      "get": {
+        "operationId": "GET_ISSUE_TYPES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_ISSUE_TYPES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/label": {
+      "get": {
+        "operationId": "GET_LABELS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_LABELS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "values": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/priority": {
+      "get": {
+        "operationId": "GET_PRIORITIES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_PRIORITIES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/project": {
+      "get": {
+        "operationId": "LIST_PROJECTS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for LIST_PROJECTS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/project/{projectKey}": {
+      "get": {
+        "operationId": "GET_PROJECT",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_PROJECT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/project/{projectKey}/components": {
+      "get": {
+        "operationId": "GET_COMPONENTS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_COMPONENTS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/project/{projectKey}/versions": {
+      "get": {
+        "operationId": "GET_VERSIONS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_VERSIONS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/rest/api/2/search": {
+      "get": {
+        "operationId": "EPIC_ISSUES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for EPIC_ISSUES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "issues": {
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/status": {
+      "get": {
+        "operationId": "GET_STATUSES",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for GET_STATUSES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/user/search": {
+      "get": {
+        "operationId": "SEARCH_USERS",
+        "x-cpm-source": "manual",
+        "responses": {
+          "200": {
+            "description": "Success response for SEARCH_USERS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rest/api/2/version": {
+      "post": {
+        "operationId": "CREATE_VERSION",
+        "x-cpm-source": "manual",
+        "responses": {
+          "201": {
+            "description": "Success response for CREATE_VERSION.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
