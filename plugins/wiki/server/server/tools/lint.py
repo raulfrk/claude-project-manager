@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -30,10 +31,28 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_lint_broken_links)
     mcp.tool()(wiki_lint_broken_section_refs)
     mcp.tool()(wiki_lint_category_violations)
+    mcp.tool()(wiki_lint_stale)
 
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    """Best-effort parse of an ISO-8601 UTC datetime string. Returns None on failure."""
+    if not value:
+        return None
+    # datetime.fromisoformat on Py 3.11+ accepts trailing 'Z'; be defensive for older runs.
+    normalized = value
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 
 def _collect_link_targets(fm: dict[str, Any], body: str) -> list[str]:
@@ -233,3 +252,35 @@ def wiki_lint_category_violations() -> str:
                 }
             )
     return json.dumps({"violations": violations})
+
+
+def wiki_lint_stale(days: int = 0) -> str:
+    """Pages whose last_ingested is older than `days` (or lint.stale_after_days default).
+
+    Pages with unparseable last_ingested are NOT flagged here — they're caught
+    by wiki_lint_schema.
+
+    Returns JSON {stale: [{slug, path, last_ingested, age_days}]}.
+    """
+    cfg = config_mod.load_config()
+    wiki_dir = cfg.wiki_dir
+    lint_cfg = _load_lint_config(wiki_dir)
+    threshold_days = int(days) if days > 0 else int(lint_cfg.get("stale_after_days", 90))
+    cutoff = datetime.now(UTC) - timedelta(days=threshold_days)
+    stale: list[dict[str, Any]] = []
+    for md, fm, _ in _iter_pages(wiki_dir):
+        last_ingested = str(fm.get("last_ingested", "") or "")
+        parsed = _parse_iso_utc(last_ingested)
+        if parsed is None:
+            continue
+        if parsed < cutoff:
+            age_days = (datetime.now(UTC) - parsed).days
+            stale.append(
+                {
+                    "slug": md.stem,
+                    "path": str(md),
+                    "last_ingested": last_ingested,
+                    "age_days": age_days,
+                }
+            )
+    return json.dumps({"stale": stale})
