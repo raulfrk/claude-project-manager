@@ -129,6 +129,40 @@ class TestMain:
         with patch("check_shared_version.get_staged_files", return_value=staged):
             assert check_shared_version.main() == 0
 
+    def test_test_only_changes_in_shared_do_not_trigger_gate(self) -> None:
+        """712: plugins/_shared/tests/**/*.py changes should not require a version bump."""
+        staged = [
+            "plugins/_shared/tests/test_managed_section.py",
+            "plugins/_shared/tests/test_scrubbing.py",
+        ]
+        with (
+            patch("check_shared_version.get_staged_files", return_value=staged),
+            patch("check_shared_version.get_version_from_git") as mock_get,
+        ):
+            result = check_shared_version.main()
+        assert result == 0
+        mock_get.assert_not_called()  # no version check when only tests changed
+
+    def test_source_plus_tests_staged_still_triggers_gate(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """712: mixed source + tests staged → source wins, gate fires as normal."""
+        staged = [
+            "plugins/_shared/tests/test_managed_section.py",
+            "plugins/_shared/hook_dispatch/dispatch.py",
+        ]
+        with (
+            patch("check_shared_version.get_staged_files", return_value=staged),
+            patch(
+                "check_shared_version.get_version_from_git",
+                side_effect=["0.4.10", "0.4.10"],
+            ),
+        ):
+            result = check_shared_version.main()
+        assert result == 1  # version not bumped → gate blocks
+        captured = capsys.readouterr()
+        assert "version not bumped" in captured.out
+
     def test_shared_py_staged_version_bumped_exits_0(self) -> None:
         """When _shared .py staged and version has changed, allow the commit."""
         staged = ["plugins/_shared/hook_dispatch/dispatch.py"]

@@ -88,8 +88,15 @@ def _check_lockfiles_pin_new_version(
 
 def main() -> int:
     staged = get_staged_files()
+    # Exclude plugins/_shared/tests/ — test-only changes don't alter the
+    # claude-hook-transport package contents, so they shouldn't require
+    # a version bump + lockfile regen.
     shared_py_staged = [
-        f for f in staged if f.startswith("plugins/_shared/") and f.endswith(".py")
+        f
+        for f in staged
+        if f.startswith("plugins/_shared/")
+        and f.endswith(".py")
+        and not f.startswith("plugins/_shared/tests/")
     ]
     if not shared_py_staged:
         return 0  # no _shared .py files staged — nothing to check
