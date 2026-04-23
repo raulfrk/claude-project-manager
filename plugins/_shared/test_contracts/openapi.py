@@ -44,10 +44,14 @@ def load(spec_path: str | Path) -> dict[str, Any]:
 def load_merged(*spec_paths: str | Path) -> dict[str, Any]:
     """Read + merge multiple OpenAPI specs into one ``paths`` view.
 
-    Later specs override earlier ones on path collision. ``components`` are
-    merged under ``components/schemas``. Use when a plugin needs both a
-    vendored upstream spec and a hand-authored supplement file for
-    endpoints the upstream doesn't cover.
+    On path collision, operation maps are **merged per method** — later
+    specs override the same method; methods only in the earlier spec
+    are preserved. ``components/schemas`` are merged top-level.
+
+    Use when a plugin needs a vendored upstream spec supplemented by a
+    hand-authored file for endpoints or methods the upstream omits
+    (e.g. Atlassian Cloud spec defines only POST on ``/wiki/rest/api/space``
+    and we need GET — put GET in the supplement).
     """
     merged: dict[str, Any] = {
         "openapi": "3.1.0",
@@ -57,7 +61,12 @@ def load_merged(*spec_paths: str | Path) -> dict[str, Any]:
     }
     for p in spec_paths:
         spec = load(p)
-        merged["paths"].update(spec.get("paths", {}))
+        for url, path_obj in spec.get("paths", {}).items():
+            existing = merged["paths"].get(url)
+            if existing and isinstance(existing, dict) and isinstance(path_obj, dict):
+                merged["paths"][url] = {**existing, **path_obj}
+            else:
+                merged["paths"][url] = path_obj
         cs = spec.get("components", {}).get("schemas", {})
         if isinstance(cs, dict):
             merged["components"]["schemas"].update(cs)

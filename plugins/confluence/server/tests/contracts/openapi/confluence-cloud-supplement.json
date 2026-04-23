@@ -1,0 +1,166 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Confluence Cloud — hand-authored supplement",
+    "version": "1",
+    "x-cpm-note": "Endpoints / methods our plugin uses that are missing from the Atlassian Cloud swagger (developer.atlassian.com/cloud/confluence/swagger.v3.json). The official spec defines only POST on /wiki/rest/api/space and only PUT/POST on /child/attachment — we need GET on both. Ported from the original EndpointContract literals; schemas mirror the DC v1 equivalents since the v1 REST API is consistent across deployments."
+  },
+  "x-cpm-source": "manual",
+  "paths": {
+    "/wiki/rest/api/content": {
+      "get": {
+        "operationId": "getContent",
+        "responses": {
+          "200": {
+            "description": "List of pages (paged).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/content/{id}": {
+      "get": {
+        "operationId": "getContentById",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Page fetched by id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "version": {"type": "object"},
+                    "body": {"type": "object"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/content/{id}/descendant/page": {
+      "get": {
+        "operationId": "getContentDescendantPages",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Descendant pages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/content/{id}/child/comment": {
+      "get": {
+        "operationId": "getContentChildComments",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Child comments list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/content/{id}/child/attachment": {
+      "get": {
+        "operationId": "getContentChildAttachments",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "List of attachments on a content item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/space": {
+      "get": {
+        "operationId": "getSpaces",
+        "responses": {
+          "200": {
+            "description": "List of spaces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wiki/rest/api/search": {
+      "get": {
+        "operationId": "search",
+        "responses": {
+          "200": {
+            "description": "Search results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {"type": "array"},
+                    "size": {"type": "integer"},
+                    "totalSize": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
