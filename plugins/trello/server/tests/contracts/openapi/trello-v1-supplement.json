@@ -1,0 +1,69 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Trello API v1 — hand-authored supplement",
+    "version": "1",
+    "x-cpm-note": "Endpoints missing from the APIs.guru community spec. Ported from existing EndpointContract literals."
+  },
+  "x-cpm-source": "manual",
+  "paths": {
+    "/members/me/boards": {
+      "get": {
+        "operationId": "getMembersMeBoards",
+        "responses": {
+          "200": {
+            "description": "List of boards the authenticated member is on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {"type": "string"},
+                      "name": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cards/{cardId}/checkItem/{itemId}": {
+      "put": {
+        "operationId": "updateCardCheckItem",
+        "parameters": [
+          {"name": "cardId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "itemId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated check item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCardCheckItem",
+        "parameters": [
+          {"name": "cardId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "itemId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Deleted."}
+        }
+      }
+    }
+  }
+}

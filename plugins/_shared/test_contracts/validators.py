@@ -79,13 +79,44 @@ def _check_required_headers(request: httpx.Request, contract: EndpointContract) 
             )
 
 
-def _validate_body_against_schema(body: dict[str, Any], schema: dict[str, object]) -> None:
-    """Light-weight structural check: verify all required schema keys exist in body.
+def _looks_like_openapi_schema(schema: dict[str, object]) -> bool:
+    """Heuristic: true if the schema uses proper JSON Schema vocabulary.
 
-    This is NOT a full JSON Schema validator. It checks that every key defined in
-    ``schema["properties"]`` (or every top-level key in the schema dict if no
-    ``properties`` key) exists in the body. Nested schemas are checked recursively.
+    Vendored OpenAPI specs produce schemas with ``type`` at the top level (and
+    often ``required``). Hand-authored minimal schemas in our older contract
+    modules are typically bare ``{"properties": {...}}`` dicts without
+    ``type`` — those use the legacy "all keys must exist" check for
+    backward compatibility.
     """
+    return "type" in schema or "required" in schema or "$ref" in schema
+
+
+def _validate_body_against_schema(
+    body: dict[str, Any] | list[Any], schema: dict[str, object]
+) -> None:
+    """Validate ``body`` against ``schema``.
+
+    Dispatches:
+
+    - **OpenAPI-shaped schemas** (``type``/``required``/``$ref`` present) →
+      proper ``jsonschema.Draft202012Validator`` with ``required`` and
+      type enforcement.
+    - **Legacy minimal schemas** (bare ``{"properties": {...}}``) → old
+      "every key in properties must exist in body" check so hand-authored
+      contracts keep working unchanged.
+    """
+    if _looks_like_openapi_schema(schema):
+        from jsonschema import Draft202012Validator, ValidationError
+
+        try:
+            Draft202012Validator(schema).validate(body)
+        except ValidationError as exc:
+            raise AssertionError(f"Body does not match schema: {exc.message}") from exc
+        return
+
+    if not isinstance(body, dict):
+        return
+
     properties: dict[str, object] = schema.get("properties", schema)  # type: ignore[assignment]
 
     for key in properties:

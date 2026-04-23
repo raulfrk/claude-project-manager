@@ -41,6 +41,59 @@ def load(spec_path: str | Path) -> dict[str, Any]:
     return spec
 
 
+def load_merged(*spec_paths: str | Path) -> dict[str, Any]:
+    """Read + merge multiple OpenAPI specs into one ``paths`` view.
+
+    Later specs override earlier ones on path collision. ``components`` are
+    merged under ``components/schemas``. Use when a plugin needs both a
+    vendored upstream spec and a hand-authored supplement file for
+    endpoints the upstream doesn't cover.
+    """
+    merged: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "info": {"title": "merged", "version": "0"},
+        "paths": {},
+        "components": {"schemas": {}},
+    }
+    for p in spec_paths:
+        spec = load(p)
+        merged["paths"].update(spec.get("paths", {}))
+        cs = spec.get("components", {}).get("schemas", {})
+        if isinstance(cs, dict):
+            merged["components"]["schemas"].update(cs)
+    return merged
+
+
+def rename_path_placeholders(spec: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+    """Return a shallow-copy of ``spec`` with path placeholder names rewritten.
+
+    ``aliases`` maps ``{from_name}`` → ``{to_name}``. Useful when the
+    vendored spec uses different placeholder names than the plugin's
+    client (e.g. Trello spec uses ``{idBoard}`` but our URLs use
+    ``{boardId}``).
+
+    When two original paths normalise to the same renamed form (e.g. a
+    spec has both ``{idChecklist}`` and ``{idChecklistCurrent}`` at
+    otherwise-identical paths), their operation maps are merged.
+    """
+    new_paths: dict[str, Any] = {}
+    for url, path_obj in spec.get("paths", {}).items():
+        renamed = url
+        for old, new in aliases.items():
+            renamed = renamed.replace(old, new)
+        existing = new_paths.get(renamed)
+        if existing is not None and isinstance(path_obj, dict) and isinstance(existing, dict):
+            merged = {**existing}
+            for method, op in path_obj.items():
+                # Later specs override earlier on same method; this preserves
+                # methods the earlier spec had that the later doesn't.
+                merged[method] = op
+            new_paths[renamed] = merged
+        else:
+            new_paths[renamed] = path_obj
+    return {**spec, "paths": new_paths}
+
+
 def _find_operation(spec: dict[str, Any], operation_id: str) -> tuple[str, str, dict[str, Any]]:
     """Return (url_pattern, method, operation_object) for a given operationId."""
     for url_pattern, path_obj in spec.get("paths", {}).items():
@@ -175,19 +228,22 @@ def _success_status_for(op: dict[str, Any]) -> int:
 
 
 def endpoint_contract(
-    spec_path: str | Path,
+    spec_path: str | Path | dict[str, Any],
     method: str,
     url_pattern: str,
     *,
+    spec_url_pattern: str | None = None,
     required_headers: dict[str, str] | None = None,
     auth_style: str = "bearer",
     status: str | int = "2xx",
+    no_request_body: bool = False,
+    no_response_body: bool = False,
 ) -> EndpointContract:
     """Build an EndpointContract from a vendored OpenAPI spec.
 
-    Looks up an operation by ``(method, url_pattern)`` — the same fields that
-    already exist on the caller's contract — and pulls request/response
-    schemas from the vendored spec.
+    Looks up an operation by ``(method, spec_url_pattern or url_pattern)``
+    in the spec, then returns an EndpointContract whose ``url_pattern``
+    matches what the plugin's client actually sends.
 
     Parameters
     ----------
@@ -196,26 +252,35 @@ def endpoint_contract(
     method:
         HTTP method (GET/POST/PUT/DELETE).
     url_pattern:
-        URL path pattern (must match a key in the spec's ``paths`` map).
+        URL path pattern as used by the plugin's client / httpx intercept.
+        Goes onto the returned contract — used by validators to match
+        against real requests.
+    spec_url_pattern:
+        URL pattern as it appears in the spec. Defaults to ``url_pattern``.
+        Use when the spec's server URL includes a version prefix (e.g.
+        Trello spec ``servers: [{"url": "https://trello.com/1"}]`` means
+        spec paths are like ``/boards/{id}`` but the plugin sends
+        ``/1/boards/{id}`` because its base URL omits ``/1``).
     required_headers:
-        Headers the client is expected to send. Caller supplies because
-        auth style is plugin-specific and often token-templated.
+        Headers the client is expected to send.
     auth_style:
         One of ``"bearer"``, ``"basic"``, ``"query_params"``.
     status:
         Which response status's schema to pull. Default ``"2xx"`` — first
         2XX code found. Pass explicit ``"204"`` etc. for no-body responses.
     """
-    spec = load(spec_path)
-    op = _find_operation_by_path(spec, method, url_pattern)
+    spec = spec_path if isinstance(spec_path, dict) else load(spec_path)
+    op = _find_operation_by_path(spec, method, spec_url_pattern or url_pattern)
     success = _success_status_for(op) if status == "2xx" else int(status)
     return EndpointContract(
         method=method.upper(),
         url_pattern=url_pattern,
         required_headers=required_headers or {},
         auth_style=auth_style,
-        request_schema=_request_schema_from_op(spec, op),
-        response_schema=_response_schema_from_op(spec, op, status=success),
+        request_schema=None if no_request_body else _request_schema_from_op(spec, op),
+        response_schema={}
+        if no_response_body
+        else _response_schema_from_op(spec, op, status=success),
         response_status=success,
     )
 
