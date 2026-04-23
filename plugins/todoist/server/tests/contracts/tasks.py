@@ -1,13 +1,15 @@
-"""EndpointContract definitions for Todoist API v1 task endpoints."""
+"""Endpoint contracts for Todoist API v1 task endpoints.
+
+URL, method, and request-body schemas come from the vendored OpenAPI
+spec. Response schemas are kept hand-authored because the plugin's
+``TodoistTask.to_dict`` translates raw API responses (notably converting
+``priority: int`` to ``priority: "low|normal|high|urgent"``), so the
+spec's response shape doesn't match what ``assert_response_parses`` sees.
+"""
 
 from __future__ import annotations
 
-from test_contracts.base import EndpointContract
-
-_AUTH_HEADERS = {"Authorization": "Bearer {token}"}
-_AUTH_STYLE = "bearer"
-
-# -- Task response schema (fields returned by TodoistTask.to_dict) -----------
+from tests.contracts import contract as _c
 
 _TASK_RESPONSE_SCHEMA: dict[str, object] = {
     "properties": {
@@ -24,82 +26,17 @@ _TASK_RESPONSE_SCHEMA: dict[str, object] = {
     },
 }
 
-# -- Contracts ---------------------------------------------------------------
+_OK_SCHEMA: dict[str, object] = {"properties": {"ok": {"type": "boolean"}}}
 
-LIST_TASKS = EndpointContract(
-    method="GET",
-    url_pattern="/api/v1/tasks",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
+
+LIST_TASKS = _c(
+    "GET",
+    "/api/v1/tasks",
     response_schema={"items": _TASK_RESPONSE_SCHEMA},
-    response_status=200,
 )
-
-CREATE_TASK = EndpointContract(
-    method="POST",
-    url_pattern="/api/v1/tasks",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema={
-        "properties": {
-            "content": {"type": "string"},
-        },
-    },
-    response_schema=_TASK_RESPONSE_SCHEMA,
-    response_status=200,
-)
-
-UPDATE_TASK = EndpointContract(
-    method="POST",
-    url_pattern="/api/v1/tasks/{task_id}",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema={
-        "properties": {
-            "content": {"type": "string"},
-        },
-    },
-    response_schema=_TASK_RESPONSE_SCHEMA,
-    response_status=200,
-)
-
-CLOSE_TASK = EndpointContract(
-    method="POST",
-    url_pattern="/api/v1/tasks/{task_id}/close",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
-    response_schema={"properties": {"ok": {"type": "boolean"}}},
-    response_status=204,
-)
-
-REOPEN_TASK = EndpointContract(
-    method="POST",
-    url_pattern="/api/v1/tasks/{task_id}/reopen",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
-    response_schema={"properties": {"ok": {"type": "boolean"}}},
-    response_status=204,
-)
-
-DELETE_TASK = EndpointContract(
-    method="DELETE",
-    url_pattern="/api/v1/tasks/{task_id}",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
-    response_schema={"properties": {"ok": {"type": "boolean"}}},
-    response_status=204,
-)
-
-GET_TASK = EndpointContract(
-    method="GET",
-    url_pattern="/api/v1/tasks/{task_id}",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
-    response_schema=_TASK_RESPONSE_SCHEMA,
-    response_status=200,
-)
+CREATE_TASK = _c("POST", "/api/v1/tasks", response_schema=_TASK_RESPONSE_SCHEMA)
+UPDATE_TASK = _c("POST", "/api/v1/tasks/{task_id}", response_schema=_TASK_RESPONSE_SCHEMA)
+CLOSE_TASK = _c("POST", "/api/v1/tasks/{task_id}/close", status=204, response_schema=_OK_SCHEMA)
+REOPEN_TASK = _c("POST", "/api/v1/tasks/{task_id}/reopen", status=204, response_schema=_OK_SCHEMA)
+DELETE_TASK = _c("DELETE", "/api/v1/tasks/{task_id}", status=204, response_schema=_OK_SCHEMA)
+GET_TASK = _c("GET", "/api/v1/tasks/{task_id}", response_schema=_TASK_RESPONSE_SCHEMA)

@@ -215,6 +215,21 @@ def request_schema_for(spec: dict[str, Any], operation_id: str) -> dict[str, Any
     return schema or None
 
 
+def _strip_required(node: Any) -> Any:
+    """Recursively remove ``required`` arrays from a JSON Schema tree.
+
+    Used with ``drop_required=True`` on ``endpoint_contract`` when the
+    vendored spec declares many required fields but the plugin's test
+    payloads are intentionally minimal. Type-level drift is still caught
+    on properties that ARE present; required-field drift is not.
+    """
+    if isinstance(node, dict):
+        return {k: _strip_required(v) for k, v in node.items() if k != "required"}
+    if isinstance(node, list):
+        return [_strip_required(item) for item in node]
+    return node
+
+
 def _success_status_for(op: dict[str, Any]) -> int:
     """Pick a canonical 2xx status code from an operation's responses."""
     responses = op.get("responses", {}) or {}
@@ -238,6 +253,9 @@ def endpoint_contract(
     status: str | int = "2xx",
     no_request_body: bool = False,
     no_response_body: bool = False,
+    response_schema: dict[str, object] | None = None,
+    request_schema: dict[str, object] | None = None,
+    drop_required: bool = False,
 ) -> EndpointContract:
     """Build an EndpointContract from a vendored OpenAPI spec.
 
@@ -272,15 +290,30 @@ def endpoint_contract(
     spec = spec_path if isinstance(spec_path, dict) else load(spec_path)
     op = _find_operation_by_path(spec, method, spec_url_pattern or url_pattern)
     success = _success_status_for(op) if status == "2xx" else int(status)
+
+    if no_request_body:
+        req_schema: dict[str, object] | None = None
+    elif request_schema is not None:
+        req_schema = request_schema
+    else:
+        req_schema = _request_schema_from_op(spec, op)
+
+    if no_response_body:
+        resp_schema: dict[str, object] = {}
+    elif response_schema is not None:
+        resp_schema = response_schema
+    else:
+        resp_schema = _response_schema_from_op(spec, op, status=success)
+        if drop_required and isinstance(resp_schema, dict):
+            resp_schema = _strip_required(resp_schema)
+
     return EndpointContract(
         method=method.upper(),
         url_pattern=url_pattern,
         required_headers=required_headers or {},
         auth_style=auth_style,
-        request_schema=None if no_request_body else _request_schema_from_op(spec, op),
-        response_schema={}
-        if no_response_body
-        else _response_schema_from_op(spec, op, status=success),
+        request_schema=req_schema,
+        response_schema=resp_schema,
         response_status=success,
     )
 

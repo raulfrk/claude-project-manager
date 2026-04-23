@@ -1,13 +1,8 @@
-"""EndpointContract definitions for Todoist API v1 project endpoints."""
+"""Endpoint contracts for Todoist API v1 project endpoints."""
 
 from __future__ import annotations
 
-from test_contracts.base import EndpointContract
-
-_AUTH_HEADERS = {"Authorization": "Bearer {token}"}
-_AUTH_STYLE = "bearer"
-
-# -- Project response schema -------------------------------------------------
+from tests.contracts import contract as _c
 
 _PROJECT_RESPONSE_SCHEMA: dict[str, object] = {
     "properties": {
@@ -18,28 +13,9 @@ _PROJECT_RESPONSE_SCHEMA: dict[str, object] = {
     },
 }
 
-# -- Contracts ---------------------------------------------------------------
-
-LIST_PROJECTS = EndpointContract(
-    method="GET",
-    url_pattern="/api/v1/projects",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema=None,
+LIST_PROJECTS = _c(
+    "GET",
+    "/api/v1/projects",
     response_schema={"items": _PROJECT_RESPONSE_SCHEMA},
-    response_status=200,
 )
-
-CREATE_PROJECT = EndpointContract(
-    method="POST",
-    url_pattern="/api/v1/projects",
-    required_headers=_AUTH_HEADERS,
-    auth_style=_AUTH_STYLE,
-    request_schema={
-        "properties": {
-            "name": {"type": "string"},
-        },
-    },
-    response_schema=_PROJECT_RESPONSE_SCHEMA,
-    response_status=200,
-)
+CREATE_PROJECT = _c("POST", "/api/v1/projects", response_schema=_PROJECT_RESPONSE_SCHEMA)
