@@ -2,6 +2,7 @@
 name: save
 description: Save session notes, reconcile git activity with todos, and update project context. Use when asked "save session", "proj:save", or at the end of a work session.
 allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__plugin_wiki_wiki__wiki_scope_detect, Task, Read, Bash, Write
+argument-hint: "[free-form session note]"
 ---
 
 
