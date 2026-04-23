@@ -133,6 +133,23 @@ For the full architecture with diagrams and interaction flows, see [docs/archite
 
 ---
 
+## Karpathy alignment
+
+The managed CLAUDE.md block adopts Andrej Karpathy's late-2025 LLM-coding-pitfalls observations as 4 of its rules (Think Before Coding / Simplicity First / Surgical Changes / Goal-Driven Execution), via the [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills) distillation (MIT-licensed).
+
+Original Karpathy tweet: https://x.com/karpathy/status/2015883857489522876
+
+These rules are layered with cpm-specific operationalizations:
+- Append-only log convention (chronological project history grep-able via `## [YYYY-MM-DD HH:MM] op | title` headings)
+- Reset-over-recover discipline (prefer `wt_remove` + new `wt_create` with tightened scope over patching agent drift)
+- Reproduce-before-fix for bug-work
+- Mid-execution checkpoint rhythm (`/proj:checkpoint`)
+- Principled-across-config-scales constraint
+
+See `~/.claude/CLAUDE.md` for the full block (auto-installed by the cpm installer; refresh via `/proj:claudemd-refresh`).
+
+---
+
 ## Local development
 
 Install `just` (`brew install just` on macOS, `cargo install just` elsewhere)
