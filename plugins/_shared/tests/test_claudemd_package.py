@@ -193,6 +193,23 @@ class TestManagedSectionContent:
         assert "mcp__plugin_worktree_worktree__wt_create" in MANAGED_SECTION
         assert "git fetch origin" in MANAGED_SECTION
         assert "git reset --hard origin/" in MANAGED_SECTION
+        # 687 refinement: local-ahead-of-origin guard preserves unpushed commits.
+        assert "rev-list origin/" in MANAGED_SECTION
+        assert "unpushed" in MANAGED_SECTION
+
+    def test_verify_before_asserting_rule(self):
+        """700: general-purpose rule to fact-check claims via tools instead of assuming."""
+        assert "Verify before asserting" in MANAGED_SECTION
+        # Distinctive phrases that can only come from bullet 19 (not single-word tokens
+        # which any future prose could accidentally satisfy).
+        assert "Read for file contents" in MANAGED_SECTION
+        assert "Grep for symbols" in MANAGED_SECTION
+        assert "Bash or git for repository state" in MANAGED_SECTION
+        assert "WebFetch or WebSearch" in MANAGED_SECTION
+        # Calls out mid-task timing vs verification-before-completion boundary.
+        assert "mid-task" in MANAGED_SECTION
+        # Memory recall also in scope.
+        assert "memory recall" in MANAGED_SECTION
 
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
@@ -200,6 +217,7 @@ class TestManagedSectionContent:
         assert "plan mode" in MANAGED_SECTION
         assert "Auto-capture" in MANAGED_SECTION
         assert "Interactive Q&A" in MANAGED_SECTION
+        assert "Verify before asserting" in MANAGED_SECTION
 
 
 def test_managed_section_loaded_from_file():
