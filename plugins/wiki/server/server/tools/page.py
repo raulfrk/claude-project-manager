@@ -24,6 +24,7 @@ REQUIRED_FRONTMATTER_FIELDS = ("title", "tags", "links_to", "scope", "sources", 
 
 def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_page_write)
+    mcp.tool()(wiki_page_get)
 
 
 def _validate_frontmatter(fm: dict[str, Any]) -> list[str]:
@@ -115,3 +116,23 @@ def wiki_page_write(
             "warning": warning,
         }
     )
+
+
+def wiki_page_get(slug: str, category: str | None) -> str:
+    """Read a single wiki page.
+
+    Args:
+        slug: page slug (filename stem, lowercase-with-dashes).
+        category: directory name under pages/. None = flat (minimal profile).
+
+    Returns JSON string with {frontmatter, body, path} or {error: "not_found" | ...}.
+    """
+    cfg = config_mod.load_config()
+    target = storage.page_path(cfg.wiki_dir, category, slug)
+    if not target.exists():
+        return json.dumps({"error": "not_found", "path": str(target)})
+    try:
+        fm, body = fm_mod.parse(target.read_text())
+    except fm_mod.FrontmatterError as e:
+        return json.dumps({"error": f"malformed frontmatter: {e}", "path": str(target)})
+    return json.dumps({"frontmatter": fm, "body": body, "path": str(target)})
