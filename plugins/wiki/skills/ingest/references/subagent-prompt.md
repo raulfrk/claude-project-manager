@@ -12,7 +12,7 @@ SCOPE: {scope}
 CONFIG: {wiki_config}  (profile, categories, required_frontmatter, session_ingest.section_map)
 
 MCP TOOLS AVAILABLE:
-- mcp__plugin_wiki_wiki__wiki_page_list, wiki_page_get, wiki_page_write, wiki_page_delete
+- mcp__plugin_wiki_wiki__wiki_page_list, wiki_page_get, wiki_page_write
 - mcp__plugin_wiki_wiki__wiki_index_read, wiki_index_rebuild
 - mcp__plugin_wiki_wiki__wiki_log_append, wiki_log_read
 - mcp__plugin_wiki_wiki__wiki_link_resolve

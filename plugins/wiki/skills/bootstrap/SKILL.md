@@ -14,28 +14,32 @@ Bulk import. `$ARGUMENTS` = optional directory path or file-list file.
 - `../ingest/references/dedup-protocol.md`
 - `../ingest/references/subagent-prompt.md`
 
-**1.** `mcp__plugin_wiki_wiki__wiki_scope_detect` → `scope` + `proj_present`.
-- `proj_present == true` AND `$ARGUMENTS` is empty → **proj-aware mode** (step 2).
-- Else → **standalone mode** (step 3).
+**1.** Sanity check — confirm wiki is initialized:
+- `mcp__plugin_wiki_wiki__wiki_index_read` → read catalog.
+- `content == ""` → stop: "Wiki not initialized or empty. Run `/wiki:init` first, then retry."
 
-**2.** (proj-aware) Enumerate proj sources:
+**2.** `mcp__plugin_wiki_wiki__wiki_scope_detect` → `scope` + `proj_present`.
+- `proj_present == true` AND `$ARGUMENTS` is empty → **proj-aware mode** (step 3).
+- Else → **standalone mode** (step 4).
+
+**3.** (proj-aware) Enumerate proj sources:
 - Determine tracking dir: read `~/.claude/proj.yaml::tracking_dir` via `Read` (default `~/projects/tracking`).
 - Determine active project name via `wiki_scope_detect` (`scope` = `project:<name>`, extract `<name>`).
-- If no active project → fall back to standalone mode w/ AskUserQuestion prompt.
+- If no active project → fall back to standalone mode (jump to step 4 w/ `AskUserQuestion` prompt).
 - Scan `<tracking_dir>/<project>/`:
     - `NOTES.md` (if exists)
-    - `sessions/*.md` (glob via Bash `ls`)
-    - `todos/*/requirements.md` + `todos/*/research.md`
-    - `docs/*.md`, `overhaul-requirements.md`, etc. (pattern-match any top-level `.md`)
+    - `sessions/*.md` (use `Bash find <tracking_dir>/<project>/sessions -name "*.md" -type f`)
+    - `todos/*/requirements.md` + `todos/*/research.md` (use `Bash find <tracking_dir>/<project>/todos -name "requirements.md" -o -name "research.md" -type f`)
+    - `docs/*.md`, `overhaul-requirements.md`, etc. (use `Bash find <tracking_dir>/<project> -maxdepth 2 -name "*.md" -type f`)
 - Read `proj.yaml::sync.wiki.bootstrap_docs` (if present) → append user-declared doc paths.
 - Group sources by category:
     - `NOTES.md` + top-level docs → "narrative-sources"
     - `sessions/*.md` → "session-sources"
     - `todos/*/*.md` → "todo-sources"
-- Skip to step 4.
+- Skip to step 5.
 
-**3.** (standalone) Prompt for sources:
-- If `$ARGUMENTS` is a directory path → scan for `*.md` files (via `Bash ls <dir>/**/*.md`).
+**4.** (standalone) Prompt for sources:
+- If `$ARGUMENTS` is a directory path → scan for `*.md` files: `Bash find <dir> -name "*.md" -type f`.
 - Else prompt via `AskUserQuestion`:
     - Question: "What sources to bootstrap?"
     - Options:
@@ -44,21 +48,25 @@ Bulk import. `$ARGUMENTS` = optional directory path or file-list file.
         - `cancel` — exit.
 - Group all files as a single "mixed-sources" bucket (no per-category split in standalone mode).
 
-**4.** Dispatch subagent team via `TeamCreate` + per-agent `Task`:
-- One agent per source bucket from step 2/3.
-- Each agent gets a subset of sources from `../ingest/references/subagent-prompt.md` template — with a modification: the prompt lists multiple sources + asks the agent to iterate, running the full ingest protocol per source.
-- Per-agent prompt mod:
+**5.** Read wiki config for subagent prompts (same shape as `/wiki:ingest` step 5):
+- `Read ~/.claude/wiki.yaml` → extract `session_ingest.section_map`.
+- `Read ~/.claude/wiki/config.yaml` → extract `profile`, `categories`, `required_frontmatter`.
+- Bundle into a single JSON string (the "CONFIG" placeholder used in agent prompts below).
+
+**6.** `Read ../ingest/references/subagent-prompt.md` → the template.
+
+**7.** Dispatch subagent team via `TeamCreate` + per-agent `Task`:
+- One agent per source bucket from step 3/4.
+- For each bucket, construct a per-agent prompt by taking the template from step 6 + substituting `{source}` → a BATCH-SOURCES list (one path per line), `{scope}` → scope from step 2, `{wiki_config}` → JSON from step 5. Prepend the batch-iteration prologue:
 
 ```
-You are ingesting MULTIPLE sources for a bootstrap batch. For each SOURCE below,
-run the full single-source ingest protocol sequentially (NOT in parallel — the
-same subagent handles the batch to avoid duplicate-write races on shared pages).
+You are ingesting MULTIPLE sources for a bootstrap batch. For each source in the
+BATCH-SOURCES list below, run the full single-source ingest protocol sequentially
+(NOT in parallel — the same subagent handles the batch to avoid duplicate-write
+races on shared pages).
 
-SOURCES (one per line):
+BATCH-SOURCES (one per line):
 <list-of-sources-for-this-bucket>
-
-SCOPE: <from step 1>
-CONFIG: <same JSON as single-source ingest>
 
 After all sources processed, return JSON: {
   per_source: [{source, status, pages_created, pages_updated, contradictions}],
@@ -68,30 +76,30 @@ After all sources processed, return JSON: {
 
 - `TeamCreate` size = number of source buckets (usually 2-4 agents for proj-aware, 1 for standalone).
 
-**5.** Wait for team completion. Aggregate per-agent summaries.
+**8.** Wait for team completion. Aggregate per-agent summaries.
 
-**6.** Final cross-ref sweep (post-team):
+**9.** Final cross-ref sweep (post-team):
 - Parallel agents may have written pages with stale `links_to` (agent A didn't know agent B created `[[concept-X]]`).
 - Dispatch ONE cleanup subagent via `Task` w/ prompt:
 
 ```
 You are the post-bootstrap cross-ref sweeper. Walk every page under
 ~/.claude/wiki/pages/. For each page:
-1. Use wiki_page_get to read frontmatter + body.
+1. mcp__plugin_wiki_wiki__wiki_page_get to read frontmatter + body.
 2. Scan body for noun phrases matching other page titles/aliases via
-   wiki_link_resolve.
+   mcp__plugin_wiki_wiki__wiki_link_resolve.
 3. Insert [[wikilinks]] inline for any new matches.
-4. Update links_to frontmatter via wiki_page_write(mode="update").
+4. Update links_to frontmatter via mcp__plugin_wiki_wiki__wiki_page_write(mode="update").
 Return JSON: {pages_touched: N, cross_refs_added: N}.
 ```
 
-**7.** `wiki_search_index_refresh` → rebuild BM25 sidecar to include new pages (so first `/wiki:query` after bootstrap doesn't waste time on a full rebuild).
+**10.** `mcp__plugin_wiki_wiki__wiki_search_index_refresh` → rebuild BM25 sidecar to include new pages (so first `/wiki:query` after bootstrap doesn't waste time on a full rebuild).
 
-**8.** `wiki_index_rebuild` → refresh index.md w/ new pages + Recent section.
+**11.** `mcp__plugin_wiki_wiki__wiki_index_rebuild` → refresh index.md w/ new pages + Recent section.
 
-**9.** `wiki_log_append` w/ `action=bootstrap`, `title=<scope>`, `body=<summary>`.
+**12.** `mcp__plugin_wiki_wiki__wiki_log_append` w/ `action=bootstrap`, `title=<scope>`, `body=<summary>`.
 
-**10.** Render summary:
+**13.** Render summary:
 
 ```
 ## Bootstrap complete

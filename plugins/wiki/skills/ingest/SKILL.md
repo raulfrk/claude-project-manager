@@ -25,12 +25,12 @@ Ingest one source into the wiki. Delegates to a forked subagent that runs the fu
 - Else: `global`.
 
 **3.** `mcp__plugin_wiki_wiki__wiki_index_read` → sanity check.
-- `content == ""` → stop: "Wiki empty — but init is complete. Run `/wiki:ingest <source>` to populate. (Hint: you're trying to do that now; but run `/wiki:init` first if you haven't.)"
-- Count total pages from category sums. Pass as `wiki_page_count` into subagent prompt for BM25 threshold decision.
+- `content == ""` → stop: "Wiki not initialized or empty. Run `/wiki:init` first, then retry."
+- The subagent will decide BM25 vs index-only retrieval internally based on corpus size (threshold ~200 pages, hardcoded in subagent-prompt.md).
 
 **4.** Idempotency check (unless `--force`):
 - `mcp__plugin_wiki_wiki__wiki_log_read(action_filter="ingest")` → list recent ingest entries.
-- Read `wiki.yaml::reingest_cooldown_hours` (default 24).
+- Read `~/.claude/wiki.yaml::reingest_cooldown_hours` (default 24).
 - If any recent entry has `title` matching the current source (substring match or exact slug match) within cooldown → print "Source recently ingested (see log entry `<date>`). Skipping. Re-run w/ `--force` to re-ingest." + stop.
 
 **5.** Read wiki config for the subagent prompt:
