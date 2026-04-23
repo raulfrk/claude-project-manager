@@ -218,6 +218,12 @@ class TestManagedSectionContent:
         assert "Explore" in MANAGED_SECTION
         assert "general-purpose" in MANAGED_SECTION
         assert "skip if wiki plugin disabled" in MANAGED_SECTION
+        wiki_pos = MANAGED_SECTION.index("/wiki:query")
+        proj_search_pos = MANAGED_SECTION.index("mcp__plugin_proj_proj__proj_search_knowledge")
+        explore_pos = MANAGED_SECTION.index("Explore")
+        assert wiki_pos < proj_search_pos < explore_pos, (
+            "priority order must be wiki -> proj_search -> Explore"
+        )
 
     def test_managed_section_still_has_preexisting_rules(self):
         # Regression: new rules must not delete old ones
