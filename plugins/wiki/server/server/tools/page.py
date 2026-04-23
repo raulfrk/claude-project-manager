@@ -89,9 +89,14 @@ def wiki_page_write(
     new_content = fm_mod.dump(frontmatter, body)
 
     with storage.wiki_lock(wiki_dir):
-        # Idempotency (inside lock to avoid TOCTOU): on upsert with identical
-        # existing content → no-op.
-        if mode == "upsert" and exists:
+        # Re-check existence under lock so idempotency + created/updated
+        # reporting reflect the locked-state truth. Pre-lock `exists` stayed
+        # accurate for the mode-error guards above (best-effort by design),
+        # but a concurrent writer could have created the page between
+        # `target.exists()` at line 80 and lock acquisition here.
+        locked_exists = target.exists()
+        # Idempotency: on upsert with identical existing content → no-op.
+        if mode == "upsert" and locked_exists:
             existing_raw = target.read_text()
             existing_fm, existing_body = fm_mod.parse(existing_raw)
             if _content_hash(existing_fm, existing_body) == _content_hash(frontmatter, body):
@@ -109,8 +114,8 @@ def wiki_page_write(
     return json.dumps(
         {
             "path": str(target),
-            "created": not exists,
-            "updated": exists,
+            "created": not locked_exists,
+            "updated": locked_exists,
             "noop": False,
             "warning": warning,
         }
