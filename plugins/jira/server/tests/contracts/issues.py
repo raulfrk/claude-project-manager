@@ -3,120 +3,41 @@
 Covers: jira_search, jira_get_issue, jira_get_issue_comments,
 jira_get_epic_issues, jira_get_user_issues, jira_create_issue,
 jira_bulk_create_issues, jira_update_issues.
+
+Contracts are pulled from the vendored OpenAPI spec via
+``endpoint_contract``. Schemas live in ``openapi/jira-dc-v2.json``.
 """
 
 from __future__ import annotations
 
-from test_contracts.base import EndpointContract
+from test_contracts.openapi import endpoint_contract
+
+from tests.contracts import _SPEC_PATH
 
 _BEARER_HEADERS = {"Authorization": "Bearer {token}"}
 
-SEARCH = EndpointContract(
-    method="GET",
-    url_pattern="/rest/api/2/search",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema=None,
-    response_schema={
-        "properties": {
-            "issues": {"type": "array"},
-            "total": {"type": "integer"},
-        }
-    },
-    response_status=200,
-)
 
-GET_ISSUE = EndpointContract(
-    method="GET",
-    url_pattern="/rest/api/2/issue/{issueKey}",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema=None,
-    response_schema={
-        "properties": {
-            "key": {"type": "string"},
-            "fields": {"type": "object"},
-        }
-    },
-    response_status=200,
-)
+def _c(method: str, url: str, status: str | int = "2xx"):
+    return endpoint_contract(
+        _SPEC_PATH,
+        method,
+        url,
+        required_headers=_BEARER_HEADERS,
+        auth_style="bearer",
+        status=status,
+    )
 
-GET_ISSUE_COMMENTS = EndpointContract(
-    method="GET",
-    url_pattern="/rest/api/2/issue/{issueKey}/comment",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema=None,
-    response_schema={
-        "properties": {
-            "comments": {"type": "array"},
-            "total": {"type": "integer"},
-        }
-    },
-    response_status=200,
-)
 
-# jira_get_epic_issues reuses /rest/api/2/search
+SEARCH = _c("GET", "/rest/api/2/search")
+GET_ISSUE = _c("GET", "/rest/api/2/issue/{issueKey}")
+GET_ISSUE_COMMENTS = _c("GET", "/rest/api/2/issue/{issueKey}/comment")
+
+# jira_get_epic_issues and jira_get_user_issues reuse /rest/api/2/search
 EPIC_ISSUES = SEARCH
-
-# jira_get_user_issues reuses /rest/api/2/search
 USER_ISSUES = SEARCH
 
-CREATE_ISSUE = EndpointContract(
-    method="POST",
-    url_pattern="/rest/api/2/issue",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema={
-        "properties": {
-            "fields": {
-                "type": "object",
-                "properties": {
-                    "project": {"type": "object"},
-                    "summary": {"type": "string"},
-                    "issuetype": {"type": "object"},
-                },
-            }
-        }
-    },
-    response_schema={
-        "properties": {
-            "key": {"type": "string"},
-            "self": {"type": "string"},
-        }
-    },
-    response_status=201,
-)
+CREATE_ISSUE = _c("POST", "/rest/api/2/issue")
+BULK_CREATE = _c("POST", "/rest/api/2/issue/bulk")
 
-BULK_CREATE = EndpointContract(
-    method="POST",
-    url_pattern="/rest/api/2/issue/bulk",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema={
-        "properties": {
-            "issueUpdates": {"type": "array"},
-        }
-    },
-    response_schema={
-        "properties": {
-            "issues": {"type": "array"},
-            "errors": {"type": "array"},
-        }
-    },
-    response_status=201,
-)
-
-BULK_UPDATE_SINGLE = EndpointContract(
-    method="PUT",
-    url_pattern="/rest/api/2/issue/{issueKey}",
-    required_headers=_BEARER_HEADERS,
-    auth_style="bearer",
-    request_schema={
-        "properties": {
-            "fields": {"type": "object"},
-        }
-    },
-    response_schema={},
-    response_status=204,
-)
+# Bulk update of individual issues maps to single-issue PUT /issue/{key}
+BULK_UPDATE_SINGLE = _c("PUT", "/rest/api/2/issue/{issueKey}", status=204)
