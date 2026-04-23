@@ -68,6 +68,8 @@ jobs:
             path: plugins/todoist/server
           - plugin: confluence
             path: plugins/confluence/server
+          - plugin: wiki
+            path: plugins/wiki/server
           - plugin: _shared
             path: plugins/_shared
     name: test (${{ matrix.plugin }})

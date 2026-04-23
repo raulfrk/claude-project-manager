@@ -27,11 +27,21 @@ def anyio_backend(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture(autouse=True)
-def reset_session_state() -> Generator[None, None, None]:
-    """Reset session state before each test to prevent cross-test contamination."""
-    state.clear_session_active()
+def reset_session_state(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Generator[None, None, None]:
+    """Reset session state before each test.
+
+    Redirects state._SESSION_FILE to a per-test tmp path so the shared
+    ~/.claude/proj-session.yaml is never touched during tests + cross-worker
+    contamination (pytest-xdist) is impossible. Also clears in-memory state
+    before + after each test.
+    """
+    tmp = tmp_path_factory.mktemp("proj-session")
+    monkeypatch.setattr(state, "_SESSION_FILE", tmp / "proj-session.yaml")
+    monkeypatch.setattr(state, "_session_active_project", None)
     yield
-    state.clear_session_active()
+    monkeypatch.setattr(state, "_session_active_project", None)
 
 
 @pytest.fixture()
