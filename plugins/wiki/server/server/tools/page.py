@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from server.lib import config as config_mod
 from server.lib import frontmatter as fm_mod
@@ -25,6 +25,7 @@ REQUIRED_FRONTMATTER_FIELDS = ("title", "tags", "links_to", "scope", "sources", 
 def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_page_write)
     mcp.tool()(wiki_page_get)
+    mcp.tool()(wiki_page_list)
 
 
 def _validate_frontmatter(fm: dict[str, Any]) -> list[str]:
@@ -136,3 +137,79 @@ def wiki_page_get(slug: str, category: str | None) -> str:
     except fm_mod.FrontmatterError as e:
         return json.dumps({"error": f"malformed frontmatter: {e}", "path": str(target)})
     return json.dumps({"frontmatter": fm, "body": body, "path": str(target)})
+
+
+def wiki_page_list(
+    scope_filter: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
+    linked_from: str | None = None,
+    linked_to: str | None = None,
+    limit: int = 0,
+) -> str:
+    """List pages with optional filters.
+
+    Filters:
+        scope_filter: match pages whose scope[] contains this value.
+        category: match pages under pages/<category>/.
+        tags: match pages whose tags[] is a superset of this list.
+        linked_from: match pages pointed at by this slug (i.e. slug's links_to).
+        linked_to: match pages whose links_to contains this slug.
+        limit: 0 = unlimited. Truncation flag in response.
+    """
+    cfg = config_mod.load_config()
+    pages_root = storage.pages_dir(cfg.wiki_dir)
+    if not pages_root.exists():
+        return json.dumps({"pages": [], "truncated": False})
+
+    tag_set = set(tags or [])
+
+    # Build linked_from map: slug → links_to from that page (for linked_from filter)
+    linked_from_targets: set[str] = set()
+    if linked_from:
+        source_path = None
+        for md in pages_root.rglob("*.md"):
+            if md.stem == linked_from:
+                source_path = md
+                break
+        if source_path:
+            fm, _ = fm_mod.parse(source_path.read_text())
+            linked_from_targets = set(fm.get("links_to", []) or [])
+
+    results: list[dict[str, Any]] = []
+    for md in sorted(pages_root.rglob("*.md")):
+        rel = md.relative_to(pages_root)
+        cat = rel.parts[0] if len(rel.parts) > 1 else None
+        if category and cat != category:
+            continue
+        try:
+            fm, _ = fm_mod.parse(md.read_text())
+        except fm_mod.FrontmatterError:
+            continue  # skip malformed pages
+        page_scope = cast("list[str]", fm.get("scope", []) or [])
+        if scope_filter and scope_filter not in page_scope:
+            continue
+        page_tags = set(fm.get("tags", []) or [])
+        if tag_set and not tag_set.issubset(page_tags):
+            continue
+        if linked_to and linked_to not in (fm.get("links_to", []) or []):
+            continue
+        if linked_from and md.stem not in linked_from_targets:
+            continue
+        results.append(
+            {
+                "title": fm.get("title", ""),
+                "slug": md.stem,
+                "category": cat,
+                "scope": page_scope,
+                "tags": list(page_tags),
+                "last_ingested": fm.get("last_ingested", ""),
+            }
+        )
+
+    truncated = False
+    if limit > 0 and len(results) > limit:
+        results = results[:limit]
+        truncated = True
+
+    return json.dumps({"pages": results, "truncated": truncated})
