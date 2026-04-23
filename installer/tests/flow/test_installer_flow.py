@@ -149,7 +149,7 @@ class TestReinstall:
         assert (claude / "proj.yaml").exists()
         assert (claude / "worktree.yaml").exists()
 
-    def test_reinstall_calls_ensure_managed_section(self) -> None:
+    def test_reinstall_calls_ensure_managed_section(self, tmp_path: Path) -> None:
         """_run_reinstall must refresh managed CLAUDE.md before executing reinstall."""
         with (
             patch(
@@ -174,11 +174,12 @@ class TestReinstall:
             ),
             patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
             patch("installer.flow.installer_flow.ensure_managed_section") as mock_ems,
+            patch("installer.flow.installer_flow.Path.home", return_value=tmp_path),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
             code = run_installer_flow("reinstall", _Args(), console)
         assert code == 0
-        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
+        mock_ems.assert_called_once_with(tmp_path / ".claude" / "CLAUDE.md")
 
 
 # ── Uninstall ──────────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ class TestUninstall:
 
 
 class TestInstall:
-    def test_install_selects_plugins_and_executes(self) -> None:
+    def test_install_selects_plugins_and_executes(self, tmp_path: Path) -> None:
         with (
             patch(
                 "installer.flow.installer_flow.pre_install_phase",
@@ -290,6 +291,7 @@ class TestInstall:
                 return_value=_ok(),
             ) as mock_exec,
             patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.Path.home", return_value=tmp_path),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
             code = run_installer_flow("install", _Args(), console)
@@ -299,7 +301,7 @@ class TestInstall:
             a.plugin_id == "proj@claude-project-manager" and a.action == "install"
             for a in plan.actions
         )
-        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
+        mock_ems.assert_called_once_with(tmp_path / ".claude" / "CLAUDE.md")
 
     def test_install_cancelled_at_plugin_select(self) -> None:
         with (
@@ -706,7 +708,7 @@ class TestUpdate:
             code = run_installer_flow("update", _Args(), console)
         assert code == 0
 
-    def test_update_calls_ensure_managed_section(self) -> None:
+    def test_update_calls_ensure_managed_section(self, tmp_path: Path) -> None:
         """_run_update must refresh managed CLAUDE.md before executing updates."""
         with (
             patch(
@@ -738,11 +740,12 @@ class TestUpdate:
             ),
             patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
             patch("installer.flow.installer_flow.ensure_managed_section") as mock_ems,
+            patch("installer.flow.installer_flow.Path.home", return_value=tmp_path),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
             code = run_installer_flow("update", _Args(), console)
         assert code == 0
-        mock_ems.assert_called_once_with(Path.home() / ".claude" / "CLAUDE.md")
+        mock_ems.assert_called_once_with(tmp_path / ".claude" / "CLAUDE.md")
 
 
 # ── Integration config diff gate (todo 682) ────────────────────────────────
