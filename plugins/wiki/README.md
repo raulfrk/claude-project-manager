@@ -77,3 +77,12 @@ The `/wiki:ingest` + `/wiki:bootstrap` skills share a set of reference docs at `
 - `subagent-prompt.md` — the reusable forked-subagent prompt template.
 
 These files are part of the plugin; future phases (`/proj:save` auto-ingest in Phase 4) will reuse them by reference rather than duplicating the prose.
+
+### `references/` subfolder convention
+
+Skills whose prose exceeds ~250 lines or whose prompt templates are reused across multiple skills should place supporting docs in a `references/` subfolder next to `SKILL.md`. Examples:
+
+- `plugins/wiki/skills/ingest/references/` — source readers, dedup protocol, subagent prompt (shared with `/wiki:bootstrap` and `/proj:save` auto-ingest).
+- `plugins/wiki/skills/lint/references/` — Tier-2 lint subagent prompts (one per concern).
+
+This keeps `SKILL.md` under the 250-line soft cap while letting rich reference material stay version-controlled with the skill.

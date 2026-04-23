@@ -26,10 +26,12 @@ Bulk import. `$ARGUMENTS` = optional directory path or file-list file.
 - Determine tracking dir: read `~/.claude/proj.yaml::tracking_dir` via `Read` (default `~/projects/tracking`).
 - Determine active project name via `wiki_scope_detect` (`scope` = `project:<name>`, extract `<name>`).
 - If no active project → fall back to standalone mode (jump to step 4 w/ `AskUserQuestion` prompt).
+
+> **Note:** proj-aware enumeration depends on the active-project being persisted in `~/.claude/proj-session.yaml` (file-backed per todo 705). Session-only setups (proj loaded via `/proj:load` but `proj-session.yaml` not written) will fall back to standalone mode here. If you expected proj-aware mode + got standalone, run `/proj:load <name>` again to re-persist, then retry `/wiki:bootstrap`.
 - Scan `<tracking_dir>/<project>/`:
     - `NOTES.md` (if exists)
     - `sessions/*.md` (use `Bash find <tracking_dir>/<project>/sessions -name "*.md" -type f`)
-    - `todos/*/requirements.md` + `todos/*/research.md` (use `Bash find <tracking_dir>/<project>/todos -name "requirements.md" -o -name "research.md" -type f`)
+    - `todos/*/requirements.md` + `todos/*/research.md` (use `Bash find <tracking_dir>/<project>/todos \( -name "requirements.md" -o -name "research.md" \) -type f`)
     - `docs/*.md`, `overhaul-requirements.md`, etc. (use `Bash find <tracking_dir>/<project> -maxdepth 2 -name "*.md" -type f`)
 - Read `proj.yaml::sync.wiki.bootstrap_docs` (if present) → append user-declared doc paths.
 - Group sources by category:

@@ -46,3 +46,7 @@ When resolving `mcp:*` or natural-language forms that map to MCP tools, check av
 - linear: `*issue_get*`, `*project_get*`
 
 If none match, fall back to `AskUserQuestion`: "Which MCP tool should fetch this? Options: `<list of available tool names that look relevant>`."
+
+## Idempotency note
+
+Source resolution is stateless — the reader does not check for prior ingests. Idempotency is enforced later in the pipeline (see `dedup-protocol.md::Idempotency safeguards`). Readers always fetch fresh content; the skill-level `wiki_log_read` check gates whether to pass the content through to ingest at all.

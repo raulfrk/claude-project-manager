@@ -62,5 +62,10 @@ When updating an existing page:
 
 ## Idempotency safeguards
 
-- Ingest same source twice within `reingest_cooldown_hours` (default 24) → subagent detects via `sources[*].ref` + returns existing pages. Only re-ingests w/ `--force` flag.
-- Identical-content upsert → `wiki_page_write(mode="upsert")` returns `noop: true` (already handled by the tool).
+Defense-in-depth — three independent checks, each intentional:
+
+1. **Skill-level** (ingest step 4): the skill calls `wiki_log_read(action_filter="ingest")` and short-circuits if a log entry within `reingest_cooldown_hours` matches the source ref. First line of defense; cheapest.
+2. **Subagent-level** (`subagent-prompt.md` IDEMPOTENCY block): subagent re-runs the same `wiki_log_read(action_filter="ingest")` check after dispatch. Defensive re-check (e.g. covers log-write races between skill and subagent). The dedup decision matrix above (overlap/title/slug-based, not source-ref-based) is a separate guard against duplicate page *creation* when the same content is ingested under a different source ref.
+3. **Tool-level**: `wiki_page_write(mode="upsert")` returns `noop: true` when content hash matches existing. Handles pathological retries or external file writes.
+
+Re-ingest same source within `reingest_cooldown_hours` (default 24) → check (1) short-circuits. Only re-ingests w/ `--force` flag (bypasses checks 1 + 2; check 3 still applies). Note: there is no `sources[*].ref` index — guards 1 and 2 share the log-read mechanism, not the page frontmatter.
