@@ -3,6 +3,8 @@
 import threading
 from pathlib import Path
 
+import pytest
+
 from server.lib.storage import (
     atomic_write,
     page_path,
@@ -85,3 +87,30 @@ class TestWikiLock:
         t_a.join()
         t_b.join()
         assert order == ["A-enter", "A-exit", "B-enter", "B-exit"]
+
+
+class TestAtomicWriteCleanup:
+    def test_atomic_write_cleans_up_tmp_on_replace_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If os.replace (Path.replace) raises, the tmp file must be removed."""
+        target = tmp_path / "target.md"
+
+        original_replace = Path.replace
+
+        def boom(self: Path, *args: object, **kwargs: object) -> Path:
+            # Only boom for the atomic_write tmp file; let other replace calls through.
+            if self.name.startswith(".target.md."):
+                raise OSError("simulated replace failure")
+            return original_replace(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "replace", boom)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            atomic_write(target, "hello")
+
+        # Target was never created (the replace failed).
+        assert not target.exists()
+        # Tmp file must have been cleaned up.
+        tmp_leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".target.md.")]
+        assert tmp_leftovers == [], f"leaked tmp files: {tmp_leftovers}"

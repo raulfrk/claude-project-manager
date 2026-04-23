@@ -146,3 +146,12 @@ class TestSaveProfile:
         loaded = load_profile(wiki_root)
         assert loaded.name == p.name
         assert loaded.categories == p.categories
+
+
+class TestProfileMalformedYaml:
+    def test_malformed_config_raises_profile_error(self, tmp_path: Path) -> None:
+        wiki_dir = tmp_path
+        (wiki_dir / "config.yaml").write_text("profile: [unclosed-bracket\n")
+
+        with pytest.raises(ProfileError, match="malformed"):
+            load_profile(wiki_dir)

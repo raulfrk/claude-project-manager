@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+from server.tools.index import _first_summary_line
 from tests.conftest import _write_page, call_tool
 
 
@@ -73,3 +74,16 @@ class TestWikiIndexRead:
         result = json.loads(await call_tool(mcp_app, "wiki_index_read"))
         assert "Wiki Index" in result["content"]
         assert result["categories"].get("concepts") == 1
+
+
+class TestFirstSummaryLine:
+    def test_empty_body_returns_empty_string(self) -> None:
+        assert _first_summary_line("") == ""
+
+    def test_body_starting_with_heading_skips_heading(self) -> None:
+        body = "# Heading only on first line\n\nthis is the real first line."
+        assert _first_summary_line(body) == "this is the real first line."
+
+    def test_all_heading_body_returns_empty(self) -> None:
+        body = "# one\n## two\n### three"
+        assert _first_summary_line(body) == ""

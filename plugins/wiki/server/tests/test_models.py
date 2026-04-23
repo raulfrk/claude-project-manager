@@ -106,3 +106,24 @@ class TestPage:
     def test_category_none_for_flat(self) -> None:
         p = Page(path=Path("/tmp/pages/hooks.md"), frontmatter={"title": "X"}, body="")
         assert p.category is None
+
+
+class TestPageScopeStringBranch:
+    def test_scope_accepts_plain_string(self, tmp_path: Path) -> None:
+        page = Page(
+            path=tmp_path / "pages" / "concepts" / "foo.md",
+            frontmatter={"scope": "global", "tags": [], "title": "Foo"},
+            body="",
+        )
+        assert page.scope == ["global"]
+
+
+class TestPageCategoryBranch:
+    def test_category_returns_none_when_path_has_no_pages_segment(self, tmp_path: Path) -> None:
+        # Flat layout: path has no 'pages' dir between wiki root and file.
+        page = Page(
+            path=tmp_path / "foo.md",
+            frontmatter={"title": "Foo"},
+            body="",
+        )
+        assert page.category is None
