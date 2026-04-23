@@ -1238,11 +1238,17 @@ class TestNotesAppendHeadingConvention:
         captured: dict[str, Any] = {}
 
         def fake_append_note(
-            cfg: Any, name: str, text: str, heading: str | None = None, op: str = "note"
+            cfg: Any,
+            name: str,
+            text: str,
+            heading: str | None = None,
+            op: str = "note",
+            _ts: str | None = None,
         ) -> None:
             captured["text"] = text
             captured["heading"] = heading
             captured["op"] = op
+            captured["_ts"] = _ts
 
         monkeypatch.setattr(storage, "append_note", fake_append_note)
         _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
@@ -1268,7 +1274,12 @@ class TestNotesAppendHeadingConvention:
         captured: dict[str, Any] = {}
 
         def fake_append_note(
-            cfg: Any, name: str, text: str, heading: str | None = None, op: str = "note"
+            cfg: Any,
+            name: str,
+            text: str,
+            heading: str | None = None,
+            op: str = "note",
+            _ts: str | None = None,
         ) -> None:
             captured["heading"] = heading
             captured["op"] = op
@@ -1311,4 +1322,36 @@ class TestNotesAppendHeadingConvention:
         ), (
             "content_first_line should be the composed heading sans '## ' prefix: "
             f"{parsed['content_first_line']!r}"
+        )
+
+    async def test_notes_append_first_line_matches_disk_heading(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
+        """Regression: content_first_line and on-disk heading use the same timestamp.
+
+        Catches the minute-boundary race that existed in initial Phase 2 commit b477784
+        where tools/context.py and lib/storage.py each called datetime.now()
+        independently — if the two calls straddled a minute boundary, the returned
+        content_first_line would not match the heading written to NOTES.md.
+        """
+        name = "myapp"
+        _setup_project_with_todos(cfg, name, tmp_path, todos=[])
+        state.set_session_active(name)
+
+        result = await call_tool(
+            mcp_app, "notes_append", text="body", heading="My Title", op="note"
+        )
+        parsed = json.loads(result)
+        first_line = parsed["content_first_line"]
+
+        # On-disk heading is "## [TS] note | My Title";
+        # content_first_line is "[TS] note | My Title" (no ## prefix).
+        notes_path = Path(cfg.tracking_dir) / name / "NOTES.md"
+        on_disk = notes_path.read_text()
+        expected_disk_line = f"## {first_line}"
+        assert expected_disk_line in on_disk, (
+            f"Mismatch: first_line={first_line!r}, on_disk={on_disk!r}"
         )

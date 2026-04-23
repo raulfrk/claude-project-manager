@@ -71,7 +71,7 @@ Save session ctx; reconcile git activity for active project.
 **9.** Update CLAUDE.md (if project has repos w/ claudemd=true):
  - `mcp__proj__claudemd_write` to update active todos section.
 
-**10.** `mcp__proj__notes_append(heading="<session date>", op="session", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep "^## \[" notes.md | tail -10`-friendly.
+**10.** `mcp__proj__notes_append(heading="<one-line session topic>", op="session", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep "^## \[" notes.md | tail -10`-friendly. Topic distinct from text body: heading = scannable title (e.g. "Phase 2 ship"), text = full session summary.
 
 **10b.** Decision-log reminder (light prompt, single dismiss):
  - Step 8 logged 0 decisions (no Key Decisions in synthesis) → ask via `AskUserQuestion`: "No decisions logged this session. Any to capture before save?" Options: Yes / No.

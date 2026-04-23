@@ -146,6 +146,16 @@ def test_append_note_without_heading_keeps_legacy_format(tmp_cfg: ProjConfig) ->
     assert "legacy body" in notes
 
 
+def test_append_note_uses_caller_ts_when_provided(tmp_cfg: ProjConfig) -> None:
+    """When _ts is provided, storage uses it verbatim (no datetime.now() call)."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    storage.append_note(
+        tmp_cfg, "myapp", "body", heading="title", op="note", _ts="2025-01-15 03:42"
+    )
+    notes = storage.read_notes(tmp_cfg, "myapp")
+    assert "## [2025-01-15 03:42] note | title" in notes
+
+
 def test_requirements_roundtrip(tmp_cfg: ProjConfig) -> None:
     (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
     storage.write_requirements(tmp_cfg, "myapp", "T001", "# Requirements\n\nGoal: do something")

@@ -7,6 +7,7 @@ import logging
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -400,15 +401,14 @@ def register(app: FastMCP) -> None:
         name = state.resolve_project(project_name)
         if not name:
             return json.dumps({"status": "error", "error": "No active project."})
-        storage.append_note(cfg, name, text, heading=heading, op=op)
-        # First line: when heading is provided, return the composed heading line
-        # so router hooks consuming content_first_line get the structured title.
         if heading is not None:
-            from datetime import datetime
-
             ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            storage.append_note(cfg, name, text, heading=heading, op=op, _ts=ts)
+            # Single ts source: avoids minute-boundary divergence between
+            # the on-disk heading and content_first_line.
             first_line = f"[{ts}] {op} | {heading}"[:200]
         else:
+            storage.append_note(cfg, name, text)
             first_line = (text.splitlines()[0].strip() if text.strip() else "")[:200]
         return json.dumps(
             {

@@ -269,13 +269,12 @@ def append_note(
     text: str,
     heading: str | None = None,
     op: str = "note",
+    _ts: str | None = None,
 ) -> None:
     path = notes_path(cfg, project_name)
     path.parent.mkdir(parents=True, exist_ok=True)
     if heading is not None:
-        from datetime import datetime
-
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        ts = _ts if _ts is not None else datetime.now().strftime("%Y-%m-%d %H:%M")
         entry = f"\n## [{ts}] {op} | {heading}\n\n{text.strip()}\n"
     else:
         today = str(date.today())
