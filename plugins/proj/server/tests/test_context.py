@@ -1355,3 +1355,52 @@ class TestNotesAppendHeadingConvention:
         assert expected_disk_line in on_disk, (
             f"Mismatch: first_line={first_line!r}, on_disk={on_disk!r}"
         )
+
+    async def test_notes_append_content_first_line_uses_decision_op(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
+        """When op='decision', content_first_line uses 'decision | ' separator.
+
+        Tool-layer assertion: storage tests cover the on-disk format for
+        op='decision'; this closes the tool-layer gap.
+        """
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
+        state.set_session_active("myapp")
+
+        result = await call_tool(
+            mcp_app,
+            "notes_append",
+            text="A vs B chose A",
+            heading="DB choice",
+            op="decision",
+        )
+        parsed = json.loads(result)
+        import re
+
+        assert re.match(
+            r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] decision \| DB choice",
+            parsed["content_first_line"],
+        ), f"content_first_line wrong shape for op='decision': {parsed['content_first_line']!r}"
+
+    async def test_notes_append_legacy_no_heading_first_line_from_text(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
+        """When heading is None, content_first_line equals first line of text (backward compat).
+        No storage monkeypatch — exercises the real first_line derivation in notes_append.
+        """
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
+        state.set_session_active("myapp")
+
+        result = await call_tool(
+            mcp_app,
+            "notes_append",
+            text="first line of body\nsecond line\nthird line",
+        )
+        parsed = json.loads(result)
+        assert parsed["content_first_line"] == "first line of body", parsed["content_first_line"]

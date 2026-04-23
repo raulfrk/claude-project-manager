@@ -73,11 +73,11 @@ Save session ctx; reconcile git activity for active project.
 
 **10.** `mcp__proj__notes_append(heading="<one-line session topic>", op="session", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep "^## \[" notes.md | tail -10`-friendly. Topic distinct from text body: heading = scannable title (e.g. "Phase 2 ship"), text = full session summary.
 
-**10b.** Decision-log reminder (light prompt, single dismiss):
- - Step 8 logged 0 decisions (no Key Decisions in synthesis) → ask via `AskUserQuestion`: "No decisions logged this session. Any to capture before save?" Options: Yes / No.
- - Yes → user supplies decision text; call `mcp__proj__notes_append(heading=<short title>, op="decision", text=<full text>)`. Optionally also call `mcp__proj__proj_decision_log` if user marks it as a structured A/B pick.
- - No → proceed silently to step 11.
- - Step 8 logged ≥1 decision → skip reminder.
+**10b.** Decision-log reminder:
+ - Step 8 logged ≥1 decision → skip 10b.
+ - Zero decisions → ask via `AskUserQuestion`: "No decisions logged this session. Any to capture before save?" Options: Yes / No.
+   - Yes → user supplies text; call `mcp__proj__notes_append(heading=<short title>, op="decision", text=<full text>)`. If user marks as A/B pick: also call `mcp__proj__proj_decision_log`.
+   - No → proceed silently to step 11.
 
 **11.** Wiki auto-ingest (if enabled):
  - `mcp__proj__config_load` → check `sync.wiki.enabled` + `sync.wiki.auto_ingest_sessions`.
