@@ -49,15 +49,24 @@ def wiki_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Pat
 
 
 @pytest.fixture
+def proj_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect proj.yaml lookup in scope.py to a temp path."""
+    p = tmp_path / "proj.yaml"
+    monkeypatch.setattr("server.tools.scope._PROJ_YAML_PATH", p)
+    return p
+
+
+@pytest.fixture
 def mcp_app(wiki_setup: dict[str, Path]) -> FastMCP:
     """FastMCP instance with wiki tools registered (expand as tools land)."""
-    from server.tools import index, links, log, page
+    from server.tools import index, links, log, page, scope
 
     mcp: FastMCP = FastMCP("wiki-test")
     page.register(mcp)
     log.register(mcp)
     index.register(mcp)
     links.register(mcp)
+    scope.register(mcp)
     return mcp
 
 
