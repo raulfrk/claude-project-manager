@@ -1,4 +1,11 @@
-"""wiki_scope_detect: resolve active-project scope via proj.yaml presence."""
+"""wiki_scope_detect: resolve active-project scope via proj plugin state.
+
+Reads two files, both owned by proj plugin:
+  - ~/.claude/proj.yaml          (existence signal → proj_present)
+  - ~/.claude/proj-session.yaml  (active project name → scope)
+
+No cross-MCP calls; pure file I/O per spec §3 persistence/synthesis boundary.
+"""
 
 from __future__ import annotations
 
@@ -12,35 +19,43 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _PROJ_YAML_PATH = Path.home() / ".claude" / "proj.yaml"
+_SESSION_YAML_PATH = Path.home() / ".claude" / "proj-session.yaml"
 
 
 def register(mcp: FastMCP) -> None:
     mcp.tool()(wiki_scope_detect)
 
 
+def _read_active_from_session() -> str | None:
+    """Read proj-session.yaml's `active` field. None if missing/malformed/empty."""
+    if not _SESSION_YAML_PATH.exists():
+        return None
+    try:
+        with _SESSION_YAML_PATH.open() as f:
+            data = yaml.safe_load(f)  # type: ignore[misc]
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("active")  # type: ignore[attr-defined]
+    if not value:
+        return None
+    return str(value)  # type: ignore[arg-type]
+
+
+def _proj_yaml_present() -> bool:
+    """True if ~/.claude/proj.yaml exists (regardless of contents)."""
+    return _PROJ_YAML_PATH.exists()
+
+
 def wiki_scope_detect() -> str:
-    """Detect active project scope via proj.yaml introspection.
+    """Detect active project scope via proj plugin's session file.
 
     Returns JSON {scope, proj_present}:
-        - scope: "project:<name>" if proj loaded + active project set, else "global"
-        - proj_present: whether proj.yaml exists on disk
-
-    NOTE: Active project is session-scoped only (stored in proj server memory,
-    not persisted to proj.yaml). Therefore, this tool always returns scope="global"
-    when reading proj.yaml directly. The scope concept is reserved for future use
-    when proj implements persistent active-project tracking.
+        - scope: "project:<name>" if proj_session_yaml has active project, else "global"
+        - proj_present: whether ~/.claude/proj.yaml exists on disk
     """
-    proj_present = _PROJ_YAML_PATH.exists()
-    if not proj_present:
-        return json.dumps({"scope": "global", "proj_present": False})
-
-    try:
-        with _PROJ_YAML_PATH.open() as f:
-            yaml.safe_load(f)  # type: ignore[misc]
-    except yaml.YAMLError:
-        # Malformed YAML: file exists but cannot be parsed.
-        return json.dumps({"scope": "global", "proj_present": True})
-
-    # Active project is session-scoped only, not persisted to proj.yaml.
-    # Always return global scope. Reserved for future active-project persistence.
-    return json.dumps({"scope": "global", "proj_present": True})
+    proj_present = _proj_yaml_present()
+    active = _read_active_from_session()
+    scope = f"project:{active}" if active else "global"
+    return json.dumps({"scope": scope, "proj_present": proj_present})

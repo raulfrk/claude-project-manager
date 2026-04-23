@@ -49,11 +49,19 @@ def wiki_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Pat
 
 
 @pytest.fixture
-def proj_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect proj.yaml lookup in scope.py to a temp path."""
-    p = tmp_path / "proj.yaml"
-    monkeypatch.setattr("server.tools.scope._PROJ_YAML_PATH", p)
-    return p
+def proj_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """Redirect both proj.yaml + proj-session.yaml lookups in scope.py."""
+    proj_yaml = tmp_path / "proj.yaml"
+    session_yaml = tmp_path / "proj-session.yaml"
+    monkeypatch.setattr("server.tools.scope._PROJ_YAML_PATH", proj_yaml)
+    monkeypatch.setattr("server.tools.scope._SESSION_YAML_PATH", session_yaml)
+    return {"proj_yaml": proj_yaml, "session_yaml": session_yaml}
+
+
+@pytest.fixture
+def proj_yaml_path(proj_paths: dict[str, Path]) -> Path:
+    """Legacy alias for proj_paths['proj_yaml']."""
+    return proj_paths["proj_yaml"]
 
 
 @pytest.fixture
