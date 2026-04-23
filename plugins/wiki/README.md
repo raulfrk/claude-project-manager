@@ -34,7 +34,7 @@ Note: `wiki.yaml::enabled` ("wiki plugin ready") and `proj.yaml::sync.wiki.enabl
 - **Phase 2** — BM25 search (`wiki_search_bm25`, `wiki_search_index_refresh`), 7 Tier-1 lint tools (`wiki_lint_*`), 3 standalone skills (`/wiki:init`, `/wiki:query`, `/wiki:lint`). ✅
 - **Phase 3** — 3 more skills (`/wiki:ingest`, `/wiki:bootstrap`, `/wiki:promote`). Ingest accepts 6 source types (URL, file, `session:`, `note:`, `search:`, `mcp:`) + free-form natural language. Bootstrap is proj-aware. ✅
 - **Phase 4a** — proj integration foundation: session-active file persistence (`~/.claude/proj-session.yaml`, fixes scope detection), `WikiSync` dataclass in proj.yaml, router hook `notes_append` → `wiki_log_append`, `/proj:save` final step spawns wiki ingest subagent when enabled. ✅
-- **Phase 4b** — wizard integration (installer prompts for wiki section). Pending.
+- **Phase 4b** — installer wizard gains wiki section: profile picker (software/personal/research/minimal/custom), bootstrap-queue flag, proj-integration toggles. Writes `wiki.yaml` + `wiki/config.yaml` + `proj.yaml::sync.wiki.*`. ✅
 - **Phase 4c** — Tier-2 semantic lint (contradictions, deprecation, missing cross-refs, category cluster suggestions). Pending.
 - **Phase 5** — polish + docs. Pending.
 
