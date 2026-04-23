@@ -75,6 +75,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 /proj:status            # Show open todos, git activity, project health
 /proj:todo add <text>   # Add a todo
 /proj:todo done <id>    # Mark a todo complete
+/proj:checkpoint        # Mid-execution review: continue, reset, or tighten scope
 /proj:save              # Save session notes and reconcile git
 ```
 

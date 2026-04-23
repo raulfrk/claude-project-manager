@@ -170,6 +170,7 @@ Skills are invoked as `/proj:<name>`. Most accept `$ARGUMENTS` for the primary i
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
+| `checkpoint` | `/proj:checkpoint [scope-hint]` | Mid-execution checkpoint — review in-flight work, decide continue/reset/tighten. |
 | `status` | `/proj:status` | Show project status, open todos, and recent git activity. Syncs Todoist if auto_sync is enabled. |
 | `save` | `/proj:save` | Save session notes (decisions, todos, insights, open questions) to session file + NOTES.md. Reconciles git activity with todos. |
 
