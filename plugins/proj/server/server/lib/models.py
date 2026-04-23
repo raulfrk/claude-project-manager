@@ -270,6 +270,41 @@ class JiraSync:
 
 
 @dataclass
+class WikiSync:
+    """Wiki plugin integration settings stored under sync.wiki in proj.yaml."""
+
+    enabled: bool = False
+    auto_sync: bool = True
+    auto_ingest_sessions: bool = False
+    capture_notes_as_log: bool = False
+    replace_notes_md: bool = False
+    bootstrap_docs: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "enabled": self.enabled,
+            "auto_sync": self.auto_sync,
+            "auto_ingest_sessions": self.auto_ingest_sessions,
+            "capture_notes_as_log": self.capture_notes_as_log,
+            "replace_notes_md": self.replace_notes_md,
+            "bootstrap_docs": list(self.bootstrap_docs),
+        }
+
+    @classmethod
+    def from_dict(cls, data: JsonDict) -> WikiSync:
+        raw_docs: JsonValue = data.get("bootstrap_docs", []) or []
+        docs: list[str] = [str(d) for d in raw_docs] if isinstance(raw_docs, list) else []
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            auto_sync=bool(data.get("auto_sync", True)),
+            auto_ingest_sessions=bool(data.get("auto_ingest_sessions", False)),
+            capture_notes_as_log=bool(data.get("capture_notes_as_log", False)),
+            replace_notes_md=bool(data.get("replace_notes_md", False)),
+            bootstrap_docs=docs,
+        )
+
+
+@dataclass
 class PermissionsConfig:
     auto_grant: bool = True
     auto_allow_mcps: bool = True  # add mcp__<server>__* allow rules at init time
@@ -367,6 +402,7 @@ class ProjConfig:
     todoist: TodoistSync = field(default_factory=TodoistSync)
     trello: TrelloSync = field(default_factory=TrelloSync)
     jira: JiraSync = field(default_factory=JiraSync)
+    wiki: WikiSync = field(default_factory=WikiSync)
     git_tracking: GitTracking = field(default_factory=GitTracking)
     # Optional integration flags set by /proj:init-plugin
     sandbox_integration: bool = False
@@ -391,6 +427,7 @@ class ProjConfig:
                 "todoist": self.todoist.to_dict(),
                 "trello": self.trello.to_dict(),
                 "jira": self.jira.to_dict(),
+                "wiki": self.wiki.to_dict(),
             },
             "git_tracking": self.git_tracking.to_dict(),
             "sandbox_integration": self.sandbox_integration,
@@ -418,6 +455,9 @@ class ProjConfig:
         jira_raw = sync.get("jira", {})
         if not isinstance(jira_raw, dict):
             jira_raw = {}
+        wiki_raw = sync.get("wiki", {})
+        if not isinstance(wiki_raw, dict):
+            wiki_raw = {}
 
         perms_raw = data.get("permissions", {})
         if not isinstance(perms_raw, dict):
@@ -446,6 +486,7 @@ class ProjConfig:
             todoist=TodoistSync.from_dict(todoist_raw),
             trello=TrelloSync.from_dict(trello_raw),
             jira=JiraSync.from_dict(jira_raw),
+            wiki=WikiSync.from_dict(wiki_raw),
             git_tracking=GitTracking.from_dict(git_tracking_raw),
             sandbox_integration=bool(data.get("sandbox_integration", False)),
             worktree_integration=bool(data.get("worktree_integration", False)),
