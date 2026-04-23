@@ -1,4 +1,5 @@
 """Wiki filesystem helpers: path resolution, atomic writes, shared lock."""
+
 from __future__ import annotations
 
 import fcntl
@@ -58,11 +59,11 @@ def wiki_lock(wiki_dir: Path) -> Generator[None, None, None]:
 
     # Track held locks per thread to avoid re-acquiring fcntl lock on same FD
     if not hasattr(_HELD_LOCKS, "fds"):
-        _HELD_LOCKS.fds = cast(dict[str, int], {})
+        _HELD_LOCKS.fds = cast("dict[str, int]", {})
 
     _WIKI_LOCK.acquire()
     fd: int | None = None
-    fds = cast(dict[str, int], _HELD_LOCKS.fds)
+    fds = cast("dict[str, int]", _HELD_LOCKS.fds)
     is_first_acquire = str(wiki_dir) not in fds
     try:
         if is_first_acquire:
