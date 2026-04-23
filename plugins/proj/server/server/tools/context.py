@@ -382,15 +382,34 @@ def register(app: FastMCP) -> None:
         name = ctx_detect_project_name(cwd)
         return name if name else "No project matched."
 
-    @app.tool(description="Append a dated note to the active project's NOTES.md.")
-    def notes_append(text: str, project_name: str | None = None) -> str:
+    @app.tool(
+        description=(
+            "Append a dated note to the active project's NOTES.md. When heading is "
+            "provided, uses the chronological convention prefix "
+            "'## [YYYY-MM-DD HH:MM] {op} | {heading}'; when absent, uses the legacy "
+            "'## YYYY-MM-DD' prefix for backward compat."
+        )
+    )
+    def notes_append(
+        text: str,
+        heading: str | None = None,
+        op: str = "note",
+        project_name: str | None = None,
+    ) -> str:
         cfg = require_config()
         name = state.resolve_project(project_name)
         if not name:
             return json.dumps({"status": "error", "error": "No active project."})
-        storage.append_note(cfg, name, text)
-        # First line (stripped) for routing to log-entry titles that must be short.
-        first_line = (text.splitlines()[0].strip() if text.strip() else "")[:200]
+        storage.append_note(cfg, name, text, heading=heading, op=op)
+        # First line: when heading is provided, return the composed heading line
+        # so router hooks consuming content_first_line get the structured title.
+        if heading is not None:
+            from datetime import datetime
+
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            first_line = f"[{ts}] {op} | {heading}"[:200]
+        else:
+            first_line = (text.splitlines()[0].strip() if text.strip() else "")[:200]
         return json.dumps(
             {
                 "status": "appended",

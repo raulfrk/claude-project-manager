@@ -107,6 +107,45 @@ def test_append_note_creates_file(tmp_cfg: ProjConfig) -> None:
     assert "Second note" in notes
 
 
+def test_append_note_with_heading_uses_convention_format(tmp_cfg: ProjConfig) -> None:
+    """When heading is provided, prefix uses ## [YYYY-MM-DD HH:MM] {op} | {title} format."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    storage.append_note(
+        tmp_cfg, "myapp", "First decision body", heading="initial choice", op="decision"
+    )
+    notes = storage.read_notes(tmp_cfg, "myapp")
+    import re
+
+    pattern = r"## \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] decision \| initial choice"
+    assert re.search(pattern, notes), f"Heading prefix not found in: {notes!r}"
+    assert "First decision body" in notes
+
+
+def test_append_note_with_heading_default_op_is_note(tmp_cfg: ProjConfig) -> None:
+    """When op not provided, defaults to 'note'."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    storage.append_note(tmp_cfg, "myapp", "Body text", heading="Some title")
+    notes = storage.read_notes(tmp_cfg, "myapp")
+    import re
+
+    pattern = r"## \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] note \| Some title"
+    assert re.search(pattern, notes), f"Default op 'note' not used: {notes!r}"
+
+
+def test_append_note_without_heading_keeps_legacy_format(tmp_cfg: ProjConfig) -> None:
+    """Backward compat: when heading is None, use the existing ## YYYY-MM-DD prefix."""
+    (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
+    storage.append_note(tmp_cfg, "myapp", "legacy body")
+    notes = storage.read_notes(tmp_cfg, "myapp")
+    today = str(date.today())
+    assert f"## {today}" in notes
+    import re
+
+    new_pattern = r"## \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]"
+    assert not re.search(new_pattern, notes), f"Legacy call should not use new format: {notes!r}"
+    assert "legacy body" in notes
+
+
 def test_requirements_roundtrip(tmp_cfg: ProjConfig) -> None:
     (Path(tmp_cfg.tracking_dir) / "myapp").mkdir(parents=True)
     storage.write_requirements(tmp_cfg, "myapp", "T001", "# Requirements\n\nGoal: do something")

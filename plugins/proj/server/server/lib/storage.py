@@ -263,11 +263,23 @@ def notes_path(cfg: ProjConfig, project_name: str) -> Path:
     return tracking_dir(cfg, project_name) / "NOTES.md"
 
 
-def append_note(cfg: ProjConfig, project_name: str, text: str) -> None:
+def append_note(
+    cfg: ProjConfig,
+    project_name: str,
+    text: str,
+    heading: str | None = None,
+    op: str = "note",
+) -> None:
     path = notes_path(cfg, project_name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    today = str(date.today())
-    entry = f"\n## {today}\n\n{text.strip()}\n"
+    if heading is not None:
+        from datetime import datetime
+
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        entry = f"\n## [{ts}] {op} | {heading}\n\n{text.strip()}\n"
+    else:
+        today = str(date.today())
+        entry = f"\n## {today}\n\n{text.strip()}\n"
     existing = path.read_text() if path.exists() else ""
     _atomic_write_text(path, existing + entry)
 

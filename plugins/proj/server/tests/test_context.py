@@ -1216,3 +1216,99 @@ class TestClaudemdRefreshManaged:
         assert MANAGED_SECTION in content
         assert "# User header" in content
         assert "# User footer" in content
+
+
+# ---------------------------------------------------------------------------
+# notes_append heading + op tests (Phase 2, Karpathy CPM integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestNotesAppendHeadingConvention:
+    """Tests for notes_append MCP tool with heading + op params (rule 20)."""
+
+    async def test_notes_append_with_heading_passes_to_storage(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """notes_append MCP tool forwards heading + op to storage.append_note."""
+        captured: dict[str, Any] = {}
+
+        def fake_append_note(
+            cfg: Any, name: str, text: str, heading: str | None = None, op: str = "note"
+        ) -> None:
+            captured["text"] = text
+            captured["heading"] = heading
+            captured["op"] = op
+
+        monkeypatch.setattr(storage, "append_note", fake_append_note)
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
+        state.set_session_active("myapp")
+
+        result = await call_tool(
+            mcp_app, "notes_append", text="body", heading="Some title", op="decision"
+        )
+        parsed = json.loads(result)
+        assert parsed["status"] == "appended"
+        assert captured["heading"] == "Some title"
+        assert captured["op"] == "decision"
+        assert captured["text"] == "body"
+
+    async def test_notes_append_without_heading_passes_none(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """notes_append MCP tool with no heading param forwards heading=None."""
+        captured: dict[str, Any] = {}
+
+        def fake_append_note(
+            cfg: Any, name: str, text: str, heading: str | None = None, op: str = "note"
+        ) -> None:
+            captured["heading"] = heading
+            captured["op"] = op
+
+        monkeypatch.setattr(storage, "append_note", fake_append_note)
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
+        state.set_session_active("myapp")
+
+        result = await call_tool(mcp_app, "notes_append", text="legacy")
+        parsed = json.loads(result)
+        assert parsed["status"] == "appended"
+        assert captured["heading"] is None
+        assert captured["op"] == "note"
+
+    async def test_notes_append_content_first_line_is_heading_when_provided(
+        self,
+        mcp_app: Any,
+        cfg: ProjConfig,
+        tmp_path: Path,
+    ) -> None:
+        """When heading is provided, content_first_line returns the composed heading line
+        (sans ## prefix), so the default-hooks router can use it as a log-entry title.
+        """
+        _setup_project_with_todos(cfg, "myapp", tmp_path, todos=[])
+        state.set_session_active("myapp")
+
+        result = await call_tool(
+            mcp_app,
+            "notes_append",
+            text="multi-line\nbody\ntext",
+            heading="My Title",
+            op="note",
+        )
+        parsed = json.loads(result)
+        import re
+
+        assert re.match(
+            r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] note \| My Title",
+            parsed["content_first_line"],
+        ), (
+            "content_first_line should be the composed heading sans '## ' prefix: "
+            f"{parsed['content_first_line']!r}"
+        )

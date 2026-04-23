@@ -71,7 +71,13 @@ Save session ctx; reconcile git activity for active project.
 **9.** Update CLAUDE.md (if project has repos w/ claudemd=true):
  - `mcp__proj__claudemd_write` to update active todos section.
 
-**10.** `mcp__proj__notes_append` w/ one-line summary.
+**10.** `mcp__proj__notes_append(heading="<session date>", op="session", text=<one-line summary>)` — uses chronological log convention (rule 20) so notes.md becomes `grep "^## \[" notes.md | tail -10`-friendly.
+
+**10b.** Decision-log reminder (light prompt, single dismiss):
+ - Step 8 logged 0 decisions (no Key Decisions in synthesis) → ask via `AskUserQuestion`: "No decisions logged this session. Any to capture before save?" Options: Yes / No.
+ - Yes → user supplies decision text; call `mcp__proj__notes_append(heading=<short title>, op="decision", text=<full text>)`. Optionally also call `mcp__proj__proj_decision_log` if user marks it as a structured A/B pick.
+ - No → proceed silently to step 11.
+ - Step 8 logged ≥1 decision → skip reminder.
 
 **11.** Wiki auto-ingest (if enabled):
  - `mcp__proj__config_load` → check `sync.wiki.enabled` + `sync.wiki.auto_ingest_sessions`.
