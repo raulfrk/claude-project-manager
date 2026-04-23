@@ -169,29 +169,29 @@ Single PR. Files:
 
 ### Skill behavior
 
-1. **Identify scope**: read active project via `proj_get_active`; read worktree info via `wt_list` filtered to active project's repos. If multiple worktrees, prompt user to pick (or default to current `cwd` worktree if unambiguous).
-2. **Compute diff since last checkpoint**: read git note tag `checkpoint:<id>` on the worktree branch via `git notes list`. If absent, default to "since branch divergence from base" (`git merge-base origin/<base>..HEAD`). Bash composition; no new MCP tool.
-3. **Surface diff**: per existing managed-block rule 11 (revdiff routing) — check `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` and `which revdiff`. If both succeed, invoke `revdiff:revdiff` skill on the diff. Else: render `git diff --stat` + per-file bullet summary inline.
-4. **Surface state context**: pull recent commits, open todos via `todo_list` (compact), and recent `notes.md` entries since last checkpoint.
+1. **Identify scope**: read session context via `proj_session_context` (returns `project.name`, `config.tracking_dir`, `project.repos[].path` in one call — same shape `/proj:save` uses); read worktree info via `wt_list` filtered to active project's repos. If multiple worktrees, prompt user to pick (or default to current `cwd` worktree if unambiguous).
+2. **Compute diff anchor**: always compute base SHA from base-branch divergence — `git -C <wt_path> merge-base origin/<base> HEAD` (two-arg form; the range form `origin/<base>..HEAD` is invalid for `merge-base`). Base branch = `git config --get branch.<branch>.remote-base` (rare; user-set) → fallback to `dev`. Diff = `git diff <base_sha>..HEAD --stat` + `--name-only`. Bash composition; no new MCP tool. (Earlier drafts used a `git notes list`-based "last checkpoint marker" mechanism; dropped because `git notes list` output is not chronologically ordered and the 2-field format is not a single-SHA-per-line stream.)
+3. **Surface diff**: check `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` and `which revdiff`. If both succeed, invoke `revdiff:revdiff` skill on the diff. Else: render `git diff --stat` + per-file bullet summary inline. (Note: managed-block rule 11 self-scopes to superpowers-namespace skills; `/proj:checkpoint` lives in the `proj:` namespace, so it re-implements the revdiff check inline rather than citing rule 11.)
+4. **Surface state context**: pull recent commits, open todos via `todo_list` (compact), and recent `notes.md` entries (tail) for quick recall.
 5. **Prompt user via `AskUserQuestion`** with 3 options:
-   - **Continue** — work continues on current branch; checkpoint marker advances.
-   - **Reset + restart with tightened scope** — `wt_remove` current worktree, `wt_create` new worktree with branch suffix `-v2` (or user-supplied), prompt user for tightened scope statement, log via `notes_append(op="checkpoint", heading="reset to v2", ...)`.
-   - **Tighten scope only** — keep branch + worktree, prompt user for new constraint, log via `notes_append(op="checkpoint", heading="tightened scope", ...)`.
-6. **Mark checkpoint**: place git note `checkpoint:<timestamp>` on `HEAD` of the active branch (Bash: `git notes add -m "checkpoint" <sha>`). Used by next checkpoint invocation to compute diff-since.
+   - **Continue** — work continues on current branch; audit-trail entry written via `notes_append`; no git state change.
+   - **Reset + restart with tightened scope** — `wt_remove` current worktree. Then prepare `dev` in the base repo (`git fetch origin && git checkout dev && git reset --hard origin/dev`) so the new worktree cuts from a fresh `origin/dev`. Then `wt_create(repo_label=<x>, branch=<old-branch>-v2, path=<old>-v2)` — **no `base` kwarg** (the worktree MCP tool does not accept one; `wt_create` cuts from the repo's current HEAD, which step 5 just set to `origin/dev`). Prompt user for tightened-scope statement, log via `notes_append(op="checkpoint", heading="reset to v2: <scope>", ...)`.
+   - **Tighten scope only** — keep branch + worktree, prompt user for new constraint, log via `notes_append(op="checkpoint", heading="tightened: <constraint>", ...)`.
+6. **Audit-trail log**: the `notes_append` call in step 5's chosen branch is the checkpoint record. No separate git-notes marker is written (dropped — see step 2).
 7. **Auto-suggestion** (managed-block rule 24): suggest invocation when a TaskCreate-tracked phase completes or user pauses to evaluate. Skill itself doesn't enforce — relies on Claude's instruction-following per rule 24.
 
 ### Composition surface
 
 | Primitive | Use |
 |---|---|
-| `proj_get_active` | active project lookup |
+| `proj_session_context` | active project + tracking_dir lookup (single call) |
 | `wt_list` | worktree info |
-| Bash (`git notes`, `git diff`, `git merge-base`, `git log`) | diff/marker computation |
+| Bash (`git diff`, `git merge-base`, `git log`, `git config`, `git fetch`/`checkout`/`reset`) | diff anchor computation + pre-wt_create `dev` sync |
 | `revdiff:revdiff` (conditional) | diff display |
 | `todo_list` | open-todo context |
-| `notes_append` (Phase 2 enhanced) | checkpoint logging |
+| `notes_append` (Phase 2 enhanced) | checkpoint audit-trail logging |
 | `AskUserQuestion` | 3-option prompt |
-| `wt_remove`, `wt_create` | reset path |
+| `wt_remove`, `wt_create` (no `base` kwarg — does not exist) | reset path |
 
 ### Phase 3 testing
 

@@ -19,8 +19,7 @@ This checklist verifies `/proj:checkpoint` works end-to-end. User-interactive pr
 4. [ ] Quit revdiff with no annotations.
 5. [ ] Verify `AskUserQuestion` prompt appears with 3 options.
 6. [ ] Select "Continue".
-7. [ ] Verify `git notes list` on the worktree shows a new `checkpoint` note on HEAD.
-8. [ ] Verify `tracking_dir/<project>/notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | continue`.
+7. [ ] Verify `tracking_dir/<project>/notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | continue` (audit-trail entry; no git state change).
 
 ### Scenario B: Reset path (default `-v2` suffix)
 
@@ -29,7 +28,7 @@ This checklist verifies `/proj:checkpoint` works end-to-end. User-interactive pr
 3. [ ] Provide a tightened-scope statement when prompted.
 4. [ ] Verify the original worktree is removed (`wt_list` no longer shows it).
 5. [ ] Verify a new worktree exists with branch suffix `-v2` (e.g. `feat/foo` → `feat/foo-v2`).
-6. [ ] Verify the new worktree was synced to remote (per rule 13).
+6. [ ] Verify the base repo's `dev` was reset to `origin/dev` (`git -C <repo_root> log dev --oneline -1` matches `origin/dev`) before `wt_create`, and the new worktree branches from that HEAD (per rule 13).
 7. [ ] Verify `notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | reset to v2: <scope>`.
 
 ### Scenario C: Reset path with custom suffix via $ARGUMENTS

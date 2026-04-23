@@ -805,7 +805,7 @@ mkdir -p plugins/proj/skills/checkpoint
 ---
 name: checkpoint
 description: Mid-execution checkpoint — review in-flight work, decide continue/reset/tighten. Use when a TaskCreate-tracked phase completes during multi-step impl, when user pauses to evaluate, or when the user says "checkpoint", "/proj:checkpoint", "review where we are", or "should we keep going".
-allowed-tools: mcp__proj__proj_get_active, mcp__proj__notes_append, mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove, mcp__plugin_worktree_worktree__wt_create, mcp__proj__todo_list, AskUserQuestion, Bash, Skill
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove, mcp__plugin_worktree_worktree__wt_create, mcp__proj__todo_list, AskUserQuestion, Bash, Skill
 argument-hint: "[optional: scope hint or branch suffix]"
 ---
 
@@ -814,18 +814,17 @@ argument-hint: "[optional: scope hint or branch suffix]"
 
 Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/tighten.
 
-**1.** Active project: `mcp__proj__proj_get_active` → extract `name`, `repos[].path`.
+**1.** Session context: `mcp__proj__proj_session_context` → extract `project.name`, `config.tracking_dir`, `project.repos[].path`. (Same call shape as `/proj:save` step 1.)
 
 **2.** Worktrees: `mcp__plugin_worktree_worktree__wt_list(repo_label=<from project meta>)`. Multiple worktrees → prompt user via `AskUserQuestion` to pick one. Single → use it.
 
-**3.** Compute diff-since-last-checkpoint:
- - Last checkpoint marker = git note tag `checkpoint:<timestamp>` on branch HEAD.
- - `cd <wt_path> && git notes list 2>/dev/null | tail -1` → last marker SHA, if any.
- - No marker → use base branch divergence: `git merge-base origin/<base>..HEAD` (base = `git config --get branch.<branch>.remote-base` or default `dev`).
- - Diff cmd: `git diff <base-sha>..HEAD --stat` + `git diff <base-sha>..HEAD --name-only`.
+**3.** Compute base SHA for diff:
+ - Determine base branch: `git -C <wt_path> config --get branch.<branch>.remote-base` (rare; user-set) → fallback to `dev`.
+ - `base_sha = git -C <wt_path> merge-base origin/<base> HEAD`.
+ - Diff cmd: `git -C <wt_path> diff <base_sha>..HEAD --stat` + `git -C <wt_path> diff <base_sha>..HEAD --name-only`.
 
 **4.** Surface diff:
- - revdiff available (rule 11 check: `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` AND `which revdiff` returns 0):
+ - revdiff available (check: `enabledPlugins["revdiff@revdiff"]` in `~/.claude/settings.json` AND `which revdiff` returns 0):
      - Invoke `revdiff:revdiff` skill w/ ref args `<base-sha> HEAD`.
  - Else: render inline — `git diff --stat` output + bullet summary per file (line counts, brief purpose).
 
@@ -837,20 +836,20 @@ Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/t
 **6.** Prompt user via `AskUserQuestion`:
  - Q: "Checkpoint review — what next?"
  - Options:
-     - **Continue** — Work continues. Next checkpoint marker advances to current HEAD.
+     - **Continue** — Work continues. Log audit-trail entry via `notes_append`; no git state change.
      - **Reset + restart w/ tightened scope** — `wt_remove` current; `wt_create` new w/ branch suffix `-v2` (or `$ARGUMENTS` if provided). Prompt for tightened-scope statement. Log via `notes_append(op="checkpoint", heading="reset to v2: <scope>")`.
      - **Tighten scope only** — Keep branch + worktree. Prompt for new constraint. Log via `notes_append(op="checkpoint", heading="tightened: <constraint>")`.
 
 **7.** Apply chosen action:
- - Continue → `cd <wt_path> && git notes add -m "checkpoint" HEAD`. `notes_append(op="checkpoint", heading="continue", text="<diff summary + decision rationale>")`.
- - Reset → `mcp__plugin_worktree_worktree__wt_remove(path=<old>)`; `mcp__plugin_worktree_worktree__wt_create(repo_label=<x>, branch=<old-branch>-v2, base="dev", path=<old>-v2)`. Sync per rule 13 (fetch + reset). `notes_append(op="checkpoint", heading="reset to v2: <user-supplied scope>", text="<reason>")`. Inform user new wt path.
- - Tighten → `notes_append(op="checkpoint", heading="tightened: <constraint>", text="<full text>")`. Continue on same branch.
+ - Continue → `notes_append(op="checkpoint", heading="continue", text="<diff summary + decision rationale>")`. Audit trail; no git state change.
+ - Reset → `mcp__plugin_worktree_worktree__wt_remove(path=<old>)`. Then prepare `dev`: `git -C <repo_root> fetch origin && git -C <repo_root> checkout dev && git -C <repo_root> reset --hard origin/dev` (so the new worktree branches from current `origin/dev`). Then `mcp__plugin_worktree_worktree__wt_create(repo_label=<x>, branch=<old-branch>-v2, path=<old>-v2)` (no `base` kwarg — `wt_create` cuts from current `dev` HEAD; sync handled above). Sync new worktree per rule 13. `notes_append(op="checkpoint", heading="reset to v2: <user-supplied scope>", text="<reason>")`. Inform user new wt path.
+ - Tighten → `notes_append(op="checkpoint", heading="tightened: <constraint>", text="<full text>")`. Keep branch + worktree.
 
 **8.** "Checkpoint complete. Next action: <continue|reset|tighten>."
 
 ## Prerequisites
 
-- Active project loaded (`mcp__proj__proj_get_active` returns project meta).
+- Active project loaded (`mcp__proj__proj_session_context` returns project meta).
 - Project has at least one repo registered.
 - Repo has at least one worktree (created via `wt_create` per managed-block rule 6).
 
@@ -858,8 +857,7 @@ Mid-exec checkpoint. Read in-flight diff; surface state; prompt continue/reset/t
 
 - No active project → display err, stop.
 - No worktrees → display err: "No worktrees found. Create via wt_create first.", stop.
-- `git notes` not supported (some configs disable) → fall back to base-branch divergence (step 3 fallback path) silently.
-- revdiff missing or fails to launch → fall back to inline diff render silently (per rule 11).
+- revdiff missing or fails to launch → fall back to inline diff render silently.
 - User cancels AskUserQuestion → no action; state preserved.
 - wt_create fails on reset path → display err, original worktree NOT removed (safety).
 
@@ -904,8 +902,7 @@ This checklist verifies `/proj:checkpoint` works end-to-end. User-interactive pr
 4. [ ] Quit revdiff with no annotations.
 5. [ ] Verify `AskUserQuestion` prompt appears with 3 options.
 6. [ ] Select "Continue".
-7. [ ] Verify `git notes list` on the worktree shows a new `checkpoint` note on HEAD.
-8. [ ] Verify `tracking_dir/<project>/notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | continue`.
+7. [ ] Verify `tracking_dir/<project>/notes.md` has a new entry with heading `## [YYYY-MM-DD HH:MM] checkpoint | continue` (audit-trail entry; no git state change).
 
 ### Scenario B: Reset path (default `-v2` suffix)
 
@@ -1028,8 +1025,9 @@ Phase 3 of the Karpathy CPM integration. New skill that fills the
 rules 21 + 24, shipped in Phase 1):
 
 - plugins/proj/skills/checkpoint/SKILL.md (caveman ultra) — composes
-  proj_get_active, wt_list/wt_remove/wt_create, revdiff (per rule 11),
-  notes_append (Phase 2 heading convention), AskUserQuestion, git CLI.
+  proj_session_context, wt_list/wt_remove/wt_create, revdiff (if
+  available), notes_append (Phase 2 heading convention),
+  AskUserQuestion, git CLI.
 - Manual E2E checklist covers 6 scenarios (continue/reset/tighten +
   custom suffix + revdiff fallback + no-worktrees err path).
 - README updates for skill discoverability.
