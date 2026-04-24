@@ -149,7 +149,21 @@ Wiki spans 4 config files. Full reference:
 - `bootstrap_docs` — per-project doc paths included by `/wiki:bootstrap` proj-aware mode.
 
 **`~/.claude/proj-session.yaml`** (proj session state — owned by proj, read by wiki):
-- `active: <project-name>` — session-scoped active project; wiki's `wiki_scope_detect` reads this to return `scope: project:<name>`. Cleared on `/proj:archive` or explicit clear.
+- Schema v2 — pid-keyed so concurrent Claude Code sessions don't clobber each other.
+  ```yaml
+  schema_version: 2
+  active_by_claude_pid:
+    "<claude-code-pid>":
+      active: <project-name>
+      last_seen: <iso8601>
+  ```
+- Each MCP subprocess resolves its slot by walking its ppid chain via `psutil`
+  to find its Claude Code ancestor. Matcher regex configurable via env var
+  `CPM_CLAUDE_CODE_CMDLINE_MATCHER` (default: `(?:^|/)claude(?:\s|$)`).
+- Dead pid entries are garbage-collected on write. v1 files with a flat
+  `active:` scalar auto-migrate into the current session's slot on first read.
+- Cleared on `/proj:archive` (current session only) or explicit clear.
+- Shared helper: `plugins/_shared/session_key/` (both proj and wiki import from here).
 
 ## Skill Files
 
