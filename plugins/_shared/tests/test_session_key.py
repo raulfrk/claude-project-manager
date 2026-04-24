@@ -140,6 +140,16 @@ class TestReadActive:
         )
         assert sk.read_active(f, session_key="100") is None
 
+    def test_v1_file_migrates_in_memory_returns_active(self, tmp_path: Path) -> None:
+        """v1 flat scalar file → read returns active; file NOT rewritten."""
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(f, {"active": "legacy-proj"})
+        assert sk.read_active(f, session_key="100") == "legacy-proj"
+        # read_active is read-only — file stays v1 on disk:
+        data = yaml.safe_load(f.read_text())
+        assert "schema_version" not in data
+        assert data["active"] == "legacy-proj"
+
     def test_uses_detected_key_when_session_key_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

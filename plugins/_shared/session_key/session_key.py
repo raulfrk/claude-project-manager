@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 from typing import TYPE_CHECKING
@@ -73,7 +74,7 @@ def read_active(file: Path, session_key: str | None = None) -> str | None:
     return str(value)
 
 
-def _load_raw(file: Path) -> dict | None:
+def _load_raw(file: Path) -> dict[str, object] | None:
     """Load raw YAML dict from file. Returns None on missing/malformed."""
     if not file.exists():
         return None
@@ -87,7 +88,7 @@ def _load_raw(file: Path) -> dict | None:
     return data
 
 
-def _migrate_if_needed(data: dict, session_key: str) -> dict:
+def _migrate_if_needed(data: dict[str, object], session_key: str) -> dict[str, object]:
     """Migrate v1 (flat `active`) into v2 structure in-memory. Does NOT write.
 
     If file has no schema_version but has a v1 `active` scalar, inject it into
@@ -111,9 +112,7 @@ def _migrate_if_needed(data: dict, session_key: str) -> dict:
 
 def _now_iso() -> str:
     """Return current UTC time in ISO 8601 seconds precision."""
-    import datetime as _dt
-
-    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+    return datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat()
 
 
 def write_active(file: Path, name: str, session_key: str | None = None) -> None:
