@@ -104,7 +104,8 @@ class TestSessionActivePersistence:
         set_session_active("x")
         assert session_file.exists()
         clear_session_active()
-        assert not session_file.exists()
+        # clear_active leaves a v2 file with an empty active_by_claude_pid map;
+        # the important invariant is that get_session_active() returns None.
         assert get_session_active() is None
 
     def test_clear_when_nothing_set_is_idempotent(self, session_file: Path) -> None:
@@ -125,3 +126,66 @@ class TestSessionActivePersistence:
         set_session_active("survived")
         monkeypatch.setattr(state, "_session_active_project", None)
         assert get_session_active() == "survived"
+
+
+class TestMultiSessionIsolation:
+    def test_two_sessions_dont_clobber(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Writes from two distinct session_keys coexist in the file."""
+        import os
+
+        # Use real PIDs so _gc_dead_pids doesn't prune them (GC skips non-int keys
+        # and prunes dead int keys; real pids of this test process are always alive).
+        key1 = str(os.getpid())
+        key2 = str(os.getppid())
+
+        # Session 1 writes:
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key1)
+        set_session_active("proj-a")
+
+        # Simulate a DIFFERENT Claude Code session sharing the same file:
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key2)
+        state._session_active_project = None  # fresh in-memory (different process)
+        set_session_active("proj-b")
+
+        # Session 1 view (fresh in-memory, reads disk):
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key1)
+        state._session_active_project = None
+        assert get_session_active() == "proj-a"
+
+        # Session 2 view:
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key2)
+        state._session_active_project = None
+        assert get_session_active() == "proj-b"
+
+    def test_clear_one_session_leaves_other_intact(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+
+        key1 = str(os.getpid())
+        key2 = str(os.getppid())
+
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key1)
+        set_session_active("proj-a")
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key2)
+        state._session_active_project = None
+        set_session_active("proj-b")
+
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key1)
+        state._session_active_project = None
+        clear_session_active()
+
+        # key2 still resolves:
+        monkeypatch.setattr(state, "_session_key_fn", lambda: key2)
+        state._session_active_project = None
+        assert get_session_active() == "proj-b"
+
+    def test_read_migrates_v1_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A legacy v1 file → read() returns the scalar for the current session."""
+        import os
+
+        import yaml as _yaml
+
+        state._SESSION_FILE.write_text(_yaml.safe_dump({"active": "legacy"}))
+
+        monkeypatch.setattr(state, "_session_key_fn", lambda: str(os.getpid()))
+        state._session_active_project = None
+        assert get_session_active() == "legacy"
