@@ -52,11 +52,15 @@ PROTOCOL:
    `dedup-protocol.md` merge semantics → wiki_page_write(mode="update").
    Preserve prior sources[]; append new entry.
 6. Cross-ref pass (same-category scope): for each written page in category X,
-   scan body for noun phrases that match titles/aliases of OTHER pages within
-   category X only (not full wiki). Use wiki_link_resolve scoped via
-   wiki_page_list(category=X) → insert [[wikilinks]] inline → update links_to
-   frontmatter → wiki_page_write(mode="update"). Cross-category links are not
-   added here; `/wiki:lint` tier-2 fills them in as a separate sweep.
+   first call `wiki_page_list(category=X)` to obtain the candidate target set
+   (other pages within category X only — not full wiki). Scan body for noun
+   phrases that match titles/aliases of pages in that set, using
+   `wiki_link_resolve(link)` for alias confirmation on candidates from the
+   set. Do NOT pass any category/scope arg to `wiki_link_resolve` itself —
+   the scoping happens via the pre-filtered candidate set.
+   Insert `[[wikilinks]]` inline → update `links_to` frontmatter →
+   `wiki_page_write(mode="update")`. Cross-category links are not added here;
+   `/wiki:lint` tier-2 fills them in as a separate sweep.
 7. wiki_log_append(action="ingest", title=<short-source-ref>, body=<JSON summary
    of what was created/updated>).
 8. wiki_index_rebuild.

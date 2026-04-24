@@ -62,10 +62,15 @@ ingest-time noun-phrase matches across categories are noise; restricting to
 same-category cuts wiki_link_resolve calls roughly proportional to the
 category-to-wiki size ratio.
 
-1. Walk each new/updated page's body.
-2. For each noun phrase that matches the title/alias of ANOTHER page in the
-   SAME category (via `wiki_link_resolve` scoped via `wiki_page_list(category=X)`):
-   insert `[[wikilink]]` replacement inline.
+1. For each new/updated page in category X, call `wiki_page_list(category=X)`
+   once to obtain the candidate target set (pages within category X only).
+   Reuse this list across all candidates written into the same category in
+   this ingest pass — no need to re-call per page.
+2. Walk the page's body. For each noun phrase that matches the title or alias
+   of ANOTHER page in the candidate target set, insert `[[wikilink]]`
+   replacement inline. Use `wiki_link_resolve(link)` for alias confirmation
+   on candidates from the set; do NOT pass any category/scope arg to
+   `wiki_link_resolve` itself.
 3. Update the page's `links_to` frontmatter (union of existing + newly inserted).
 4. Write back via `wiki_page_write(mode="update")`.
 
