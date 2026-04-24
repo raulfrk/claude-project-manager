@@ -82,7 +82,14 @@ Save session ctx; reconcile git activity for active project.
 **11.** Wiki auto-ingest (if enabled):
  - `mcp__proj__config_load` → check `sync.wiki.enabled` + `sync.wiki.auto_ingest_sessions`.
  - Both false → skip silently.
- - Both true → spawn forked subagent via `Task`:
+ - Both true → run substance gate before dispatch:
+   - Read just-written session file (path from steps 5-7).
+   - Count bullets under `## Key Decisions` (missing section = 0).
+   - Count bullets under `## Insights Discovered` (missing section = 0).
+   - Compute total word count of session file.
+   - **Gate fail when ALL true**: Decisions bullets == 0 AND Insights bullets == 0 AND word count < 300.
+   - Gate fail → log to console: `Wiki ingest skipped: trivial session (no decisions/insights, <300 words).` Skip subagent dispatch. Continue to step 12.
+   - Gate pass → spawn forked subagent via `Task`:
      - `subagent_type="general-purpose"`
      - `description="Wiki ingest session file"`
      - `prompt` = contents of `plugins/wiki/skills/ingest/references/subagent-prompt.md` (read via `Read`) w/ `{source}` = `session:<tracking_dir>/<name>/sessions/<filename>`, `{scope}` = `project:<name>` (from step 1), `{wiki_config}` = JSON of `~/.claude/wiki.yaml` + `~/.claude/wiki/config.yaml` (read via `Read`).
