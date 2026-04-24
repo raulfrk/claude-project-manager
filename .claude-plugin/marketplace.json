@@ -36,7 +36,7 @@
       "name": "proj",
       "source": "./plugins/proj",
       "description": "Project lifecycle management: init, explore, status, update, todo, report, archive",
-      "version": "5.1.4",
+      "version": "5.1.5",
       "author": {
         "name": "raulfrk"
       },
@@ -88,7 +88,7 @@
       "name": "wiki",
       "source": "./plugins/wiki",
       "description": "Karpathy-style LLM wiki: persistent markdown knowledge base with entity pages, cross-refs, + append-only log",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "raulfrk"
       },
