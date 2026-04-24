@@ -3,7 +3,7 @@
 Project management plugins for Claude Code -- track todos, manage permissions, and orchestrate workflows from inside your conversations.
 
 <!-- AUTO:badges-start -->
-[![version](https://img.shields.io/badge/version-5.1.3-blue?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-5.1.4-blue?style=flat-square)](CHANGELOG.md)
 [![tests](https://img.shields.io/badge/tests-752%20passing-brightgreen?style=flat-square)](#contributing)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 <!-- AUTO:badges-end -->
@@ -55,7 +55,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 | Plugin | Version | Category | Description |
 |--------|---------|----------|-------------|
 | [worktree](plugins/worktree/) | 5.0.0 | utilities | Git worktree management — create, list, and remove worktrees from configured base repositories |
-| [proj](plugins/proj/) | 5.1.3 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
+| [proj](plugins/proj/) | 5.1.4 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
 | [trello](plugins/trello/) | 5.0.0 | integrations | Trello board, card, and list management via REST API — full CRUD for boards, lists, cards, labels, members, comments, checklists, attachments |
 | [confluence](plugins/confluence/) | 1.0.0 | integrations | Read-only Confluence Cloud + Server/Data Center access via REST API. |
 | [wiki](plugins/wiki/) | 0.1.1 | productivity | Karpathy-style LLM wiki: persistent markdown knowledge base with entity pages, cross-refs, + append-only log |
