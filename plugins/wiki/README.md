@@ -45,7 +45,7 @@ See full design spec at `docs/superpowers/specs/2026-04-21-karpathy-wiki-plugin-
   - `capture_notes_as_log` — router hook `notes_append` → `wiki_log_append` fires
   - `replace_notes_md` — (future) redirect `notes_append` to wiki entirely
   - `bootstrap_docs` — per-project doc paths to include in `/wiki:bootstrap`
-- `~/.claude/proj-session.yaml` — proj-owned, session-scoped, file-backed active project marker. Wiki reads the `active` field to scope queries.
+- `~/.claude/proj-session.yaml` — proj-owned, session-scoped, file-backed active project marker. Wiki reads its own session's slot in `~/.claude/proj-session.yaml` (pid-keyed v2 schema) via the shared `session_key` helper to scope queries. See the "Wiki Plugin Config Flags" section of the top-level `CLAUDE.md` for schema details.
 
 Note: `wiki.yaml::enabled` ("wiki plugin ready") and `proj.yaml::sync.wiki.enabled` ("proj should invoke wiki integrations") are distinct flags with different semantics. Both must be true for integration behaviors to fire.
 

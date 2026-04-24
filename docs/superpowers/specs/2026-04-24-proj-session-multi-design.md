@@ -66,7 +66,7 @@ active_by_claude_pid:
 Behavior:
 - Each MCP subprocess (proj, wiki, …) walks its own ppid chain to find its Claude Code ancestor pid, via `psutil.Process(os.getpid()).parents()`, taking the first ancestor whose cmdline matches a configurable Claude Code matcher (default: executable name `claude` or cmdline containing `claude`).
 - Reads/writes its own pid's slot only. `set_session_active(name)` writes to `active_by_claude_pid[<own session pid>]`.
-- GC on read: prune entries whose pid no longer exists (`psutil.pid_exists`) **and** `last_seen` older than a configurable threshold (default 24 h). The `and` guards against pid-reuse edge cases.
+- GC on write: prune entries whose pid no longer exists (via `psutil.pid_exists`) during `write_active` / `clear_active`. Reads are GC-free for fast `wiki_scope_detect` calls. Pid-reuse races are self-correcting (any live Claude Code session writes its own slot on startup).
 - v1 → v2 migration: on first v2 read of a file without `schema_version`, migrate the single `active: <name>` into `active_by_claude_pid[<current session pid>] = {active: <name>, last_seen: now}`. Preserves current session's active project.
 
 Pros:

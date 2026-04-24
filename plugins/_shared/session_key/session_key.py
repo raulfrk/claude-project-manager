@@ -163,6 +163,13 @@ def write_active(file: Path, name: str, session_key: str | None = None) -> None:
 
     Runs a GC pass (prune dead pids) on the way through. Uses atomic rename.
     Migrates v1 files to v2 as part of the write.
+
+    Concurrency note: this is a read-modify-write sequence without a file lock.
+    Two sessions writing simultaneously could race — one write may overwrite the
+    other's just-persisted entry. Per design (Approach A), this is accepted:
+    the operation is user-triggered (`/proj:load`, `/proj:archive`) and a
+    collision requires two such commands within microseconds of each other.
+    If tighter guarantees are needed in the future, add `fcntl.flock` here.
     """
     key = session_key if session_key is not None else get_claude_session_key()
     raw = _load_raw(file) or {}
