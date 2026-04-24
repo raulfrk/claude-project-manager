@@ -55,10 +55,24 @@ When updating an existing page:
 
 ## Cross-ref pass (after all candidates written)
 
+Scope: **same-category only**. For a page in category X, this pass considers
+links to other pages within category X. Cross-category links are not added
+here; `/wiki:lint` tier-2 sweep fills them in separately. Rationale: most
+ingest-time noun-phrase matches across categories are noise; restricting to
+same-category cuts wiki_link_resolve calls roughly proportional to the
+category-to-wiki size ratio.
+
 1. Walk each new/updated page's body.
-2. For each noun phrase that matches another page's title or alias (via `wiki_link_resolve`): insert `[[wikilink]]` replacement inline.
+2. For each noun phrase that matches the title/alias of ANOTHER page in the
+   SAME category (via `wiki_link_resolve` scoped via `wiki_page_list(category=X)`):
+   insert `[[wikilink]]` replacement inline.
 3. Update the page's `links_to` frontmatter (union of existing + newly inserted).
 4. Write back via `wiki_page_write(mode="update")`.
+
+Cross-category links: not handled here. The `/wiki:lint` tier-2 sweep
+identifies missing-cross-ref candidates across categories and either inserts
+them or surfaces them for user review. This split keeps ingest fast and lint
+authoritative for cross-category coherence.
 
 ## Idempotency safeguards
 

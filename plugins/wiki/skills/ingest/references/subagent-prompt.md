@@ -51,9 +51,12 @@ PROTOCOL:
 5. For candidates w/ high-overlap match: wiki_page_get existing → merge per
    `dedup-protocol.md` merge semantics → wiki_page_write(mode="update").
    Preserve prior sources[]; append new entry.
-6. Cross-ref pass: for each written page, scan body for noun phrases that
-   match other page titles/aliases via wiki_link_resolve → insert [[wikilinks]]
-   inline → update links_to frontmatter → wiki_page_write(mode="update").
+6. Cross-ref pass (same-category scope): for each written page in category X,
+   scan body for noun phrases that match titles/aliases of OTHER pages within
+   category X only (not full wiki). Use wiki_link_resolve scoped via
+   wiki_page_list(category=X) → insert [[wikilinks]] inline → update links_to
+   frontmatter → wiki_page_write(mode="update"). Cross-category links are not
+   added here; `/wiki:lint` tier-2 fills them in as a separate sweep.
 7. wiki_log_append(action="ingest", title=<short-source-ref>, body=<JSON summary
    of what was created/updated>).
 8. wiki_index_rebuild.
