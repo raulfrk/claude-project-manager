@@ -5,13 +5,12 @@ from __future__ import annotations
 import datetime
 import os
 import re
-from typing import TYPE_CHECKING
+import tempfile
+from contextlib import suppress
+from pathlib import Path
 
 import psutil
 import yaml
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _DEFAULT_MATCHER: re.Pattern[str] = re.compile(r"(?:^|/)claude(?:\s|$)")
 
@@ -115,8 +114,53 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat()
 
 
+def _atomic_write(target: Path, content: str) -> None:
+    """Atomically write content to target via tmpfile + rename."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        Path(tmp).replace(target)
+    except Exception:
+        with suppress(FileNotFoundError):
+            Path(tmp).unlink()
+        raise
+
+
+def _gc_dead_pids(data: dict[str, object]) -> dict[str, object]:
+    """Remove active_by_claude_pid entries whose pid does not exist."""
+    entries = data.get("active_by_claude_pid") or {}
+    if not isinstance(entries, dict):
+        return data
+    alive: dict[str, object] = {}
+    for key, entry in entries.items():
+        try:
+            pid_int = int(key)
+        except (TypeError, ValueError):
+            continue
+        if psutil.pid_exists(pid_int):
+            alive[str(key)] = entry
+    data["active_by_claude_pid"] = alive
+    return data
+
+
 def write_active(file: Path, name: str, session_key: str | None = None) -> None:
-    raise NotImplementedError
+    """Write active=name into the session_key's slot, preserving other sessions.
+
+    Runs a GC pass (prune dead pids) on the way through. Uses atomic rename.
+    Migrates v1 files to v2 as part of the write.
+    """
+    key = session_key if session_key is not None else get_claude_session_key()
+    raw = _load_raw(file) or {}
+    raw = _migrate_if_needed(raw, key)
+    raw = _gc_dead_pids(raw)
+    entries = raw.get("active_by_claude_pid") or {}
+    if not isinstance(entries, dict):
+        entries = {}
+    entries[key] = {"active": name, "last_seen": _now_iso()}
+    new_data: dict[str, object] = {"schema_version": 2, "active_by_claude_pid": entries}
+    _atomic_write(file, yaml.safe_dump(new_data, sort_keys=False))
 
 
 def clear_active(file: Path, session_key: str | None = None) -> None:

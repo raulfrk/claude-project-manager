@@ -163,3 +163,86 @@ class TestReadActive:
             },
         )
         assert sk.read_active(f) == "auto"
+
+
+class TestWriteActive:
+    def test_write_creates_file_with_v2_schema(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        sk.write_active(f, "my-proj", session_key="100")
+
+        assert f.exists()
+        data = yaml.safe_load(f.read_text())
+        assert data["schema_version"] == 2
+        assert data["active_by_claude_pid"]["100"]["active"] == "my-proj"
+        assert "last_seen" in data["active_by_claude_pid"]["100"]
+
+    def test_write_preserves_other_sessions(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {
+                    "200": {"active": "other", "last_seen": "2026-04-24T10:00:00"},
+                },
+            },
+        )
+        # both pids alive so GC does not prune pid 200:
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: pid in (100, 200))
+        sk.write_active(f, "mine", session_key="100")
+
+        data = yaml.safe_load(f.read_text())
+        assert data["active_by_claude_pid"]["200"]["active"] == "other"
+        assert data["active_by_claude_pid"]["100"]["active"] == "mine"
+
+    def test_write_overwrites_own_session(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        sk.write_active(f, "first", session_key="100")
+        sk.write_active(f, "second", session_key="100")
+
+        data = yaml.safe_load(f.read_text())
+        assert data["active_by_claude_pid"]["100"]["active"] == "second"
+
+    def test_gc_prunes_dead_pids_on_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {
+                    "100": {"active": "live-proj", "last_seen": "2026-04-24T10:00:00"},
+                    "999": {"active": "dead-proj", "last_seen": "2026-04-20T10:00:00"},
+                },
+            },
+        )
+        # pid 100 alive, 999 dead:
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: pid == 100)
+
+        sk.write_active(f, "updated", session_key="100")
+
+        data = yaml.safe_load(f.read_text())
+        assert "100" in data["active_by_claude_pid"]
+        assert "999" not in data["active_by_claude_pid"]
+
+    def test_write_migrates_v1_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(f, {"active": "legacy-proj"})  # v1 shape
+        sk.write_active(f, "new-proj", session_key="100")
+
+        data = yaml.safe_load(f.read_text())
+        assert data["schema_version"] == 2
+        assert "active" not in data  # v1 key removed
+        assert data["active_by_claude_pid"]["100"]["active"] == "new-proj"
+
+    def test_write_is_atomic(self, tmp_path: Path) -> None:
+        """Tmpfile should be renamed, not left behind."""
+        f = tmp_path / "proj-session.yaml"
+        sk.write_active(f, "proj", session_key="100")
+
+        # No .tmp* siblings left behind:
+        siblings = list(tmp_path.iterdir())
+        assert all(not s.name.startswith(".proj-session.yaml.") for s in siblings)

@@ -113,7 +113,7 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.4.21"
+version = "0.4.22"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
