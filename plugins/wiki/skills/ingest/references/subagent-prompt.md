@@ -34,6 +34,15 @@ PROTOCOL:
 1. Resolve + read source using the matching reader.
 2. Extract 3-15 candidate entities per the `dedup-protocol.md` extraction rules.
    Each candidate has: title, slug, category, tags, summary, body_candidate, evidence.
+   - If SOURCE is a session file (`session:` prefix) AND CONFIG includes a
+     non-empty `session_ingest.section_map` (e.g. `{"Key Decisions": "decisions",
+     "Insights Discovered": "insights"}`): walk the session file section by
+     section. For each `## <heading>` matching a key in `section_map`, candidates
+     extracted from that section's bullets receive `<section_map[heading]>` as a
+     CATEGORY HINT. The hint is not a hard assignment — override based on
+     candidate content if the body clearly belongs in a different category.
+   - If `section_map` is empty, missing, or SOURCE is not a session file:
+     extract wholesale (current behavior, unchanged).
 3. For each candidate, run dedup per `dedup-protocol.md` decision matrix:
    wiki_page_list → wiki_link_resolve → wiki_search_bm25 (if wiki ≥200 pages).
 4. For candidates w/ no high-overlap match: construct full frontmatter + body →
