@@ -4,16 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.17"
+version = "0.4.18"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.28",
+    "psutil>=5.9",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hook_transport", "hook_dispatch", "scrubbing", "test_contracts", "claudemd"]
+packages = ["hook_transport", "hook_dispatch", "scrubbing", "test_contracts", "claudemd", "session_key"]
 force-include = { "claudemd/managed_section.md" = "claudemd/managed_section.md" }
 
 [dependency-groups]
@@ -51,7 +52,7 @@ reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "test_contracts/tests"]
-addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov-fail-under=80"]
+addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov=session_key", "--cov-fail-under=80"]
 
 [tool.coverage.run]
 omit = [
