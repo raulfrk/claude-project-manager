@@ -246,3 +246,38 @@ class TestWriteActive:
         # No .tmp* siblings left behind:
         siblings = list(tmp_path.iterdir())
         assert all(not s.name.startswith(".proj-session.yaml.") for s in siblings)
+
+
+class TestClearActive:
+    def test_clear_removes_own_session(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        f = tmp_path / "proj-session.yaml"
+        # Both pids kept alive so GC does not prune them — ensures pop() is the
+        # actual mechanism removing "100", not GC silently discarding it first.
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
+        sk.write_active(f, "mine", session_key="100")
+        sk.write_active(f, "theirs", session_key="200")
+
+        sk.clear_active(f, session_key="100")
+
+        data = yaml.safe_load(f.read_text())
+        assert "100" not in data["active_by_claude_pid"]
+        assert data["active_by_claude_pid"]["200"]["active"] == "theirs"
+
+    def test_clear_on_missing_file_is_noop(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        # No file yet. Should not raise.
+        sk.clear_active(f, session_key="100")
+        assert not f.exists()
+
+    def test_clear_last_session_leaves_empty_structure(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        sk.write_active(f, "only", session_key="100")
+
+        sk.clear_active(f, session_key="100")
+
+        # File still exists w/ empty mapping — not deleted (preserves schema).
+        data = yaml.safe_load(f.read_text())
+        assert data["schema_version"] == 2
+        assert data["active_by_claude_pid"] == {}

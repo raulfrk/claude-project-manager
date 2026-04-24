@@ -164,4 +164,19 @@ def write_active(file: Path, name: str, session_key: str | None = None) -> None:
 
 
 def clear_active(file: Path, session_key: str | None = None) -> None:
-    raise NotImplementedError
+    """Remove session_key's entry from the file, preserving other sessions.
+
+    No-op if the file doesn't exist. Leaves an empty active_by_claude_pid map
+    behind when the last entry is cleared (schema stays intact for readers).
+    """
+    key = session_key if session_key is not None else get_claude_session_key()
+    raw = _load_raw(file)
+    if raw is None:
+        return
+    raw = _migrate_if_needed(raw, key)
+    raw = _gc_dead_pids(raw)
+    raw_entries = raw.get("active_by_claude_pid")
+    entries: dict[str, object] = raw_entries if isinstance(raw_entries, dict) else {}
+    entries.pop(key, None)
+    new_data: dict[str, object] = {"schema_version": 2, "active_by_claude_pid": entries}
+    _atomic_write(file, yaml.safe_dump(new_data, sort_keys=False))
