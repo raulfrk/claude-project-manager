@@ -119,7 +119,12 @@ def _atomic_write(target: Path, content: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as f:
+        try:
+            f = os.fdopen(fd, "w")
+        except Exception:
+            os.close(fd)
+            raise
+        with f:
             f.write(content)
         Path(tmp).replace(target)
     except Exception:
@@ -129,7 +134,15 @@ def _atomic_write(target: Path, content: str) -> None:
 
 
 def _gc_dead_pids(data: dict[str, object]) -> dict[str, object]:
-    """Remove active_by_claude_pid entries whose pid does not exist."""
+    """Remove active_by_claude_pid entries whose pid does not exist.
+
+    Non-integer keys are silently dropped — all valid session keys produced by
+    `get_claude_session_key` are integer pid strings; any non-numeric key has
+    been corrupted and should not be preserved.
+
+    Mutates `data` in place AND returns it (callers typically discard the
+    return value).
+    """
     entries = data.get("active_by_claude_pid") or {}
     if not isinstance(entries, dict):
         return data
