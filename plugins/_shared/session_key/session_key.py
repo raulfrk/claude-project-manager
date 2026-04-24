@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING
 
 import psutil
+import yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +51,69 @@ def get_claude_session_key() -> str:
 
 
 def read_active(file: Path, session_key: str | None = None) -> str | None:
-    raise NotImplementedError
+    """Read active project for the given session_key from v2 file.
+
+    Returns None if file missing, malformed, or the key is absent / has no
+    `active` field. Uses `get_claude_session_key()` when session_key is None.
+    """
+    key = session_key if session_key is not None else get_claude_session_key()
+    data = _load_raw(file)
+    if data is None:
+        return None
+    data = _migrate_if_needed(data, key)
+    entries = data.get("active_by_claude_pid") or {}
+    if not isinstance(entries, dict):
+        return None
+    entry = entries.get(key)
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("active")
+    if not value:
+        return None
+    return str(value)
+
+
+def _load_raw(file: Path) -> dict | None:
+    """Load raw YAML dict from file. Returns None on missing/malformed."""
+    if not file.exists():
+        return None
+    try:
+        with file.open() as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _migrate_if_needed(data: dict, session_key: str) -> dict:
+    """Migrate v1 (flat `active`) into v2 structure in-memory. Does NOT write.
+
+    If file has no schema_version but has a v1 `active` scalar, inject it into
+    the current session's slot. Callers that want to persist the migration
+    should re-write via write_active. Returns data unchanged if already v2 or
+    if no v1 content is present.
+    """
+    if data.get("schema_version") == 2:
+        return data
+    legacy = data.get("active")
+    if not legacy:
+        return data
+    # Synthesize a v2 in-memory view for the current session.
+    return {
+        "schema_version": 2,
+        "active_by_claude_pid": {
+            session_key: {"active": str(legacy), "last_seen": _now_iso()},
+        },
+    }
+
+
+def _now_iso() -> str:
+    """Return current UTC time in ISO 8601 seconds precision."""
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
 
 
 def write_active(file: Path, name: str, session_key: str | None = None) -> None:

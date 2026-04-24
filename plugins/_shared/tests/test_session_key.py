@@ -5,9 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import yaml
+
 from session_key import session_key as sk
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
 
 
@@ -81,3 +85,71 @@ class TestGetClaudeSessionKey:
         monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
 
         assert sk.get_claude_session_key() == "1"  # fallback to own pid
+
+
+def _write_yaml(path: Path, data: dict) -> None:
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+
+class TestReadActive:
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        assert sk.read_active(f, session_key="100") is None
+
+    def test_v2_hit_returns_active(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {
+                    "100": {"active": "proj-a", "last_seen": "2026-04-24T10:00:00"},
+                    "200": {"active": "proj-b", "last_seen": "2026-04-24T11:00:00"},
+                },
+            },
+        )
+        assert sk.read_active(f, session_key="100") == "proj-a"
+        assert sk.read_active(f, session_key="200") == "proj-b"
+
+    def test_v2_miss_returns_none(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {
+                    "100": {"active": "proj-a", "last_seen": "2026-04-24T10:00:00"},
+                },
+            },
+        )
+        assert sk.read_active(f, session_key="999") is None
+
+    def test_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        f.write_text("this: is: not: : valid")
+        assert sk.read_active(f, session_key="100") is None
+
+    def test_v2_entry_without_active_field_returns_none(self, tmp_path: Path) -> None:
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {"100": {"last_seen": "2026-04-24T10:00:00"}},
+            },
+        )
+        assert sk.read_active(f, session_key="100") is None
+
+    def test_uses_detected_key_when_session_key_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sk, "get_claude_session_key", lambda: "777")
+        f = tmp_path / "proj-session.yaml"
+        _write_yaml(
+            f,
+            {
+                "schema_version": 2,
+                "active_by_claude_pid": {"777": {"active": "auto", "last_seen": "x"}},
+            },
+        )
+        assert sk.read_active(f) == "auto"

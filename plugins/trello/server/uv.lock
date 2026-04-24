@@ -237,12 +237,13 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.4.19"
+version = "0.4.20"
 source = { directory = "../../_shared" }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "psutil" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -250,6 +251,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "psutil", specifier = ">=5.9" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]

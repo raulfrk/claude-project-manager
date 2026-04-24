@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.19"
+version = "0.4.20"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.28",
     "psutil>=5.9",
+    "pyyaml>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]
