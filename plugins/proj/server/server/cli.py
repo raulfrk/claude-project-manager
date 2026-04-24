@@ -13,7 +13,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from server.lib import storage
+from server.lib import state, storage
 from server.tools.context import _build_context, ctx_detect_project_name
 from server.tools.digest import _deduplicate, _parse_session
 
@@ -233,10 +233,18 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
         print("Warning: project config not found, skipping session context", file=sys.stderr)
         return
 
-    # Activate the project in the MCP server process via socket call.
-    # This ensures state.set_session_active() is set even if $CLAUDE_PROJECT_DIR
-    # was missing at MCP startup (Layer 1), so all subsequent MCP tool calls
-    # resolve the correct project without requiring Claude to call proj_load_session.
+    # Persist directly to ~/.claude/proj-session.yaml first — covers the case
+    # where the proj-server socket isn't yet bound when the SessionStart hook
+    # fires (startup race) or has died. The cli's parent is Claude Code, so
+    # session_key.get_claude_session_key() resolves to the correct Claude pid
+    # slot. proj_get_active falls back to the file when in-memory state is None,
+    # so subsequent MCP calls see the right project even if the socket call
+    # below silently fails.
+    state.set_session_active(detected)
+
+    # Best-effort warmup of proj-server's in-memory state + side-effect hook
+    # chain (proj-sandbox-sync, todoist-on-proj-load, etc.). On failure, the
+    # direct write above has already persisted the active project.
     _call_proj_socket("proj_load_session", {"name": detected})
 
     # Router health probe (replaces standalone session_start_router_health.py).

@@ -159,6 +159,95 @@ class TestCmdSessionStart:
         out, _err = capsys.readouterr()
         assert out == ""
 
+    def test_session_start_writes_session_file_when_socket_unavailable(
+        self,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SessionStart must persist the active project to proj-session.yaml even
+        when the proj-server socket call fails (covers startup race where the
+        MCP server isn't yet bound when the SessionStart hook fires)."""
+        import yaml
+
+        from server import cli
+        from server.lib import state
+
+        _make_project(cfg, "myapp", str(tmp_path), active=False)
+
+        session_file = tmp_path / "proj-session.yaml"
+        monkeypatch.setattr(state, "_SESSION_FILE", session_file)
+        # Reset in-memory state so the test is hermetic across runs.
+        monkeypatch.setattr(state, "_session_active_project", None)
+        # Simulate the socket being unreachable (startup race / dead server).
+        monkeypatch.setattr(cli, "_call_proj_socket", lambda *_a, **_kw: None)
+
+        cli.cmd_session_start(cwd=str(tmp_path), compact=False)
+
+        assert session_file.exists(), "session file must be written even when socket unavailable"
+        data = yaml.safe_load(session_file.read_text())
+        assert data["schema_version"] == 2
+        entries = data["active_by_claude_pid"]
+        assert len(entries) >= 1
+        # At least one slot must point at the detected project.
+        assert any(entry["active"] == "myapp" for entry in entries.values())
+
+    def test_session_start_writes_session_file_when_socket_succeeds(
+        self,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Direct file write happens unconditionally — happy-path socket call
+        does not skip the persistence step."""
+        import yaml
+
+        from server import cli
+        from server.lib import state
+
+        _make_project(cfg, "myapp", str(tmp_path), active=False)
+
+        session_file = tmp_path / "proj-session.yaml"
+        monkeypatch.setattr(state, "_SESSION_FILE", session_file)
+        monkeypatch.setattr(state, "_session_active_project", None)
+
+        socket_calls: list[tuple[str, dict]] = []  # type: ignore[type-arg]
+
+        def record_socket(tool: str, params: dict) -> None:  # type: ignore[type-arg]
+            socket_calls.append((tool, params))
+
+        monkeypatch.setattr(cli, "_call_proj_socket", record_socket)
+
+        cli.cmd_session_start(cwd=str(tmp_path), compact=False)
+
+        assert session_file.exists()
+        data = yaml.safe_load(session_file.read_text())
+        assert any(entry["active"] == "myapp" for entry in data["active_by_claude_pid"].values())
+        # Socket warmup still fired with the detected project.
+        assert socket_calls == [("proj_load_session", {"name": "myapp"})]
+
+    def test_session_start_no_match_does_not_touch_session_file(
+        self,
+        cfg: ProjConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When cwd matches no project, the session file must remain untouched
+        (no spurious slot writes)."""
+        from server import cli
+        from server.lib import state
+
+        _make_project(cfg, "myapp", str(tmp_path), active=False)
+
+        session_file = tmp_path / "proj-session.yaml"
+        monkeypatch.setattr(state, "_SESSION_FILE", session_file)
+        monkeypatch.setattr(state, "_session_active_project", None)
+        monkeypatch.setattr(cli, "_call_proj_socket", lambda *_a, **_kw: None)
+
+        cli.cmd_session_start(cwd="/nonexistent/path/xyz", compact=False)
+
+        assert not session_file.exists(), "no session file write when no project detected"
+
 
 # ---------------------------------------------------------------------------
 # cmd_session_end — direct function tests
