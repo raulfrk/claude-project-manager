@@ -72,8 +72,8 @@ class TestWikiScopeDetect:
         assert result["scope"] == "global"
 
 
+@pytest.mark.asyncio
 class TestWikiScopeMultiSession:
-    @pytest.mark.asyncio
     async def test_v2_file_returns_own_session_active(
         self,
         mcp_app: FastMCP,
@@ -96,7 +96,6 @@ class TestWikiScopeMultiSession:
         result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
         assert result["scope"] == "project:mine"
 
-    @pytest.mark.asyncio
     async def test_v2_file_unknown_session_returns_global(
         self,
         mcp_app: FastMCP,
@@ -118,7 +117,6 @@ class TestWikiScopeMultiSession:
         result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
         assert result["scope"] == "global"
 
-    @pytest.mark.asyncio
     async def test_v1_file_still_resolves_for_current_session(
         self,
         mcp_app: FastMCP,
