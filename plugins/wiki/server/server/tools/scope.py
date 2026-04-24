@@ -2,9 +2,10 @@
 
 Reads two files, both owned by proj plugin:
   - ~/.claude/proj.yaml          (existence signal → proj_present)
-  - ~/.claude/proj-session.yaml  (active project name → scope)
+  - ~/.claude/proj-session.yaml  (pid-keyed v2 schema; active project for this session)
 
 No cross-MCP calls; pure file I/O per spec §3 persistence/synthesis boundary.
+The pid-key logic lives in the shared `session_key` helper (see plugins/_shared/session_key/).
 """
 
 from __future__ import annotations
@@ -13,13 +14,14 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
+import session_key
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _PROJ_YAML_PATH = Path.home() / ".claude" / "proj.yaml"
 _SESSION_YAML_PATH = Path.home() / ".claude" / "proj-session.yaml"
+_session_key_fn = session_key.get_claude_session_key
 
 
 def register(mcp: FastMCP) -> None:
@@ -27,22 +29,8 @@ def register(mcp: FastMCP) -> None:
 
 
 def _read_active_from_session() -> str | None:
-    """Read proj-session.yaml's `active` field. None if missing/malformed/empty."""
-    if not _SESSION_YAML_PATH.exists():
-        return None
-    try:
-        with _SESSION_YAML_PATH.open() as f:
-            data = yaml.safe_load(f)
-    except yaml.YAMLError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    # yaml.safe_load returns Any; basedpyright loses narrowing after isinstance check.
-    value = data.get("active")  # type: ignore[attr-defined]
-    if not value:
-        return None
-    # value is Any (propagated from yaml.safe_load); str() arg type unknown to basedpyright.
-    return str(value)  # type: ignore[arg-type]
+    """Read active project for the current session from v2 proj-session.yaml."""
+    return session_key.read_active(_SESSION_YAML_PATH, session_key=_session_key_fn())
 
 
 def _proj_yaml_present() -> bool:
@@ -54,7 +42,7 @@ def wiki_scope_detect() -> str:
     """Detect active project scope via proj plugin's session file.
 
     Returns JSON {scope, proj_present}:
-        - scope: "project:<name>" if proj_session_yaml has active project, else "global"
+        - scope: "project:<name>" if this session has an active project, else "global"
         - proj_present: whether ~/.claude/proj.yaml exists on disk
     """
     proj_present = _proj_yaml_present()

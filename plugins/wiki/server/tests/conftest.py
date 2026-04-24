@@ -49,6 +49,12 @@ def wiki_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Pat
 
 
 @pytest.fixture
+def pin_wiki_session_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force scope.py's session_key lookup to return a deterministic value."""
+    monkeypatch.setattr("server.tools.scope._session_key_fn", lambda: "wiki-test-sess")
+
+
+@pytest.fixture
 def proj_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     """Redirect both proj.yaml + proj-session.yaml lookups in scope.py."""
     proj_yaml = tmp_path / "proj.yaml"

@@ -70,3 +70,62 @@ class TestWikiScopeDetect:
         proj_paths["session_yaml"].write_text(yaml.safe_dump({"active": None}))
         result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
         assert result["scope"] == "global"
+
+
+class TestWikiScopeMultiSession:
+    @pytest.mark.asyncio
+    async def test_v2_file_returns_own_session_active(
+        self,
+        mcp_app: FastMCP,
+        proj_paths: dict[str, Path],
+        pin_wiki_session_key: None,
+    ) -> None:
+        """wiki picks the entry matching its own session_key, not anyone else's."""
+        proj_paths["proj_yaml"].write_text(yaml.safe_dump({}))
+        proj_paths["session_yaml"].write_text(
+            yaml.safe_dump(
+                {
+                    "schema_version": 2,
+                    "active_by_claude_pid": {
+                        "wiki-test-sess": {"active": "mine", "last_seen": "x"},
+                        "other-sess": {"active": "theirs", "last_seen": "x"},
+                    },
+                }
+            )
+        )
+        result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
+        assert result["scope"] == "project:mine"
+
+    @pytest.mark.asyncio
+    async def test_v2_file_unknown_session_returns_global(
+        self,
+        mcp_app: FastMCP,
+        proj_paths: dict[str, Path],
+        pin_wiki_session_key: None,
+    ) -> None:
+        """wiki session not in the file → global scope."""
+        proj_paths["proj_yaml"].write_text(yaml.safe_dump({}))
+        proj_paths["session_yaml"].write_text(
+            yaml.safe_dump(
+                {
+                    "schema_version": 2,
+                    "active_by_claude_pid": {
+                        "other-sess": {"active": "theirs", "last_seen": "x"},
+                    },
+                }
+            )
+        )
+        result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
+        assert result["scope"] == "global"
+
+    @pytest.mark.asyncio
+    async def test_v1_file_still_resolves_for_current_session(
+        self,
+        mcp_app: FastMCP,
+        proj_paths: dict[str, Path],
+        pin_wiki_session_key: None,
+    ) -> None:
+        """Backward-compat: v1 file → scope returns the scalar."""
+        proj_paths["session_yaml"].write_text(yaml.safe_dump({"active": "legacy"}))
+        result = json.loads(await call_tool(mcp_app, "wiki_scope_detect"))
+        assert result["scope"] == "project:legacy"
