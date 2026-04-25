@@ -340,6 +340,11 @@ class TestKillStaleOrdering:
                 return_value=[("proj", "install")],
             ),
             patch(
+                "installer.flow.installer_flow.run_wizard",
+                return_value={"tracking_dir": "/tmp/tracking"},
+            ),
+            patch("installer.flow.installer_flow._write_wizard_result"),
+            patch(
                 "installer.flow.installer_flow._name_to_id_map",
                 return_value={"proj": "proj@claude-project-manager"},
             ),
