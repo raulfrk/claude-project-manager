@@ -1135,6 +1135,145 @@ class TestTodoTreeMerge:
         orphaned_roots = [node for node in data if node.get("id") == "__orphaned__"]
         assert len(orphaned_roots) == 0
 
+    async def test_todo_tree_archived_parent_child_renders_at_top_level(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """A child whose parent is archived (not deleted) renders at top level,
+        not under __orphaned__."""
+        cfg, name = project
+        archived_parent = Todo(
+            id="100",
+            title="Archived Parent",
+            status="done",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
+        storage.save_archived_todos(cfg, name, [archived_parent])
+        active_child = Todo(
+            id="101",
+            title="Active Child",
+            tags=["group:100"],
+            created="2026-01-02",
+            updated="2026-01-02",
+        )
+        storage.save_todos(cfg, name, [active_child])
+
+        result = await call_tool(mcp_app, "todo_tree")
+        data = _json.loads(result)
+
+        top_level_ids = [node.get("id") for node in data]
+        assert "101" in top_level_ids, "child should appear at top level"
+        orphaned_roots = [node for node in data if node.get("id") == "__orphaned__"]
+        assert len(orphaned_roots) == 0, (
+            "no __orphaned__ bucket should appear (parent exists, just archived)"
+        )
+
+    async def test_todo_tree_mixed_archived_and_deleted_parents(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Archived-parent child renders top level; deleted-parent child stays under
+        __orphaned__."""
+        cfg, name = project
+        archived_parent = Todo(
+            id="200",
+            title="Archived Parent",
+            status="done",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
+        storage.save_archived_todos(cfg, name, [archived_parent])
+        active_child_archived_parent = Todo(
+            id="201",
+            title="Child of Archived",
+            tags=["group:200"],
+            created="2026-01-02",
+            updated="2026-01-02",
+        )
+        active_child_deleted_parent = Todo(
+            id="202",
+            title="Child of Deleted",
+            tags=["group:999"],
+            created="2026-01-02",
+            updated="2026-01-02",
+        )
+        storage.save_todos(cfg, name, [active_child_archived_parent, active_child_deleted_parent])
+
+        result = await call_tool(mcp_app, "todo_tree")
+        data = _json.loads(result)
+
+        top_level_ids = [node.get("id") for node in data]
+        assert "201" in top_level_ids, "archived-parent child renders at top level"
+        orphaned_roots = [node for node in data if node.get("id") == "__orphaned__"]
+        assert len(orphaned_roots) == 1, "__orphaned__ bucket appears for the deleted-parent child"
+        orphaned_child_ids = [c.get("id") for c in orphaned_roots[0]["_children"]]
+        assert orphaned_child_ids == ["202"], "only the deleted-parent child is in __orphaned__"
+
+    async def test_todo_tree_archived_parent_with_include_done_nests_child(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """include_done=True merges archived into todo_map → child renders UNDER parent
+        (existing behavior preserved)."""
+        cfg, name = project
+        archived_parent = Todo(
+            id="300",
+            title="Archived Parent",
+            status="done",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
+        storage.save_archived_todos(cfg, name, [archived_parent])
+        active_child = Todo(
+            id="301",
+            title="Active Child",
+            tags=["group:300"],
+            created="2026-01-02",
+            updated="2026-01-02",
+        )
+        storage.save_todos(cfg, name, [active_child])
+
+        result = await call_tool(mcp_app, "todo_tree", include_done=True)
+        data = _json.loads(result)
+
+        parent_node = next((n for n in data if n.get("id") == "300"), None)
+        assert parent_node is not None, "archived parent appears as root when include_done=True"
+        child_ids = [c.get("id") for c in parent_node.get("_children", [])]
+        assert "301" in child_ids, "child renders under archived parent when include_done=True"
+        top_level_ids = [node.get("id") for node in data]
+        assert top_level_ids.count("301") == 0, (
+            "child is NOT at top level when parent is in todo_map"
+        )
+
+    async def test_todo_tree_compact_archived_parent_child_at_top_level(
+        self, mcp_app: Any, project: tuple[ProjConfig, str]
+    ) -> None:
+        """Compact mode: archived-parent child appears at top level, no __orphaned__ line."""
+        cfg, name = project
+        archived_parent = Todo(
+            id="400",
+            title="Archived Parent",
+            status="done",
+            created="2026-01-01",
+            updated="2026-01-01",
+        )
+        storage.save_archived_todos(cfg, name, [archived_parent])
+        active_child = Todo(
+            id="401",
+            title="Active Child",
+            tags=["group:400"],
+            created="2026-01-02",
+            updated="2026-01-02",
+        )
+        storage.save_todos(cfg, name, [active_child])
+
+        result = await call_tool(mcp_app, "todo_tree", compact=True)
+        data = _json.loads(result)
+
+        lines = data["result"].splitlines()
+        child_lines = [line for line in lines if "401" in line and "Active Child" in line]
+        assert len(child_lines) == 1, "child line appears in compact output"
+        orphaned_lines = [line for line in lines if "__orphaned__" in line or "Orphaned" in line]
+        assert len(orphaned_lines) == 0, "no __orphaned__ line in compact output"
+
 
 @pytest.mark.asyncio
 class TestManualTagDisplay:
