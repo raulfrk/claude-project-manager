@@ -13,20 +13,13 @@ class TestSharedVenvWizardStep:
     @patch("installer.wizard.ensure_managed_section")
     @patch("installer.shared_venv.ensure_shared_venv")
     @patch("installer.wizard._hooks_diff_prompt")
-    def test_creates_venv_at_marketplaces_dir(
-        self, _hd, mock_ensure, _mgr, tmp_path, monkeypatch
-    ):
+    def test_skip_true_does_not_create_venv(self, _hd, mock_ensure, _mgr):
+        """skip=True returns from run_wizard before _create_shared_venv_step
+        runs, so the shared-venv step never fires."""
         from installer.wizard import run_wizard
-
-        # Make marketplaces_dir() return a real existing path
-        target = tmp_path / "mp"
-        target.mkdir()
-        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
 
         run_wizard(selected_plugins=[], skip=True)
 
-        # skip=True returns early — no venv step. This documents that
-        # behavior; remove this assertion if you want venv to fire even on skip.
         mock_ensure.assert_not_called()
 
     @patch("installer.wizard.ensure_managed_section")
@@ -77,7 +70,7 @@ class TestSharedVenvWizardStep:
     @patch("installer.wizard._hooks_diff_prompt")
     @patch("installer.wizard._setup_proj_yaml", return_value={})
     def test_failure_is_warning_not_raise(
-        self, _proj, _hd, mock_ensure, _mgr, tmp_path, monkeypatch, capsys
+        self, _proj, _hd, mock_ensure, _mgr, tmp_path, monkeypatch
     ):
         from installer.wizard import run_wizard
 
