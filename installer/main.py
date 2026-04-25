@@ -158,7 +158,13 @@ def _install(args) -> int:
                 results[name] = "failed"
                 break
 
-    # 5. Run setup wizard now that plugins are installed and marketplace
+    # 5. Kill stale Claude Code sessions BEFORE shared-venv rebuild so old
+    # MCP processes release file descriptors to the old venv.
+    from installer.flow.kill_stale import prompt_kill_stale_sessions
+
+    prompt_kill_stale_sessions(console)
+
+    # 6. Run setup wizard now that plugins are installed and marketplace
     # dir exists (so wizard can create the shared venv).
     run_wizard(selected, skip=args.skip_wizard, args=args)
 
@@ -295,6 +301,12 @@ def _reinstall(args) -> int:
                     results[name] = False
             else:
                 results[name] = False
+
+    # Kill stale Claude Code sessions BEFORE shared-venv rebuild so old
+    # MCP processes release file descriptors to the old venv.
+    from installer.flow.kill_stale import prompt_kill_stale_sessions
+
+    prompt_kill_stale_sessions(console)
 
     # Run wizard after reinstall if configs were reset
     if not args.skip_wizard:

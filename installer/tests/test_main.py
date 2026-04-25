@@ -334,7 +334,6 @@ class TestInstall:
         assert result == EXIT_SUCCESS
         mock_ensure.assert_called_with(target)
 
-    @patch("installer.main.run_wizard")
     @patch("installer.main.install_plugin")
     @patch("installer.main.get_installed_plugins", return_value=[])
     @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
@@ -345,7 +344,6 @@ class TestInstall:
         _avail,
         _installed,
         _install_plugin,
-        mock_wizard,
     ):
         """Non --skip-wizard install: prompt_kill_stale_sessions called
         before run_wizard (which itself triggers shared-venv build via
@@ -353,10 +351,12 @@ class TestInstall:
         from unittest.mock import MagicMock as _MagicMock
 
         parent = _MagicMock()
-        parent.run_wizard = mock_wizard
-        with patch(
-            "installer.flow.kill_stale.prompt_kill_stale_sessions",
-            parent.prompt_kill_stale_sessions,
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch("installer.main.run_wizard", parent.run_wizard),
         ):
             args = _make_args(plugins=["proj"], skip_wizard=False)
             _install(args)
@@ -367,7 +367,6 @@ class TestInstall:
             f"prompt_kill_stale_sessions must precede run_wizard; got {names}"
         )
 
-    @patch("installer.shared_venv.ensure_shared_venv")
     @patch("installer.main.install_plugin")
     @patch("installer.main.get_installed_plugins", return_value=[])
     @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
@@ -380,7 +379,6 @@ class TestInstall:
         _avail,
         _installed,
         _install_plugin,
-        mock_ensure,
         tmp_path,
         monkeypatch,
     ):
@@ -393,10 +391,14 @@ class TestInstall:
         monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
 
         parent = _MagicMock()
-        parent.ensure_shared_venv = mock_ensure
-        with patch(
-            "installer.flow.kill_stale.prompt_kill_stale_sessions",
-            parent.prompt_kill_stale_sessions,
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.shared_venv.ensure_shared_venv", parent.ensure_shared_venv
+            ),
         ):
             args = _make_args(plugins=["proj"], skip_wizard=True)
             _install(args)
@@ -804,7 +806,6 @@ class TestReinstallSharedVenv:
         kwargs = mock_wizard.call_args.kwargs
         assert kwargs.get("args") is args
 
-    @patch("installer.shared_venv.ensure_shared_venv")
     @patch("installer.main.install_plugin")
     @patch("installer.main.add_marketplace")
     @patch("installer.main.remove_marketplace")
@@ -823,7 +824,6 @@ class TestReinstallSharedVenv:
         _remove_mp,
         _add_mp,
         _install_plugin,
-        mock_ensure,
         tmp_path,
         monkeypatch,
     ):
@@ -837,10 +837,14 @@ class TestReinstallSharedVenv:
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
 
         parent = _MagicMock()
-        parent.ensure_shared_venv = mock_ensure
-        with patch(
-            "installer.flow.kill_stale.prompt_kill_stale_sessions",
-            parent.prompt_kill_stale_sessions,
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.shared_venv.ensure_shared_venv", parent.ensure_shared_venv
+            ),
         ):
             args = _make_args(reinstall=True, skip_wizard=True)
             _reinstall(args)
