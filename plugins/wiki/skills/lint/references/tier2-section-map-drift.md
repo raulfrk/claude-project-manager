@@ -4,8 +4,6 @@ Subagent-prompt template. Used by `/wiki:lint --tier=2`.
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
 
-> **SYNC CONTRACT**: This prose is the runtime impl. `plugins/wiki/server/server/tools/lint.py::check_section_map_drift` is a parallel reference impl pinned by tests. If you change the algorithm here (anchor markers, sentinel semantics, output kinds), update lint.py too — and vice versa. See todo 736 for plan to consolidate.
-
 ## Purpose
 
 Detect drift between `wiki.yaml::session_ingest.section_map` keys and `## H2` headings in `/proj:save` SKILL.md's session-file template (step 7). Drift → ingest silently degrades to wholesale extraction.
