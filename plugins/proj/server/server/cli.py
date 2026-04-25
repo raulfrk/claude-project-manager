@@ -13,8 +13,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from session_key import remove_session_marker, write_session_marker
-
 from server.lib import state, storage
 from server.tools.context import _build_context, ctx_detect_project_name
 from server.tools.digest import _deduplicate, _parse_session
@@ -185,13 +183,6 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
     in-memory state is updated immediately (without requiring Claude to act on
     a text instruction).
     """
-    # Marker write happens FIRST, regardless of project config state. This
-    # records the (claude_pid, ns_inode) tuple that MCP servers later use to
-    # resolve their session_key without cmdline-regex guessing. PPID is
-    # Claude's pid because this CLI is a direct child of the SessionStart hook
-    # which itself was spawned by Claude Code.
-    write_session_marker(claude_pid=os.getppid(), cwd=cwd)
-
     if not storage.config_exists():
         return
 
@@ -262,9 +253,6 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
 
 def cmd_session_end(cwd: str | None) -> None:
     """Bump last_updated for the active project (async, no output needed)."""
-    # Best-effort marker cleanup so dead-pid GC has less to prune.
-    remove_session_marker(claude_pid=os.getppid())
-
     if not storage.config_exists():
         return
     cfg = storage.load_config()

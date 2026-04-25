@@ -10,16 +10,12 @@ from session_key.session_key import (
     clear_active,
     get_claude_session_key,
     read_active,
-    remove_session_marker,
     write_active,
-    write_session_marker,
 )
 
 __all__ = [
     "clear_active",
     "get_claude_session_key",
     "read_active",
-    "remove_session_marker",
     "write_active",
-    "write_session_marker",
 ]
