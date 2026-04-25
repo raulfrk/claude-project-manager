@@ -218,8 +218,8 @@ Largely preserves the current cpm parallel-impl-orchestration recipe.
 4. Cleanup parallel
    - wt_remove × N (parallel, force=true if needed per [[worktree-rebase-artifact]])
    - git branch -d × N after verifying merged
-   - todo_complete batch via mcp__plugin_proj_proj__todo_batch_complete
-     (per CLAUDE.md project rule on batch completion)
+   - mcp__plugin_proj_proj__todo_complete(todo_ids=[<id-1>, ..., <id-N>]) — single batch call
+     (todo_batch_complete tool was removed; todo_complete now accepts a list — see todo 738)
 
 5. Append-only log entry per managed rule 20
    - notes_append heading: "## [YYYY-MM-DD HH:MM] checkpoint | Batch N completed: <todo-ids>"

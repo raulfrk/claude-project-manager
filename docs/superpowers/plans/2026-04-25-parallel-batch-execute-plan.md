@@ -91,7 +91,7 @@ Write to `plugins/proj/skills/parallel-batch-execute/SKILL.md`:
 ---
 name: parallel-batch-execute
 description: Orchestrate parallel impl of >=2 disjoint todos w/ full superpowers gate fidelity. Use when user requests parallel batch impl OR says "parallel batch", "/proj:parallel-batch-execute", "execute these N todos in parallel". Wraps standard superpowers workflow (brainstorming -> writing-plans -> subagent-driven-development -> finishing-a-development-branch); parallelism only in execution stage.
-allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_batch_complete, mcp__plugin_proj_proj__notes_append, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent, Bash, Skill, Read, Edit
+allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__notes_append, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_remove, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent, Bash, Skill, Read, Edit
 argument-hint: "<todo-id> <todo-id> [<todo-id>...]"
 ---
 
@@ -638,8 +638,8 @@ with:
 4. Cleanup parallel:
    - wt_remove x N parallel (force=true if needed per [[worktree-rebase-artifact]])
    - git branch -d x N after verifying merged
-   - mcp__plugin_proj_proj__todo_batch_complete x N todo IDs
-     (per CLAUDE.md project rule on batch completion)
+   - mcp__plugin_proj_proj__todo_complete(todo_ids=[<id-1>, ..., <id-N>]) — single batch call
+     (todo_batch_complete was removed; todo_complete accepts a list — see todo 738)
 
 5. notes_append heading: "## [YYYY-MM-DD HH:MM] checkpoint | Batch N completed: <todo-ids>"
 ```
@@ -962,7 +962,7 @@ git branch -d feat/736-parallel-batch-execute
 mcp__plugin_proj_proj__todo_complete(todo_id="736")
 ```
 
-(Single todo → use `todo_complete`, not `todo_batch_complete` per project rule.)
+(Single todo → `todo_complete(todo_id="736")`. For batch closure, `todo_complete(todo_ids=[...])` accepts a list — see todo 738.)
 
 ---
 
