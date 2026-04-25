@@ -15,7 +15,7 @@ else
   exit 1
 fi
 
-plugins=(proj sandbox worktree trello jira hooks todoist zoxide)
+plugins=(proj worktree trello jira router todoist confluence wiki)
 
 for plugin in "${plugins[@]}"; do
   dir="$REPO_ROOT/plugins/$plugin/server"
@@ -26,5 +26,8 @@ for plugin in "${plugins[@]}"; do
     echo "skip $plugin (no server dir)"
   fi
 done
+
+echo "syncing shared marketplace venv ..."
+uv sync --extra plugins --directory "$REPO_ROOT"
 
 echo "done"
