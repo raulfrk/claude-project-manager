@@ -18,6 +18,7 @@ from rich.console import Console
 
 from installer._config_loader import ConfigLoadError, load_existing_yaml
 from installer.flow.form import FieldSpec, run_form
+from installer.wizard import _create_shared_venv_step
 from installer.wizard_specs import PROJ_YAML_PROMPTS, get_distinct_yaml_files
 
 _PROJ_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "confluence"}
@@ -78,4 +79,6 @@ def run_wizard(state: Any, args: Any, console: Console) -> dict[str, Any] | None
             )
         )
 
-    return run_form(fields, console, title="Configuration Wizard")
+    result = run_form(fields, console, title="Configuration Wizard")
+    _create_shared_venv_step(args, console)
+    return result
