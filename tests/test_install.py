@@ -370,8 +370,8 @@ class TestStartShSharedVenv:
         # Also patch out uv sync so it doesn't actually run
         content = target_script.read_text()
         content = content.replace(
-            'test -f "$DIR/.venv/bin/python" || uv sync --frozen --directory "$DIR"',
-            'test -f "$DIR/.venv/bin/python" || echo "WOULD_SYNC=1"',
+            'uv sync --frozen --directory "$DIR"',
+            'echo "WOULD_SYNC=1"',
         )
         target_script.write_text(content)
 
@@ -385,6 +385,113 @@ class TestStartShSharedVenv:
         assert str(server_dir / ".venv") in r.stdout
         # Should print the fallback message
         assert "falling back" in r.stderr.lower()
+
+    def test_walk_up_finds_local_marketplace_venv(self, tmp_path: Path) -> None:
+        """When $DIR is inside a local-marketplace clone (has .claude-plugin/
+        marketplace.json), walk-up should locate the venv at the clone root."""
+        # Layout: tmp_path/clone/plugins/proj/server/  (mirrors --local-marketplace)
+        clone_root = tmp_path / "clone"
+        server_dir = clone_root / "plugins" / "proj" / "server"
+        server_dir.mkdir(parents=True)
+
+        # Marketplace metadata at clone root
+        (clone_root / ".claude-plugin").mkdir()
+        (clone_root / ".claude-plugin" / "marketplace.json").write_text(
+            '{"name": "claude-project-manager"}'
+        )
+
+        # Plugin pyproject.toml at server dir
+        (server_dir / "pyproject.toml").write_text(
+            textwrap.dedent("""\
+            [project]
+            name = "test-plugin"
+            version = "0.1.0"
+            requires-python = ">=3.12"
+            dependencies = []
+            """)
+        )
+
+        # _shared at the location start.sh scans: $DIR/../../_shared
+        # With DIR=clone/plugins/proj/server, $DIR/../.. = clone/plugins
+        # The glob $MARKETPLACE_CACHE/*/_shared/ = clone/*/_shared/ matches clone/plugins/_shared/
+        shared_dir = clone_root / "plugins" / "_shared"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "pyproject.toml").write_text(
+            textwrap.dedent("""\
+            [project]
+            name = "claude-hook-transport"
+            version = "0.3.3"
+            """)
+        )
+
+        # Create the shared venv at clone root
+        shared_venv = clone_root / ".venv"
+        shared_venv.mkdir(parents=True)
+        (shared_venv / "bin").mkdir()
+        (shared_venv / "bin" / "python").write_text("#!/bin/sh\n")
+        (shared_venv / "bin" / "python").chmod(0o755)
+
+        script = self._make_start_sh(tmp_path)
+        target_script = server_dir / "start.sh"
+        target_script.write_text(script.read_text())
+        target_script.chmod(0o755)
+
+        env = os.environ.copy()
+        env["HOME"] = str(tmp_path / "home_unused")  # ensure basename lookup misses
+
+        r = _run(
+            ["bash", str(target_script), str(server_dir), "dummy_server"],
+            env=env,
+        )
+        assert r.returncode == 0, f"start.sh failed: {r.stderr}"
+        assert f"CHOSEN_VENV={shared_venv}" in r.stdout, r.stdout
+
+    def test_diagnostic_emits_three_paths_on_total_miss(self, tmp_path: Path) -> None:
+        """When both walk-up and basename lookup miss, fallback diagnostic
+        must emit all three searched paths (walk-up status, basename path,
+        per-plugin path) for diagnosability."""
+        server_dir, _marketplace_cache = self._setup_plugin_cache_layout(tmp_path)
+
+        env = os.environ.copy()
+        env["HOME"] = str(tmp_path)
+
+        # Marketplaces source dir w/ _shared (so the _shared sync step succeeds),
+        # but NO .venv anywhere
+        mp_src = (
+            tmp_path / ".claude" / "plugins" / "marketplaces" / "claude-project-manager"
+        )
+        mp_src.mkdir(parents=True)
+        plugins_shared = mp_src / "plugins" / "_shared"
+        plugins_shared.mkdir(parents=True)
+        (plugins_shared / "pyproject.toml").write_text(
+            textwrap.dedent("""\
+            [project]
+            name = "claude-hook-transport"
+            version = "0.3.3"
+            """)
+        )
+
+        # Patch out the actual `uv sync` so we don't need network
+        script = self._make_start_sh(tmp_path)
+        content = script.read_text()
+        content = content.replace(
+            'uv sync --frozen --directory "$DIR"',
+            'echo "WOULD_SYNC=1"',
+        )
+        target_script = server_dir / "start.sh"
+        target_script.write_text(content)
+        target_script.chmod(0o755)
+
+        r = _run(
+            ["bash", str(target_script), str(server_dir), "dummy_server"],
+            env=env,
+        )
+        assert r.returncode == 0, f"start.sh failed: {r.stderr}"
+        # Diagnostic must mention all three searched locations
+        assert "walk-up from" in r.stderr, r.stderr
+        assert "basename lookup tried:" in r.stderr, r.stderr
+        assert "per-plugin venv:" in r.stderr, r.stderr
+        assert "<not found>" in r.stderr, r.stderr  # walk-up should report not-found
 
 
 class TestStartShSharedSync:
