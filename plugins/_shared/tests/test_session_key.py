@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
-import pytest
 import yaml
 
 from session_key import session_key as sk
@@ -13,225 +12,153 @@ from session_key import session_key as sk
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 
 class _FakeProc:
-    def __init__(self, pid: int, cmdline: list[str]) -> None:
+    """Minimal psutil.Process stub for resolver tests."""
+
+    def __init__(
+        self,
+        pid: int,
+        exe: str = "",
+        exe_raises: bool = False,
+        parents_: list[_FakeProc] | None = None,
+    ) -> None:
         self.pid = pid
-        self._cmdline = cmdline
+        self._exe = exe
+        self._exe_raises = exe_raises
+        self._parents = parents_ or []
 
+    def exe(self) -> str:
+        if self._exe_raises:
+            import psutil
+
+            raise psutil.NoSuchProcess(self.pid)
+        return self._exe
+
+    def parents(self) -> list[_FakeProc]:
+        return self._parents
+
+    # Legacy fields kept for any pre-existing tests that still reference them.
     def cmdline(self) -> list[str]:
-        return self._cmdline
-
-
-@pytest.fixture(autouse=True)
-def _isolate_marker_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Pin _MARKER_DIR to a tmp path so tests never see/leak real markers."""
-    marker_dir = tmp_path / "markers"
-    monkeypatch.setattr(sk, "_MARKER_DIR", marker_dir)
-    return marker_dir
+        return []
 
 
 class TestGetClaudeSessionKey:
-    def test_returns_ancestor_pid_when_claude_in_chain(
+    """EXECPATH-based ancestor-walk resolver tests.
+
+    The resolver matches ancestor processes by canonical exe path
+    (CLAUDE_CODE_EXECPATH realpath) — no cmdline regex, no marker files.
+    """
+
+    def test_falls_back_to_own_pid_when_execpath_unset(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        own_pid = 1001
-        monkeypatch.setattr(sk.os, "getpid", lambda: own_pid)
+        from session_key.session_key import get_claude_session_key
 
-        chain = [
-            _FakeProc(2002, ["uv", "run", "proj-server"]),
-            _FakeProc(3003, ["/usr/local/bin/claude"]),
-            _FakeProc(4004, ["/bin/zsh"]),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
+        assert get_claude_session_key() == str(os.getpid())
 
-        assert sk.get_claude_session_key() == "3003"
+    def test_direct_parent_match_returns_ppid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fast path: os.getppid()'s exe matches EXECPATH → return ppid."""
+        from session_key import session_key as sk
 
-    def test_falls_back_to_own_pid_if_no_claude_ancestor(
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 1234)
+
+        fake_parent = _FakeProc(pid=1234, exe="/usr/bin/claude")
+        # psutil.Process(1234).exe() must return the EXECPATH for the fast path.
+        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_parent)
+        # realpath is identity for these absolute paths
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
+
+        assert sk.get_claude_session_key() == "1234"
+
+    def test_mid_chain_ancestor_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Direct parent doesn't match; an ancestor higher in the chain does."""
+        from session_key import session_key as sk
+
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        # Direct parent is uv (no match); two hops up is claude.
+        monkeypatch.setattr(sk.os, "getppid", lambda: 9001)
+        uv_proc = _FakeProc(pid=9001, exe="/usr/bin/uv")
+        bash_proc = _FakeProc(pid=9000, exe="/bin/bash")
+        claude_proc = _FakeProc(pid=8999, exe="/usr/bin/claude")
+
+        # Process(ppid=9001) returns uv_proc; Process() (no arg) returns self
+        # whose .parents() yields [uv, bash, claude].
+        def fake_process(pid=None):
+            if pid == 9001:
+                return uv_proc
+            return _FakeProc(pid=os.getpid(), parents_=[uv_proc, bash_proc, claude_proc])
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
+
+        assert sk.get_claude_session_key() == "8999"
+
+    def test_no_ancestor_matches_falls_back_to_own_pid(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        own_pid = 7777
-        monkeypatch.setattr(sk.os, "getpid", lambda: own_pid)
+        from session_key import session_key as sk
 
-        chain = [
-            _FakeProc(2002, ["uv"]),
-            _FakeProc(3003, ["/bin/zsh"]),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 5000)
+        bash_proc = _FakeProc(pid=5000, exe="/bin/bash")
+        sh_proc = _FakeProc(pid=4999, exe="/bin/sh")
 
-        assert sk.get_claude_session_key() == str(own_pid)
+        def fake_process(pid=None):
+            if pid == 5000:
+                return bash_proc
+            return _FakeProc(pid=os.getpid(), parents_=[bash_proc, sh_proc])
 
-    def test_matcher_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CPM_CLAUDE_CODE_CMDLINE_MATCHER", r"^node.+myclaude$")
-        monkeypatch.setattr(sk.os, "getpid", lambda: 1)
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
 
-        chain = [
-            _FakeProc(5005, ["node", "/opt/myclaude"]),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        assert sk.get_claude_session_key() == str(os.getpid())
 
-        assert sk.get_claude_session_key() == "5005"
+    def test_no_such_process_mid_walk_continues(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One ancestor raises NoSuchProcess; walk continues to find next match."""
+        from session_key import session_key as sk
 
-    def test_default_matcher_matches_node_cli_invocation(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`node /path/.../claude-code/cli.js` matches the broadened default regex."""
-        monkeypatch.delenv("CPM_CLAUDE_CODE_CMDLINE_MATCHER", raising=False)
-        monkeypatch.setattr(sk.os, "getpid", lambda: 1)
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 7000)
 
-        chain = [
-            _FakeProc(2002, ["uv", "run", "proj-server"]),
-            _FakeProc(
-                3003,
-                ["node", "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"],
-            ),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        # Direct parent: bash (no match). One ancestor raises; the next matches.
+        bash_proc = _FakeProc(pid=7000, exe="/bin/bash")
+        dead_proc = _FakeProc(pid=6999, exe_raises=True)
+        claude_proc = _FakeProc(pid=6998, exe="/usr/bin/claude")
 
-        assert sk.get_claude_session_key() == "3003"
+        def fake_process(pid=None):
+            if pid == 7000:
+                return bash_proc
+            return _FakeProc(pid=os.getpid(), parents_=[bash_proc, dead_proc, claude_proc])
 
-    def test_marker_match_wins_over_regex(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        """If a marker file lists ancestor pid 5050, that's the key — even if
-        the regex would have matched a different ancestor. This is the
-        bulletproof path: PPID-of-the-hook tells us Claude's pid directly."""
-        _isolate_marker_dir.mkdir()
-        (_isolate_marker_dir / "5050.yaml").write_text(
-            yaml.safe_dump({"ns_inode": 0, "started": "x"})
-        )
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
 
-        # Regex would otherwise pick 3003 (a /usr/local/bin/claude).
-        chain = [
-            _FakeProc(2002, ["uv", "run", "proj-server"]),
-            _FakeProc(3003, ["/usr/local/bin/claude"]),
-            _FakeProc(5050, ["node", "/some/wrapper.js"]),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
+        assert sk.get_claude_session_key() == "6998"
 
-        assert sk.get_claude_session_key() == "5050"
+    def test_realpath_normalization(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """EXECPATH and ancestor exe both go through realpath() — symlinks resolve."""
+        from session_key import session_key as sk
 
-    def test_marker_with_mismatched_ns_inode_is_skipped(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        """Marker from a different PID namespace (e.g., sibling bwrap container)
-        must NOT match this process's ancestors."""
-        _isolate_marker_dir.mkdir()
-        (_isolate_marker_dir / "5050.yaml").write_text(
-            yaml.safe_dump({"ns_inode": 9999999})  # foreign NS
-        )
+        # EXECPATH is /usr/bin/claude (a symlink); realpath → /opt/claude/bin/claude.
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 4242)
+        parent = _FakeProc(pid=4242, exe="/usr/bin/claude")  # also a symlink
 
-        chain = [
-            _FakeProc(2002, ["uv", "run", "proj-server"]),
-            _FakeProc(5050, ["claude"]),
-        ]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 1234)
+        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: parent)
 
-        # Falls back to regex, which matches 5050's "claude" cmdline.
-        assert sk.get_claude_session_key() == "5050"
+        def fake_realpath(p: str) -> str:
+            if p == "/usr/bin/claude":
+                return "/opt/claude/bin/claude"
+            return p
 
-    def test_marker_with_zero_ns_inode_is_wildcard(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        """ns_inode=0 means writer couldn't read /proc/self/ns/pid (non-Linux,
-        readonly /proc) → treat as wildcard so the marker still works."""
-        _isolate_marker_dir.mkdir()
-        (_isolate_marker_dir / "5050.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
+        monkeypatch.setattr(sk.os.path, "realpath", fake_realpath)
 
-        chain = [_FakeProc(5050, ["something-unrecognisable"])]
-        fake_self = MagicMock()
-        fake_self.parents.return_value = chain
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 4242)
-
-        assert sk.get_claude_session_key() == "5050"
-
-
-class TestSessionMarker:
-    def test_write_creates_marker_file_with_ns_inode(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 4026531836)
-        # GC pass would otherwise prune our synthetic pid immediately.
-        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
-        sk.write_session_marker(claude_pid=12345, cwd="/home/x/p")
-
-        marker = _isolate_marker_dir / "12345.yaml"
-        assert marker.exists()
-        data = yaml.safe_load(marker.read_text())
-        assert data["ns_inode"] == 4026531836
-        assert data["cwd"] == "/home/x/p"
-        assert "started" in data
-
-    def test_write_is_idempotent(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 100)
-        # All pids exist so GC keeps both markers.
-        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
-        sk.write_session_marker(claude_pid=12345)
-        sk.write_session_marker(claude_pid=12345)
-        # Second write overwrites — only one file, no error.
-        markers = list(_isolate_marker_dir.iterdir())
-        assert len(markers) == 1
-
-    def test_remove_is_noop_if_missing(self, _isolate_marker_dir: Path) -> None:
-        # Should not raise.
-        sk.remove_session_marker(claude_pid=99999)
-
-    def test_remove_drops_existing_marker(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
-        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
-        sk.write_session_marker(claude_pid=11111)
-        assert (_isolate_marker_dir / "11111.yaml").exists()
-
-        sk.remove_session_marker(claude_pid=11111)
-        assert not (_isolate_marker_dir / "11111.yaml").exists()
-
-    def test_gc_prunes_dead_pid_markers_on_write(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        _isolate_marker_dir: Path,
-    ) -> None:
-        _isolate_marker_dir.mkdir()
-        # Pre-seed two markers — one alive, one dead.
-        (_isolate_marker_dir / "1111.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
-        (_isolate_marker_dir / "9999.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
-        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: pid in (1111, 22222))
-        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
-
-        sk.write_session_marker(claude_pid=22222)
-
-        remaining = {p.stem for p in _isolate_marker_dir.iterdir()}
-        assert remaining == {"1111", "22222"}  # 9999 GC'd
+        assert sk.get_claude_session_key() == "4242"
 
 
 def _write_yaml(path: Path, data: dict) -> None:
