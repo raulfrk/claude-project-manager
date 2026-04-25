@@ -39,4 +39,16 @@ for each todo in batch:
 
 Outputs: N spec docs + N plan docs committed before Phase 2.
 
-<!-- Sections to fill: Phase 2, Phase 3, Phase 4, Phase 5, Cross-refs -->
+### Phase 2 — Worktree setup (parallel)
+
+```
+1. wt_create x N parallel via mcp__plugin_worktree_worktree__wt_create
+   - one branch per todo, forked from current dev
+2. post-wt-create-remote-sync per worktree (parallel; single Bash loop)
+   - per managed rule 13 (git fetch origin + reset based on local-ahead check)
+3. wt_create fails -> abort batch; leave Phase 1 artifacts intact; surface failed todo
+```
+
+No language/framework setup (deps, lockfiles) -> implementer handles in Phase 3. Skill stays project-agnostic.
+
+<!-- Sections to fill: Phase 3, Phase 4, Phase 5, Cross-refs -->
