@@ -53,6 +53,43 @@ from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
 
 
+def _finalize_shared_venv(args: Any, console: Console) -> None:
+    """Build the shared marketplace venv after install/reinstall/update.
+
+    Mirrors installer.wizard._create_shared_venv_step. Targets:
+    - marketplaces_dir() (github + url installs)
+    - LOCAL_CLONE_DIR (only when --local-marketplace)
+
+    Failures are warnings only — start.sh falls back to per-plugin uv sync.
+    """
+    from installer.shared_venv import ensure_shared_venv, marketplaces_dir
+
+    targets: list[Path] = [marketplaces_dir()]
+    if getattr(args, "local_marketplace", False):
+        from installer.local_marketplace import LOCAL_CLONE_DIR
+
+        targets.append(LOCAL_CLONE_DIR)
+
+    for target in targets:
+        if not target.is_dir():
+            console.print(
+                f"[yellow]Skipping shared venv at {target} (dir does not exist).[/yellow]"
+            )
+            continue
+        with console.status(f"[bold]Creating shared environment at {target}...[/bold]"):
+            try:
+                ensure_shared_venv(target)
+            except InstallerError as exc:
+                console.print(
+                    f"[yellow]Failed to create shared venv at {target}: {exc}[/yellow]"
+                )
+                console.print(
+                    "[yellow]Plugins will fall back to per-plugin uv sync at runtime.[/yellow]"
+                )
+                continue
+        console.print(f"  [green]✓[/green] Shared venv ready at {target}")
+
+
 def _resolve_source_locally(
     args: Any, console: Console | None = None
 ) -> tuple[str, str | None]:
@@ -455,6 +492,7 @@ def _run_install(args: Any, console: Console) -> int:
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=[], console=console)
     if exit_code == 0:
+        _finalize_shared_venv(args, console)
         prompt_kill_stale_sessions(console)
     return exit_code
 
@@ -483,6 +521,8 @@ def _run_update(args: Any, pre_state: Any, console: Console) -> int:
     )
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=[], console=console)
+    if exit_code == 0:
+        _finalize_shared_venv(args, console)
     return exit_code
 
 
@@ -532,6 +572,7 @@ def _run_reinstall(
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=orphans, console=console)
     if exit_code == 0:
+        _finalize_shared_venv(args, console)
         prompt_kill_stale_sessions(console)
     if mode_options.get("reset_configs"):
         _reset_installer_configs(console)

@@ -182,6 +182,119 @@ class TestReinstall:
         mock_ems.assert_called_once_with(tmp_path / ".claude" / "CLAUDE.md")
 
 
+class TestSharedVenvFinalize:
+    """The TUI/Rich install flow must build the shared venv after each
+    successful install/reinstall/update, so plugins can run without
+    network access at start.sh time."""
+
+    def test_reinstall_calls_finalize_shared_venv(self) -> None:
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": False},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch(
+                "installer.flow.installer_flow._finalize_shared_venv"
+            ) as mock_finalize,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            code = run_installer_flow("reinstall", _Args(), console)
+        assert code == 0
+        mock_finalize.assert_called_once()
+
+    def test_reinstall_skips_finalize_on_failure(self) -> None:
+        """If plan execution fails, don't bother building the venv."""
+        from installer.flow.install_plan import InstallResult
+
+        bad = InstallResult(success_count=0, failure_count=1, failures=[])
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": False},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=bad,
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch(
+                "installer.flow.installer_flow._finalize_shared_venv"
+            ) as mock_finalize,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("reinstall", _Args(), console)
+        mock_finalize.assert_not_called()
+
+    def test_finalize_builds_marketplaces_dir(self, tmp_path: Path) -> None:
+        """_finalize_shared_venv calls ensure_shared_venv on marketplaces_dir()."""
+        from installer.flow.installer_flow import _finalize_shared_venv
+
+        target = tmp_path / "mp"
+        target.mkdir()
+        with (
+            patch("installer.shared_venv.marketplaces_dir", return_value=target),
+            patch("installer.shared_venv.ensure_shared_venv") as mock_ensure,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            _finalize_shared_venv(_Args(), console)
+        mock_ensure.assert_called_once_with(target)
+
+    def test_finalize_builds_local_clone_dir_when_local_marketplace(
+        self, tmp_path: Path
+    ) -> None:
+        """--local-marketplace adds LOCAL_CLONE_DIR as a second target."""
+        from installer.flow.installer_flow import _finalize_shared_venv
+
+        mp = tmp_path / "mp"
+        mp.mkdir()
+        local = tmp_path / "local-clone"
+        local.mkdir()
+
+        class _ArgsLocal:
+            branch = None
+            local_marketplace = True
+
+        with (
+            patch("installer.shared_venv.marketplaces_dir", return_value=mp),
+            patch("installer.local_marketplace.LOCAL_CLONE_DIR", local),
+            patch("installer.shared_venv.ensure_shared_venv") as mock_ensure,
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            _finalize_shared_venv(_ArgsLocal(), console)
+        called_targets = {call.args[0] for call in mock_ensure.call_args_list}
+        assert mp in called_targets
+        assert local in called_targets
+
+
 # ── Uninstall ──────────────────────────────────────────────────────────────
 
 
