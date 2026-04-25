@@ -587,12 +587,56 @@ def _setup_jira_config(console: Console) -> None:
     console.print(f"[green]Jira configured — wrote {config_path}[/green]")
 
 
-def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
+def _create_shared_venv_step(args: Any | None, console: Console) -> None:
+    """Create the shared marketplace venv as the final wizard step.
+
+    Failures are logged as warnings but do not abort install — plugins
+    fall back to per-plugin uv sync at runtime via start.sh.
+    """
+    from installer.errors import InstallerError
+    from installer.shared_venv import ensure_shared_venv, marketplaces_dir
+
+    targets: list[Path] = [marketplaces_dir()]
+
+    # Also create at LOCAL_CLONE_DIR if --local-marketplace was used.
+    if args is not None and getattr(args, "local_marketplace", False):
+        from installer.local_marketplace import LOCAL_CLONE_DIR
+
+        targets.append(LOCAL_CLONE_DIR)
+
+    for target in targets:
+        if not target.is_dir():
+            console.print(
+                f"[yellow]Skipping shared venv at {target} (dir does not exist).[/yellow]"
+            )
+            continue
+        with console.status(f"[bold]Creating shared environment at {target}...[/bold]"):
+            try:
+                ensure_shared_venv(target)
+            except InstallerError as exc:
+                console.print(
+                    f"[yellow]Failed to create shared venv at {target}: {exc}[/yellow]"
+                )
+                console.print(
+                    "[yellow]Plugins will fall back to per-plugin uv sync at runtime.[/yellow]"
+                )
+                continue
+        console.print(f"  [green]✓[/green] Shared venv ready at {target}")
+
+
+def run_wizard(
+    selected_plugins: list[str],
+    skip: bool = False,
+    args: Any | None = None,
+) -> None:
     """Run the post-install setup wizard.
 
     Args:
         selected_plugins: List of plugin names that were installed.
         skip: If True, skip all prompts and use defaults / keep existing.
+        args: Parsed CLI args (for --local-marketplace detection during
+              the shared-venv creation step). May be None if invoked
+              outside the standard install flow.
     """
     console = Console()
 
@@ -627,5 +671,7 @@ def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
         _hooks_diff_prompt(plugin_dirs, console=console)
 
     ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+
+    _create_shared_venv_step(args, console)
 
     console.print("\n[green]Setup wizard complete.[/green]")
