@@ -115,7 +115,18 @@ def ensure_local_clone(
 
     if dest.exists():
         _status(console, f"[yellow]Removing existing local clone at {dest}...[/yellow]")
-        shutil.rmtree(dest)
+        try:
+            shutil.rmtree(dest)
+        except OSError as exc:
+            raise InstallerError(
+                f"Failed to remove existing local clone at {dest}: {exc}. "
+                f"Check permissions or remove manually with `rm -rf {dest}`."
+            ) from exc
+        if dest.exists():
+            raise InstallerError(
+                f"rmtree completed but {dest} still exists — partial filesystem state. "
+                f"Remove manually with `rm -rf {dest}` and retry."
+            )
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     _status(console, f"[bold]Cloning {_HTTPS_SOURCE} → {dest}...[/bold]")
