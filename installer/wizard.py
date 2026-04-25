@@ -552,7 +552,7 @@ def _setup_jira_config(console: Console) -> None:
 
     try:
         resp = httpx.get(
-            f"{base_url}/rest/api/3/myself",
+            f"{base_url}/rest/api/2/myself",
             headers={"Authorization": f"Bearer {personal_access_token.strip()}"},
             timeout=10,
         )

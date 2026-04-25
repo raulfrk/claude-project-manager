@@ -230,7 +230,7 @@ def _jira_validator(values: dict[str, Any]) -> str | None:
         return "Personal access token is required"
     try:
         resp = httpx.get(
-            f"{base_url}/rest/api/3/myself",
+            f"{base_url}/rest/api/2/myself",
             headers={"Authorization": f"Bearer {token}"},
             timeout=10,
         )
