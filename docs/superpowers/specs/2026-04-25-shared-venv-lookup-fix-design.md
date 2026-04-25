@@ -121,14 +121,14 @@ Implementation: thin `subprocess.run` wrapper mirroring `installer/plugin_cli._r
 | `installer/flow/installer_flow.py` | 345, 355, 516 | Alternative flow entry points |
 
 **Marketplace dir resolution** (inside the wrapper):
-- Always: `~/.claude/plugins/marketplaces/<name>/` — read `<name>` from bundled `installer/marketplace.json` (`force-include`'d at build time per `pyproject.toml::tool.hatch.build.targets.wheel.force-include`).
-- If `source` is a filesystem path (heuristic: `Path(source).exists()`) AND `Path(source) == LOCAL_CLONE_DIR`: also call `ensure_shared_venv(LOCAL_CLONE_DIR)` so walk-up from `start.sh` resolves at the local clone. Both calls are needed because Claude Code may reference either location depending on cache state; both are idempotent.
+- Always: `~/.claude/plugins/marketplaces/<name>/` — `<name>` comes from `installer.plugin_cli.MARKETPLACE_NAME` (existing module-level constant, hardcoded to `claude-project-manager`). Avoids the wheel-bundled-vs-source-tree split that would force reading `installer/marketplace.json` w/ a fallback to `.claude-plugin/marketplace.json`.
+- If `source` is a filesystem path (`Path(source).exists()`) AND resolves to `LOCAL_CLONE_DIR`: also call `ensure_shared_venv(LOCAL_CLONE_DIR)` so walk-up from `start.sh` resolves at the local clone. Both calls are needed because Claude Code may reference either location depending on cache state; both are idempotent.
 
 `installer/update.py` is version-comparison utilities only — no `add_marketplace` calls. No changes needed there.
 
 **Failure handling:** `ensure_shared_venv` raises on failure; call sites catch and log a yellow warning, then continue. Plugins fall back to per-plugin venv at runtime, exactly preserving today's behavior. Do **not** abort install on shared-venv failure — that would regress users in restricted-network environments who can still use per-plugin sync if their PyPI mirror works.
 
-**Marketplace name resolution:** read from `installer/marketplace.json` (already bundled at build time per `pyproject.toml::tool.hatch.build.targets.wheel.force-include`). No extra plumbing.
+**Marketplace name resolution:** import `MARKETPLACE_NAME` from `installer.plugin_cli` (already used elsewhere as the source-of-truth constant). No extra plumbing, no file IO at install time.
 
 ### Component 3 — `scripts/presync.sh` sweep
 
