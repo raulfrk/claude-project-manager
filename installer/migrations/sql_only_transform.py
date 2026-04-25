@@ -207,8 +207,9 @@ def migrate_yaml_to_sql(project_dir: Path) -> None:
 
     Idempotent: if YAML files are absent the operation is a no-op.
     Ensures flat schema (todos, archive_todos, decisions, project_meta,
-    project_index) exists before inserting — handles empty data.db files
-    created by prior init steps that never ran schema init.
+    project_index) exists before inserting — handles both empty and absent
+    data.db files (sqlite3.connect creates the file when missing, then
+    executescript initializes the schema).
     Raises on SQL errors (caller should roll back / restore backup).
     """
     db_path = project_dir / "data.db"
@@ -221,11 +222,6 @@ def migrate_yaml_to_sql(project_dir: Path) -> None:
     todos = _load_yaml_list(todos_path)
     archive = _load_yaml_list(archive_path)
     decisions_raw = _load_yaml_list(decisions_path)
-
-    if not db_path.exists():
-        raise FileNotFoundError(
-            f"data.db not found at {db_path} — run cpm-install first"
-        )
 
     conn = sqlite3.connect(db_path)
     try:

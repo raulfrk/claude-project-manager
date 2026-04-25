@@ -207,8 +207,8 @@ def test_migrate_yaml_absent_is_noop(v2_project: Path) -> None:
     conn.close()
 
 
-def test_migrate_intact_yaml_on_sql_failure(v2_project: Path) -> None:
-    """YAML files remain intact if SQL write fails (data.db missing)."""
+def test_migrate_creates_db_when_absent(v2_project: Path) -> None:
+    """Missing data.db is auto-created with full schema; YAML rows migrate."""
     (v2_project / "todos.yaml").write_text(
         yaml.safe_dump(
             [
@@ -223,11 +223,17 @@ def test_migrate_intact_yaml_on_sql_failure(v2_project: Path) -> None:
             ]
         )
     )
-    # Remove data.db to force failure
+    # Remove data.db — v1 projects with git_enabled=false reach v2 without one.
     (v2_project / "data.db").unlink()
 
-    with pytest.raises(FileNotFoundError):
-        migrate_yaml_to_sql(v2_project)
+    migrate_yaml_to_sql(v2_project)
 
-    # YAML file must still exist
-    assert (v2_project / "todos.yaml").exists()
+    assert (v2_project / "data.db").exists()
+    conn = sqlite3.connect(v2_project / "data.db")
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT id, title, project FROM todos").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["id"] == "1"
+    assert rows[0]["project"] == "demo"
+    conn.close()
+    assert not (v2_project / "todos.yaml").exists()
