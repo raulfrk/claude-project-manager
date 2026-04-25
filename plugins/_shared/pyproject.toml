@@ -53,6 +53,12 @@ reportUnknownParameterType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "test_contracts/tests"]
+# NOTE: --cov-fail-under=80 aggregates coverage across ALL --cov targets above.
+# Running a single test file (e.g. `uv run pytest tests/test_session_key.py`) will
+# fail the gate even when the targeted module is well-covered, because the other
+# modules contribute 0% to the aggregate. Workaround: pass --no-cov to skip the
+# threshold check for targeted runs:
+#   uv run pytest tests/<file> -v --no-cov
 addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov=session_key", "--cov-fail-under=80"]
 
 [tool.coverage.run]
