@@ -14,4 +14,12 @@ Orchestrate parallel impl of >=2 disjoint todos. Wrap superpowers workflow; para
 
 ## Phases
 
-<!-- Sections filled in subsequent tasks: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Cross-refs -->
+### Phase 0 — Setup
+
+1. `mcp__plugin_proj_proj__proj_session_context` -> active proj name + tracking_dir.
+2. Parse `$ARGUMENTS` -> N todo IDs. N < 2 -> err: "use sequential superpowers workflow".
+3. Each todo: `mcp__plugin_proj_proj__todo_get` -> verify exists + open. Missing/done -> err.
+4. Disjointness: prompt user via `AskUserQuestion` to confirm per-todo file scopes disjoint. Coupled -> abort.
+5. `TaskCreate` 1 parent task per phase + subtasks per todo for Phases 1+3.
+
+<!-- Sections to fill: Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Cross-refs -->
