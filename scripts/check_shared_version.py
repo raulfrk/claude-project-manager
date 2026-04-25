@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# See check_shared_version.md for the validate-vs-auto-regen evaluation rubric.
 """Pre-commit hook: fail if plugins/_shared/*.py staged but version not bumped."""
 
 import re
