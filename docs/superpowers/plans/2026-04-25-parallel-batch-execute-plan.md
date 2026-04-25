@@ -38,9 +38,9 @@ Before starting any task, create an isolated worktree per project rules.
 
 ```
 mcp__plugin_worktree_worktree__wt_create(
-  repo_label="code",
+  repo_label="cpm",
   branch="feat/736-parallel-batch-execute",
-  base_branch="dev"
+  new_branch=true
 )
 ```
 
