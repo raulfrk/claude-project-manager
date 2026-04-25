@@ -151,6 +151,48 @@ def test_migrate_todos_and_archive(v2_project: Path) -> None:
     assert not (v2_project / "archive.yaml").exists()
 
 
+def test_migrate_dict_valued_field_serialised_to_json(v2_project: Path) -> None:
+    """Nested mappings (e.g. trello_sync_state) round-trip as JSON text.
+
+    Real proj-plugin todos serialise TrelloSyncState via dataclasses.asdict,
+    which yaml.safe_dump emits as a nested mapping. sqlite3 cannot bind dicts
+    directly, so the transform must JSON-encode them.
+    """
+    sync_state = {
+        "card_id": "C1",
+        "checklist_id": "CL1",
+        "checklist_item_id": "I1",
+        "last_synced": "2026-01-02T00:00:00",
+    }
+    (v2_project / "todos.yaml").write_text("[]")
+    (v2_project / "archive.yaml").write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "9",
+                    "title": "Synced",
+                    "status": "done",
+                    "priority": "medium",
+                    "created": "2026-01-01",
+                    "updated": "2026-01-02",
+                    "trello_sync_state": sync_state,
+                }
+            ]
+        )
+    )
+
+    migrate_yaml_to_sql(v2_project)
+
+    conn = sqlite3.connect(v2_project / "data.db")
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT trello_sync_state FROM archive_todos WHERE id='9'"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert json.loads(row["trello_sync_state"]) == sync_state
+
+
 def test_migrate_decisions(v2_project: Path) -> None:
     """Decisions are written to SQL from decisions.yaml."""
     (v2_project / "todos.yaml").write_text("[]")

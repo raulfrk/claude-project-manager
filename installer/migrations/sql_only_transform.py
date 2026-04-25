@@ -89,6 +89,9 @@ def _todo_row(todo: dict[str, object], project_name: str) -> dict[str, object]:
         # Serialise list fields
         if field in {"tags", "git_commits", "blocks", "blocked_by", "jira_comment_ids"}:
             row[field] = _list_to_json(raw)
+        elif isinstance(raw, dict):
+            # Nested mappings (e.g. trello_sync_state) are stored as JSON text.
+            row[field] = json.dumps(raw)
         else:
             row[field] = raw
     return row
