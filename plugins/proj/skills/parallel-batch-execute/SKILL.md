@@ -98,4 +98,46 @@ Reviewer chains parallel across workers (disjoint worktrees -> no shared state).
 
 All N `REVIEW_PASSED` -> record SHAs per branch -> Phase 4. `REVIEW_PASSED` workers wait for slowest. Permanent `BLOCKED` -> `AskUserQuestion`: continue N-1 / abort batch / let user investigate.
 
-<!-- Sections to fill: Phase 4, Phase 5, Cross-refs -->
+### Phase 4 — Pre-merge integration gates (sequential)
+
+Run after all N workers `REVIEW_PASSED`, before any merge to dev. Catches cross-layer boundary issues per-worker reviewers miss.
+
+#### 4a. Final whole-impl reviewer
+
+Full template: `references/final-reviewer-prompt.md`. Mechanic:
+
+```
+dispatch one reviewer subagent (opus)
+  - input: ALL N branches' diffs vs current dev
+  - role: superpowers:requesting-code-review semantics, cross-batch
+  - explicit checks (4 categories): shared types/config, dual-impls,
+    SKILL.md frontmatter, cross-cutting user-facing flows
+  - output: APPROVE / FINDINGS list per worker affected
+```
+
+Re-review loop on findings: route each finding -> relevant worker's impl (per `superpowers:receiving-code-review`). Loop until `APPROVE`.
+
+#### 4b. End-to-end smoke
+
+Full template: `references/smoke-prompt.md`. Mechanic:
+
+```
+dispatch one smoke subagent (sonnet)
+  - input: features touched (orchestrator extracts from per-todo plans)
+  - prefer sandboxed fixture (tmpdir-based, isolated from user state)
+  - fall back to live ~/.claude/ ONLY when explicitly safe
+  - check: invoke each touched SKILL/MCP tool/script end-to-end >=1x
+  - output: SMOKE_OK / SMOKE_FAILED <details> / NO_SMOKE_AVAILABLE
+```
+
+`SMOKE_FAILED` -> route -> impl -> re-smoke. `NO_SMOKE_AVAILABLE` not blocker; `AskUserQuestion`: proceed / add fixtures first / abort batch.
+
+#### 4c. Cross-todo integration sweep
+
+Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-facing flows" checks).
+
+#### Phase 4 exit
+
+4a `APPROVE` + 4b `SMOKE_OK` (or `NO_SMOKE_AVAILABLE` acknowledged by user). Transition to Phase 5.
+
+<!-- Sections to fill: Phase 5, Cross-refs -->
