@@ -1,293 +1,89 @@
 # installer/migrations/sql_only_transform.py
-"""Transform v2 YAML-hybrid project to v3 SQL-only.
+"""Wizard's v2→v3 YAML→SQL transform.
 
-migrate_yaml_to_sql reads todos.yaml / archive.yaml / decisions.yaml from
-project_dir, writes rows into the existing data.db, then deletes the YAML
-files. Called from SqlOnlyMigration._flatten.
+Delegates to the proj plugin's canonical `migrate_yaml_to_sqlite`.
 
-Standalone — no dependency on plugins/proj/server (installer boundary).
+Why we cross the installer↔plugin boundary here:
+The wizard previously hand-rolled a parallel YAML→SQL transform that
+silently drifted from the real `Todo` schema. The drift caused a chain of
+data-loss bugs (data.db existence guard, dict-bind on trello_sync_state,
+missing meta.yaml migration, mismatched field names: `git`/`git_branch`,
+`jira_synced_comment_ids`/`jira_comment_ids`,
+`todoist_description_synced`/`todoist_desc_synced`). To make this class
+of bug impossible, the wizard now delegates to the single source of truth
+in `plugins/proj/server/server/lib/migration.py`. Any future field added
+to `Todo` flows through automatically.
+
+Source-tree assumption: `cpm-install` is documented as `uvx --from
+git+...` or `uv run cpm-install`, both of which run from a checked-out
+repo where `plugins/proj/server` sits next to `installer/`. A pure-PyPI
+wheel install would not work — we fail fast with an actionable message.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import sqlite3
+import sys
 from pathlib import Path
 
 import yaml
 
 log = logging.getLogger(__name__)
 
-# Columns sourced from YAML keys (plus `project` injected from project_name).
-# These must match _TODO_COLUMNS in db.py for the INSERT to succeed.
-_TODO_YAML_FIELDS = (
-    "id",
-    "title",
-    "status",
-    "priority",
-    "created",
-    "updated",
-    "tags",
-    "git_branch",
-    "git_commits",
-    "blocks",
-    "blocked_by",
-    "notes",
-    "has_requirements",
-    "has_research",
-    "todoist_task_id",
-    "todoist_desc_synced",
-    "trello_card_id",
-    "trello_checklist_id",
-    "trello_checklist_item_id",
-    "jira_issue_key",
-    "jira_comment_ids",
-    "due_date",
-    "trello_sync_state",
-)
-
-_TODO_DEFAULTS: dict[str, object] = {
-    "status": "pending",
-    "priority": "medium",
-    "created": "",
-    "updated": "",
-    "tags": "[]",
-    "git_branch": None,
-    "git_commits": "[]",
-    "blocks": "[]",
-    "blocked_by": "[]",
-    "notes": "",
-    "has_requirements": 0,
-    "has_research": 0,
-    "todoist_task_id": None,
-    "todoist_desc_synced": "",
-    "trello_card_id": None,
-    "trello_checklist_id": None,
-    "trello_checklist_item_id": None,
-    "jira_issue_key": None,
-    "jira_comment_ids": "[]",
-    "due_date": None,
-    "trello_sync_state": None,
-}
+# Repo layout: installer/migrations/sql_only_transform.py → repo root is parents[2].
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PROJ_PLUGIN_ROOT = _REPO_ROOT / "plugins" / "proj" / "server"
 
 
-def _list_to_json(val: object) -> str:
-    """Normalise a YAML list or JSON-string field to a JSON string."""
-    if isinstance(val, list):
-        return json.dumps(val)
-    if isinstance(val, str):
-        return val
-    return "[]"
+def _normalize_wrapped_yaml(path: Path) -> None:
+    """Rewrite a bare-list YAML file as a `{"todos": [...]}` wrapper in
+    place. No-op if the file is missing, already wrapped, or empty.
 
-
-def _todo_row(todo: dict[str, object], project_name: str) -> dict[str, object]:
-    """Convert a YAML todo dict to a column→value mapping for INSERT."""
-    row: dict[str, object] = {"project": project_name}
-    for field in _TODO_YAML_FIELDS:
-        raw = todo.get(field, _TODO_DEFAULTS.get(field))
-        # Serialise list fields
-        if field in {"tags", "git_commits", "blocks", "blocked_by", "jira_comment_ids"}:
-            row[field] = _list_to_json(raw)
-        elif isinstance(raw, dict):
-            # Nested mappings (e.g. trello_sync_state) are stored as JSON text.
-            row[field] = json.dumps(raw)
-        else:
-            row[field] = raw
-    return row
-
-
-def _load_yaml_list(path: Path) -> list[dict[str, object]]:
-    """Load a YAML file that should be a list. Returns [] on missing/invalid.
-
-    Real proj-plugin YAML files for todos + archive use a `{"todos": [...]}`
-    wrapper; decisions.yaml is a bare list. Accepts both shapes.
+    The proj plugin's runtime migrate accepts only the wrapped form (the
+    canonical shape produced by current writers). Older proj versions and
+    test fixtures sometimes emit bare lists; we normalise them here so the
+    runtime can read them.
     """
+    if not path.exists():
+        return
     try:
         raw = yaml.safe_load(path.read_text())
-    except (FileNotFoundError, yaml.YAMLError):
-        return []
-    if isinstance(raw, dict):
-        # Wrapped form: {"todos": [...]} — todos.yaml + archive.yaml
-        for key in ("todos", "decisions", "items"):
-            if key in raw and isinstance(raw[key], list):
-                raw = raw[key]
-                break
-        else:
-            return []
-    if isinstance(raw, list):
-        return [item for item in raw if isinstance(item, dict)]
-    return []
-
-
-_FLAT_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS todos (
-    id TEXT PRIMARY KEY,
-    project TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    created TEXT NOT NULL,
-    updated TEXT NOT NULL,
-    tags TEXT NOT NULL DEFAULT '[]',
-    git_branch TEXT,
-    git_commits TEXT NOT NULL DEFAULT '[]',
-    blocks TEXT NOT NULL DEFAULT '[]',
-    blocked_by TEXT NOT NULL DEFAULT '[]',
-    notes TEXT NOT NULL DEFAULT '',
-    has_requirements INTEGER NOT NULL DEFAULT 0,
-    has_research INTEGER NOT NULL DEFAULT 0,
-    todoist_task_id TEXT,
-    todoist_desc_synced TEXT NOT NULL DEFAULT '',
-    trello_card_id TEXT,
-    trello_checklist_id TEXT,
-    trello_checklist_item_id TEXT,
-    jira_issue_key TEXT,
-    jira_comment_ids TEXT NOT NULL DEFAULT '[]',
-    due_date TEXT,
-    trello_sync_state TEXT
-);
-
-CREATE TABLE IF NOT EXISTS archive_todos (
-    id TEXT PRIMARY KEY,
-    project TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    created TEXT NOT NULL,
-    updated TEXT NOT NULL,
-    tags TEXT NOT NULL DEFAULT '[]',
-    git_branch TEXT,
-    git_commits TEXT NOT NULL DEFAULT '[]',
-    blocks TEXT NOT NULL DEFAULT '[]',
-    blocked_by TEXT NOT NULL DEFAULT '[]',
-    notes TEXT NOT NULL DEFAULT '',
-    has_requirements INTEGER NOT NULL DEFAULT 0,
-    has_research INTEGER NOT NULL DEFAULT 0,
-    todoist_task_id TEXT,
-    todoist_desc_synced TEXT NOT NULL DEFAULT '',
-    trello_card_id TEXT,
-    trello_checklist_id TEXT,
-    trello_checklist_item_id TEXT,
-    jira_issue_key TEXT,
-    jira_comment_ids TEXT NOT NULL DEFAULT '[]',
-    due_date TEXT,
-    trello_sync_state TEXT
-);
-
-CREATE TABLE IF NOT EXISTS project_meta (
-    name TEXT PRIMARY KEY,
-    data TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS project_index (
-    name TEXT PRIMARY KEY,
-    data TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    text TEXT NOT NULL,
-    todo_id TEXT,
-    tags TEXT DEFAULT '[]'
-);
-
-CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project);
-CREATE INDEX IF NOT EXISTS idx_todos_project_status ON todos(project, status);
-CREATE INDEX IF NOT EXISTS idx_todos_todoist ON todos(todoist_task_id);
-CREATE INDEX IF NOT EXISTS idx_todos_trello ON todos(trello_card_id);
-CREATE INDEX IF NOT EXISTS idx_todos_jira ON todos(jira_issue_key);
-CREATE INDEX IF NOT EXISTS idx_archive_project ON archive_todos(project);
-CREATE INDEX IF NOT EXISTS idx_archive_project_status ON archive_todos(project, status);
-CREATE INDEX IF NOT EXISTS idx_decisions_todo_id ON decisions(todo_id);
-CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
-"""
+    except yaml.YAMLError:
+        return
+    if not isinstance(raw, list):
+        return  # already wrapped, scalar, or None
+    path.write_text(yaml.safe_dump({"todos": raw}, sort_keys=False))
 
 
 def migrate_yaml_to_sql(project_dir: Path) -> None:
-    """Read YAML files, write SQL rows, delete YAML files.
+    """Migrate a v2 project's YAML files into its data.db.
 
-    Idempotent: if YAML files are absent the operation is a no-op.
-    Ensures flat schema (todos, archive_todos, decisions, project_meta,
-    project_index) exists before inserting — handles both empty and absent
-    data.db files (sqlite3.connect creates the file when missing, then
-    executescript initializes the schema).
+    Delegates to `server.lib.migration.migrate_yaml_to_sqlite` so the
+    transform stays in lock-step with the proj plugin's canonical schema.
+
+    Idempotent. Reads todos.yaml + archive.yaml + meta.yaml +
+    decisions.yaml; populates todos / archive_todos / project_meta /
+    decisions tables (creating data.db if absent); renames migrated YAML
+    files to `<name>.bak` for disaster recovery.
     Raises on SQL errors (caller should roll back / restore backup).
     """
-    db_path = project_dir / "data.db"
-    project_name = project_dir.name
-
-    todos_path = project_dir / "todos.yaml"
-    archive_path = project_dir / "archive.yaml"
-    decisions_path = project_dir / "decisions.yaml"
-
-    todos = _load_yaml_list(todos_path)
-    archive = _load_yaml_list(archive_path)
-    decisions_raw = _load_yaml_list(decisions_path)
-
-    conn = sqlite3.connect(db_path)
-    try:
-        # Drop any stale pre-647 decisions table (schema: id/project/timestamp/data).
-        # decisions.yaml has been the canonical source; the legacy SQL rows are stale
-        # mirrors that never got the 647 schema migration (text/todo_id/tags cols).
-        # Dropping lets CREATE TABLE IF NOT EXISTS below produce the new schema.
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='decisions'"
+    if not _PROJ_PLUGIN_ROOT.is_dir():
+        raise RuntimeError(
+            f"cannot find proj plugin source at {_PROJ_PLUGIN_ROOT}; "
+            "cpm-install must be run from a source checkout (e.g. "
+            "`uvx --from git+https://github.com/raulfrk/claude-project-manager "
+            "cpm-install`)"
         )
-        if cur.fetchone() is not None:
-            cols = {
-                r[1] for r in conn.execute("PRAGMA table_info(decisions)").fetchall()
-            }
-            if "todo_id" not in cols:
-                conn.execute("DROP TABLE decisions")
 
-        conn.executescript(_FLAT_SCHEMA_SQL)
-        conn.execute("BEGIN IMMEDIATE")
+    # Normalise legacy bare-list YAML into the wrapped form the runtime expects.
+    _normalize_wrapped_yaml(project_dir / "todos.yaml")
+    _normalize_wrapped_yaml(project_dir / "archive.yaml")
 
-        # Insert todos (skip rows already present by id to stay idempotent)
-        for todo in todos:
-            row = _todo_row(todo, project_name)
-            cols = ", ".join(row.keys())
-            placeholders = ", ".join(f":{k}" for k in row)
-            conn.execute(
-                f"INSERT OR IGNORE INTO todos ({cols}) VALUES ({placeholders})",  # noqa: S608
-                row,
-            )
+    if str(_PROJ_PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJ_PLUGIN_ROOT))
 
-        # Insert archive
-        for todo in archive:
-            row = _todo_row(todo, project_name)
-            cols = ", ".join(row.keys())
-            placeholders = ", ".join(f":{k}" for k in row)
-            conn.execute(
-                f"INSERT OR IGNORE INTO archive_todos ({cols}) VALUES ({placeholders})",  # noqa: S608
-                row,
-            )
+    from server.lib.migration import migrate_yaml_to_sqlite
+    from server.lib.models import ProjConfig
 
-        # Insert decisions
-        for decision in decisions_raw:
-            timestamp = str(decision.get("timestamp") or "")
-            # Accept 'text' (new) or 'decision' (legacy) key
-            text = str(decision.get("text") or decision.get("decision") or "")
-            todo_id = str(decision["todo_id"]) if decision.get("todo_id") else None
-            tags_raw = decision.get("tags", [])
-            tags = json.dumps(tags_raw) if isinstance(tags_raw, list) else "[]"
-            conn.execute(
-                "INSERT INTO decisions (timestamp, text, todo_id, tags) VALUES (?, ?, ?, ?)",
-                (timestamp, text, todo_id, tags),
-            )
-
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-    # Delete YAML files only after successful SQL commit
-    for path in (todos_path, archive_path, decisions_path):
-        try:
-            path.unlink(missing_ok=True)
-        except OSError as exc:
-            log.warning("Could not delete %s: %s", path, exc)
+    cfg = ProjConfig(tracking_dir=str(project_dir.parent))
+    migrate_yaml_to_sqlite(cfg, project_dir.name)

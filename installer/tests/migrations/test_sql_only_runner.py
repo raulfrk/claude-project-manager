@@ -74,19 +74,21 @@ def _make_v2_project(root: Path) -> PendingProject:
     (root / ".schema-version").write_text("2\n")
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
-            [
-                {
-                    "id": "1",
-                    "title": "A todo",
-                    "status": "pending",
-                    "priority": "medium",
-                    "created": "2026-01-01",
-                    "updated": "2026-01-01",
-                }
-            ]
+            {
+                "todos": [
+                    {
+                        "id": "1",
+                        "title": "A todo",
+                        "status": "pending",
+                        "priority": "medium",
+                        "created": "2026-01-01",
+                        "updated": "2026-01-01",
+                    }
+                ]
+            }
         )
     )
-    (root / "archive.yaml").write_text("[]")
+    (root / "archive.yaml").write_text(yaml.safe_dump({"todos": []}))
     (root / "decisions.yaml").write_text("[]")
     _init_db(root)
     return PendingProject(

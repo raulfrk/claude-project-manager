@@ -83,42 +83,46 @@ def v2_project(tmp_path: Path) -> PendingProject:
 
     (root / "todos.yaml").write_text(
         yaml.safe_dump(
-            [
-                {
-                    "id": "1",
-                    "title": "Implement SQL-only storage",
-                    "status": "done",
-                    "priority": "high",
-                    "created": "2026-01-01",
-                    "updated": "2026-04-01",
-                    "tags": ["group:parent"],
-                    "todoist_task_id": "tod-1",
-                },
-                {
-                    "id": "2",
-                    "title": "Write tests",
-                    "status": "pending",
-                    "priority": "medium",
-                    "created": "2026-01-02",
-                    "updated": "2026-04-01",
-                    "tags": [],
-                },
-            ]
+            {
+                "todos": [
+                    {
+                        "id": "1",
+                        "title": "Implement SQL-only storage",
+                        "status": "done",
+                        "priority": "high",
+                        "created": "2026-01-01",
+                        "updated": "2026-04-01",
+                        "tags": ["group:parent"],
+                        "todoist_task_id": "tod-1",
+                    },
+                    {
+                        "id": "2",
+                        "title": "Write tests",
+                        "status": "pending",
+                        "priority": "medium",
+                        "created": "2026-01-02",
+                        "updated": "2026-04-01",
+                        "tags": [],
+                    },
+                ]
+            }
         )
     )
     (root / "archive.yaml").write_text(
         yaml.safe_dump(
-            [
-                {
-                    "id": "0",
-                    "title": "Old task",
-                    "status": "done",
-                    "priority": "low",
-                    "created": "2025-12-01",
-                    "updated": "2025-12-31",
-                    "tags": [],
-                }
-            ]
+            {
+                "todos": [
+                    {
+                        "id": "0",
+                        "title": "Old task",
+                        "status": "done",
+                        "priority": "low",
+                        "created": "2025-12-01",
+                        "updated": "2025-12-31",
+                        "tags": [],
+                    }
+                ]
+            }
         )
     )
     (root / "decisions.yaml").write_text(
