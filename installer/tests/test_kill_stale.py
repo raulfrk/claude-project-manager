@@ -51,8 +51,28 @@ class TestFindStaleClaude:
         ):
             result = find_stale_claude_pids()
 
-        assert claude_pid in result
-        assert other_pid not in result, "non-claude process must NOT be in kill list"
+        pids = [pid for pid, _ in result]
+        assert claude_pid in pids
+        assert other_pid not in pids, "non-claude process must NOT be in kill list"
+
+    def test_returns_tuple_shape(self):
+        """find_stale_claude_pids returns list of (pid, cmdline_str) tuples."""
+        from installer.flow.kill_stale import find_stale_claude_pids
+
+        procs = [_make_proc_info(1234, ["/usr/bin/claude", "--session"])]
+
+        with (
+            patch("installer.flow.kill_stale.psutil.process_iter", return_value=procs),
+            patch(
+                "installer.flow.kill_stale._ancestor_pids", return_value={os.getpid()}
+            ),
+        ):
+            result = find_stale_claude_pids()
+
+        assert len(result) == 1
+        pid, cmdline = result[0]
+        assert pid == 1234
+        assert cmdline == "/usr/bin/claude --session"
 
     def test_excludes_ancestor_claude_pid(self):
         """A claude process that IS in the ancestor chain is excluded."""
@@ -77,8 +97,9 @@ class TestFindStaleClaude:
         ):
             result = find_stale_claude_pids()
 
-        assert ancestor_pid not in result, "ancestor PID must be excluded"
-        assert other_claude_pid in result
+        pids = [pid for pid, _ in result]
+        assert ancestor_pid not in pids, "ancestor PID must be excluded"
+        assert other_claude_pid in pids
 
     def test_non_claude_process_excluded(self):
         """A process with no claude in cmdline is excluded even if pid is low."""
@@ -132,8 +153,9 @@ class TestFindStaleClaude:
         ):
             result = find_stale_claude_pids()
 
-        assert 8801 in result
-        assert 8802 not in result
+        pids = [pid for pid, _ in result]
+        assert 8801 in pids
+        assert 8802 not in pids
 
     def test_three_procs_two_claude_one_ancestor(self):
         """3 mocked procs: 2 claude, 1 not — ancestor excluded → 1 in kill list.
@@ -161,12 +183,11 @@ class TestFindStaleClaude:
         ):
             result = find_stale_claude_pids()
 
+        pids = [pid for pid, _ in result]
         # Only 1 process — the non-ancestor claude
-        assert result == [other_claude_pid]
-        assert ancestor_pid not in result, "wizard's ancestor PID must be excluded"
-        assert non_claude_pid not in result, (
-            "non-claude process must NOT be in kill list"
-        )
+        assert pids == [other_claude_pid]
+        assert ancestor_pid not in pids, "wizard's ancestor PID must be excluded"
+        assert non_claude_pid not in pids, "non-claude process must NOT be in kill list"
 
     def test_proc_access_denied_skipped(self):
         """Processes raising AccessDenied are silently skipped."""
@@ -188,17 +209,18 @@ class TestFindStaleClaude:
         ):
             result = find_stale_claude_pids()
 
-        assert 7778 in result
-        assert 7777 not in result
+        pids = [pid for pid, _ in result]
+        assert 7778 in pids
+        assert 7777 not in pids
 
 
 # ---------------------------------------------------------------------------
-# _kill_pid — SIGTERM + SIGKILL fallback
+# _kill_pid — SIGTERM + SIGKILL fallback + KillStatus returns
 # ---------------------------------------------------------------------------
 
 
 class TestKillPid:
-    """Verify SIGTERM → SIGKILL flow."""
+    """Verify SIGTERM → SIGKILL flow and returned KillStatus values."""
 
     def test_sigterm_sent_and_waits(self):
         """Happy path: SIGTERM, process exits within timeout."""
@@ -262,6 +284,57 @@ class TestKillPid:
         # wait() returned 0 → no SIGKILL
         assert signal.SIGKILL not in kill_calls
 
+    def test_kill_pid_returns_killed_on_success(self):
+        """_kill_pid returns 'killed' when SIGTERM succeeds within timeout."""
+        from installer.flow.kill_stale import _kill_pid
+
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+
+        with patch("installer.flow.kill_stale.psutil.Process", return_value=mock_proc):
+            status = _kill_pid(12345)
+
+        assert status == "killed"
+
+    def test_kill_pid_returns_timeout_killed_on_sigkill_path(self):
+        """_kill_pid returns 'timeout_killed' when SIGTERM times out and SIGKILL sent."""
+        import psutil as _psutil
+        from installer.flow.kill_stale import _kill_pid
+
+        mock_proc = MagicMock()
+        mock_proc.wait.side_effect = _psutil.TimeoutExpired(12345, 5.0)
+
+        with patch("installer.flow.kill_stale.psutil.Process", return_value=mock_proc):
+            status = _kill_pid(12345)
+
+        assert status == "timeout_killed"
+
+    def test_kill_pid_returns_not_found_on_no_such_process(self):
+        """_kill_pid returns 'not_found' when process does not exist."""
+        import psutil as _psutil
+        from installer.flow.kill_stale import _kill_pid
+
+        with patch(
+            "installer.flow.kill_stale.psutil.Process",
+            side_effect=_psutil.NoSuchProcess(99999),
+        ):
+            status = _kill_pid(99999)
+
+        assert status == "not_found"
+
+    def test_kill_pid_returns_denied_on_access_denied(self):
+        """_kill_pid returns 'denied' when SIGTERM raises AccessDenied (covers I1)."""
+        import psutil as _psutil
+        from installer.flow.kill_stale import _kill_pid
+
+        mock_proc = MagicMock()
+        mock_proc.send_signal.side_effect = _psutil.AccessDenied(pid=55555)
+
+        with patch("installer.flow.kill_stale.psutil.Process", return_value=mock_proc):
+            status = _kill_pid(55555)
+
+        assert status == "denied"
+
 
 # ---------------------------------------------------------------------------
 # prompt_kill_stale_sessions — integration
@@ -291,14 +364,17 @@ class TestPromptKillStaleSessions:
         from installer.flow.kill_stale import prompt_kill_stale_sessions
 
         console = self._make_console()
-        pids = [3001, 3002]
+        detected = [(3001, "/usr/bin/claude"), (3002, "/usr/bin/claude --session")]
 
         with (
             patch(
-                "installer.flow.kill_stale.find_stale_claude_pids", return_value=pids
+                "installer.flow.kill_stale.find_stale_claude_pids",
+                return_value=detected,
             ),
             patch("installer.flow.kill_stale.ask_yn", return_value=True),
-            patch("installer.flow.kill_stale._kill_pid") as mock_kill,
+            patch(
+                "installer.flow.kill_stale._kill_pid", return_value="killed"
+            ) as mock_kill,
         ):
             prompt_kill_stale_sessions(console)
 
@@ -314,7 +390,8 @@ class TestPromptKillStaleSessions:
 
         with (
             patch(
-                "installer.flow.kill_stale.find_stale_claude_pids", return_value=[4001]
+                "installer.flow.kill_stale.find_stale_claude_pids",
+                return_value=[(4001, "/usr/bin/claude")],
             ),
             patch("installer.flow.kill_stale.ask_yn", return_value=False),
             patch("installer.flow.kill_stale._kill_pid") as mock_kill,
@@ -322,3 +399,91 @@ class TestPromptKillStaleSessions:
             prompt_kill_stale_sessions(console)
 
         mock_kill.assert_not_called()
+
+    def test_prompt_aggregates_status_counts(self):
+        """Outcome breakdown includes killed, timeout_killed, not_found, denied counts."""
+        from installer.flow.kill_stale import prompt_kill_stale_sessions
+
+        console = self._make_console()
+        detected = [
+            (5001, "/usr/bin/claude"),
+            (5002, "/usr/bin/claude"),
+            (5003, "/usr/bin/claude"),
+            (5004, "/usr/bin/claude"),
+        ]
+        # 1 killed, 1 timeout_killed, 1 not_found, 1 denied
+        statuses = ["killed", "timeout_killed", "not_found", "denied"]
+
+        printed_lines: list[str] = []
+
+        def _capture_print(msg: str = "", **kwargs: object) -> None:
+            printed_lines.append(str(msg))
+
+        console.print = _capture_print  # type: ignore[method-assign]
+
+        with (
+            patch(
+                "installer.flow.kill_stale.find_stale_claude_pids",
+                return_value=detected,
+            ),
+            patch("installer.flow.kill_stale.ask_yn", return_value=True),
+            patch(
+                "installer.flow.kill_stale._kill_pid",
+                side_effect=statuses,
+            ),
+        ):
+            prompt_kill_stale_sessions(console)
+
+        summary_line = next(
+            (
+                ln
+                for ln in printed_lines
+                if "Killed" in ln or "denied" in ln or "exited" in ln
+            ),
+            None,
+        )
+        assert summary_line is not None, f"No summary line found in: {printed_lines}"
+        # 2 killed (1 normal + 1 timeout_killed)
+        assert "Killed 2" in summary_line
+        # SIGKILL note
+        assert "SIGKILL" in summary_line
+        # already exited
+        assert "already exited" in summary_line
+        # denied with hint
+        assert "denied" in summary_line
+
+    def test_prompt_lists_pids_before_confirm(self):
+        """PID enumeration prints before the y/N prompt."""
+        from installer.flow.kill_stale import prompt_kill_stale_sessions
+
+        console = self._make_console()
+        detected = [(6001, "/usr/bin/claude --session"), (6002, "/usr/bin/claude")]
+
+        printed_before_ask: list[str] = []
+        ask_called_at: list[int] = []
+
+        def _capture_print(msg: str = "", **kwargs: object) -> None:
+            printed_before_ask.append(str(msg))
+
+        def _fake_ask_yn(prompt: str, **kwargs: object) -> bool:
+            ask_called_at.append(len(printed_before_ask))
+            return False  # decline → no kills needed
+
+        console.print = _capture_print  # type: ignore[method-assign]
+
+        with (
+            patch(
+                "installer.flow.kill_stale.find_stale_claude_pids",
+                return_value=detected,
+            ),
+            patch("installer.flow.kill_stale.ask_yn", side_effect=_fake_ask_yn),
+        ):
+            prompt_kill_stale_sessions(console)
+
+        # At least 2 lines printed before ask_yn (header + 2 pid lines)
+        assert ask_called_at[0] >= 3, (
+            f"Expected ≥3 lines before ask_yn, got {ask_called_at[0]}: {printed_before_ask}"
+        )
+        all_printed = "\n".join(printed_before_ask[: ask_called_at[0]])
+        assert "6001" in all_printed, "pid 6001 must appear before y/N prompt"
+        assert "6002" in all_printed, "pid 6002 must appear before y/N prompt"
