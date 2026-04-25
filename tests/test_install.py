@@ -367,7 +367,10 @@ class TestStartShSharedVenv:
             """)
         )
 
-        # Also patch out uv sync so it doesn't actually run
+        # Also patch out uv sync so it doesn't actually run.
+        # Patch target shortened in commit 1d706a3: start.sh refactor
+        # (commit 28b121d) removed the `test -f ... ||` guard, leaving a
+        # bare `uv sync ...` line.
         content = target_script.read_text()
         content = content.replace(
             'uv sync --frozen --directory "$DIR"',
