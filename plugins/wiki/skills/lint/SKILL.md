@@ -9,6 +9,10 @@ argument-hint: "[--tier=1|2|all]"
 
 Run Tier-1 lint + interactive fix flow.
 
+## Architecture (tier-1 vs tier-2)
+
+Tier-1 lint checks (orphans, broken-links, broken-section-refs, category-violations, stale, schema, duplicates) → Python-driven, registered as MCP tools (`wiki_lint_*`), tested. Tier-2 checks (contradictions, deprecation, missing-cross-refs, category-clusters, section-map-drift) → prose-only — each lives at `references/tier2-<check-name>.md` as an LLM subagent template. No Python helpers for tier-2; no dual-impl. See [[wiki-plugin]] for the architectural principle (decided 2026-04-25 per todo 737).
+
 ## Execution
 
 **1.** Call all 7 Tier-1 lint tools in parallel:
