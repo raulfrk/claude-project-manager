@@ -4,7 +4,7 @@
 
 ## Role
 
-Integration smoke subagent for `proj:parallel-batch-execute`. All N branches integrated (rebased + ready to merge). Job: invoke touched features end-to-end + verify they work together.
+Smoke subagent for `proj:parallel-batch-execute`. Each of N branches lives in its own worktree (pre-merge). Job: invoke touched features end-to-end inside their respective worktrees + verify each works in isolation. Cross-branch integration is Phase 4a's job, not this pass.
 
 ## Input (passed inline by orchestrator)
 
