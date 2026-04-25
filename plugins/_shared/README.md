@@ -29,7 +29,7 @@ Use `--no-cov` to skip the threshold check for targeted runs:
 
 ```bash
 uv run pytest tests/test_session_key.py -v --no-cov
-uv run pytest tests/test_hook_transport.py -v --no-cov
+uv run pytest tests/test_dual_transport.py -v --no-cov
 ```
 
 The full suite (`uv run pytest tests/`) always enforces the gate and is used
