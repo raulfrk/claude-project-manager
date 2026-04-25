@@ -178,6 +178,7 @@ Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-fa
 - Sibling pitfalls: [[worktree-rebase-artifact]], [[parallel-git-races]], [[stale-worktree-vs-advancing-dev]]
 - Reviewer prompts: `references/final-reviewer-prompt.md`, `references/smoke-prompt.md`
 - Q-routing rubric: `references/implementer-q-routing.md`
-- Superpowers skills wrapped: `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review`, `using-git-worktrees`, `finishing-a-development-branch`
-- Superpowers agent dispatched: `code-reviewer` (used by `requesting-code-review` for the per-impl + final review chains)
+- Superpowers skills invoked: `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review`, `finishing-a-development-branch`
+- Superpowers patterns followed (not invoked directly): `using-git-worktrees` (Phase 2 calls cpm `wt_create` MCP tool + post-wt-create-remote-sync per managed rule 13)
+- Superpowers agent dispatched: `code-reviewer` (used by `requesting-code-review` for per-impl + final review chains)
 - Managed CLAUDE.md rules invoked: 1 (parallel agents), 4 (batched Q&A), 6 (worktree isolation), 8 (destructive ops consent), 12 (revdiff review), 13 (post-wt-create-remote-sync), 20 (append-only log)
