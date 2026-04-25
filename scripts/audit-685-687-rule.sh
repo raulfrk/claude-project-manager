@@ -30,6 +30,10 @@ set -euo pipefail
 
 WORKTREES_ROOT="${1:-${WORKTREES_ROOT:-$HOME/worktrees}}"
 
+# Non-interactive git: never prompt for credentials or host-key confirmation.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=no"
+
 # Suppress zoxide config noise when sourced indirectly.
 export _ZO_DOCTOR=0
 ANOMALIES=0
@@ -73,9 +77,10 @@ audit_worktree() {
   merge_ref=$(git -C "$wt" config --get "branch.${branch}.merge" 2>/dev/null) || merge_ref=""
 
   if [ -z "$remote" ] || [ -z "$merge_ref" ]; then
-    # No upstream configured — try origin/<branch> as fallback.
-    remote="origin"
-    merge_ref="refs/heads/${branch}"
+    # No upstream configured — skip rather than synthesize origin/<branch>.
+    # Local-only / experimental branches have no rightful upstream to compare against.
+    echo "  SKIP $wt — no upstream configured for branch '$branch'"
+    return 0
   fi
 
   # Convert refs/heads/foo → foo.
@@ -99,12 +104,24 @@ audit_worktree() {
   behind_count=$(git -C "$wt" rev-list --count "HEAD..${upstream}" 2>/dev/null) || behind_count=0
 
   if [ "$behind_count" -gt 0 ]; then
-    echo "  FLAG $wt"
-    echo "       branch:   $branch"
-    echo "       upstream: $upstream"
-    echo "       behind:   ${behind_count} commit(s) on ${upstream} not in HEAD"
-    echo "       → possible rule-685/687 misparse (reset --hard may have been skipped)"
-    ANOMALIES=$((ANOMALIES + 1))
+    # Only FLAG worktrees created within the last 7 days.  Older worktrees are
+    # intentionally stale (user-pinned, long-lived experiments, etc.) — flagging
+    # them produces noise rather than signal.
+    local wt_mtime age_days
+    wt_mtime=$(stat -c '%Y' "$wt" 2>/dev/null) || wt_mtime=0
+    age_days=$(( ( $(date +%s) - wt_mtime ) / 86400 ))
+
+    if [ "$age_days" -gt 7 ]; then
+      echo "  STALE $wt  ($branch ← ${upstream}, ${behind_count} behind, ${age_days}d old — skipping, likely intentional)"
+    else
+      echo "  FLAG $wt"
+      echo "       branch:   $branch"
+      echo "       upstream: $upstream"
+      echo "       behind:   ${behind_count} commit(s) on ${upstream} not in HEAD"
+      echo "       age:      ${age_days} day(s)"
+      echo "       → possible rule-685/687 misparse (reset --hard may have been skipped)"
+      ANOMALIES=$((ANOMALIES + 1))
+    fi
   else
     echo "  OK   $wt  ($branch ← ${upstream})"
   fi
