@@ -193,7 +193,7 @@ def _install(args) -> int:
                         f"[yellow]Failed to create shared venv at {LOCAL_CLONE_DIR}: {exc}[/yellow]"
                     )
 
-    # 6. Summary
+    # 7. Summary
     n_installed = sum(1 for v in results.values() if v == "installed")
     n_failed = sum(1 for v in results.values() if v == "failed")
     n_skipped = sum(1 for v in results.values() if v == "skipped")
