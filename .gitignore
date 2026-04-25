@@ -18,3 +18,4 @@ build/
 .basedpyright/
 .uv-cache/
 snapshot_report.html
+tmp/735-investigation/
