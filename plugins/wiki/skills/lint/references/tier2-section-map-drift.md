@@ -14,7 +14,6 @@ Locate `/proj:save` SKILL.md. Check in order:
 
 1. `~/.claude/plugins/marketplaces/<marketplace-id>/cpm/proj/skills/save/SKILL.md` — installed cpm cache. Use glob `~/.claude/plugins/marketplaces/*/cpm/proj/skills/save/SKILL.md` (first match).
 2. Repo-local `plugins/proj/skills/save/SKILL.md` — present when running from cpm dev checkout. Detect via: `cwd` contains `claude-project-manager` OR `plugins/proj/` exists relative to cwd.
-3. Glob fallback: `~/.claude/plugins/marketplaces/*/cpm/proj/skills/save/SKILL.md` (already covered by #1; included as explicit fallback label for clarity).
 
 None resolve → emit single warning: `WARN: Could not locate /proj:save SKILL.md for drift check` + skip check entirely. Do NOT fail lint.
 
@@ -23,10 +22,10 @@ None resolve → emit single warning: `WARN: Could not locate /proj:save SKILL.m
 1. Load `wiki.yaml` via `Read` → parse `session_ingest.section_map` → extract keys list. Empty or missing → `section_map_keys = []`.
 2. Read located SKILL.md via `Read`.
 3. Extract H2 headings from session-file template block:
-   - Find anchor line matching `**7.**` (step 7 marker in save SKILL).
-   - From that point forward, scan until closing triple-backtick ` ``` ` ends the template block.
+   - Find `<!-- session-template-start -->` HTML comment marker in save SKILL.
+   - From that point forward, find opening triple-backtick ` ``` ` fence, then scan until closing ` ``` ` fence ends the template block.
    - Within that block, regex-extract all `^## (.+)$` lines → `template_h2s` list (whitespace-trimmed).
-   - If anchor not found or block not detected → `template_h2s = []`.
+   - If marker not found OR fence not found → emit single `template_unparseable` warning + skip drift comparison entirely (do NOT emit per-key warnings).
 4. Set diff:
    - `missing_from_template = section_map_keys - template_h2s` (key in config but no matching H2)
    - `missing_from_config = template_h2s - section_map_keys` (H2 in template but no config key)
@@ -58,9 +57,9 @@ PROTOCOL:
    Empty / missing key → section_map_keys = [].
 2. SAVE_SKILL_PATH empty → emit "WARN: Could not locate /proj:save SKILL.md for drift check"; return.
 3. Read {save_skill_path}.
-4. Find line matching "**7.**" → scan forward to first closing ``` fence.
+4. Find `<!-- session-template-start -->` marker → scan to opening ``` fence → scan to closing ``` fence.
    Within block: regex-extract ^## (.+)$ lines → template_h2s (stripped).
-   Block or anchor not found → template_h2s = [].
+   Marker or fence not found → emit {"kind": "template_unparseable", ...}; return.
 5. Compute:
    missing_from_template = [k for k in section_map_keys if k not in template_h2s]
    missing_from_config   = [h for h in template_h2s if h not in section_map_keys]

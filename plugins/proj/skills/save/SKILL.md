@@ -38,6 +38,7 @@ Save session ctx; reconcile git activity for active project.
 
 **7.** Write session file via Write tool to `<tracking_dir>/<name>/sessions/<filename>`:
 
+<!-- session-template-start -->
    ```
    # Session: <date>
 
@@ -56,6 +57,7 @@ Save session ctx; reconcile git activity for active project.
    ## Open Questions
    - <bullet>
    ```
+<!-- session-template-end -->
 
 **8.** Knowledge bridge — extract Key Decisions from step 7:
  - No decisions → skip silently.

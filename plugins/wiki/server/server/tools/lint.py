@@ -340,33 +340,38 @@ def wiki_lint_schema() -> str:
     return json.dumps({"violations": violations})
 
 
-_STEP7_ANCHOR_RE = re.compile(r"\*\*7\.\*\*")
+_TEMPLATE_START_RE = re.compile(r"<!--\s*session-template-start\s*-->")
+_TEMPLATE_END_RE = re.compile(r"<!--\s*session-template-end\s*-->")
 _TEMPLATE_H2_RE = re.compile(r"^## (.+)$")
 
 
-def _extract_save_skill_h2s(skill_text: str) -> list[str]:
+def _extract_save_skill_h2s(skill_text: str) -> list[str] | None:
     """Extract H2 headings from /proj:save SKILL.md step-7 session template.
 
-    Finds the **7.** anchor, then scans forward to the closing ``` fence of the
-    template block. Returns whitespace-trimmed heading names within that block.
+    Anchors on HTML comment markers <!-- session-template-start --> and
+    <!-- session-template-end --> wrapping the fenced template block.
     Lines inside the block may be indented (e.g. 3 spaces) — each line is stripped
     before matching so both indented + flush formats are supported.
-    Returns [] if anchor or closing fence not found.
+
+    Returns:
+        None  — anchor or fence not found (parse failure / malformed SKILL)
+        []    — anchor + fence found but template contains zero H2s (legit-empty)
+        [...]  — list of whitespace-trimmed H2 heading names
     """
-    match = _STEP7_ANCHOR_RE.search(skill_text)
-    if not match:
-        return []
-    after_anchor = skill_text[match.start() :]
-    # Find opening ``` (first one after anchor)
-    open_fence = after_anchor.find("```")
+    start_match = _TEMPLATE_START_RE.search(skill_text)
+    if not start_match:
+        return None
+    after_start = skill_text[start_match.end() :]
+    # Find opening ``` fence after the start marker
+    open_fence = after_start.find("```")
     if open_fence == -1:
-        return []
+        return None
     block_start = open_fence + 3
     # Find closing ``` after the opening fence
-    close_fence = after_anchor.find("```", block_start)
+    close_fence = after_start.find("```", block_start)
     if close_fence == -1:
-        return []
-    block = after_anchor[block_start:close_fence]
+        return None
+    block = after_start[block_start:close_fence]
     headings: list[str] = []
     for line in block.splitlines():
         m = _TEMPLATE_H2_RE.match(line.strip())
@@ -382,9 +387,11 @@ def check_section_map_drift(
     """Detect drift between wiki.yaml section_map keys and /proj:save template H2s.
 
     Returns list of warning dicts with keys: kind, value, message.
-    kind is "missing_from_template" or "missing_from_config".
+    kind is "missing_from_template", "missing_from_config", "skill_not_found",
+    or "template_unparseable".
 
     If skill_path is None or doesn't exist → returns single not-found warning.
+    If SKILL exists but anchor/fence not found → returns single template_unparseable warning.
     """
     if skill_path is None or not skill_path.exists():
         return [
@@ -397,6 +404,19 @@ def check_section_map_drift(
 
     skill_text = skill_path.read_text()
     template_h2s = _extract_save_skill_h2s(skill_text)
+
+    if template_h2s is None:
+        return [
+            {
+                "kind": "template_unparseable",
+                "value": str(skill_path),
+                "message": (
+                    "WARN: /proj:save SKILL.md found but session-template markers or fence not"
+                    " found — skipping drift check"
+                ),
+            }
+        ]
+
     section_map_keys = list(section_map.keys())
 
     warnings: list[dict[str, str]] = []
