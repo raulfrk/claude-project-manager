@@ -83,10 +83,7 @@ def _install(args) -> int:
         console.print("[dim]No plugins selected. Nothing to install.[/dim]")
         return EXIT_SUCCESS
 
-    # 2. Run the setup wizard
-    run_wizard(selected, skip=args.skip_wizard)
-
-    # 3. Ensure marketplace is registered (optionally from a local clone)
+    # 2. Ensure marketplace is registered (optionally from a local clone)
     try:
         source, branch = _resolve_marketplace_source(args)
     except InstallerError as exc:
@@ -120,7 +117,7 @@ def _install(args) -> int:
         else:
             console.print("[dim]Marketplace already registered.[/dim]")
 
-    # 4. Check already-installed plugins and build name→ID map
+    # 3. Check already-installed plugins and build name→ID map
     installed_ids = get_installed_plugins()
     available_ids = get_available_plugins()
     name_to_id: dict[str, str] = {}
@@ -128,7 +125,7 @@ def _install(args) -> int:
         name_to_id.setdefault(pid.split("@")[0], pid)
     installed_names = {pid.split("@")[0] for pid in installed_ids}
 
-    # 5. Install each plugin
+    # 4. Install each plugin
     results: dict[str, str] = {}  # name -> "installed" | "failed" | "skipped"
     for name in selected:
         plugin_id = name_to_id.get(name)
@@ -157,6 +154,10 @@ def _install(args) -> int:
                     continue
                 results[name] = "failed"
                 break
+
+    # 5. Run setup wizard now that plugins are installed and marketplace
+    # dir exists (so wizard can create the shared venv).
+    run_wizard(selected, skip=args.skip_wizard, args=args)
 
     # 6. Summary
     n_installed = sum(1 for v in results.values() if v == "installed")
