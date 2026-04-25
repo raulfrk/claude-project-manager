@@ -441,3 +441,128 @@ class TestWriteWikiIntegrationResult:
         data = yaml.safe_load((fake_home / ".claude" / "proj.yaml").read_text())
         assert data["sync"]["todoist"]["enabled"] is True
         assert data["sync"]["wiki"]["enabled"] is True
+
+
+class TestWriteWikiSeeding:
+    """Regression tests: installer seeds index.md + log.md (todo 723)."""
+
+    def _result(self, **kwargs: object) -> dict:
+        base: dict = {
+            "enabled": True,
+            "profile": "software",
+            "custom_categories": "",
+            "bootstrap_pending": True,  # user set True; should be overridden to False
+        }
+        base.update(kwargs)
+        return base
+
+    def test_seeds_index_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """index.md created after install + is non-empty."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        index_md = fake_home / ".claude" / "wiki" / "index.md"
+        assert index_md.exists(), "index.md must exist after install"
+        assert index_md.read_text().strip(), "index.md must be non-empty"
+
+    def test_seeds_log_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """log.md created after install + is non-empty."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        log_md = fake_home / ".claude" / "wiki" / "log.md"
+        assert log_md.exists(), "log.md must exist after install"
+        assert log_md.read_text().strip(), "log.md must be non-empty"
+
+    def test_log_md_has_init_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """log.md contains installer-seeded init entry in canonical format."""
+        import re
+
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        log_md = fake_home / ".claude" / "wiki" / "log.md"
+        content = log_md.read_text()
+        # Canonical format: ## [YYYY-MM-DD] action | title
+        assert re.search(r"## \[\d{4}-\d{2}-\d{2}\] init \| installer-seeded", content)
+
+    def test_all_four_files_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fresh install produces all 4 expected files: wiki.yaml, wiki/config.yaml, wiki/index.md, wiki/log.md."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        claude = fake_home / ".claude"
+        assert (claude / "wiki.yaml").exists(), "wiki.yaml missing"
+        assert (claude / "wiki" / "config.yaml").exists(), "wiki/config.yaml missing"
+        assert (claude / "wiki" / "index.md").exists(), "wiki/index.md missing"
+        assert (claude / "wiki" / "log.md").exists(), "wiki/log.md missing"
+
+    def test_bootstrap_pending_cleared_after_seed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """bootstrap_pending always False after seeding, even if user set True in form."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        # User selected bootstrap_pending=True in the wizard form
+        _write_wiki_integration_result(
+            self._result(bootstrap_pending=True), proj_selected=False
+        )
+
+        data = yaml.safe_load((fake_home / ".claude" / "wiki.yaml").read_text())
+        assert data["bootstrap_pending"] is False, (
+            "bootstrap_pending must be False after installer seeds wiki"
+        )
+
+    def test_does_not_overwrite_existing_index_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If index.md already exists (re-run wizard), it is not overwritten."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "wiki").mkdir(parents=True)
+        existing_content = "# Wiki Index\n\n## Concepts (1)\n- [[my-page]]\n"
+        (fake_home / ".claude" / "wiki" / "index.md").write_text(existing_content)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        content = (fake_home / ".claude" / "wiki" / "index.md").read_text()
+        assert content == existing_content, "existing index.md must not be overwritten"
+
+    def test_does_not_overwrite_existing_log_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If log.md already exists (re-run wizard), it is not overwritten."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        (fake_home / ".claude" / "wiki").mkdir(parents=True)
+        existing_content = "## [2025-01-01] init | installer-seeded\n\n"
+        (fake_home / ".claude" / "wiki" / "log.md").write_text(existing_content)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+        _write_wiki_integration_result(self._result(), proj_selected=False)
+
+        content = (fake_home / ".claude" / "wiki" / "log.md").read_text()
+        assert content == existing_content, "existing log.md must not be overwritten"

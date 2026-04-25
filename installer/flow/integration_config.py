@@ -503,11 +503,29 @@ def configure_wiki(
 
 
 def _write_wiki_integration_result(result: dict[str, Any], proj_selected: bool) -> None:
-    """Write wiki config to 3 files + create category subdirs per profile."""
+    """Write wiki config to 3 files + create category subdirs per profile.
+
+    Also seeds index.md + log.md so the wiki is immediately usable after
+    install — avoids the deadlock where /wiki:init refuses (wiki.yaml exists)
+    and /wiki:bootstrap refuses (empty index).
+    """
+    from datetime import date
+
     claude_home = Path.home() / ".claude"
     wiki_home = claude_home / "wiki"
     wiki_home.mkdir(parents=True, exist_ok=True)
     (wiki_home / "pages").mkdir(exist_ok=True)
+
+    # Seed index.md with empty index (mirrors wiki_index_rebuild on zero pages).
+    index_path = wiki_home / "index.md"
+    if not index_path.exists():
+        index_path.write_text("# Wiki Index\n")
+
+    # Seed log.md with installer-init entry (mirrors wiki_log_append format).
+    log_path = wiki_home / "log.md"
+    if not log_path.exists():
+        today = date.today().isoformat()
+        log_path.write_text(f"## [{today}] init | installer-seeded\n\n")
 
     # 1. ~/.claude/wiki.yaml — preserve non-wizard keys
     wiki_yaml_path = claude_home / "wiki.yaml"
@@ -515,7 +533,8 @@ def _write_wiki_integration_result(result: dict[str, Any], proj_selected: bool) 
     existing_wiki["enabled"] = bool(result["enabled"])
     existing_wiki["wiki_dir"] = str(wiki_home)
     existing_wiki.setdefault("reingest_cooldown_hours", 24)
-    existing_wiki["bootstrap_pending"] = bool(result.get("bootstrap_pending", False))
+    # Wiki is now seeded — bootstrap_pending cleared regardless of form value.
+    existing_wiki["bootstrap_pending"] = False
     existing_wiki.setdefault("session_ingest", {"section_map": {}})
     _atomic_write_yaml(wiki_yaml_path, existing_wiki)
 
