@@ -163,20 +163,19 @@ class StepMachine:
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-class Outcome:
-    """Tagged union — one of Submitted, BackRequested, Cancelled."""
-
 @dataclass(frozen=True)
-class Submitted(Outcome):
+class Submitted:
     value: Any
 
 @dataclass(frozen=True)
-class BackRequested(Outcome):
+class BackRequested:
     pass
 
 @dataclass(frozen=True)
-class Cancelled(Outcome):
+class Cancelled:
     pass
+
+Outcome = Submitted | BackRequested | Cancelled
 
 class Renderer(Protocol):
     def render(
@@ -200,7 +199,7 @@ class Renderer(Protocol):
 
 - `text` / `password` / `int`: use `prompt_toolkit.shortcuts.input_dialog`. Cancel button → check what user typed; if `:back` → `BackRequested`, else `Cancelled`. (Limitation: `input_dialog` only has OK/Cancel; sentinel is the back affordance.)
 - `bool`: replace `yes_no_dialog` w/ `button_dialog` having three buttons: `Yes`, `No`, `Back`. Back → `BackRequested`.
-- `select`: replace `radiolist_dialog` w/ same dialog + custom `ok_text="Next"` and an extra "Back" button via `button_dialog`-style wrapper, OR append `← Back` as a sentinel option in the radiolist (`("__BACK__", "← Back")`). Pick one — implementation chooses based on prompt_toolkit API stability across versions; spec defaults to **sentinel option** for simplicity + version safety.
+- `select`: append `← Back` as a sentinel option in the radiolist (`("__BACK__", "← Back")`). On submit, sentinel value `"__BACK__"` → `BackRequested`. The sentinel string `"__BACK__"` is reserved — `WizardStep.choices` MUST NOT contain it; renderer asserts this at construction. Chosen over `button_dialog` (3rd-button approach) for prompt_toolkit version safety + uniformity w/ the radiolist UX.
 - `at_start=True` → omit Back button / Back option.
 - Banner: prepend `f"[Error: {banner}]\n"` to dialog text (already done in current `_FormRunner`).
 
@@ -222,7 +221,9 @@ def build_todoist_steps(existing: dict) -> tuple[list[WizardStep], WizardBlock]:
 def build_trello_steps(existing: dict) -> tuple[list[WizardStep], WizardBlock]: ...
 def build_jira_steps(existing: dict) -> tuple[list[WizardStep], WizardBlock]: ...
 def build_confluence_steps(existing: dict) -> tuple[list[WizardStep], WizardBlock]: ...
-def build_wiki_steps(existing: dict, proj_selected: bool) -> tuple[list[WizardStep], WizardBlock | None]: ...
+def build_wiki_steps(existing: dict, proj_selected: bool) -> list[WizardStep]: ...
+    # Wiki has no credential validator — returns just steps, no WizardBlock.
+    # Other integration factories return (steps, block) because they have validators.
 
 # installer/wizard_engine/__init__.py
 def build_all_steps(
