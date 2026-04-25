@@ -1464,12 +1464,37 @@ def register(app: FastMCP) -> None:
         roots = [todo_map[t.id] for t in todos if not parent_id_from_tags(t.tags)]
         if not include_done:
             roots = [r for r in (_filter_tree_node(root) for root in roots) if r is not None]
-        # Detect orphaned todos: have a group tag pointing to a non-existent parent
+
+        # Load archived IDs for parent-existence check (when not include_done; otherwise
+        # archived already merged into todo_map above).
+        archived_id_set: set[str] = set()
+        if not include_done:
+            archived_id_set = {t.id for t in storage.load_archived_todos(cfg, name)}
+
+        # Children whose parent is archived render at top level (parent exists, just outside
+        # the active render window). Tag preserved for provenance.
+        archived_parent_children = [
+            todo_map[t.id]
+            for t in todos
+            if (pid := parent_id_from_tags(t.tags)) is not None
+            and pid not in todo_map
+            and pid in archived_id_set
+        ]
+        if not include_done:
+            archived_parent_children = [
+                c
+                for c in (_filter_tree_node(child) for child in archived_parent_children)
+                if c is not None
+            ]
+        roots.extend(archived_parent_children)
+
+        # Genuine orphans: parent doesn't exist in active OR archived sets.
         orphaned = [
             todo_map[t.id]
             for t in todos
-            if parent_id_from_tags(t.tags) is not None
-            and parent_id_from_tags(t.tags) not in todo_map
+            if (pid := parent_id_from_tags(t.tags)) is not None
+            and pid not in todo_map
+            and pid not in archived_id_set
         ]
         if not include_done:
             orphaned = [o for o in orphaned if _filter_tree_node(o) is not None]
