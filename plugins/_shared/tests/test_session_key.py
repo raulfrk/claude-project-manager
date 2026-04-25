@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
 import yaml
 
 from session_key import session_key as sk
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 class _FakeProc:
@@ -22,6 +21,14 @@ class _FakeProc:
 
     def cmdline(self) -> list[str]:
         return self._cmdline
+
+
+@pytest.fixture(autouse=True)
+def _isolate_marker_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Pin _MARKER_DIR to a tmp path so tests never see/leak real markers."""
+    marker_dir = tmp_path / "markers"
+    monkeypatch.setattr(sk, "_MARKER_DIR", marker_dir)
+    return marker_dir
 
 
 class TestGetClaudeSessionKey:
@@ -71,20 +78,160 @@ class TestGetClaudeSessionKey:
 
         assert sk.get_claude_session_key() == "5005"
 
-    def test_default_matcher_ignores_wrapper_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`uv run claude-server` must NOT match — only the actual `claude` binary."""
+    def test_default_matcher_matches_node_cli_invocation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`node /path/.../claude-code/cli.js` matches the broadened default regex."""
         monkeypatch.delenv("CPM_CLAUDE_CODE_CMDLINE_MATCHER", raising=False)
         monkeypatch.setattr(sk.os, "getpid", lambda: 1)
 
         chain = [
             _FakeProc(2002, ["uv", "run", "proj-server"]),
-            _FakeProc(4004, ["/bin/zsh"]),
+            _FakeProc(
+                3003,
+                ["node", "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"],
+            ),
         ]
         fake_self = MagicMock()
         fake_self.parents.return_value = chain
         monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
 
-        assert sk.get_claude_session_key() == "1"  # fallback to own pid
+        assert sk.get_claude_session_key() == "3003"
+
+    def test_marker_match_wins_over_regex(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        """If a marker file lists ancestor pid 5050, that's the key — even if
+        the regex would have matched a different ancestor. This is the
+        bulletproof path: PPID-of-the-hook tells us Claude's pid directly."""
+        _isolate_marker_dir.mkdir()
+        (_isolate_marker_dir / "5050.yaml").write_text(
+            yaml.safe_dump({"ns_inode": 0, "started": "x"})
+        )
+
+        # Regex would otherwise pick 3003 (a /usr/local/bin/claude).
+        chain = [
+            _FakeProc(2002, ["uv", "run", "proj-server"]),
+            _FakeProc(3003, ["/usr/local/bin/claude"]),
+            _FakeProc(5050, ["node", "/some/wrapper.js"]),
+        ]
+        fake_self = MagicMock()
+        fake_self.parents.return_value = chain
+        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
+
+        assert sk.get_claude_session_key() == "5050"
+
+    def test_marker_with_mismatched_ns_inode_is_skipped(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        """Marker from a different PID namespace (e.g., sibling bwrap container)
+        must NOT match this process's ancestors."""
+        _isolate_marker_dir.mkdir()
+        (_isolate_marker_dir / "5050.yaml").write_text(
+            yaml.safe_dump({"ns_inode": 9999999})  # foreign NS
+        )
+
+        chain = [
+            _FakeProc(2002, ["uv", "run", "proj-server"]),
+            _FakeProc(5050, ["claude"]),
+        ]
+        fake_self = MagicMock()
+        fake_self.parents.return_value = chain
+        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 1234)
+
+        # Falls back to regex, which matches 5050's "claude" cmdline.
+        assert sk.get_claude_session_key() == "5050"
+
+    def test_marker_with_zero_ns_inode_is_wildcard(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        """ns_inode=0 means writer couldn't read /proc/self/ns/pid (non-Linux,
+        readonly /proc) → treat as wildcard so the marker still works."""
+        _isolate_marker_dir.mkdir()
+        (_isolate_marker_dir / "5050.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
+
+        chain = [_FakeProc(5050, ["something-unrecognisable"])]
+        fake_self = MagicMock()
+        fake_self.parents.return_value = chain
+        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_self)
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 4242)
+
+        assert sk.get_claude_session_key() == "5050"
+
+
+class TestSessionMarker:
+    def test_write_creates_marker_file_with_ns_inode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 4026531836)
+        # GC pass would otherwise prune our synthetic pid immediately.
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
+        sk.write_session_marker(claude_pid=12345, cwd="/home/x/p")
+
+        marker = _isolate_marker_dir / "12345.yaml"
+        assert marker.exists()
+        data = yaml.safe_load(marker.read_text())
+        assert data["ns_inode"] == 4026531836
+        assert data["cwd"] == "/home/x/p"
+        assert "started" in data
+
+    def test_write_is_idempotent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 100)
+        # All pids exist so GC keeps both markers.
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
+        sk.write_session_marker(claude_pid=12345)
+        sk.write_session_marker(claude_pid=12345)
+        # Second write overwrites — only one file, no error.
+        markers = list(_isolate_marker_dir.iterdir())
+        assert len(markers) == 1
+
+    def test_remove_is_noop_if_missing(self, _isolate_marker_dir: Path) -> None:
+        # Should not raise.
+        sk.remove_session_marker(claude_pid=99999)
+
+    def test_remove_drops_existing_marker(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: True)
+        sk.write_session_marker(claude_pid=11111)
+        assert (_isolate_marker_dir / "11111.yaml").exists()
+
+        sk.remove_session_marker(claude_pid=11111)
+        assert not (_isolate_marker_dir / "11111.yaml").exists()
+
+    def test_gc_prunes_dead_pid_markers_on_write(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _isolate_marker_dir: Path,
+    ) -> None:
+        _isolate_marker_dir.mkdir()
+        # Pre-seed two markers — one alive, one dead.
+        (_isolate_marker_dir / "1111.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
+        (_isolate_marker_dir / "9999.yaml").write_text(yaml.safe_dump({"ns_inode": 0}))
+        monkeypatch.setattr(sk.psutil, "pid_exists", lambda pid: pid in (1111, 22222))
+        monkeypatch.setattr(sk, "_read_pid_ns_inode", lambda: 0)
+
+        sk.write_session_marker(claude_pid=22222)
+
+        remaining = {p.stem for p in _isolate_marker_dir.iterdir()}
+        assert remaining == {"1111", "22222"}  # 9999 GC'd
 
 
 def _write_yaml(path: Path, data: dict) -> None:
