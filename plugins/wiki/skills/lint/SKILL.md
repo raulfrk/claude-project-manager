@@ -42,12 +42,18 @@ Zero findings → print "Wiki clean. No lint issues." + stop.
 **4.** Tier-2 dispatch (`--tier=2` or `--tier=all`):
  - Read each `plugins/wiki/skills/lint/references/tier2-*.md` template via `Read`.
  - Substitute `{wiki_dir}` (read from `~/.claude/wiki.yaml::wiki_dir`) + `{current_categories}` (read from `~/.claude/wiki/config.yaml::categories`).
- - `TeamCreate` w/ 4 general-purpose agents:
+ - Resolve `/proj:save` SKILL.md path (for drift check):
+    1. Glob `~/.claude/plugins/marketplaces/*/cpm/proj/skills/save/SKILL.md` → first match.
+    2. Else `plugins/proj/skills/save/SKILL.md` (repo-local dev checkout).
+    3. Else empty string (drift check will warn + skip).
+ - Read `~/.claude/wiki.yaml` path (pass to drift agent as `{wiki_yaml_path}`).
+ - `TeamCreate` w/ 5 general-purpose agents:
     - Agent `contradictions`: prompt from `tier2-contradictions.md`
     - Agent `deprecation`: prompt from `tier2-deprecation.md`
     - Agent `cross-refs`: prompt from `tier2-missing-cross-refs.md`
     - Agent `clusters`: prompt from `tier2-category-clusters.md`
- - Wait for all 4. Collect JSON findings.
+    - Agent `drift`: prompt from `tier2-section-map-drift.md` w/ `{wiki_yaml_path}` + `{save_skill_path}` substituted
+ - Wait for all 5. Collect JSON findings.
 
 **5.** Aggregate Tier-1 + Tier-2 findings. Present combined summary:
 
@@ -64,6 +70,7 @@ Zero findings → print "Wiki clean. No lint issues." + stop.
 | 2 | Deprecation candidates | N |
 | 2 | Missing cross-refs | N |
 | 2 | Category clusters | N |
+| 2 | Section-map drift | N |
 
 **6.** Per finding (grouped by check type), present + prompt user via `AskUserQuestion`:
 - Question: `[<check>] <page-slug>: <detail>. Fix?`
@@ -83,6 +90,7 @@ Zero findings → print "Wiki clean. No lint issues." + stop.
 - **Deprecation candidate**: apply `recommended_action` from agent JSON: `delete` (via `wiki_page_delete`) OR `mark_deprecated` (set frontmatter `deprecated: true` + optionally `deprecated_in_favor_of: <slug>`) OR `merge_into:<target>` (copy body + links to target via `wiki_page_get` + `wiki_page_write(mode=update)` on target, then delete).
 - **Missing cross-ref**: insert `[[wikilink]]` into source page body via `wiki_page_get` + text edit + `wiki_page_write(mode=update)` + update frontmatter `links_to` list.
 - **Category cluster**: confirm cluster name + target pages. Update `~/.claude/wiki/config.yaml::categories` to add new category. Move each page via `wiki_page_delete` + `wiki_page_write(mode=create)` in new dir. Confirm full migration before any moves fire.
+- **Section-map drift**: inform user of specific missing keys/H2s. Offer "edit wiki.yaml" (open file for user to add missing section_map key) OR "skip". No auto-fix — user must decide category mapping for new/removed keys.
 
 **8.** After all findings processed: `wiki_log_append` w/ `action=lint`, `title="full" | "tier-2"`, `body="<N> fixed, <M> skipped"`.
 

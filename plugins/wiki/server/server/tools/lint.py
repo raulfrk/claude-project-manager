@@ -340,6 +340,89 @@ def wiki_lint_schema() -> str:
     return json.dumps({"violations": violations})
 
 
+_STEP7_ANCHOR_RE = re.compile(r"\*\*7\.\*\*")
+_TEMPLATE_H2_RE = re.compile(r"^## (.+)$")
+
+
+def _extract_save_skill_h2s(skill_text: str) -> list[str]:
+    """Extract H2 headings from /proj:save SKILL.md step-7 session template.
+
+    Finds the **7.** anchor, then scans forward to the closing ``` fence of the
+    template block. Returns whitespace-trimmed heading names within that block.
+    Lines inside the block may be indented (e.g. 3 spaces) — each line is stripped
+    before matching so both indented + flush formats are supported.
+    Returns [] if anchor or closing fence not found.
+    """
+    match = _STEP7_ANCHOR_RE.search(skill_text)
+    if not match:
+        return []
+    after_anchor = skill_text[match.start() :]
+    # Find opening ``` (first one after anchor)
+    open_fence = after_anchor.find("```")
+    if open_fence == -1:
+        return []
+    block_start = open_fence + 3
+    # Find closing ``` after the opening fence
+    close_fence = after_anchor.find("```", block_start)
+    if close_fence == -1:
+        return []
+    block = after_anchor[block_start:close_fence]
+    headings: list[str] = []
+    for line in block.splitlines():
+        m = _TEMPLATE_H2_RE.match(line.strip())
+        if m:
+            headings.append(m.group(1).strip())
+    return headings
+
+
+def check_section_map_drift(
+    skill_path: Path | None,
+    section_map: dict[str, str],
+) -> list[dict[str, str]]:
+    """Detect drift between wiki.yaml section_map keys and /proj:save template H2s.
+
+    Returns list of warning dicts with keys: kind, value, message.
+    kind is "missing_from_template" or "missing_from_config".
+
+    If skill_path is None or doesn't exist → returns single not-found warning.
+    """
+    if skill_path is None or not skill_path.exists():
+        return [
+            {
+                "kind": "skill_not_found",
+                "value": "",
+                "message": "WARN: Could not locate /proj:save SKILL.md for drift check",
+            }
+        ]
+
+    skill_text = skill_path.read_text()
+    template_h2s = _extract_save_skill_h2s(skill_text)
+    section_map_keys = list(section_map.keys())
+
+    warnings: list[dict[str, str]] = []
+    for key in section_map_keys:
+        if key not in template_h2s:
+            warnings.append(
+                {
+                    "kind": "missing_from_template",
+                    "value": key,
+                    "message": (
+                        f"WARN: section_map key '{key}' has no matching H2 in /proj:save template"
+                    ),
+                }
+            )
+    for h2 in template_h2s:
+        if h2 not in section_map_keys:
+            warnings.append(
+                {
+                    "kind": "missing_from_config",
+                    "value": h2,
+                    "message": f"WARN: /proj:save H2 '{h2}' has no section_map entry",
+                }
+            )
+    return warnings
+
+
 def wiki_lint_duplicates() -> str:
     """Pages whose filename stem (slug) collides (case-insensitive) across the wiki.
 
