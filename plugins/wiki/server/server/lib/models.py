@@ -8,6 +8,34 @@ from typing import Any, cast
 
 
 @dataclass
+class SessionIngestGate:
+    """Substance gate thresholds for wiki auto-ingest in /proj:save step 11.
+
+    Gate fails (ingest skipped) when ALL counts are below their respective
+    minimums simultaneously. Defaults preserve the 727 hardcoded behavior.
+    """
+
+    decisions_min: int = 1
+    insights_min: int = 1
+    word_count_min: int = 300
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SessionIngestGate:
+        return cls(
+            decisions_min=int(data.get("decisions_min", 1)),
+            insights_min=int(data.get("insights_min", 1)),
+            word_count_min=int(data.get("word_count_min", 300)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decisions_min": self.decisions_min,
+            "insights_min": self.insights_min,
+            "word_count_min": self.word_count_min,
+        }
+
+
+@dataclass
 class WikiConfig:
     """Runtime configuration from ~/.claude/wiki.yaml."""
 
@@ -16,6 +44,7 @@ class WikiConfig:
     reingest_cooldown_hours: int = 24
     bootstrap_pending: bool = False
     session_ingest_section_map: dict[str, str] = field(default_factory=dict)
+    session_ingest_gate: SessionIngestGate = field(default_factory=SessionIngestGate)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WikiConfig:
@@ -28,14 +57,18 @@ class WikiConfig:
         session_ingest = data.get("session_ingest", {}) or {}  # type: ignore[assignment]
         if isinstance(session_ingest, dict):
             section_map = cast("dict[str, str]", session_ingest.get("section_map", {}))  # type: ignore[arg-type]
+            gate_raw = cast("dict[str, Any]", session_ingest.get("gate", {}) or {})  # type: ignore[arg-type]
+            gate = SessionIngestGate.from_dict(gate_raw)
         else:
             section_map = {}
+            gate = SessionIngestGate()
         return cls(
             enabled=bool(data.get("enabled", False)),
             wiki_dir=wiki_dir,
             reingest_cooldown_hours=int(data.get("reingest_cooldown_hours", 24)),
             bootstrap_pending=bool(data.get("bootstrap_pending", False)),
             session_ingest_section_map=section_map,
+            session_ingest_gate=gate,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,7 +77,10 @@ class WikiConfig:
             "wiki_dir": str(self.wiki_dir),
             "reingest_cooldown_hours": self.reingest_cooldown_hours,
             "bootstrap_pending": self.bootstrap_pending,
-            "session_ingest": {"section_map": dict(self.session_ingest_section_map)},
+            "session_ingest": {
+                "section_map": dict(self.session_ingest_section_map),
+                "gate": self.session_ingest_gate.to_dict(),
+            },
         }
 
 

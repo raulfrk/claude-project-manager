@@ -84,11 +84,12 @@ Save session ctx; reconcile git activity for active project.
  - Both false → skip silently.
  - Both true → run substance gate before dispatch:
    - Read just-written session file (path from steps 5-7).
+   - Read `~/.claude/wiki.yaml::session_ingest.gate` (defaults: `decisions_min=1`, `insights_min=1`, `word_count_min=300`).
    - Count bullets under `## Key Decisions` (missing section = 0).
    - Count bullets under `## Insights Discovered` (missing section = 0).
    - Compute total word count of session file.
-   - **Gate fail when ALL true**: Decisions bullets == 0 AND Insights bullets == 0 AND word count < 300.
-   - Gate fail → log to console: `Wiki ingest skipped: trivial session (no decisions/insights, <300 words).` Skip subagent dispatch. Continue to step 12.
+   - **Gate fail when ALL true**: Decisions bullets < `decisions_min` AND Insights bullets < `insights_min` AND word count < `word_count_min`.
+   - Gate fail → log to console: `Wiki ingest skipped: trivial session (no decisions/insights, <{word_count_min} words).` Skip subagent dispatch. Continue to step 12.
    - Gate pass → spawn forked subagent via `Task`:
      - `subagent_type="general-purpose"`
      - `description="Wiki ingest session file"`

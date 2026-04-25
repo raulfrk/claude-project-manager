@@ -4,7 +4,40 @@ from pathlib import Path
 
 import pytest
 
-from server.lib.models import Page, Profile, WikiConfig
+from server.lib.models import Page, Profile, SessionIngestGate, WikiConfig
+
+
+class TestSessionIngestGate:
+    def test_defaults(self) -> None:
+        gate = SessionIngestGate()
+        assert gate.decisions_min == 1
+        assert gate.insights_min == 1
+        assert gate.word_count_min == 300
+
+    def test_from_dict_defaults(self) -> None:
+        gate = SessionIngestGate.from_dict({})
+        assert gate.decisions_min == 1
+        assert gate.insights_min == 1
+        assert gate.word_count_min == 300
+
+    def test_from_dict_custom(self) -> None:
+        gate = SessionIngestGate.from_dict(
+            {"decisions_min": 2, "insights_min": 3, "word_count_min": 500}
+        )
+        assert gate.decisions_min == 2
+        assert gate.insights_min == 3
+        assert gate.word_count_min == 500
+
+    def test_from_dict_partial_override(self) -> None:
+        gate = SessionIngestGate.from_dict({"decisions_min": 2})
+        assert gate.decisions_min == 2
+        assert gate.insights_min == 1  # default preserved
+        assert gate.word_count_min == 300  # default preserved
+
+    def test_to_dict_roundtrip(self) -> None:
+        gate = SessionIngestGate(decisions_min=2, insights_min=0, word_count_min=100)
+        restored = SessionIngestGate.from_dict(gate.to_dict())
+        assert restored == gate
 
 
 class TestWikiConfig:
@@ -39,6 +72,52 @@ class TestWikiConfig:
             reingest_cooldown_hours=12,
             bootstrap_pending=False,
             session_ingest_section_map={"X": "y"},
+        )
+        restored = WikiConfig.from_dict(cfg.to_dict())
+        assert restored == cfg
+
+    def test_from_dict_gate_defaults(self) -> None:
+        cfg = WikiConfig.from_dict({})
+        assert cfg.session_ingest_gate.decisions_min == 1
+        assert cfg.session_ingest_gate.insights_min == 1
+        assert cfg.session_ingest_gate.word_count_min == 300
+
+    def test_from_dict_gate_custom(self) -> None:
+        cfg = WikiConfig.from_dict(
+            {
+                "session_ingest": {
+                    "section_map": {},
+                    "gate": {"decisions_min": 2, "insights_min": 0, "word_count_min": 150},
+                }
+            }
+        )
+        assert cfg.session_ingest_gate.decisions_min == 2
+        assert cfg.session_ingest_gate.insights_min == 0
+        assert cfg.session_ingest_gate.word_count_min == 150
+
+    def test_to_dict_includes_gate(self) -> None:
+        cfg = WikiConfig(
+            session_ingest_gate=SessionIngestGate(
+                decisions_min=3, insights_min=2, word_count_min=400
+            )
+        )
+        d = cfg.to_dict()
+        assert d["session_ingest"]["gate"] == {
+            "decisions_min": 3,
+            "insights_min": 2,
+            "word_count_min": 400,
+        }
+
+    def test_to_dict_roundtrip_with_gate(self) -> None:
+        cfg = WikiConfig(
+            enabled=True,
+            wiki_dir=Path("/tmp/w"),
+            reingest_cooldown_hours=12,
+            bootstrap_pending=False,
+            session_ingest_section_map={"X": "y"},
+            session_ingest_gate=SessionIngestGate(
+                decisions_min=2, insights_min=1, word_count_min=500
+            ),
         )
         restored = WikiConfig.from_dict(cfg.to_dict())
         assert restored == cfg
