@@ -1,5 +1,9 @@
 # Wiki Plugin Phase 4c: Tier-2 Semantic Lint — Implementation Plan
 
+> **Historical record (deprecated TeamCreate-based orchestration)** —
+> superseded by bare parallel `Agent` calls. See current SKILL.md files
+> for the live design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development.
 
 **Goal:** Extend `/wiki:lint` with 4 Tier-2 semantic checks (LLM-driven subagents dispatched in parallel after Tier-1). Ship reference prompts so checks are reusable + auditable.

@@ -17,6 +17,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# State subdirectory under each project's tracking dir.
+# Renamed from ".team-state" once the deprecated team_mode infrastructure
+# was removed; the legacy dir is auto-migrated on first access.
+_STATE_DIR_NAME = ".proj-state"
+_LEGACY_STATE_DIR_NAME = ".team-state"
+
+
+def _resolve_state_dir(state_dir: Path) -> Path:
+    """Return ``<state_dir>/.proj-state``, migrating ``.team-state`` if needed.
+
+    Best-effort: if the legacy dir exists and the new one does not, rename it.
+    On rename failure (target collision, perms), log + continue with the new
+    path — callers create it on demand via ``mkdir(parents=True)``.
+    """
+    current = state_dir / _STATE_DIR_NAME
+    legacy = state_dir / _LEGACY_STATE_DIR_NAME
+    if legacy.is_dir() and not current.exists():
+        try:
+            legacy.rename(current)
+        except OSError as exc:
+            logger.warning(
+                "Could not migrate %s → %s: %s; continuing with new path",
+                legacy,
+                current,
+                exc,
+            )
+    return current
+
+
 @dataclass
 class CircuitBreaker:
     """State for a single service circuit breaker."""
@@ -66,7 +95,7 @@ class CircuitBreakerManager:
         failure_threshold: int = 3,
         recovery_timeout: int = 300,
     ) -> None:
-        self.state_file = state_dir / ".team-state" / "circuit-breakers.yaml"
+        self.state_file = _resolve_state_dir(state_dir) / "circuit-breakers.yaml"
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self._breakers: dict[str, CircuitBreaker] = {}
@@ -181,7 +210,7 @@ class CircuitBreakerManager:
 
 
 class OrphanLogger:
-    """Log orphaned external resources to .team-state/orphaned-resources.yaml.
+    """Log orphaned external resources to .proj-state/orphaned-resources.yaml.
 
     An orphan is an external resource (e.g. Todoist task, Trello card) that was
     created but could not be linked back to a local todo due to an error.
@@ -190,7 +219,7 @@ class OrphanLogger:
     MAX_ENTRIES = 500
 
     def __init__(self, state_dir: Path) -> None:
-        self.state_file = state_dir / ".team-state" / "orphaned-resources.yaml"
+        self.state_file = _resolve_state_dir(state_dir) / "orphaned-resources.yaml"
 
     def log_orphan(
         self,

@@ -325,7 +325,6 @@ Configuration file: `~/.claude/proj.yaml` (created by `/proj:init-plugin`).
 | `permissions.auto_allow_mcps` | `true` | Auto-add MCP wildcard rules |
 | `todoist.enabled` | `false` | Enable Todoist sync |
 | `todoist.auto_sync` | `true` | Auto-sync on status/load commands |
-| `team_mode.max_agents` | `30` | Hard ceiling on concurrent parallel agents. Recommended cap: **10** for CPU-bound or API-rate-limited workloads. |
 
 ---
 

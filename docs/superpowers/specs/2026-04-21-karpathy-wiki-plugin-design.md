@@ -1,5 +1,9 @@
 # Karpathy LLM Wiki Plugin — Design Spec
 
+> **Historical record (deprecated TeamCreate-based orchestration)** —
+> superseded by bare parallel `Agent` calls. See current SKILL.md files
+> for the live design.
+
 **Date**: 2026-04-21
 **Status**: Design approved; awaiting implementation plan
 **Todo**: [688](~/projects/tracking/claude-project-manager/todos.yaml) — "Investigate creating new plugin for cpm around Karpathy's LLM Wiki pattern"

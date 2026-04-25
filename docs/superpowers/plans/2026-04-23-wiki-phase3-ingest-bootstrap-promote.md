@@ -1,5 +1,9 @@
 # Wiki Plugin Phase 3: Ingest + Bootstrap + Promote — Implementation Plan
 
+> **Historical record (deprecated TeamCreate-based orchestration)** —
+> superseded by bare parallel `Agent` calls. See current SKILL.md files
+> for the live design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the 3 remaining standalone skills — `/wiki:ingest` (accepts 6 source types: URL, file, `session:`, `note:`, `search:`, `mcp:`, + free-form natural language), `/wiki:bootstrap` (bulk import), `/wiki:promote` (scope editing). At end of Phase 3, a user can install the wiki plugin, init it, populate it from any source (web, local files, MCP servers like confluence/jira/github), bootstrap from a directory of markdown, query + lint. Still no proj integration — that's Phase 4.

@@ -1,7 +1,7 @@
 ---
 name: lint
 description: Run Tier-1 + Tier-2 lint on wiki. Tier-1: orphans / broken links / section refs / category violations / stale / schema / duplicates. Tier-2: contradictions / deprecation / missing cross-refs / category clusters (LLM-driven). Interactive fix prompts per finding. Use `--tier=1|2|all`.
-allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion, Task, TeamCreate, Read, Bash, Glob
+allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion, Task, Agent, Read, Bash, Glob
 argument-hint: "[--tier=1|2|all]"
 ---
 
@@ -51,13 +51,13 @@ Zero findings → print "Wiki clean. No lint issues." + stop.
     2. Else `plugins/proj/skills/save/SKILL.md` (repo-local dev checkout).
     3. Else empty string (drift check will warn + skip).
  - Read `~/.claude/wiki.yaml` path (pass to drift agent as `{wiki_yaml_path}`).
- - `TeamCreate` w/ 5 general-purpose agents:
-    - Agent `contradictions`: prompt from `tier2-contradictions.md`
-    - Agent `deprecation`: prompt from `tier2-deprecation.md`
-    - Agent `cross-refs`: prompt from `tier2-missing-cross-refs.md`
-    - Agent `clusters`: prompt from `tier2-category-clusters.md`
-    - Agent `drift`: prompt from `tier2-section-map-drift.md` w/ `{wiki_yaml_path}` + `{save_skill_path}` substituted
- - Wait for all 5. Collect JSON findings.
+ - Dispatch 5 parallel `Agent` calls in a single message, each `subagent_type: general-purpose` w/ `run_in_background: true`:
+    - `contradictions`: prompt from `tier2-contradictions.md`
+    - `deprecation`: prompt from `tier2-deprecation.md`
+    - `cross-refs`: prompt from `tier2-missing-cross-refs.md`
+    - `clusters`: prompt from `tier2-category-clusters.md`
+    - `drift`: prompt from `tier2-section-map-drift.md` w/ `{wiki_yaml_path}` + `{save_skill_path}` substituted
+ - Wait for all 5 background agents to complete (each notifies on finish). Collect JSON findings.
 
 **5.** Aggregate Tier-1 + Tier-2 findings. Present combined summary:
 

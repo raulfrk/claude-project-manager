@@ -1,7 +1,7 @@
 ---
 name: bootstrap
-description: Bulk-import many sources into the wiki. Proj-aware — auto-enumerates proj sources (NOTES.md, sessions/*, todos/*) when proj is loaded; otherwise prompts for a directory or file list. Dispatches a team of ingest subagents in parallel, runs final cross-ref sweep. Use when user says "bootstrap wiki", "wiki:bootstrap", "import project docs into wiki".
-allowed-tools: mcp__plugin_wiki_wiki__wiki_scope_detect, mcp__plugin_wiki_wiki__wiki_index_read, mcp__plugin_wiki_wiki__wiki_index_rebuild, mcp__plugin_wiki_wiki__wiki_log_append, mcp__plugin_wiki_wiki__wiki_search_index_refresh, AskUserQuestion, Task, TeamCreate, Bash, Read
+description: Bulk-import many sources into the wiki. Proj-aware — auto-enumerates proj sources (NOTES.md, sessions/*, todos/*) when proj is loaded; otherwise prompts for a directory or file list. Dispatches parallel ingest subagents, runs final cross-ref sweep. Use when user says "bootstrap wiki", "wiki:bootstrap", "import project docs into wiki".
+allowed-tools: mcp__plugin_wiki_wiki__wiki_scope_detect, mcp__plugin_wiki_wiki__wiki_index_read, mcp__plugin_wiki_wiki__wiki_index_rebuild, mcp__plugin_wiki_wiki__wiki_log_append, mcp__plugin_wiki_wiki__wiki_search_index_refresh, AskUserQuestion, Task, Agent, Bash, Read
 argument-hint: "[<directory-or-file-list>]"
 ---
 
@@ -57,8 +57,7 @@ Bulk import. `$ARGUMENTS` = optional directory path or file-list file.
 
 **6.** `Read ../ingest/references/subagent-prompt.md` → the template.
 
-**7.** Dispatch subagent team via `TeamCreate` + per-agent `Task`:
-- One agent per source bucket from step 3/4.
+**7.** Dispatch parallel subagents — one `Agent` call per source bucket from step 3/4, all in a single message w/ `run_in_background: true` so they execute concurrently:
 - For each bucket, construct a per-agent prompt by taking the template from step 6 + substituting `{source}` → a BATCH-SOURCES list (one path per line), `{scope}` → scope from step 2, `{wiki_config}` → JSON from step 5. Prepend the batch-iteration prologue:
 
 ```
@@ -76,9 +75,10 @@ After all sources processed, return JSON: {
 }
 ```
 
-- `TeamCreate` size = number of source buckets (usually 2-4 agents for proj-aware, 1 for standalone).
+- Agent count = number of source buckets (usually 2-4 for proj-aware, 1 for standalone).
+- Use `subagent_type: general-purpose` for each call.
 
-**8.** Wait for team completion. Aggregate per-agent summaries.
+**8.** Wait for the background agents to complete (each notifies on finish). Aggregate per-agent JSON summaries.
 
 **9.** Final cross-ref sweep (post-team):
 - Parallel agents may have written pages with stale `links_to` (agent A didn't know agent B created `[[concept-X]]`).
@@ -126,6 +126,6 @@ Close with: "Log entry appended. Index + BM25 refreshed. Run `/wiki:lint` to che
 
 - Wiki disabled / missing → "Wiki not initialized. Run `/wiki:init` first." + stop.
 - Proj-aware mode but no active project → fall back to standalone mode w/ prompt.
-- Any subagent in the team fails → other agents continue; report failure per-source in the summary. Partial success is OK.
+- Any subagent fails → other agents continue (background dispatch isolates failures); report failure per-source in the summary. Partial success is OK.
 - Cross-ref sweeper fails → warn but don't roll back — per-page `links_to` may be incomplete; user can re-run `/wiki:lint` to find broken links.
 - Empty source list (standalone directory has no .md files) → stop: "No .md files found at `<path>`. Nothing to bootstrap."

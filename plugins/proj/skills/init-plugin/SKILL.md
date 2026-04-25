@@ -178,9 +178,6 @@ Skip sync sections for undetected plugins.
 ### Group E: Extras
 - **Zoxide** (if detected) — `"Enable zoxide integration (boost project dirs in frecency)? [<yes/no from proj_config.zoxide_integration, default no>]"`
 - **Worktree** (if detected) — shown as detected, no question (auto-enabled)
-- **Team mode** — `"Enable parallel agent execution for batch todos? [<yes/no from proj_config.team_mode.enabled, default no>]"`
- - Yes: `"Max agents? [<proj_config.team_mode.max_agents or 30>]"` — recommended cap: 10 for CPU/API-limited; hard default 30
- - Yes: `"Trust level? (0=supervised, 1=guided, 2=autonomous, 3=full-auto) [<proj_config.team_mode.trust_level or 1>]"`
 - **Default priority** — `"Default priority for new todos? (low/medium/high) [<proj_config.default_priority or 'medium'>]"`
  - Loaded val not low/medium/high → warn, use 'medium'
 - **Archive purge** — `"Days after archiving before purgeable projects are eligible for purge? Leave empty for never. [<proj_config.archive.purge_after_days or 'none'>]"`
@@ -210,7 +207,6 @@ Configuration summary:
   Extras:
     zoxide: yes
     worktree: yes
-    team_mode: no
     default_priority: medium
     archive_purge: never
 
@@ -227,7 +223,7 @@ Call `mcp__proj__config_init` w/ all collected vals:
 - Plugins: `sandbox_integration` (auto-set), `worktree_integration` (auto-set), `zoxide_integration`
 - Sync: `todoist_enabled`, `todoist_auto_sync`, `todoist_mcp_server`, `trello_enabled`, `trello_auto_sync`, `trello_default_board_id`, `trello_on_delete`, `trello_list_projects`, `trello_list_tasks`, `jira_enabled`, `jira_default_user`
 - Git: `git_integration`, `git_tracking_enabled`, `git_tracking_github_enabled`, `git_tracking_github_repo_format`
-- Extras: `team_mode_enabled`, `team_mode_max_agents`, `team_mode_trust_level`, `default_priority`, `archive_purge_after_days`
+- Extras: `default_priority`, `archive_purge_after_days`
 
 Omit `todoist_mcp_server` when `todoist_enabled: false`.
 

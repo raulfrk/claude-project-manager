@@ -207,7 +207,7 @@ class TestCircuitBreakerManager:
         assert mgr._breakers == {}
 
     def test_load_handles_corrupt_file(self, tmp_path: Path):
-        state_dir = tmp_path / ".team-state"
+        state_dir = tmp_path / ".proj-state"
         state_dir.mkdir(parents=True)
         state_file = state_dir / "circuit-breakers.yaml"
         state_file.write_text("not: valid: yaml: {{{")
@@ -215,7 +215,7 @@ class TestCircuitBreakerManager:
         assert mgr._breakers == {}
 
     def test_load_handles_non_dict_file(self, tmp_path: Path):
-        state_dir = tmp_path / ".team-state"
+        state_dir = tmp_path / ".proj-state"
         state_dir.mkdir(parents=True)
         state_file = state_dir / "circuit-breakers.yaml"
         state_file.write_text("- a list\n- not a dict\n")
@@ -241,23 +241,55 @@ class TestCircuitBreakerManager:
         assert mgr.check("todoist") is True
         assert mgr._breakers["todoist"].state == "HALF_OPEN"
 
-    def test_state_file_in_team_state_dir(self, tmp_path: Path):
-        """Verify the state file is written to .team-state/ subdirectory."""
+    def test_state_file_in_proj_state_dir(self, tmp_path: Path):
+        """Verify the state file is written to .proj-state/ subdirectory."""
         mgr = CircuitBreakerManager(tmp_path, failure_threshold=1)
         mgr.record_failure("todoist", "error")
 
-        state_file = tmp_path / ".team-state" / "circuit-breakers.yaml"
+        state_file = tmp_path / ".proj-state" / "circuit-breakers.yaml"
         assert state_file.exists()
         # Old location should NOT exist
         old_file = tmp_path / ".circuit-breakers.yaml"
         assert not old_file.exists()
+
+    def test_migrates_legacy_team_state_dir(self, tmp_path: Path):
+        """Legacy .team-state/ is auto-renamed to .proj-state/ on first init.
+
+        Regression: deprecated team_mode infra used .team-state/. The state dir
+        was renamed during the TeamCreate eradication; existing user dirs must
+        survive the rename without losing breaker state.
+        """
+        legacy = tmp_path / ".team-state"
+        legacy.mkdir()
+        (legacy / "circuit-breakers.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "breakers": {
+                        "todoist": {
+                            "service": "todoist",
+                            "state": "OPEN",
+                            "failure_count": 5,
+                        }
+                    }
+                }
+            )
+        )
+
+        mgr = CircuitBreakerManager(tmp_path)
+
+        new_dir = tmp_path / ".proj-state"
+        assert new_dir.is_dir()
+        assert not legacy.exists()
+        assert (new_dir / "circuit-breakers.yaml").exists()
+        assert mgr._breakers["todoist"].state == "OPEN"
+        assert mgr._breakers["todoist"].failure_count == 5
 
     def test_yaml_state_file_format(self, tmp_path: Path):
         """Verify the YAML file structure is correct."""
         mgr = CircuitBreakerManager(tmp_path, failure_threshold=1)
         mgr.record_failure("todoist", "connection timeout", status_code=503)
 
-        state_file = tmp_path / ".team-state" / "circuit-breakers.yaml"
+        state_file = tmp_path / ".proj-state" / "circuit-breakers.yaml"
         assert state_file.exists()
         data = yaml.safe_load(state_file.read_text())
         assert "breakers" in data
@@ -311,11 +343,11 @@ class TestOrphanLogger:
         assert entries[0]["external_id"] == "ext-1"
         assert entries[-1]["external_id"] == "ext-500"
 
-    def test_state_file_in_team_state_dir(self, tmp_path: Path):
+    def test_state_file_in_proj_state_dir(self, tmp_path: Path):
         logger = OrphanLogger(tmp_path)
         logger.log_orphan("todoist", "ext-1", "TODO-001", "err")
 
-        expected = tmp_path / ".team-state" / "orphaned-resources.yaml"
+        expected = tmp_path / ".proj-state" / "orphaned-resources.yaml"
         assert expected.exists()
         assert logger.state_file == expected
 
