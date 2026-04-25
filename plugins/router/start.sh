@@ -45,12 +45,39 @@ else
   fi
 fi
 
-# Use shared marketplace venv if available, otherwise fall back to per-plugin venv
-SHARED_VENV="$HOME/.claude/plugins/marketplaces/$MARKETPLACE_NAME/.venv"
-if [ -f "$SHARED_VENV/bin/python" ]; then
+# Locate shared venv via two-stage lookup
+SHARED_VENV=""
+WALK_UP_FOUND=""
+
+# Stage 1: walk up from $DIR looking for marketplace metadata
+walk_dir="$DIR"
+while [ "$walk_dir" != "/" ] && [ -n "$walk_dir" ]; do
+  if [ -f "$walk_dir/.claude-plugin/marketplace.json" ]; then
+    WALK_UP_FOUND="$walk_dir"
+    break
+  fi
+  walk_dir="$(dirname "$walk_dir")"
+done
+
+if [ -n "$WALK_UP_FOUND" ] && [ -f "$WALK_UP_FOUND/.venv/bin/python" ]; then
+  SHARED_VENV="$WALK_UP_FOUND/.venv"
+fi
+
+# Stage 2: basename-derived lookup (covers standard cache install)
+if [ -z "$SHARED_VENV" ]; then
+  BASENAME_CANDIDATE="$HOME/.claude/plugins/marketplaces/$MARKETPLACE_NAME/.venv"
+  if [ -f "$BASENAME_CANDIDATE/bin/python" ]; then
+    SHARED_VENV="$BASENAME_CANDIDATE"
+  fi
+fi
+
+if [ -n "$SHARED_VENV" ]; then
   export UV_PROJECT_ENVIRONMENT="$SHARED_VENV"
 else
-  echo "Shared venv not found, falling back to per-plugin venv" >&2
+  echo "[start.sh] shared venv not found, falling back to per-plugin venv:" >&2
+  echo "  walk-up from $DIR for .claude-plugin/marketplace.json: ${WALK_UP_FOUND:-<not found>}" >&2
+  echo "  basename lookup tried: $HOME/.claude/plugins/marketplaces/$MARKETPLACE_NAME/.venv" >&2
+  echo "  per-plugin venv: $DIR/.venv (will run 'uv sync --frozen')" >&2
   export UV_PROJECT_ENVIRONMENT="$DIR/.venv"
   uv sync --frozen --directory "$DIR"
 fi
