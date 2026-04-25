@@ -71,44 +71,6 @@ class TestRunGit:
         assert mock_run.call_args.kwargs["cwd"] == Path("/tmp/x")
 
 
-class TestIsValidClone:
-    def test_false_when_dir_missing(self, tmp_path):
-        from installer.local_marketplace import _is_valid_clone
-
-        assert _is_valid_clone(tmp_path / "missing") is False
-
-    def test_false_when_not_a_git_repo(self, tmp_path):
-        from installer.local_marketplace import _is_valid_clone
-
-        # A dir with contents but no .git
-        (tmp_path / "file.txt").write_text("hi")
-        assert _is_valid_clone(tmp_path) is False
-
-    @patch("installer.local_marketplace._run_git")
-    def test_false_when_origin_url_mismatches(self, mock_run_git, tmp_path):
-        from installer.local_marketplace import _is_valid_clone
-
-        (tmp_path / ".git").mkdir()
-        mock_run_git.return_value = MagicMock(stdout="git@github.com:other/repo.git\n")
-        assert _is_valid_clone(tmp_path) is False
-
-    @patch("installer.local_marketplace._run_git")
-    def test_true_when_origin_url_matches(self, mock_run_git, tmp_path):
-        from installer.local_marketplace import _HTTPS_SOURCE, _is_valid_clone
-
-        (tmp_path / ".git").mkdir()
-        mock_run_git.return_value = MagicMock(stdout=f"{_HTTPS_SOURCE}\n")
-        assert _is_valid_clone(tmp_path) is True
-
-    @patch("installer.local_marketplace._run_git")
-    def test_false_when_git_command_fails(self, mock_run_git, tmp_path):
-        from installer.local_marketplace import _is_valid_clone
-
-        (tmp_path / ".git").mkdir()
-        mock_run_git.side_effect = InstallerError("no origin")
-        assert _is_valid_clone(tmp_path) is False
-
-
 class TestDefaultBranch:
     @patch("installer.local_marketplace._run_git")
     def test_returns_branch_name_from_symref(self, mock_run_git, tmp_path):
@@ -146,11 +108,8 @@ class TestDefaultBranch:
 
 class TestEnsureLocalClone:
     @patch("installer.local_marketplace.shutil.which", return_value="/usr/bin/git")
-    @patch("installer.local_marketplace._is_valid_clone", return_value=False)
     @patch("installer.local_marketplace._run_git")
-    def test_clones_when_dir_missing(
-        self, mock_run_git, _is_valid, _which, tmp_path, monkeypatch
-    ):
+    def test_clones_when_dir_missing(self, mock_run_git, _which, tmp_path, monkeypatch):
         from installer.local_marketplace import _HTTPS_SOURCE, ensure_local_clone
 
         clone_dir = tmp_path / "mk"
@@ -165,37 +124,51 @@ class TestEnsureLocalClone:
         assert returned == clone_dir
 
     @patch("installer.local_marketplace.shutil.which", return_value="/usr/bin/git")
-    @patch("installer.local_marketplace._is_valid_clone", return_value=True)
     @patch("installer.local_marketplace._run_git")
-    def test_fetches_and_resets_when_clone_exists(
-        self, mock_run_git, _is_valid, _which, tmp_path, monkeypatch
+    def test_existing_dir_removed_then_recloned(
+        self, mock_run_git, _which, tmp_path, monkeypatch
     ):
+        """Pre-existing clone dir must be wiped before re-cloning so the
+        install always lands on a clean checkout. Verifies rmtree fires
+        AND the subsequent clone command is invoked."""
         from installer.local_marketplace import ensure_local_clone
 
         clone_dir = tmp_path / "mk"
         clone_dir.mkdir()
         (clone_dir / ".git").mkdir()
+        (clone_dir / "stale-file.txt").write_text("from prior run")
         monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", clone_dir)
-        mock_run_git.return_value = MagicMock(stdout="", stderr="")
+
+        observed: dict[str, bool | list] = {"dir_existed_at_clone": True}
+
+        def capture(args, *, cwd):
+            if args[0] == "clone":
+                # By the time `git clone` runs, the original dir must be gone
+                observed["dir_existed_at_clone"] = clone_dir.exists()
+            return MagicMock(stdout="", stderr="")
+
+        mock_run_git.side_effect = capture
         ensure_local_clone(branch="dev")
-        # Verify fetch, checkout, reset were called in order
+
+        assert observed["dir_existed_at_clone"] is False, (
+            "pre-existing clone dir was not removed before git clone"
+        )
+        # Verify the typical command sequence still ran
         calls = [c.args[0] for c in mock_run_git.call_args_list]
+        assert calls[0][0] == "clone"
         assert ["fetch", "origin"] in calls
         assert ["checkout", "dev"] in calls
         assert ["reset", "--hard", "origin/dev"] in calls
 
     @patch("installer.local_marketplace.shutil.which", return_value="/usr/bin/git")
-    @patch("installer.local_marketplace._is_valid_clone", return_value=True)
     @patch("installer.local_marketplace._default_branch", return_value="main")
     @patch("installer.local_marketplace._run_git")
     def test_uses_default_branch_when_branch_none(
-        self, mock_run_git, _default, _is_valid, _which, tmp_path, monkeypatch
+        self, mock_run_git, _default, _which, tmp_path, monkeypatch
     ):
         from installer.local_marketplace import ensure_local_clone
 
         clone_dir = tmp_path / "mk"
-        clone_dir.mkdir()
-        (clone_dir / ".git").mkdir()
         monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", clone_dir)
         mock_run_git.return_value = MagicMock(stdout="", stderr="")
         ensure_local_clone(branch=None)
@@ -213,20 +186,6 @@ class TestEnsureLocalClone:
         with pytest.raises(InstallerError) as exc_info:
             ensure_local_clone(branch=None)
         assert "git" in str(exc_info.value).lower()
-
-    @patch("installer.local_marketplace.shutil.which", return_value="/usr/bin/git")
-    def test_raises_when_existing_dir_is_not_valid_clone(
-        self, _which, tmp_path, monkeypatch
-    ):
-        from installer.local_marketplace import ensure_local_clone
-
-        clone_dir = tmp_path / "mk"
-        clone_dir.mkdir()
-        (clone_dir / "stray-file.txt").write_text("not a clone")
-        monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", clone_dir)
-        with pytest.raises(InstallerError) as exc_info:
-            ensure_local_clone(branch=None)
-        assert "not a valid clone" in str(exc_info.value).lower()
 
     @patch("installer.local_marketplace.shutil.which", return_value="/usr/bin/git")
     @patch("installer.local_marketplace._run_git")

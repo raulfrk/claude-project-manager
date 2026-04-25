@@ -52,22 +52,6 @@ def _run_git(args: list[str], *, cwd: Path | None) -> subprocess.CompletedProces
     return result
 
 
-def _is_valid_clone(path: Path) -> bool:
-    """Return True if *path* is an existing clone of ``_HTTPS_SOURCE``.
-
-    Checks:
-    - ``path`` exists and contains a ``.git`` entry
-    - ``git -C <path> remote get-url origin`` returns ``_HTTPS_SOURCE``
-    """
-    if not (path / ".git").exists():
-        return False
-    try:
-        result = _run_git(["remote", "get-url", "origin"], cwd=path)
-    except InstallerError:
-        return False
-    return result.stdout.strip() == _HTTPS_SOURCE
-
-
 def _default_branch(repo_dir: Path) -> str:
     """Return the repo's default branch by resolving ``origin/HEAD``.
 
@@ -86,17 +70,15 @@ def _default_branch(repo_dir: Path) -> str:
 
 
 def ensure_local_clone(branch: str | None = None) -> Path:
-    """Ensure a valid clone at ``LOCAL_CLONE_DIR`` on the given branch.
+    """Ensure a fresh clone at ``LOCAL_CLONE_DIR`` on the given branch.
 
     Behavior:
     - ``git`` missing on PATH → ``InstallerError``.
-    - Dir missing: parent created, then ``git clone _HTTPS_SOURCE LOCAL_CLONE_DIR``,
+    - Dir exists: removed via ``shutil.rmtree`` before re-cloning. Always
+      yields a clean checkout, no stale state from prior runs.
+    - Clone steps: parent created, then ``git clone _HTTPS_SOURCE LOCAL_CLONE_DIR``,
       followed by ``git fetch origin``, ``git checkout <branch>``, and
       ``git reset --hard origin/<branch>``.
-    - Dir exists and is a valid clone: ``git fetch origin``, ``git checkout <branch>``,
-      ``git reset --hard origin/<branch>``.
-    - Dir exists but is not a valid clone (stray files or wrong remote):
-      ``InstallerError`` with guidance to delete the path.
 
     When ``branch`` is ``None``, resolves the remote's default branch via
     ``_default_branch`` and uses that.
@@ -108,21 +90,11 @@ def ensure_local_clone(branch: str | None = None) -> Path:
 
     dest = LOCAL_CLONE_DIR
 
-    if not dest.exists():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        _run_git(["clone", _HTTPS_SOURCE, str(dest)], cwd=None)
-        target = branch or _default_branch(dest)
-        _run_git(["fetch", "origin"], cwd=dest)
-        _run_git(["checkout", target], cwd=dest)
-        _run_git(["reset", "--hard", f"origin/{target}"], cwd=dest)
-        return dest
+    if dest.exists():
+        shutil.rmtree(dest)
 
-    if not _is_valid_clone(dest):
-        raise InstallerError(
-            f"Cache dir at {dest} is not a valid clone of {_HTTPS_SOURCE}. "
-            f"Delete it and retry."
-        )
-
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run_git(["clone", _HTTPS_SOURCE, str(dest)], cwd=None)
     target = branch or _default_branch(dest)
     _run_git(["fetch", "origin"], cwd=dest)
     _run_git(["checkout", target], cwd=dest)
