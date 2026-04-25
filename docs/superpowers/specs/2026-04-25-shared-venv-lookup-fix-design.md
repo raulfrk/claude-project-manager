@@ -112,23 +112,21 @@ def ensure_shared_venv(marketplace_dir: Path) -> None:
 
 Implementation: thin `subprocess.run` wrapper mirroring `installer/plugin_cli._run`; timeout 300s; `stdin=DEVNULL`; raises `InstallerError` with stderr captured on non-zero exit.
 
-**Wrapper-based wiring** (avoids missed call sites): add `installer/shared_venv.py::add_marketplace_with_shared_venv(source, branch)` that calls `add_marketplace(source, branch)` then `ensure_shared_venv(<dir>)`. Replace all 6 existing `add_marketplace` call sites with the wrapper:
+**Placement: at the end of install** (after marketplace registration AND plugin install loop). The shared venv is a finalization step — by the time it runs, all plugin code is in cache and the marketplace dir's `pyproject.toml` is in place. Two complementary call sites:
 
-| File | Line(s) | Notes |
-|------|---------|-------|
-| `installer/main.py::_install` | 107, 118 | Standard + branch-update paths |
-| `installer/main.py::_reinstall` | 247 | Reinstall path |
-| `installer/flow/installer_flow.py` | 345, 355, 516 | Alternative flow entry points |
+1. **Wizard's last step** — both `installer/wizard.py::run_wizard` and `installer/flow/wizard.py::run_wizard` add a final step that calls `ensure_shared_venv`. This gives interactive users a visible "creating shared environment..." progress message. Wizard step also handles `--local-marketplace` (additional `ensure_shared_venv(LOCAL_CLONE_DIR)` call when args indicate local mode).
 
-**Marketplace dir resolution** (inside the wrapper):
-- Always: `~/.claude/plugins/marketplaces/<name>/` — `<name>` comes from `installer.plugin_cli.MARKETPLACE_NAME` (existing module-level constant, hardcoded to `claude-project-manager`). Avoids the wheel-bundled-vs-source-tree split that would force reading `installer/marketplace.json` w/ a fallback to `.claude-plugin/marketplace.json`.
-- If `source` is a filesystem path (`Path(source).exists()`) AND resolves to `LOCAL_CLONE_DIR`: also call `ensure_shared_venv(LOCAL_CLONE_DIR)` so walk-up from `start.sh` resolves at the local clone. Both calls are needed because Claude Code may reference either location depending on cache state; both are idempotent.
+2. **Main.py finalize for `--skip-wizard`** — `installer/main.py::_install` calls `ensure_shared_venv` directly at the end of the install loop for the case where wizard was skipped. Idempotent w/ wizard's call (uv reuses cache when both fire).
 
-`installer/update.py` is version-comparison utilities only — no `add_marketplace` calls. No changes needed there.
+**Required reorder:** `installer/main.py::_install` currently runs the wizard at line 87 — BEFORE `add_marketplace` (lines 107/118) — so the wizard cannot create the shared venv (marketplace dir not yet present). Move `run_wizard(...)` from line 87 to AFTER the plugin install loop (after line 159, before the summary at line 161). This matches the order already used by `_reinstall` (line 272) and `installer/flow/installer_flow._run_install` (line 370). Reorder also makes hook-diff prompting in the wizard meaningful since plugin cache dirs now exist.
 
-**Failure handling:** `ensure_shared_venv` raises on failure; call sites catch and log a yellow warning, then continue. Plugins fall back to per-plugin venv at runtime, exactly preserving today's behavior. Do **not** abort install on shared-venv failure — that would regress users in restricted-network environments who can still use per-plugin sync if their PyPI mirror works.
+**Wizard signature change:** `installer.wizard.run_wizard` currently takes `(selected_plugins: list[str], skip: bool = False)`. Add an optional `args: Any | None = None` parameter so the wizard can detect `--local-marketplace`. Backwards-compatible. `installer.flow.wizard.run_wizard` already accepts `args`.
 
-**Marketplace name resolution:** import `MARKETPLACE_NAME` from `installer.plugin_cli` (already used elsewhere as the source-of-truth constant). No extra plumbing, no file IO at install time.
+**Marketplace dir resolution:** `~/.claude/plugins/marketplaces/<name>/` — `<name>` comes from `installer.plugin_cli.MARKETPLACE_NAME` (existing constant, hardcoded to `claude-project-manager`). For `--local-marketplace`: additionally use `LOCAL_CLONE_DIR` from `installer.local_marketplace`.
+
+`installer/update.py` is version-comparison utilities only — no marketplace mutation. No changes needed there. The 6 `add_marketplace` call sites stay literal — wrapping them is no longer required because venv creation moved to the end-of-install finalize step.
+
+**Failure handling:** `ensure_shared_venv` raises on failure; both call sites (wizard step + main.py finalize) catch and log a yellow warning, then continue. Plugins fall back to per-plugin venv at runtime, exactly preserving today's behavior. Do **not** abort install on shared-venv failure — that would regress users in restricted-network environments who can still use per-plugin sync if their PyPI mirror works.
 
 ### Component 3 — `scripts/presync.sh` sweep
 

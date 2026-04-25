@@ -4,7 +4,7 @@
 
 **Goal:** Fix the broken shared-venv path so plugins use one venv at the marketplace root instead of always falling back to per-plugin `uv sync` (which requires open PyPI access).
 
-**Architecture:** Three coordinated changes — (1) `start.sh` does a 3-stage cascading lookup (walk-up → basename → per-plugin diagnostic), (2) installer creates the shared venv via a new `add_marketplace_with_shared_venv` wrapper around all 6 `add_marketplace` call sites, (3) `scripts/presync.sh` plugin list refreshed + shared-venv step appended.
+**Architecture:** Three coordinated changes — (1) `start.sh` does a 3-stage cascading lookup (walk-up → basename → per-plugin diagnostic), (2) installer creates the shared venv at end-of-install via a wizard finalize step (visible UX) plus a `--skip-wizard` fallback in `main.py`, (3) `scripts/presync.sh` plugin list refreshed + shared-venv step appended.
 
 **Tech Stack:** Bash (`start.sh`, `presync.sh`), Python 3.12+ + uv (installer), pytest (tests), subprocess (uv invocation).
 
@@ -20,12 +20,14 @@
 |------|--------|----------------|
 | `plugins/proj/start.sh` | Modify lines 48-56 | New 3-stage cascading shared-venv lookup |
 | `plugins/{worktree,trello,jira,router,todoist,confluence,wiki}/start.sh` | Replace (cp from proj) | Identical copies |
-| `installer/shared_venv.py` | Create | `ensure_shared_venv()` + `add_marketplace_with_shared_venv()` |
-| `installer/tests/test_shared_venv.py` | Create | Unit tests for both functions |
-| `installer/main.py` | Modify imports + 3 call sites | Use wrapper instead of raw `add_marketplace` |
-| `installer/flow/installer_flow.py` | Modify imports + 3 call sites | Use wrapper instead of raw `add_marketplace` |
-| `installer/tests/test_main.py` | Modify | Update existing mocks to point at wrapper |
-| `scripts/presync.sh` | Modify lines 19 + append | Refresh plugin list + add shared-venv step |
+| `installer/shared_venv.py` | Create | `ensure_shared_venv(marketplace_dir)` |
+| `installer/tests/test_shared_venv.py` | Create | Unit tests for ensure_shared_venv |
+| `installer/main.py` | Reorder + add finalize call | wizard runs after plugin install; `--skip-wizard` triggers explicit `ensure_shared_venv` |
+| `installer/wizard.py` | Add final wizard step | "Creating shared environment..." step calling `ensure_shared_venv` |
+| `installer/flow/wizard.py` | Add final wizard step | Same step in the alternative wizard impl |
+| `installer/tests/test_main.py` | Update | Reflect new wizard ordering in `_install` tests |
+| `installer/tests/test_wizard.py` (or nearest) | Add | Wizard's venv-step happy path + skip-when-marketplace-missing |
+| `scripts/presync.sh` | Modify line 19 + append | Refresh plugin list + add shared-venv step |
 | `tests/test_install.py` | Modify + extend | Update existing fallback test, add walk-up + diagnostic tests |
 
 ---
@@ -142,15 +144,13 @@ sed -n '226,400p' tests/test_install.py
 
 Expected: see `TestStartShSharedVenv` with `_make_start_sh`, `_setup_plugin_cache_layout`, `test_uses_shared_venv_when_present`, `test_falls_back_to_per_plugin_venv`.
 
-- [ ] **Step 2: Run existing tests against unmodified start.sh path**
-
-Wait — `start.sh` has already been modified in Task 1. Run existing tests against the new file:
+- [ ] **Step 2: Run existing tests against the modified start.sh**
 
 ```bash
-uv run --directory installer pytest /home/raul/worktrees/claude-project-manager/feat-shared-venv-lookup-fix/tests/test_install.py::TestStartShSharedVenv -v
+uv run pytest tests/test_install.py::TestStartShSharedVenv -v
 ```
 
-Expected: `test_uses_shared_venv_when_present` passes (Stage 2 basename lookup still hits the same path). `test_falls_back_to_per_plugin_venv` may need updating — its assertion `"falling back" in r.stderr.lower()` should still match since new text is `"falling back to per-plugin venv:"`. Note the test does a `content.replace` on a line that no longer exists in current start.sh (`test -f "$DIR/.venv/bin/python" || uv sync ...`); that replace is a no-op. The test should still work because it just checks the chosen `UV_PROJECT_ENVIRONMENT` ends in `<server_dir>/.venv` and the fallback message appears.
+Expected: `test_uses_shared_venv_when_present` passes (Stage 2 basename lookup still hits the same path). `test_falls_back_to_per_plugin_venv` should still pass — its assertion `"falling back" in r.stderr.lower()` matches the new text `"falling back to per-plugin venv:"`. The test's `content.replace` on `'test -f "$DIR/.venv/bin/python" || uv sync...'` is a no-op (line doesn't exist in current source); not a problem.
 
 - [ ] **Step 3: Add `test_walk_up_finds_local_marketplace_venv` to `TestStartShSharedVenv`**
 
@@ -220,7 +220,7 @@ Edit `tests/test_install.py`. Add this test method **inside class `TestStartShSh
 - [ ] **Step 4: Run new test**
 
 ```bash
-uv run --directory installer pytest /home/raul/worktrees/claude-project-manager/feat-shared-venv-lookup-fix/tests/test_install.py::TestStartShSharedVenv::test_walk_up_finds_local_marketplace_venv -v
+uv run pytest tests/test_install.py::TestStartShSharedVenv::test_walk_up_finds_local_marketplace_venv -v
 ```
 
 Expected: PASS.
@@ -281,7 +281,7 @@ Add this test method right after the previous one:
 - [ ] **Step 6: Run new test**
 
 ```bash
-uv run --directory installer pytest /home/raul/worktrees/claude-project-manager/feat-shared-venv-lookup-fix/tests/test_install.py::TestStartShSharedVenv::test_diagnostic_emits_three_paths_on_total_miss -v
+uv run pytest tests/test_install.py::TestStartShSharedVenv::test_diagnostic_emits_three_paths_on_total_miss -v
 ```
 
 Expected: PASS.
@@ -289,7 +289,7 @@ Expected: PASS.
 - [ ] **Step 7: Run full `TestStartSh*` class set to confirm no regressions**
 
 ```bash
-uv run --directory installer pytest /home/raul/worktrees/claude-project-manager/feat-shared-venv-lookup-fix/tests/test_install.py -k 'TestStartSh' -v
+uv run pytest tests/test_install.py -k 'TestStartSh' -v
 ```
 
 Expected: all green.
@@ -429,7 +429,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'installer.shared_venv
 - [ ] **Step 1: Create `installer/shared_venv.py`**
 
 ```python
-"""Shared marketplace venv creation + add_marketplace wrapper.
+"""Shared marketplace venv creation.
 
 Creates a single .venv at the marketplace root so all plugins share one
 Python environment. Replaces the per-plugin uv-sync fallback that fires
@@ -439,17 +439,15 @@ when no shared venv is found.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from installer.errors import InstallerError
-from installer.local_marketplace import LOCAL_CLONE_DIR
-from installer.plugin_cli import MARKETPLACE_NAME, add_marketplace
+from installer.plugin_cli import MARKETPLACE_NAME
 
 _UV_SYNC_TIMEOUT = 300  # seconds; uv sync can be slow on cold cache
 
 
-def _marketplaces_dir() -> Path:
+def marketplaces_dir() -> Path:
     """Standard install location for the marketplace symlink/clone."""
     return Path.home() / ".claude" / "plugins" / "marketplaces" / MARKETPLACE_NAME
 
@@ -486,42 +484,6 @@ def ensure_shared_venv(marketplace_dir: Path) -> None:
         raise InstallerError(
             f"uv sync failed (exit {result.returncode}) in {marketplace_dir}\n{detail}"
         )
-
-
-def add_marketplace_with_shared_venv(
-    source: str, branch: str | None = None
-) -> None:
-    """Register the marketplace and create the shared venv.
-
-    Calls add_marketplace(source, branch) first; if that fails, the error
-    propagates. Then creates the shared venv at the standard marketplaces
-    location (~/.claude/plugins/marketplaces/<name>/), and additionally at
-    LOCAL_CLONE_DIR if source points there. Failures of ensure_shared_venv
-    are caught and logged as warnings — install continues so that per-plugin
-    fallback in start.sh can still work.
-    """
-    add_marketplace(source=source, branch=branch)
-
-    venv_targets: list[Path] = [_marketplaces_dir()]
-    try:
-        source_path = Path(source)
-        if source_path.exists() and source_path.resolve() == LOCAL_CLONE_DIR.resolve():
-            venv_targets.append(LOCAL_CLONE_DIR)
-    except (OSError, ValueError):
-        pass  # source is a URL, not a path — ignore
-
-    for target in venv_targets:
-        try:
-            ensure_shared_venv(target)
-        except InstallerError as exc:
-            print(
-                f"[warn] failed to create shared venv at {target}: {exc}",
-                file=sys.stderr,
-            )
-            print(
-                "[warn] plugins will fall back to per-plugin uv sync at runtime",
-                file=sys.stderr,
-            )
 ```
 
 - [ ] **Step 2: Run Task 4 test — verify it passes**
@@ -532,7 +494,7 @@ uv run --directory installer pytest installer/tests/test_shared_venv.py::TestEns
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit (intermediate — module + happy-path test)**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add installer/shared_venv.py installer/tests/test_shared_venv.py
@@ -549,7 +511,7 @@ EOF
 
 ---
 
-### Task 6: Add failure-path test for `ensure_shared_venv`
+### Task 6: Add failure-path tests for `ensure_shared_venv`
 
 **Files:**
 - Modify: `installer/tests/test_shared_venv.py`
@@ -584,7 +546,7 @@ Append to the class:
 uv run --directory installer pytest installer/tests/test_shared_venv.py::TestEnsureSharedVenv -v
 ```
 
-Expected: all 3 pass (the impl from Task 5 already handles both error paths).
+Expected: all 3 pass (impl from Task 5 already handles both error paths).
 
 - [ ] **Step 3: Commit**
 
@@ -600,115 +562,333 @@ EOF
 
 ---
 
-### Task 7: Add tests for `add_marketplace_with_shared_venv` wrapper
+### Task 7: Reorder `installer/main.py::_install` — wizard runs after plugin install
+
+The current `_install` calls `run_wizard` at line 87, BEFORE `add_marketplace` (line 107/118) and BEFORE the install loop (line 132+). The wizard cannot create the shared venv at that point because the marketplace dir doesn't exist yet. Reorder so wizard runs at the end of install (matching `_reinstall` and `installer_flow._run_install`).
 
 **Files:**
-- Modify: `installer/tests/test_shared_venv.py`
+- Modify: `installer/main.py:87` (remove early call) + `installer/main.py:160` (add late call)
 
-- [ ] **Step 1: Add wrapper test class to `installer/tests/test_shared_venv.py`**
+- [ ] **Step 1: Read current `_install` to locate both insertion points**
 
-Append to the file:
+```bash
+sed -n '70,170p' installer/main.py
+```
+
+Expected: see `run_wizard(selected, skip=args.skip_wizard)` near line 87 and the plugin install loop ending around line 159.
+
+- [ ] **Step 2: Remove the early `run_wizard` call**
+
+Edit `installer/main.py`. Find:
 
 ```python
-class TestAddMarketplaceWithSharedVenv:
+    # 2. Run the setup wizard
+    run_wizard(selected, skip=args.skip_wizard)
+
+    # 3. Ensure marketplace is registered (optionally from a local clone)
+```
+
+Replace with:
+
+```python
+    # 2. Ensure marketplace is registered (optionally from a local clone)
+```
+
+(The numbering will shift; we'll patch other comments below.)
+
+- [ ] **Step 3: Renumber the comments in the rest of `_install`**
+
+Find each numbered step comment (e.g. `# 3. Ensure marketplace is registered`, `# 4. Check already-installed plugins`, `# 5. Install each plugin`, `# 6. Summary`) and decrement each number by 1 since the wizard step was removed from this position.
+
+- [ ] **Step 4: Add the late `run_wizard` call after the plugin install loop**
+
+Find the end of the plugin install loop (the line right before `# 6. Summary` — which after Step 3 should read `# 5. Summary`). Add immediately before it:
+
+```python
+    # Run the setup wizard now that plugins are installed and the
+    # marketplace dir exists (so the wizard can create the shared venv).
+    run_wizard(selected, skip=args.skip_wizard, args=args)
+```
+
+Note the new `args=args` kwarg — Task 8 adds this parameter to `run_wizard`.
+
+- [ ] **Step 5: Run install-flow tests**
+
+```bash
+uv run --directory installer pytest installer/tests/test_main.py -k '_install' -v
+```
+
+Expected: existing tests may need updating to reflect the new order. Where a test asserts `run_wizard` was called BEFORE `add_marketplace`, swap the assertion to AFTER `install_plugin`. Where a test asserts `run_wizard(selected, skip=...)`, update to `run_wizard(selected, skip=..., args=ANY)` (use `unittest.mock.ANY` if exact args don't matter for that test).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add installer/main.py installer/tests/test_main.py
+git commit -m "$(cat <<'EOF'
+refactor(installer/main): run wizard after plugin install in _install
+
+Matches order already used by _reinstall and installer_flow._run_install.
+Required for wizard to create the shared venv (marketplace dir must exist
+before uv sync can read its pyproject.toml). Pass args= so the wizard can
+detect --local-marketplace.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 8: Add shared-venv finalize step to `installer/wizard.py::run_wizard`
+
+**Files:**
+- Modify: `installer/wizard.py:590-631`
+- Create or extend: `installer/tests/test_wizard.py` (only if no existing test file covers `run_wizard`)
+
+- [ ] **Step 1: Check for existing wizard test file**
+
+```bash
+ls installer/tests/test_wizard*.py 2>/dev/null
+```
+
+Use existing file if found; otherwise create `installer/tests/test_wizard.py`.
+
+- [ ] **Step 2: Update `run_wizard` signature to accept optional `args`**
+
+Edit `installer/wizard.py`. Find:
+
+```python
+def run_wizard(selected_plugins: list[str], skip: bool = False) -> None:
+    """Run the post-install setup wizard.
+
+    Args:
+        selected_plugins: List of plugin names that were installed.
+        skip: If True, skip all prompts and use defaults / keep existing.
+    """
+```
+
+Replace with:
+
+```python
+def run_wizard(
+    selected_plugins: list[str],
+    skip: bool = False,
+    args: Any | None = None,
+) -> None:
+    """Run the post-install setup wizard.
+
+    Args:
+        selected_plugins: List of plugin names that were installed.
+        skip: If True, skip all prompts and use defaults / keep existing.
+        args: Parsed CLI args (for --local-marketplace detection during
+              the shared-venv creation step). May be None if invoked
+              outside the standard install flow.
+    """
+```
+
+- [ ] **Step 3: Add the shared-venv step at the end of `run_wizard` body**
+
+Find the line near the end:
+
+```python
+    ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+
+    console.print("\n[green]Setup wizard complete.[/green]")
+```
+
+Replace with:
+
+```python
+    ensure_managed_section(Path.home() / ".claude" / "CLAUDE.md")
+
+    _create_shared_venv_step(args, console)
+
+    console.print("\n[green]Setup wizard complete.[/green]")
+```
+
+- [ ] **Step 4: Add the `_create_shared_venv_step` helper above `run_wizard`**
+
+Insert this function right above `run_wizard` (after `_setup_jira_config`):
+
+```python
+def _create_shared_venv_step(args: Any | None, console: Console) -> None:
+    """Create the shared marketplace venv as the final wizard step.
+
+    Failures are logged as warnings but do not abort install — plugins
+    fall back to per-plugin uv sync at runtime via start.sh.
+    """
+    from installer.errors import InstallerError
+    from installer.shared_venv import ensure_shared_venv, marketplaces_dir
+
+    targets: list[Path] = [marketplaces_dir()]
+
+    # Also create at LOCAL_CLONE_DIR if --local-marketplace was used.
+    if args is not None and getattr(args, "local_marketplace", False):
+        from installer.local_marketplace import LOCAL_CLONE_DIR
+        targets.append(LOCAL_CLONE_DIR)
+
+    for target in targets:
+        if not target.is_dir():
+            console.print(
+                f"[yellow]Skipping shared venv at {target} (dir does not exist).[/yellow]"
+            )
+            continue
+        with console.status(
+            f"[bold]Creating shared environment at {target}...[/bold]"
+        ):
+            try:
+                ensure_shared_venv(target)
+            except InstallerError as exc:
+                console.print(
+                    f"[yellow]Failed to create shared venv at {target}: {exc}[/yellow]"
+                )
+                console.print(
+                    "[yellow]Plugins will fall back to per-plugin uv sync at runtime.[/yellow]"
+                )
+                continue
+        console.print(f"  [green]✓[/green] Shared venv ready at {target}")
+```
+
+- [ ] **Step 5: Add tests for the new wizard step**
+
+In `installer/tests/test_wizard.py` (create if missing), add:
+
+```python
+"""Tests for installer.wizard.run_wizard's shared-venv step."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from installer.errors import InstallerError
+
+
+class TestSharedVenvWizardStep:
+    @patch("installer.wizard.ensure_managed_section")
     @patch("installer.shared_venv.ensure_shared_venv")
-    @patch("installer.shared_venv.add_marketplace")
-    def test_calls_add_marketplace_then_ensure_at_marketplaces_dir(
-        self, mock_add, mock_ensure
+    @patch("installer.wizard._hooks_diff_prompt")
+    def test_creates_venv_at_marketplaces_dir(
+        self, _hd, mock_ensure, _mgr, tmp_path, monkeypatch
     ):
-        from installer.shared_venv import (
-            _marketplaces_dir,
-            add_marketplace_with_shared_venv,
+        from installer.shared_venv import marketplaces_dir
+        from installer.wizard import run_wizard
+
+        # Make marketplaces_dir() return a real existing path
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr(
+            "installer.shared_venv.marketplaces_dir", lambda: target
         )
 
-        add_marketplace_with_shared_venv(source="raulfrk/cpm", branch="dev")
+        run_wizard(selected_plugins=[], skip=True)
 
-        mock_add.assert_called_once_with(source="raulfrk/cpm", branch="dev")
-        mock_ensure.assert_called_once_with(_marketplaces_dir())
+        # skip=True returns early — no venv step. This documents that
+        # behavior; remove this assertion if you want venv to fire even on skip.
+        mock_ensure.assert_not_called()
 
+    @patch("installer.wizard.ensure_managed_section")
     @patch("installer.shared_venv.ensure_shared_venv")
-    @patch("installer.shared_venv.add_marketplace")
-    def test_local_clone_source_also_creates_venv_at_local_clone(
-        self, mock_add, mock_ensure, tmp_path, monkeypatch
+    @patch("installer.wizard._hooks_diff_prompt")
+    @patch("installer.wizard._setup_proj_yaml", return_value={})
+    def test_runs_full_flow_creates_venv(
+        self, _proj, _hd, mock_ensure, _mgr, tmp_path, monkeypatch
     ):
-        from installer.shared_venv import (
-            _marketplaces_dir,
-            add_marketplace_with_shared_venv,
+        from installer.wizard import run_wizard
+
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr(
+            "installer.shared_venv.marketplaces_dir", lambda: target
         )
 
-        # Patch LOCAL_CLONE_DIR to a tmp path that exists
+        # Run the wizard non-skip; the proj setup is mocked out so
+        # interactive prompts don't fire.
+        run_wizard(selected_plugins=["proj"], skip=False, args=None)
+
+        mock_ensure.assert_called_once_with(target)
+
+    @patch("installer.wizard.ensure_managed_section")
+    @patch("installer.shared_venv.ensure_shared_venv")
+    @patch("installer.wizard._hooks_diff_prompt")
+    @patch("installer.wizard._setup_proj_yaml", return_value={})
+    def test_local_marketplace_also_creates_at_local_clone(
+        self, _proj, _hd, mock_ensure, _mgr, tmp_path, monkeypatch
+    ):
+        from installer.wizard import run_wizard
+
+        target = tmp_path / "mp"
+        target.mkdir()
         local_clone = tmp_path / "local-marketplace"
         local_clone.mkdir()
+
         monkeypatch.setattr(
-            "installer.shared_venv.LOCAL_CLONE_DIR", local_clone
+            "installer.shared_venv.marketplaces_dir", lambda: target
+        )
+        monkeypatch.setattr(
+            "installer.local_marketplace.LOCAL_CLONE_DIR", local_clone
         )
 
-        add_marketplace_with_shared_venv(source=str(local_clone), branch=None)
+        args = SimpleNamespace(local_marketplace=True)
+        run_wizard(selected_plugins=["proj"], skip=False, args=args)
 
-        mock_add.assert_called_once_with(source=str(local_clone), branch=None)
-        # Both targets should be ensured
-        ensure_calls = {c.args[0] for c in mock_ensure.call_args_list}
-        assert _marketplaces_dir() in ensure_calls
-        assert local_clone in ensure_calls
+        called_with = {c.args[0] for c in mock_ensure.call_args_list}
+        assert target in called_with
+        assert local_clone in called_with
 
+    @patch("installer.wizard.ensure_managed_section")
     @patch("installer.shared_venv.ensure_shared_venv")
-    @patch("installer.shared_venv.add_marketplace")
-    def test_url_source_does_not_create_at_local_clone(self, mock_add, mock_ensure):
-        from installer.shared_venv import (
-            _marketplaces_dir,
-            add_marketplace_with_shared_venv,
-        )
-
-        add_marketplace_with_shared_venv(source="raulfrk/cpm", branch=None)
-
-        ensure_calls = [c.args[0] for c in mock_ensure.call_args_list]
-        assert ensure_calls == [_marketplaces_dir()]
-
-    @patch("installer.shared_venv.ensure_shared_venv")
-    @patch("installer.shared_venv.add_marketplace")
-    def test_ensure_failure_warns_but_does_not_raise(
-        self, mock_add, mock_ensure, capsys
+    @patch("installer.wizard._hooks_diff_prompt")
+    @patch("installer.wizard._setup_proj_yaml", return_value={})
+    def test_failure_is_warning_not_raise(
+        self, _proj, _hd, mock_ensure, _mgr, tmp_path, monkeypatch, capsys
     ):
-        from installer.shared_venv import add_marketplace_with_shared_venv
+        from installer.wizard import run_wizard
 
-        mock_ensure.side_effect = InstallerError("boom")
-        # Should not raise
-        add_marketplace_with_shared_venv(source="raulfrk/cpm", branch=None)
-        captured = capsys.readouterr()
-        assert "[warn]" in captured.err
-        assert "boom" in captured.err
-        assert "fall back" in captured.err
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr(
+            "installer.shared_venv.marketplaces_dir", lambda: target
+        )
+        mock_ensure.side_effect = InstallerError("uv sync exploded")
 
-    @patch("installer.shared_venv.ensure_shared_venv")
-    @patch("installer.shared_venv.add_marketplace")
-    def test_add_marketplace_failure_propagates(self, mock_add, mock_ensure):
-        from installer.shared_venv import add_marketplace_with_shared_venv
-
-        mock_add.side_effect = InstallerError("network down")
-        with pytest.raises(InstallerError, match="network down"):
-            add_marketplace_with_shared_venv(source="raulfrk/cpm", branch=None)
-        # ensure_shared_venv should not have been called
-        mock_ensure.assert_not_called()
+        # Should NOT raise
+        run_wizard(selected_plugins=["proj"], skip=False, args=None)
 ```
 
-- [ ] **Step 2: Run the wrapper test class**
+- [ ] **Step 6: Run the new tests**
 
 ```bash
-uv run --directory installer pytest installer/tests/test_shared_venv.py::TestAddMarketplaceWithSharedVenv -v
+uv run --directory installer pytest installer/tests/test_wizard.py::TestSharedVenvWizardStep -v
 ```
 
-Expected: all 5 pass (the impl from Task 5 already covers all behaviors).
+Expected: all 4 pass.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 7: Run full installer test suite**
 
 ```bash
-git add installer/tests/test_shared_venv.py
+uv run --directory installer pytest installer/tests/ -v
+```
+
+Expected: green. If any pre-existing test fails because it now sees the shared-venv step run, mock `installer.shared_venv.ensure_shared_venv` in that test or rely on the marketplaces_dir not existing in the test's tmp environment.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add installer/wizard.py installer/tests/test_wizard.py
 git commit -m "$(cat <<'EOF'
-test(shared_venv): cover add_marketplace_with_shared_venv wrapper
+feat(installer/wizard): add shared-venv finalize step
 
-Five tests: marketplaces-dir target, additional local-clone target when
-source is LOCAL_CLONE_DIR, URL source skips local-clone, ensure failure
-warns + continues, add_marketplace failure propagates.
+Wizard's last step now creates the shared marketplace venv via
+ensure_shared_venv. Visible Rich progress message ("Creating shared
+environment..."). Also handles --local-marketplace by creating an
+additional venv at LOCAL_CLONE_DIR.
+
+Failures are warnings only — plugins fall back to per-plugin uv sync
+at runtime via start.sh.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -717,95 +897,163 @@ EOF
 
 ---
 
-### Task 8: Wire wrapper into `installer/main.py`
+### Task 9: Add the same shared-venv step to `installer/flow/wizard.py::run_wizard`
 
 **Files:**
-- Modify: `installer/main.py:32` (import) + lines 107, 118, 247 (call sites)
-- Modify: `installer/tests/test_main.py` (existing mocks)
+- Modify: `installer/flow/wizard.py:44+`
 
-- [ ] **Step 1: Read current import block to find `add_marketplace`**
+- [ ] **Step 1: Read the file**
 
 ```bash
-sed -n '25,45p' installer/main.py
+cat installer/flow/wizard.py
 ```
 
-Expected: see `from installer.plugin_cli import (add_marketplace, ...)`.
+Expected: `run_wizard(state, args, console)` is the public entry. Find its body and the natural insertion point at the end.
 
-- [ ] **Step 2: Replace the `add_marketplace` import with the wrapper, aliased to keep call sites unchanged**
+- [ ] **Step 2: Add the shared-venv step at the end of the function body**
 
-Edit `installer/main.py`. Find the line:
+Reuse the `_create_shared_venv_step` helper from `installer/wizard.py`. Edit `installer/flow/wizard.py`. At the top of the file, add:
 
 ```python
-    add_marketplace,
+from installer.wizard import _create_shared_venv_step
 ```
 
-inside the `from installer.plugin_cli import (...)` block. Remove it from that block. Then add this new import directly below the `from installer.plugin_cli import (...)` block:
+At the end of `run_wizard` (just before its return statement), add:
 
 ```python
-from installer.shared_venv import add_marketplace_with_shared_venv as add_marketplace
+    _create_shared_venv_step(args, console)
 ```
 
-(The alias keeps `_install` and `_reinstall` calling `add_marketplace(source=, branch=)` literally — no per-call-site edits needed.)
-
-- [ ] **Step 3: Run existing test_main.py tests**
-
-```bash
-uv run --directory installer pytest installer/tests/test_main.py -v
-```
-
-Expected: tests that mock `installer.main.add_marketplace` should still pass — the mock now intercepts the wrapper instead of the underlying CLI call. Internal `ensure_shared_venv` is bypassed because the wrapper itself is mocked. If any test fails because it asserts internal behavior, update it to mock at the deeper level (`installer.shared_venv.add_marketplace` for the underlying CLI, or `installer.shared_venv.ensure_shared_venv` for the venv step).
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add installer/main.py
-git commit -m "$(cat <<'EOF'
-feat(installer/main): route add_marketplace through shared-venv wrapper
-
-Aliasing keeps _install/_reinstall call sites unchanged while the wrapper
-runs ensure_shared_venv post-registration. Mocks at installer.main.add_marketplace
-continue to work — they now intercept the wrapper.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-### Task 9: Wire wrapper into `installer/flow/installer_flow.py`
-
-**Files:**
-- Modify: `installer/flow/installer_flow.py:46` (import) — call sites at lines 345, 355, 516 stay literal
-
-- [ ] **Step 1: Read import block**
-
-```bash
-sed -n '40,55p' installer/flow/installer_flow.py
-```
-
-Expected: `from installer.plugin_cli import (..., add_marketplace, ...)`.
-
-- [ ] **Step 2: Apply the same alias swap**
-
-Edit `installer/flow/installer_flow.py`. Remove `add_marketplace` from the `from installer.plugin_cli import (...)` block. Add new import directly below it:
-
-```python
-from installer.shared_venv import add_marketplace_with_shared_venv as add_marketplace
-```
-
-- [ ] **Step 3: Run flow tests**
+- [ ] **Step 3: Run the flow wizard tests (if any)**
 
 ```bash
 uv run --directory installer pytest installer/tests/flow/ -v
 ```
 
-Expected: green. If anything fails on assertions about `add_marketplace`, same fix as Task 8 Step 3 — mocks may need to point at `installer.flow.installer_flow.add_marketplace` (which now refers to the wrapper).
+Expected: green. If a flow-wizard test asserts internals that now include the venv step, mock `installer.shared_venv.ensure_shared_venv` in that test.
 
-- [ ] **Step 4: Run the full installer test suite**
+- [ ] **Step 4: Commit**
 
 ```bash
-uv run --directory installer pytest installer/tests/ -v
+git add installer/flow/wizard.py
+git commit -m "$(cat <<'EOF'
+feat(installer/flow/wizard): reuse shared-venv finalize step
+
+Imports _create_shared_venv_step from installer.wizard so both wizard
+implementations behave identically at the venv-creation step.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 10: Add `--skip-wizard` finalize call in `installer/main.py::_install`
+
+When `--skip-wizard` is passed, `run_wizard` returns early and the venv step never fires. Add an explicit `ensure_shared_venv` call in this branch.
+
+**Files:**
+- Modify: `installer/main.py` (after `run_wizard` call added in Task 7)
+
+- [ ] **Step 1: Update the late `run_wizard` call site to also handle skip case**
+
+Edit `installer/main.py`. Find the block added in Task 7:
+
+```python
+    # Run the setup wizard now that plugins are installed and the
+    # marketplace dir exists (so the wizard can create the shared venv).
+    run_wizard(selected, skip=args.skip_wizard, args=args)
+```
+
+Replace with:
+
+```python
+    # Run the setup wizard now that plugins are installed and the
+    # marketplace dir exists (so the wizard can create the shared venv).
+    run_wizard(selected, skip=args.skip_wizard, args=args)
+
+    # Belt-and-suspenders: when --skip-wizard bypasses the wizard's
+    # venv-creation step, fire ensure_shared_venv directly so the
+    # shared environment still exists.
+    if args.skip_wizard:
+        from installer.errors import InstallerError
+        from installer.shared_venv import ensure_shared_venv, marketplaces_dir
+
+        target = marketplaces_dir()
+        if target.is_dir():
+            try:
+                ensure_shared_venv(target)
+            except InstallerError as exc:
+                console.print(
+                    f"[yellow]Failed to create shared venv at {target}: {exc}[/yellow]"
+                )
+        if getattr(args, "local_marketplace", False):
+            from installer.local_marketplace import LOCAL_CLONE_DIR
+
+            if LOCAL_CLONE_DIR.is_dir():
+                try:
+                    ensure_shared_venv(LOCAL_CLONE_DIR)
+                except InstallerError as exc:
+                    console.print(
+                        f"[yellow]Failed to create shared venv at {LOCAL_CLONE_DIR}: {exc}[/yellow]"
+                    )
+```
+
+- [ ] **Step 2: Add a test for the skip-wizard path**
+
+In `installer/tests/test_main.py`, add a test inside the existing `_install` test class:
+
+```python
+    @patch("installer.shared_venv.ensure_shared_venv")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
+    @patch("installer.main.check_marketplace_registered", return_value=True)
+    @patch("installer.main.run_wizard")
+    def test_install_skip_wizard_still_creates_shared_venv(
+        self,
+        _wizard,
+        _check_mp,
+        _avail,
+        _installed,
+        _install_plugin,
+        _add_mp,
+        mock_ensure,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--skip-wizard bypasses the wizard step; main.py must still
+        call ensure_shared_venv as a finalize step."""
+        from installer.shared_venv import marketplaces_dir
+
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr(
+            "installer.shared_venv.marketplaces_dir", lambda: target
+        )
+
+        args = _make_args(plugins=["proj"], skip_wizard=True)
+        result = _install(args)
+        assert result == EXIT_SUCCESS
+        mock_ensure.assert_called_with(target)
+```
+
+(Adjust `_make_args` if the helper does not yet support `skip_wizard=True`; pass through the parameter as needed.)
+
+- [ ] **Step 3: Run the new test**
+
+```bash
+uv run --directory installer pytest installer/tests/test_main.py::test_install_skip_wizard_still_creates_shared_venv -v
+```
+
+Expected: PASS. If the test class needs the new test inside it, locate the right `class TestXxx:` for `_install` and add it there.
+
+- [ ] **Step 4: Run full test_main.py to confirm no regressions**
+
+```bash
+uv run --directory installer pytest installer/tests/test_main.py -v
 ```
 
 Expected: green.
@@ -813,12 +1061,13 @@ Expected: green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add installer/flow/installer_flow.py
+git add installer/main.py installer/tests/test_main.py
 git commit -m "$(cat <<'EOF'
-feat(installer/flow): route add_marketplace through shared-venv wrapper
+feat(installer/main): finalize shared venv when --skip-wizard
 
-Same alias pattern as installer/main.py — three call sites at lines 345,
-355, 516 stay literal; the import alias swaps the underlying impl.
+Wizard's venv-creation step is bypassed by --skip-wizard. Fire
+ensure_shared_venv directly in main.py for that case so the shared
+environment still exists after non-interactive installs.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -827,7 +1076,7 @@ EOF
 
 ---
 
-### Task 10: Refresh `scripts/presync.sh`
+### Task 11: Refresh `scripts/presync.sh`
 
 **Files:**
 - Modify: `scripts/presync.sh:19` + append after the per-plugin loop
@@ -911,7 +1160,7 @@ EOF
 
 ---
 
-### Task 11: Final verification sweep
+### Task 12: Final verification sweep
 
 **Files:** none (verification only)
 
@@ -938,7 +1187,7 @@ git status -s
 git log --oneline feat/shared-venv-lookup-fix ^dev
 ```
 
-Expected: `git status -s` shows no modified files (clean tree). `git log` shows ~9 new commits on the branch (one per Task except Task 11).
+Expected: `git status -s` shows no modified files (clean tree). `git log` shows ~10 new commits on the branch (one per Task 1-11).
 
 - [ ] **Step 4: Hand off**
 
