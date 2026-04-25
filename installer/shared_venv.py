@@ -30,7 +30,8 @@ def ensure_shared_venv(marketplace_dir: Path) -> None:
     Idempotent: uv reuses cache on repeat calls.
 
     Raises:
-        InstallerError: if uv sync fails (non-zero exit, timeout).
+        InstallerError: if uv sync fails (non-zero exit, timeout, or
+            uv not found on PATH).
     """
     try:
         result = subprocess.run(
@@ -45,6 +46,10 @@ def ensure_shared_venv(marketplace_dir: Path) -> None:
     except subprocess.TimeoutExpired as exc:
         raise InstallerError(
             f"uv sync timed out after {_UV_SYNC_TIMEOUT}s in {marketplace_dir}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise InstallerError(
+            "uv not found on PATH — install uv before running cpm-install"
         ) from exc
     if result.returncode != 0:
         stderr = result.stderr.strip()
