@@ -140,4 +140,42 @@ Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-fa
 
 4a `APPROVE` + 4b `SMOKE_OK` (or `NO_SMOKE_AVAILABLE` acknowledged by user). Transition to Phase 5.
 
-<!-- Sections to fill: Phase 5, Cross-refs -->
+### Phase 5 — Merge + finish (sequential)
+
+```
+1. Sequential rebase + FF-merge (per [[worktree-merge-uses-rebase]])
+   - First branch: FF-merge to dev directly
+   - Each subsequent: rebase onto current dev -> FF-merge
+   - Disjoint files -> conflict-free in practice
+   - On rebase artifact (per [[worktree-rebase-artifact]]): git restore . -> retry rebase
+
+2. Single git push origin dev (per [[ff-merge-convention]]) — one CI run for batch
+
+3. invoke `superpowers:finishing-a-development-branch` (batch-level)
+   - operates on merged dev branch — verifies CI green, cleans up
+
+4. Cleanup parallel:
+   - wt_remove x N parallel (force=true if needed per [[worktree-rebase-artifact]])
+   - git branch -d x N after verifying merged
+   - mcp__plugin_proj_proj__todo_batch_complete x N todo IDs
+     (per CLAUDE.md project rule on batch completion)
+
+5. notes_append heading: "## [YYYY-MM-DD HH:MM] checkpoint | Batch N completed: <todo-ids>"
+```
+
+**Failure modes**:
+
+- Rebase conflict -> `AskUserQuestion`: resolve manually / abort batch / investigate.
+- CI fails post-push -> surface; never auto-revert (managed rule 8).
+- `superpowers:finishing-a-development-branch` flags issue -> impl re-dispatched per skill flow.
+
+## Cross-refs
+
+- Spec: `docs/superpowers/specs/2026-04-25-parallel-batch-execute-design.md`
+- Wiki recipe: [[parallel-impl-orchestration]]
+- Boundary issues diagnosis: [[parallel-orchestration-boundary-issues]]
+- Sibling pitfalls: [[worktree-rebase-artifact]], [[parallel-git-races]], [[stale-worktree-vs-advancing-dev]]
+- Reviewer prompts: `references/final-reviewer-prompt.md`, `references/smoke-prompt.md`
+- Q-routing rubric: `references/implementer-q-routing.md`
+- Superpowers skills wrapped: `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review`, `code-reviewer`, `using-git-worktrees`, `finishing-a-development-branch`
+- Managed CLAUDE.md rules invoked: 1 (parallel agents), 4 (batched Q&A), 6 (worktree isolation), 8 (destructive ops consent), 12 (revdiff review), 13 (post-wt-create-remote-sync), 20 (append-only log)
