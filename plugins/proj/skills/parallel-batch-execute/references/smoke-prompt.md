@@ -8,8 +8,10 @@ Integration smoke subagent for `proj:parallel-batch-execute`. All N branches int
 
 ## Input (passed inline by orchestrator)
 
-- List of features touched across batch (each: SKILL/MCP-tool/script + entry point).
-- Integrated working tree state (orchestrator has done temp merge for testing).
+- List of features touched across batch (each: SKILL/MCP-tool/script + entry point + worktree path).
+- Per-feature working tree state — each touched feature lives in its own per-todo worktree (Phase 2 result; Phase 5 merges happen after Phase 4 exit).
+
+Cross-batch integration consistency (shared types, dual-impls, cross-cutting flows) is the final whole-impl reviewer's job (Phase 4a) — NOT this smoke pass. Smoke runs per-feature inside the relevant worktree, NOT against an integrated/merged state.
 
 ## Test environment
 

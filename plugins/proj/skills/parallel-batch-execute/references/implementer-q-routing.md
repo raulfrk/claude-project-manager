@@ -17,7 +17,7 @@ Implementer Q arrives:
 
 a) Pending buffer hits 4 Qs (AskUserQuestion max per managed rule 4).
 b) All currently-active impls blocked on a Q (deadlock-avoid).
-c) 30s elapsed since first Q hit pending buffer.
+c) 30s elapsed since the *current* pending buffer's first Q (timer resets after each flush).
 
 ## Flush mechanic
 

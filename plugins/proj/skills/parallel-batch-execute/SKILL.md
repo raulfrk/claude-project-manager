@@ -1,7 +1,7 @@
 ---
 name: parallel-batch-execute
 description: Orchestrate parallel impl of >=2 disjoint todos w/ full superpowers gate fidelity. Use when user requests parallel batch impl OR says "parallel batch", "/proj:parallel-batch-execute", "execute these N todos in parallel". Wraps standard superpowers workflow (brainstorming -> writing-plans -> subagent-driven-development -> finishing-a-development-branch); parallelism only in execution stage.
-allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_list, mcp__plugin_proj_proj__todo_batch_complete, mcp__plugin_proj_proj__notes_append, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_list, mcp__plugin_worktree_worktree__wt_remove, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent, Bash, Skill, Read, Edit
+allowed-tools: mcp__plugin_proj_proj__proj_session_context, mcp__plugin_proj_proj__todo_get, mcp__plugin_proj_proj__todo_complete, mcp__plugin_proj_proj__notes_append, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_worktree_worktree__wt_remove, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent, Bash, Skill, Read, Edit
 argument-hint: "<todo-id> <todo-id> [<todo-id>...]"
 ---
 
@@ -19,7 +19,7 @@ Orchestrate parallel impl of >=2 disjoint todos. Wrap superpowers workflow; para
 1. `mcp__plugin_proj_proj__proj_session_context` -> active proj name + tracking_dir.
 2. Parse `$ARGUMENTS` -> N todo IDs. N < 2 -> err: "use sequential superpowers workflow".
 3. Each todo: `mcp__plugin_proj_proj__todo_get` -> verify exists + open. Missing/done -> err.
-4. Disjointness: prompt user via `AskUserQuestion` to confirm per-todo file scopes disjoint. Coupled -> abort.
+4. Disjointness intent gate: prompt user via `AskUserQuestion` to confirm batch is intended as parallel disjoint todos (vs coupled). Coupled intent -> abort. Concrete file-overlap check happens at Phase 2 entry (after plans exist).
 5. `TaskCreate` 1 parent task per phase + subtasks per todo for Phases 1+3.
 
 ### Phase 1 — Per-todo design (sequential, fully interactive)
@@ -42,6 +42,7 @@ Outputs: N spec docs + N plan docs committed before Phase 2.
 ### Phase 2 — Worktree setup (parallel)
 
 ```
+0. File-overlap entry gate: orchestrator extracts "Files:" table / files-touched lists from each Phase 1 plan. Computes pairwise overlap across all N plans. Any overlap -> AskUserQuestion: abort batch / let user split or reorder / continue anyway (override).
 1. wt_create x N parallel via mcp__plugin_worktree_worktree__wt_create
    - one branch per todo, forked from current dev
 2. post-wt-create-remote-sync per worktree (parallel; single Bash loop)
@@ -157,8 +158,7 @@ Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-fa
 4. Cleanup parallel:
    - wt_remove x N parallel (force=true if needed per [[worktree-rebase-artifact]])
    - git branch -d x N after verifying merged
-   - mcp__plugin_proj_proj__todo_batch_complete x N todo IDs
-     (per CLAUDE.md project rule on batch completion)
+   - mcp__plugin_proj_proj__todo_complete(todo_ids=[<id-1>, ..., <id-N>]) — single batch call
 
 5. notes_append heading: "## [YYYY-MM-DD HH:MM] checkpoint | Batch N completed: <todo-ids>"
 ```
@@ -168,6 +168,7 @@ Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-fa
 - Rebase conflict -> `AskUserQuestion`: resolve manually / abort batch / investigate.
 - CI fails post-push -> surface; never auto-revert (managed rule 8).
 - `superpowers:finishing-a-development-branch` flags issue -> impl re-dispatched per skill flow.
+- Partial cleanup failure (`wt_remove` / `git branch -d` / `todo_complete` for one of N) -> log per-worker err; do not block batch completion; surface to user post-Phase-5.
 
 ## Cross-refs
 
@@ -177,5 +178,6 @@ Collapsed into 4a (subset of "shared types/config keys" + "cross-cutting user-fa
 - Sibling pitfalls: [[worktree-rebase-artifact]], [[parallel-git-races]], [[stale-worktree-vs-advancing-dev]]
 - Reviewer prompts: `references/final-reviewer-prompt.md`, `references/smoke-prompt.md`
 - Q-routing rubric: `references/implementer-q-routing.md`
-- Superpowers skills wrapped: `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review`, `code-reviewer`, `using-git-worktrees`, `finishing-a-development-branch`
+- Superpowers skills wrapped: `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review`, `using-git-worktrees`, `finishing-a-development-branch`
+- Superpowers agent dispatched: `code-reviewer` (used by `requesting-code-review` for the per-impl + final review chains)
 - Managed CLAUDE.md rules invoked: 1 (parallel agents), 4 (batched Q&A), 6 (worktree isolation), 8 (destructive ops consent), 12 (revdiff review), 13 (post-wt-create-remote-sync), 20 (append-only log)
