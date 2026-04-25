@@ -224,6 +224,7 @@ The core plugin. Tracks project metadata, todos with nested dependencies and blo
 | `/proj:sandbox-sync` | Check sandbox settings match expected config | -- |
 | `/proj:sandbox-audit` | Audit current permissions | -- |
 | `/proj:sandbox-debug` | Debug permission issues | -- |
+| `/proj:parallel-batch-execute` | Orchestrate >=2 disjoint todos in parallel w/ full superpowers gate fidelity. Wraps the standard superpowers workflow (brainstorming → writing-plans → subagent-driven-development → finishing-a-development-branch) with parallelism only in Phase 3 (execution). Threshold: N >= 2. | -- |
 | `/router:add` | Register a new hook | -- |
 | `/router:list` | List all registered hooks | -- |
 | `/router:remove` | Remove a hook by ID | -- |

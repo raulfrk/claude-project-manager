@@ -77,6 +77,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 /proj:todo done <id>    # Mark a todo complete
 /proj:checkpoint        # Mid-execution review: continue, reset, or tighten scope
 /proj:save              # Save session notes and reconcile git
+/proj:parallel-batch-execute  # Orchestrate >=2 disjoint todos in parallel w/ full superpowers gate fidelity
 ```
 
 **AI-powered deep work:**
