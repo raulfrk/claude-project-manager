@@ -22,4 +22,21 @@ Orchestrate parallel impl of >=2 disjoint todos. Wrap superpowers workflow; para
 4. Disjointness: prompt user via `AskUserQuestion` to confirm per-todo file scopes disjoint. Coupled -> abort.
 5. `TaskCreate` 1 parent task per phase + subtasks per todo for Phases 1+3.
 
-<!-- Sections to fill: Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Cross-refs -->
+### Phase 1 — Per-todo design (sequential, fully interactive)
+
+Strict per-todo. No batch-brainstorm shortcut.
+
+```
+for each todo in batch:
+  1. invoke `superpowers:brainstorming` w/ todo context
+       -> docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+       -> spec self-review + revdiff-routed user review (per managed rule 12)
+  2. invoke `superpowers:writing-plans` w/ spec
+       -> docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md
+       -> user approval gate
+  3. user kills brainstorm/plan -> drop todo from batch; continue w/ N-1
+```
+
+Outputs: N spec docs + N plan docs committed before Phase 2.
+
+<!-- Sections to fill: Phase 2, Phase 3, Phase 4, Phase 5, Cross-refs -->
