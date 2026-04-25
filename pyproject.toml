@@ -14,11 +14,27 @@ cpm-install = "installer.main:main"
 
 [project.optional-dependencies]
 plugins = [
+    # Plugin server packages (path-deps below). Installing these brings each
+    # plugin's *-server script into the shared venv's bin/ so start.sh's
+    # `uv run --frozen --no-sync <server>` resolves to the venv-managed
+    # script instead of a stale PATH entry.
+    "proj-mcp-server",
+    "router-mcp-server",
+    "todoist-mcp-server",
+    "trello-mcp-server",
+    "jira-mcp-server",
+    "confluence-mcp-server",
+    "wiki-server",
+    "worktree-mcp-server",
+    # Shared transport library (also a transitive dep of every server).
+    "claude-hook-transport",
+    # Library deps kept explicit so the drift-detection test
+    # (installer/tests/test_shared_venv_deps.py) catches new per-plugin deps
+    # if a plugin server forgets to declare them.
     "mcp>=1.2.0",
     "pyyaml>=6.0",
     "gitpython>=3.1",
     "httpx>=0.28",
-    "claude-hook-transport",
     # confluence
     "markdownify>=0.11",
     "beautifulsoup4>=4.12",
@@ -45,3 +61,11 @@ markers = ["slow: tests that build/install packages (may take >10s)"]
 
 [tool.uv.sources]
 claude-hook-transport = { path = "plugins/_shared" }
+proj-mcp-server = { path = "plugins/proj/server" }
+router-mcp-server = { path = "plugins/router/server" }
+todoist-mcp-server = { path = "plugins/todoist/server" }
+trello-mcp-server = { path = "plugins/trello/server" }
+jira-mcp-server = { path = "plugins/jira/server" }
+confluence-mcp-server = { path = "plugins/confluence/server" }
+wiki-server = { path = "plugins/wiki/server" }
+worktree-mcp-server = { path = "plugins/worktree/server" }
