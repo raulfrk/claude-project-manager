@@ -274,8 +274,9 @@ def test_managed_section_contains_research_synthesis_rule():
     assert "Research synthesis for brainstorm/spec/plan work" in claudemd.MANAGED_SECTION
     # Required order: wiki → code → web
     assert "/wiki:query" in claudemd.MANAGED_SECTION
-    # Inline gating check
-    assert 'enabledPlugins["wiki@*"]' in claudemd.MANAGED_SECTION
+    # Inline gating check — wildcard semantics (marketplace name varies)
+    assert 'enabledPlugins["wiki@<marketplace>"]' in claudemd.MANAGED_SECTION
+    assert "wildcard" in claudemd.MANAGED_SECTION
     # Code research step
     assert "Explore" in claudemd.MANAGED_SECTION
     # Web research step
@@ -289,3 +290,14 @@ def test_managed_section_contains_research_synthesis_rule():
     rule24_pos = claudemd.MANAGED_SECTION.index("Mid-execution checkpoint rhythm")
     rule25_pos = claudemd.MANAGED_SECTION.index("Research synthesis for brainstorm/spec/plan work")
     assert rule24_pos < rule25_pos, "rule 25 must appear after rule 24"
+
+
+def test_research_synthesis_rule_orders_wiki_code_web():
+    """Rule 25 must enumerate sources in the order: wiki → code → web."""
+    rule25_pos = claudemd.MANAGED_SECTION.find("<!-- rule: 25 -->")
+    assert rule25_pos != -1, "rule 25 marker not found"
+    rule25_text = claudemd.MANAGED_SECTION[rule25_pos : rule25_pos + 1000]
+    wiki_p = rule25_text.index("/wiki:query")
+    code_p = rule25_text.index("Explore")
+    web_p = rule25_text.index("WebSearch")
+    assert wiki_p < code_p < web_p, "rule 25 must enumerate wiki → code → web in that order"
