@@ -208,3 +208,63 @@ class TestEnsureLocalClone:
         mock_run_git.side_effect = capture
         ensure_local_clone(branch=None)
         assert parent_existed_at_clone["value"] is True
+
+
+class TestRmtreeGuard:
+    """ensure_local_clone must surface rmtree failures clearly.
+
+    Bare shutil.rmtree raises OSError on permission/busy/partial
+    filesystem failures. The guard converts those into InstallerError
+    with a path and recovery hint, so users see a clean message instead
+    of a stack trace mid-install. A post-rmtree existence check catches
+    the rare case where rmtree returns 0 but leaves a partial tree.
+    """
+
+    @patch("installer.local_marketplace._run_git")
+    @patch("installer.local_marketplace.shutil.rmtree")
+    def test_rmtree_oserror_raises_installer_error(
+        self, mock_rmtree, _run_git, tmp_path, monkeypatch
+    ):
+        """rmtree raising OSError → InstallerError w/ path + recovery hint."""
+        from installer.errors import InstallerError
+        from installer.local_marketplace import ensure_local_clone
+
+        dest = tmp_path / "local-marketplace"
+        dest.mkdir()  # exists → triggers rmtree branch
+        monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", dest)
+
+        mock_rmtree.side_effect = OSError("Permission denied")
+
+        with pytest.raises(InstallerError) as exc_info:
+            ensure_local_clone()
+
+        msg = str(exc_info.value)
+        assert str(dest) in msg
+        assert "Permission denied" in msg
+        assert "rm -rf" in msg
+        # _run_git must NOT have been called — we bailed before clone
+        _run_git.assert_not_called()
+
+    @patch("installer.local_marketplace._run_git")
+    @patch("installer.local_marketplace.shutil.rmtree")
+    def test_rmtree_silent_no_op_raises_installer_error(
+        self, mock_rmtree, _run_git, tmp_path, monkeypatch
+    ):
+        """rmtree returns 0 but dest still exists → InstallerError."""
+        from installer.errors import InstallerError
+        from installer.local_marketplace import ensure_local_clone
+
+        dest = tmp_path / "local-marketplace"
+        dest.mkdir()
+        monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", dest)
+
+        # rmtree is a no-op (mock); dest stays put.
+        mock_rmtree.return_value = None
+
+        with pytest.raises(InstallerError) as exc_info:
+            ensure_local_clone()
+
+        msg = str(exc_info.value)
+        assert str(dest) in msg
+        assert "still exists" in msg or "partial" in msg
+        _run_git.assert_not_called()
