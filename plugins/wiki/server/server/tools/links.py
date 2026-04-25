@@ -25,8 +25,21 @@ def register(mcp: FastMCP) -> None:
 
 
 def _parse_link(link: str) -> tuple[str, str | None]:
-    """Split '[[page#section]]' notation into (slug, section) or (slug, None)."""
+    """Split wikilink notation into (slug, section).
+
+    Handles all four forms:
+        [[page]]                    → ("page", None)
+        [[page#section]]            → ("page", "section")
+        [[page|display alias]]      → ("page", None)         — alias dropped
+        [[page#section|display]]    → ("page", "section")    — alias dropped
+
+    The display alias after `|` is only for human-readable rendering at the
+    call site; the resolver uses slug+section to find the file.
+    """
     link = link.strip().strip("[]").strip()
+    # Strip display alias first (`|` always comes after slug+section)
+    if "|" in link:
+        link = link.split("|", 1)[0].strip()
     if "#" in link:
         slug, section = link.split("#", 1)
         return slug.strip(), section.strip()

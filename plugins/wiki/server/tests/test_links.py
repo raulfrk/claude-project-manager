@@ -72,3 +72,30 @@ class TestWikiLinkResolve:
         # First match wins (sorted) + candidates list populated
         assert result["resolved"] is not None
         assert len(result["candidates"]) >= 1
+
+    async def test_resolve_with_display_alias(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """[[slug|display alias]] — `|alias` portion is for rendering only,
+        must be stripped before slug lookup."""
+        _write_page(wiki_setup["wiki_dir"], "concepts", "hooks")
+        result = json.loads(await call_tool(mcp_app, "wiki_link_resolve", link="hooks|Hook System"))
+        assert result["resolved"].endswith("hooks.md"), result
+        assert result["section_found"] is None
+
+    async def test_resolve_with_section_and_display_alias(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """[[slug#section|display alias]] — both `#section` + `|alias` parsed."""
+        page = wiki_setup["wiki_dir"] / "pages" / "concepts" / "hooks.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            "---\ntitle: Hooks\ntags: []\nlinks_to: []\nscope: []\n"
+            "sources: []\nlast_ingested: '2026-04-23'\n---\n"
+            "# Hooks\n\n## Dispatch\n\nbody"
+        )
+        result = json.loads(
+            await call_tool(mcp_app, "wiki_link_resolve", link="hooks#Dispatch|Dispatch flow")
+        )
+        assert result["resolved"].endswith("hooks.md")
+        assert result["section_found"] is True
