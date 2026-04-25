@@ -37,10 +37,17 @@ PROTOCOL:
    - If SOURCE is a session file (`session:` prefix) AND CONFIG includes a
      non-empty `session_ingest.section_map` (e.g. `{"Key Decisions": "decisions",
      "Insights Discovered": "insights"}`): walk the session file section by
-     section. For each `## <heading>` matching a key in `section_map`, candidates
-     extracted from that section's bullets receive `<section_map[heading]>` as a
-     CATEGORY HINT. The hint is not a hard assignment — override based on
-     candidate content if the body clearly belongs in a different category.
+     section. For each heading at depth H2, H3, OR H4 that exact-matches a key
+     in `section_map`, candidates extracted from that section's bullets receive
+     `<section_map[heading]>` as a CATEGORY HINT. Match semantics: exact,
+     case-sensitive, whitespace-trimmed. `## Key Decisions` matches the key
+     `"Key Decisions"`; `## key decisions` does NOT (case-sensitive); `##  Key
+     Decisions` w/ extra space DOES (trimmed). When a bullet sits under nested
+     matching headings (e.g. `## Key Decisions` containing `### Architecture`,
+     both mapped in section_map), the DEEPEST (innermost) matching heading
+     wins as the category hint. The hint is not a hard assignment — override
+     based on candidate content if the body clearly belongs in a different
+     category.
    - If `section_map` is empty, missing, or SOURCE is not a session file:
      extract wholesale (current behavior, unchanged).
 3. For each candidate, run dedup per `dedup-protocol.md` decision matrix:
