@@ -50,7 +50,7 @@ EXIT_CANCELLED = 1
 EXIT_ERROR = 2
 
 
-def _resolve_marketplace_source(args) -> tuple[str, str | None]:
+def _resolve_marketplace_source(args, console=None) -> tuple[str, str | None]:
     """Return (source, branch) to pass to ``add_marketplace``.
 
     With ``--local-marketplace`` set, clones (or updates) the repo locally
@@ -60,10 +60,13 @@ def _resolve_marketplace_source(args) -> tuple[str, str | None]:
 
     Without ``--local-marketplace``, returns the hardcoded GitHub short ref
     and passes the raw ``--branch`` flag through.
+
+    When ``console`` is provided, ``ensure_local_clone`` emits Rich-styled
+    status updates for each clone step.
     """
     if getattr(args, "local_marketplace", False):
         branch = getattr(args, "branch", None)
-        local_path = ensure_local_clone(branch=branch)
+        local_path = ensure_local_clone(branch=branch, console=console)
         return (str(local_path), None)
     return (MARKETPLACE_SOURCE, getattr(args, "branch", None))
 
@@ -85,7 +88,7 @@ def _install(args) -> int:
 
     # 2. Ensure marketplace is registered (optionally from a local clone)
     try:
-        source, branch = _resolve_marketplace_source(args)
+        source, branch = _resolve_marketplace_source(args, console=console)
     except InstallerError as exc:
         console.print(f"[red]Failed to prepare marketplace source:[/] {exc}")
         return EXIT_ERROR
@@ -216,7 +219,7 @@ def _reinstall(args) -> int:
 
     plugins = list(installed)
     try:
-        source, branch = _resolve_marketplace_source(args)
+        source, branch = _resolve_marketplace_source(args, console=console)
     except InstallerError as exc:
         console.print(f"[red]Failed to prepare marketplace source:[/] {exc}")
         return EXIT_ERROR

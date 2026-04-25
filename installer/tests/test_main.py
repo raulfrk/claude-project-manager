@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 
 from installer.detect import InstallState
@@ -70,7 +70,7 @@ class TestResolveMarketplaceSource:
         mock_ensure.return_value = Path("/home/x/.cache/cpm/local-marketplace")
         args = _make_args(local_marketplace=True)
         source, branch = _resolve_marketplace_source(args)
-        mock_ensure.assert_called_once_with(branch=None)
+        mock_ensure.assert_called_once_with(branch=None, console=ANY)
         assert source == "/home/x/.cache/cpm/local-marketplace"
         assert branch is None
 
@@ -81,7 +81,7 @@ class TestResolveMarketplaceSource:
         mock_ensure.return_value = Path("/home/x/.cache/cpm/local-marketplace")
         args = _make_args(local_marketplace=True, branch="dev")
         source, branch = _resolve_marketplace_source(args)
-        mock_ensure.assert_called_once_with(branch="dev")
+        mock_ensure.assert_called_once_with(branch="dev", console=ANY)
         assert source == "/home/x/.cache/cpm/local-marketplace"
         # Branch returned as None because clone is already on that branch
         assert branch is None
@@ -233,7 +233,7 @@ class TestInstall:
         args = _make_args(plugins=["proj"], local_marketplace=True)
         result = _install(args)
         assert result == EXIT_SUCCESS
-        mock_ensure.assert_called_once_with(branch=None)
+        mock_ensure.assert_called_once_with(branch=None, console=ANY)
         mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
         mock_remove.assert_not_called()
 
@@ -292,7 +292,7 @@ class TestInstall:
         mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
         args = _make_args(plugins=["proj"], local_marketplace=True, branch="dev")
         _install(args)
-        mock_ensure.assert_called_once_with(branch="dev")
+        mock_ensure.assert_called_once_with(branch="dev", console=ANY)
         mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
     @patch("installer.main.ensure_local_clone")
@@ -503,7 +503,7 @@ class TestReinstall:
         mock_ensure.return_value = Path("/home/x/.cache/cpm/mk")
         args = _make_args(reinstall=True, local_marketplace=True, branch="dev")
         _reinstall(args)
-        mock_ensure.assert_called_once_with(branch="dev")
+        mock_ensure.assert_called_once_with(branch="dev", console=ANY)
         mock_add.assert_called_once_with(source="/home/x/.cache/cpm/mk", branch=None)
 
     @patch("installer.main.install_plugin")

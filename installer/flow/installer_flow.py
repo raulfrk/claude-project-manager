@@ -53,11 +53,13 @@ from installer.plugin_status import build_plugin_status_list
 from installer.update import compare_versions
 
 
-def _resolve_source_locally(args: Any) -> tuple[str, str | None]:
+def _resolve_source_locally(
+    args: Any, console: Console | None = None
+) -> tuple[str, str | None]:
     """Lazy import to avoid circular dependency w/ installer.main."""
     from installer.main import _resolve_marketplace_source
 
-    return _resolve_marketplace_source(args)
+    return _resolve_marketplace_source(args, console=console)
 
 
 _WIZARD_PLUGINS = {"proj", "router", "todoist", "trello", "jira", "worktree", "wiki"}
@@ -323,7 +325,7 @@ def _resolve_plugin_dirs(plugin_names: list[str]) -> list[Path]:
 
 def _run_install(args: Any, console: Console) -> int:
     try:
-        source, branch = _resolve_source_locally(args)
+        source, branch = _resolve_source_locally(args, console=console)
         source_is_local = getattr(args, "local_marketplace", False)
         raw_branch = getattr(args, "branch", None)
         if not check_marketplace_registered():
@@ -501,7 +503,7 @@ def _run_reinstall(
     # Fires only when the flag or --branch is supplied; otherwise leave the
     # current registration intact.
     try:
-        source, branch = _resolve_source_locally(args)
+        source, branch = _resolve_source_locally(args, console=console)
         source_is_local = getattr(args, "local_marketplace", False)
         raw_branch = getattr(args, "branch", None)
         if source_is_local or branch:

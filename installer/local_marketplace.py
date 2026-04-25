@@ -9,9 +9,27 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from installer.errors import InstallerError
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+
+def _status(console: Console | None, msg: str) -> None:
+    """Emit a status line either via Rich console or stderr fallback."""
+    if console is not None:
+        console.print(msg)
+    else:
+        # Strip Rich markup tags for the plain-text fallback
+        import re
+
+        plain = re.sub(r"\[/?[^\]]+\]", "", msg)
+        print(plain, file=sys.stderr)
+
 
 LOCAL_CLONE_DIR = (
     Path.home() / ".cache" / "claude-project-manager" / "local-marketplace"
@@ -69,7 +87,9 @@ def _default_branch(repo_dir: Path) -> str:
     return result.stdout.strip().removeprefix("refs/remotes/origin/")
 
 
-def ensure_local_clone(branch: str | None = None) -> Path:
+def ensure_local_clone(
+    branch: str | None = None, console: Console | None = None
+) -> Path:
     """Ensure a fresh clone at ``LOCAL_CLONE_DIR`` on the given branch.
 
     Behavior:
@@ -83,6 +103,9 @@ def ensure_local_clone(branch: str | None = None) -> Path:
     When ``branch`` is ``None``, resolves the remote's default branch via
     ``_default_branch`` and uses that.
 
+    When ``console`` is provided, emits Rich-styled status updates for
+    each step. Without a console, falls back to plain stderr lines.
+
     Returns the absolute path to the clone.
     """
     if shutil.which("git") is None:
@@ -91,12 +114,17 @@ def ensure_local_clone(branch: str | None = None) -> Path:
     dest = LOCAL_CLONE_DIR
 
     if dest.exists():
+        _status(console, f"[yellow]Removing existing local clone at {dest}...[/yellow]")
         shutil.rmtree(dest)
 
     dest.parent.mkdir(parents=True, exist_ok=True)
+    _status(console, f"[bold]Cloning {_HTTPS_SOURCE} → {dest}...[/bold]")
     _run_git(["clone", _HTTPS_SOURCE, str(dest)], cwd=None)
+
     target = branch or _default_branch(dest)
+    _status(console, f"[bold]Fetching origin + checking out {target}...[/bold]")
     _run_git(["fetch", "origin"], cwd=dest)
     _run_git(["checkout", target], cwd=dest)
     _run_git(["reset", "--hard", f"origin/{target}"], cwd=dest)
+    _status(console, f"  [green]✓[/green] Local clone ready at {dest} ({target})")
     return dest
