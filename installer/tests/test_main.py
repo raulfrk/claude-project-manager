@@ -304,6 +304,36 @@ class TestInstall:
         result = _install(args)
         assert result == EXIT_ERROR
 
+    @patch("installer.shared_venv.ensure_shared_venv")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
+    @patch("installer.main.check_marketplace_registered", return_value=True)
+    @patch("installer.main.run_wizard")
+    def test_install_skip_wizard_still_creates_shared_venv(
+        self,
+        _wizard,
+        _check_mp,
+        _avail,
+        _installed,
+        _install_plugin,
+        _add_mp,
+        mock_ensure,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--skip-wizard bypasses the wizard step; main.py must still
+        call ensure_shared_venv as a finalize step."""
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
+
+        args = _make_args(plugins=["proj"], skip_wizard=True)
+        result = _install(args)
+        assert result == EXIT_SUCCESS
+        mock_ensure.assert_called_with(target)
+
 
 # ===================================================================
 # _reinstall dispatch
