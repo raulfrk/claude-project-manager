@@ -321,6 +321,35 @@ class TestWriteActive:
         siblings = list(tmp_path.iterdir())
         assert all(not s.name.startswith(".proj-session.yaml.") for s in siblings)
 
+    def test_write_active_cleans_legacy_marker_dir_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """First write_active call removes ~/.claude/proj-session-markers/.
+
+        Subsequent calls in the same process skip the cleanup (guarded by a
+        module-level flag).
+        """
+        # Reset the module-level guard so this test isn't order-dependent.
+        monkeypatch.setattr(sk, "_legacy_cleanup_done", False)
+
+        # Synthetic legacy marker dir under tmp_path.
+        legacy = tmp_path / "proj-session-markers"
+        legacy.mkdir()
+        (legacy / "1234.yaml").write_text("ns_inode: 0\nstarted: '2026-01-01T00:00:00+00:00'\n")
+        monkeypatch.setattr(sk, "_LEGACY_MARKER_DIR", legacy)
+
+        target = tmp_path / "proj-session.yaml"
+        sk.write_active(target, "proj-x", session_key="100")
+
+        # First call: legacy dir gone.
+        assert not legacy.exists()
+
+        # Recreate it; a second call should NOT remove it (guard prevents).
+        legacy.mkdir()
+        (legacy / "5678.yaml").write_text("ns_inode: 0\n")
+        sk.write_active(target, "proj-y", session_key="100")
+        assert legacy.exists(), "Second write_active should be a no-op for legacy cleanup"
+
 
 class TestClearActive:
     def test_clear_removes_own_session(
