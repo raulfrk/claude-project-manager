@@ -313,7 +313,7 @@ def merge_worktree(path: str, base_branch: str | None = None) -> str:
 
     # Fast-forward merge into base repo
     try:
-        git.merge_ff_only(repo_path, branch_name)
+        git.merge_ff_only(repo_path, branch_name, worktree_path=abs_path, base_branch=base_branch)
     except GitError as e:
         return json.dumps(
             {
@@ -384,9 +384,32 @@ def rebase_continue_worktree(path: str) -> str:
     except GitError as e:
         return json.dumps({"result": "error", "message": str(e)})
 
+    # Resolve base_branch for CAS merge.
+    rebase_base_branch = "dev"
+    try:
+        origin_head = subprocess.run(
+            ["git", "-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if origin_head.returncode == 0:
+            rebase_base_branch = origin_head.stdout.strip().removeprefix("refs/remotes/origin/")
+        else:
+            default_branch = subprocess.run(
+                ["git", "-C", repo_path, "config", "init.defaultBranch"],
+                capture_output=True,
+                text=True,
+            )
+            if default_branch.returncode == 0 and default_branch.stdout.strip():
+                rebase_base_branch = default_branch.stdout.strip()
+    except FileNotFoundError:
+        pass  # keep default; merge_ff_only will surface the error
+
     # Fast-forward merge into base repo
     try:
-        git.merge_ff_only(repo_path, branch_name)
+        git.merge_ff_only(
+            repo_path, branch_name, worktree_path=abs_path, base_branch=rebase_base_branch
+        )
     except GitError as e:
         return json.dumps(
             {

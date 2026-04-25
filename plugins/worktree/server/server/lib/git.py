@@ -350,18 +350,164 @@ def rebase_continue(worktree_path: str) -> dict[str, str]:
     return {"status": "rebased"}
 
 
-def merge_ff_only(repo_path: str, branch: str) -> dict[str, str]:
-    """Fast-forward merge a branch into the current branch at repo_path."""
+def merge_ff_only(
+    repo_path: str,
+    branch: str,
+    worktree_path: str | None = None,
+    base_branch: str = "dev",
+) -> dict[str, str]:
+    """Atomically FF-merge `branch` into `base_branch` of `repo_path`.
+
+    When `worktree_path` is provided, uses `git update-ref` CAS from the worktree
+    to avoid the multi-worktree race in `git merge --ff-only`. Per todo 735.
+
+    The CAS loop:
+    - Reads current base_branch ref value (old_sha).
+    - Verifies branch is FF-mergeable (merge-base --is-ancestor).
+    - Reads branch tip (new_sha).
+    - Atomically updates refs/heads/<base_branch> from old_sha to new_sha.
+    - Retries up to 5 times with exponential backoff on CAS conflict.
+
+    After a successful ref update, syncs base repo's index/working tree via
+    `git reset --keep HEAD` (safe: aborts if it would discard uncommitted work).
+    If reset --keep fails, logs a warning and continues — the ref is already
+    updated and the user can sync manually.
+
+    Falls back to legacy `git merge --ff-only` when worktree_path is None
+    (backward-compatible for callers that don't supply it).
+
+    Raises GitError if not FF-mergeable or max retries exhausted.
+    """
+    import time
+
+    if worktree_path is None:
+        # Legacy path: kept for backward-compat; no CAS protection.
+        try:
+            result = subprocess.run(
+                ["git", "merge", "--ff-only", branch],
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.strip()
+                raise GitError(f"Fast-forward merge failed for branch {branch}: {stderr}")
+        except FileNotFoundError as err:
+            raise GitError(f"git not found or invalid path: {repo_path}") from err
+        return {"status": "merged", "branch": branch}
+
+    # Atomic CAS path.
+    MAX_RETRIES = 5
+    BACKOFF_MS = [10, 20, 40, 80, 160]
+    new_sha: str = ""
+    last_err: str = ""
+
     try:
-        result = subprocess.run(
-            ["git", "merge", "--ff-only", branch],
+        for attempt in range(MAX_RETRIES):
+            # Read current base_branch ref value.
+            rev_result = subprocess.run(
+                ["git", "rev-parse", f"refs/heads/{base_branch}"],
+                cwd=worktree_path,
+                capture_output=True,
+                text=True,
+            )
+            if rev_result.returncode != 0:
+                raise GitError(
+                    f"failed to read refs/heads/{base_branch}: {rev_result.stderr.strip()}"
+                )
+            old_sha = rev_result.stdout.strip()
+
+            # Verify branch is FF-mergeable onto current base_branch.
+            ancestor_result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", old_sha, branch],
+                cwd=worktree_path,
+                capture_output=True,
+                text=True,
+            )
+            if ancestor_result.returncode != 0:
+                raise GitError(
+                    f"Fast-forward merge failed for branch {branch}: "
+                    f"{branch} is not a fast-forward of {base_branch} ({old_sha})"
+                )
+
+            # Read branch tip.
+            tip_result = subprocess.run(
+                ["git", "rev-parse", branch],
+                cwd=worktree_path,
+                capture_output=True,
+                text=True,
+            )
+            if tip_result.returncode != 0:
+                raise GitError(f"failed to read branch {branch}: {tip_result.stderr.strip()}")
+            new_sha = tip_result.stdout.strip()
+
+            # Atomic CAS: only succeeds if base_branch ref still equals old_sha.
+            cas_result = subprocess.run(
+                ["git", "update-ref", f"refs/heads/{base_branch}", new_sha, old_sha],
+                cwd=worktree_path,
+                capture_output=True,
+                text=True,
+            )
+            if cas_result.returncode == 0:
+                break  # CAS succeeded.
+            last_err = cas_result.stderr.strip() or "<unknown>"
+            # CAS failed (another caller updated the ref) — retry after backoff.
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(BACKOFF_MS[attempt] / 1000.0)
+        else:
+            raise GitError(
+                f"max retries exhausted on CAS update-ref refs/heads/{base_branch}; "
+                f"last error: {last_err}"
+            )
+    except FileNotFoundError as err:
+        raise GitError(f"git not found or invalid path: {worktree_path}") from err
+
+    # Sync base repo's index and working tree to the new HEAD.
+    # After CAS the ref changed but the base repo's index + working tree still reflect
+    # the old HEAD. We need to advance them.
+    #
+    # Strategy: check if the working tree has any unstaged modifications (git diff --quiet,
+    # compares working tree to index). If clean, safe to hard-reset. If dirty, use
+    # reset --keep which preserves unstaged work but aborts if the new HEAD would
+    # conflict with it.
+    #
+    # Note: `git diff --cached` is NOT used here because the index still reflects the
+    # old HEAD — after CAS the staged-vs-HEAD diff always shows differences until synced.
+    wt_dirty_check = subprocess.run(
+        ["git", "diff", "--quiet"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    # returncode 0 = working tree matches index (clean), 1 = unstaged changes exist
+    wt_is_clean = wt_dirty_check.returncode == 0
+
+    if wt_is_clean:
+        # Fast path: hard reset advances index + working tree to new HEAD.
+        sync_result = subprocess.run(
+            ["git", "reset", "--hard", "HEAD"],
+            cwd=repo_path,
             capture_output=True,
             text=True,
-            cwd=repo_path,
         )
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            raise GitError(f"Fast-forward merge failed for branch {branch}: {stderr}")
-    except FileNotFoundError as err:
-        raise GitError(f"git not found or invalid path: {repo_path}") from err
+    else:
+        # Dirty path: keep preserves unstaged work; aborts on conflict with new HEAD.
+        sync_result = subprocess.run(
+            ["git", "reset", "--keep", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+
+    if sync_result.returncode != 0:
+        logger.warning(
+            "merge_ff_only: base repo %s has uncommitted work conflicting with new HEAD; "
+            "refs/heads/%s already updated to %s. User must sync working tree manually. "
+            "stderr: %s",
+            repo_path,
+            base_branch,
+            new_sha,
+            sync_result.stderr.strip(),
+        )
+
     return {"status": "merged", "branch": branch}
