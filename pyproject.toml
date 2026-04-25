@@ -19,6 +19,13 @@ plugins = [
     "gitpython>=3.1",
     "httpx>=0.28",
     "claude-hook-transport",
+    # confluence
+    "markdownify>=0.11",
+    "beautifulsoup4>=4.12",
+    # router
+    "packaging>=24.0",
+    # wiki
+    "rank-bm25>=0.2.2",
 ]
 
 [tool.hatch.build.targets.wheel]
