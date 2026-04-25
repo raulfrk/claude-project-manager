@@ -298,7 +298,32 @@ def _reinstall(args) -> int:
 
     # Run wizard after reinstall if configs were reset
     if not args.skip_wizard:
-        run_wizard(plugins, skip=False)
+        run_wizard(plugins, skip=False, args=args)
+
+    # Belt-and-suspenders: when --skip-wizard bypasses the wizard's
+    # venv-creation step, fire ensure_shared_venv directly so the
+    # shared environment still exists. Mirrors _install.
+    if args.skip_wizard:
+        from installer.shared_venv import ensure_shared_venv, marketplaces_dir
+
+        target = marketplaces_dir()
+        if target.is_dir():
+            try:
+                ensure_shared_venv(target)
+            except InstallerError as exc:
+                console.print(
+                    f"[yellow]Failed to create shared venv at {target}: {exc}[/yellow]"
+                )
+        if getattr(args, "local_marketplace", False):
+            from installer.local_marketplace import LOCAL_CLONE_DIR
+
+            if LOCAL_CLONE_DIR.is_dir():
+                try:
+                    ensure_shared_venv(LOCAL_CLONE_DIR)
+                except InstallerError as exc:
+                    console.print(
+                        f"[yellow]Failed to create shared venv at {LOCAL_CLONE_DIR}: {exc}[/yellow]"
+                    )
 
     succeeded = sum(1 for ok in results.values() if ok)
     failed_count = sum(1 for ok in results.values() if not ok)

@@ -406,7 +406,7 @@ class TestReinstall:
         mock_detect.return_value = InstallState(installed_plugins=["proj"])
         args = _make_args(reinstall=True, skip_wizard=False)
         _reinstall(args)
-        mock_wizard.assert_called_once_with(["proj"], skip=False)
+        mock_wizard.assert_called_once_with(["proj"], skip=False, args=args)
 
     @patch("installer.main.get_installed_plugins", return_value=["proj"])
     @patch("installer.main.Confirm")
@@ -619,6 +619,117 @@ def test_reinstall_prunes_stale_cache_before_install(monkeypatch, tmp_path, caps
     assert not (cache / "proj" / "4.0.0").exists()
     # Orphan removed
     assert not (cache / "sandbox").exists()
+
+
+class TestReinstallSharedVenv:
+    """_reinstall must finalize the shared venv just like _install."""
+
+    @patch("installer.shared_venv.ensure_shared_venv")
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing")
+    @patch("installer.main.run_wizard")
+    def test_skip_wizard_still_creates_shared_venv(
+        self,
+        _wizard,
+        mock_detect,
+        _disp,
+        _gip,
+        _scan,
+        _remove_mp,
+        _add_mp,
+        _install_plugin,
+        mock_ensure,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--skip-wizard reinstall must fire ensure_shared_venv directly,
+        mirroring _install's belt-and-suspenders block."""
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
+        mock_detect.return_value = InstallState(installed_plugins=["proj"])
+
+        args = _make_args(reinstall=True, skip_wizard=True)
+        result = _reinstall(args)
+
+        assert result == EXIT_SUCCESS
+        mock_ensure.assert_any_call(target)
+
+    @patch("installer.shared_venv.ensure_shared_venv")
+    @patch("installer.main.ensure_local_clone")
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing")
+    @patch("installer.main.run_wizard")
+    def test_skip_wizard_local_marketplace_creates_local_clone_venv(
+        self,
+        _wizard,
+        mock_detect,
+        _disp,
+        _gip,
+        _scan,
+        _remove_mp,
+        _add_mp,
+        _install_plugin,
+        mock_ensure_local,
+        mock_ensure_venv,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--skip-wizard --local-marketplace reinstall must build venv at LOCAL_CLONE_DIR too."""
+
+        target_mp = tmp_path / "mp"
+        target_mp.mkdir()
+        target_local = tmp_path / "local-clone"
+        target_local.mkdir()
+
+        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target_mp)
+        monkeypatch.setattr("installer.local_marketplace.LOCAL_CLONE_DIR", target_local)
+        mock_ensure_local.return_value = target_local
+        mock_detect.return_value = InstallState(installed_plugins=["proj"])
+
+        args = _make_args(reinstall=True, skip_wizard=True, local_marketplace=True)
+        _reinstall(args)
+
+        called_targets = {call.args[0] for call in mock_ensure_venv.call_args_list}
+        assert target_mp in called_targets
+        assert target_local in called_targets
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing")
+    @patch("installer.main.run_wizard")
+    def test_wizard_path_passes_args(
+        self,
+        mock_wizard,
+        mock_detect,
+        _disp,
+        _gip,
+        _scan,
+        _remove_mp,
+        _add_mp,
+        _install_plugin,
+    ):
+        """run_wizard must receive args=args so wizard's venv step sees --local-marketplace."""
+        mock_detect.return_value = InstallState(installed_plugins=["proj"])
+        args = _make_args(reinstall=True, skip_wizard=False, local_marketplace=True)
+        _reinstall(args)
+        mock_wizard.assert_called_once()
+        kwargs = mock_wizard.call_args.kwargs
+        assert kwargs.get("args") is args
 
 
 # ===================================================================
