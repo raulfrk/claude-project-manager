@@ -295,6 +295,166 @@ class TestSharedVenvFinalize:
         assert local in called_targets
 
 
+class TestKillStaleOrdering:
+    """Stale Claude sessions must be killed BEFORE the shared venv rebuild.
+
+    Old Claude Code processes still running with the previous plugin code
+    hold open handles to the old shared venv. uv sync would replace files
+    underneath them, leaving the old session in a half-stale state until
+    restart. The kill must come first.
+    """
+
+    def _assert_kill_before_finalize(self, parent_mock):
+        """Verify prompt_kill_stale_sessions was called before
+        _finalize_shared_venv on the shared parent mock."""
+        names = [c[0] for c in parent_mock.mock_calls]
+        try:
+            kill_idx = names.index("prompt_kill_stale_sessions")
+            finalize_idx = names.index("_finalize_shared_venv")
+        except ValueError as exc:
+            raise AssertionError(f"Expected both calls; got names={names}") from exc
+        assert kill_idx < finalize_idx, (
+            f"prompt_kill_stale_sessions (call #{kill_idx}) must precede "
+            f"_finalize_shared_venv (call #{finalize_idx}); calls={names}"
+        )
+
+    def test_run_install_kills_before_finalize(self) -> None:
+        from unittest.mock import MagicMock as _MagicMock
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(state=None, proceed=True),
+            ),
+            patch(
+                "installer.flow.installer_flow.check_marketplace_registered",
+                return_value=True,
+            ),
+            patch(
+                "installer.flow.installer_flow.build_plugin_status_list",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_plugin_actions",
+                return_value=[("proj", "install")],
+            ),
+            patch(
+                "installer.flow.installer_flow._name_to_id_map",
+                return_value={"proj": "proj@claude-project-manager"},
+            ),
+            patch(
+                "installer.flow.installer_flow.compute_hooks_diff",
+                return_value=[],
+            ),
+            patch(
+                "installer.flow.installer_flow.review_hooks_diff",
+                return_value={"apply": [], "remove": []},
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+            patch(
+                "installer.flow.installer_flow.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_shared_venv",
+                parent._finalize_shared_venv,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("install", _Args(), console)
+        self._assert_kill_before_finalize(parent)
+
+    def test_run_reinstall_kills_before_finalize(self) -> None:
+        from unittest.mock import MagicMock as _MagicMock
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                    mode_options={"reset_configs": False},
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.get_installed_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.get_available_plugins",
+                return_value=["proj@claude-project-manager"],
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch(
+                "installer.flow.installer_flow.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_shared_venv",
+                parent._finalize_shared_venv,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("reinstall", _Args(), console)
+        self._assert_kill_before_finalize(parent)
+
+    def test_run_update_kills_before_finalize(self) -> None:
+        """_run_update was missing kill_stale entirely; this asserts it now
+        fires AND fires before the venv build."""
+        from unittest.mock import MagicMock as _MagicMock
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.installer_flow.pre_install_phase",
+                return_value=PreInstallResult(
+                    state=MagicMock(installed_plugins=["proj"]),
+                    proceed=True,
+                ),
+            ),
+            patch(
+                "installer.flow.installer_flow.compare_versions",
+                return_value=[("proj", "1.0.0", "1.0.1")],
+            ),
+            patch(
+                "installer.flow.installer_flow.select_updates",
+                return_value=["proj"],
+            ),
+            patch(
+                "installer.flow.installer_flow._name_to_id_map",
+                return_value={"proj": "proj@claude-project-manager"},
+            ),
+            patch(
+                "installer.flow.installer_flow.execute_install_plan",
+                return_value=_ok(),
+            ),
+            patch("installer.flow.installer_flow.cleanup_orphaned_plugin_caches"),
+            patch("installer.flow.installer_flow.ensure_managed_section"),
+            patch(
+                "installer.flow.installer_flow.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_shared_venv",
+                parent._finalize_shared_venv,
+            ),
+        ):
+            console = Console(width=80, force_terminal=False, no_color=True)
+            run_installer_flow("update", _Args(), console)
+        self._assert_kill_before_finalize(parent)
+
+
 # ── Uninstall ──────────────────────────────────────────────────────────────
 
 
