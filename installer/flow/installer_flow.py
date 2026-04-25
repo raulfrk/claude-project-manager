@@ -28,6 +28,7 @@ from installer.flow.install_plan import (
     InstallPlan,
     execute_install_plan,
 )
+from installer.flow.kill_stale import prompt_kill_stale_sessions
 from installer.flow.integration_config import (
     configure_confluence,
     configure_jira,
@@ -451,6 +452,8 @@ def _run_install(args: Any, console: Console) -> int:
     )
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=[], console=console)
+    if exit_code == 0:
+        prompt_kill_stale_sessions(console)
     return exit_code
 
 
@@ -526,6 +529,8 @@ def _run_reinstall(
     )
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=orphans, console=console)
+    if exit_code == 0:
+        prompt_kill_stale_sessions(console)
     if mode_options.get("reset_configs"):
         _reset_installer_configs(console)
     return exit_code
