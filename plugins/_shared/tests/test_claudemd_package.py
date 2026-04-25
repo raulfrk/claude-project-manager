@@ -266,3 +266,26 @@ def test_managed_section_contains_revdiff_rule():
         "falls back silently" in claudemd.MANAGED_SECTION
         or "fall back silently" in claudemd.MANAGED_SECTION
     )
+
+
+def test_managed_section_contains_research_synthesis_rule():
+    """Rule 25: research-synthesis guidance bullet is present in MANAGED_SECTION."""
+    # Title present
+    assert "Research synthesis for brainstorm/spec/plan work" in claudemd.MANAGED_SECTION
+    # Required order: wiki → code → web
+    assert "/wiki:query" in claudemd.MANAGED_SECTION
+    # Inline gating check
+    assert 'enabledPlugins["wiki@*"]' in claudemd.MANAGED_SECTION
+    # Code research step
+    assert "Explore" in claudemd.MANAGED_SECTION
+    # Web research step
+    assert "WebSearch" in claudemd.MANAGED_SECTION
+    assert "WebFetch" in claudemd.MANAGED_SECTION
+    # Guidance framing (not mandate)
+    assert "Guidance, not mandate" in claudemd.MANAGED_SECTION
+    # Concrete example present
+    assert "brainstorming a new plugin" in claudemd.MANAGED_SECTION
+    # Rule 25 is placed AFTER rule 24 (mid-execution checkpoint rhythm)
+    rule24_pos = claudemd.MANAGED_SECTION.index("Mid-execution checkpoint rhythm")
+    rule25_pos = claudemd.MANAGED_SECTION.index("Research synthesis for brainstorm/spec/plan work")
+    assert rule24_pos < rule25_pos, "rule 25 must appear after rule 24"
