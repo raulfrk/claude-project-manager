@@ -1,7 +1,7 @@
 ---
 name: lint
 description: Run Tier-1 + Tier-2 lint on wiki. Tier-1: orphans / broken links / section refs / category violations / stale / schema / duplicates. Tier-2: contradictions / deprecation / missing cross-refs / category clusters (LLM-driven). Interactive fix prompts per finding. Use `--tier=1|2|all`.
-allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion, Task, TeamCreate, Read
+allowed-tools: mcp__plugin_wiki_wiki__wiki_lint_orphans, mcp__plugin_wiki_wiki__wiki_lint_broken_links, mcp__plugin_wiki_wiki__wiki_lint_broken_section_refs, mcp__plugin_wiki_wiki__wiki_lint_category_violations, mcp__plugin_wiki_wiki__wiki_lint_stale, mcp__plugin_wiki_wiki__wiki_lint_schema, mcp__plugin_wiki_wiki__wiki_lint_duplicates, mcp__plugin_wiki_wiki__wiki_page_write, mcp__plugin_wiki_wiki__wiki_page_delete, mcp__plugin_wiki_wiki__wiki_page_get, mcp__plugin_wiki_wiki__wiki_log_append, AskUserQuestion, Task, TeamCreate, Read, Bash, Glob
 argument-hint: "[--tier=1|2|all]"
 ---
 

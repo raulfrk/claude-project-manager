@@ -340,6 +340,19 @@ def wiki_lint_schema() -> str:
     return json.dumps({"violations": violations})
 
 
+# SYNC CONTRACT (todos 730 + Batch A validation):
+# The functions below are the canonical reference impl of the section-map drift
+# algorithm. The PRODUCTION drift check at /wiki:lint runtime is performed by
+# the LLM subagent dispatched per `plugins/wiki/skills/lint/references/tier2-section-map-drift.md`,
+# which re-implements the same algorithm in prose. Tests pin THIS impl; nothing
+# pins the prose. If you change the algorithm here (anchor regex, sentinel
+# semantics, output kinds), you MUST also update the prose in the reference doc
+# above — and vice versa. Two sources of truth = drift over time.
+#
+# Why we keep both: the Python is testable + machine-checkable; the prose is
+# what the runtime LLM actually executes. Promoting one to the other is a
+# larger refactor (todo 736 follow-up — investigate parallel-orchestration
+# quality recipe).
 _TEMPLATE_START_RE = re.compile(r"<!--\s*session-template-start\s*-->")
 _TEMPLATE_END_RE = re.compile(r"<!--\s*session-template-end\s*-->")
 _TEMPLATE_H2_RE = re.compile(r"^## (.+)$")
