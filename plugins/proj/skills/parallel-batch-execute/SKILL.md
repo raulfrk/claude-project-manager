@@ -51,4 +51,51 @@ Outputs: N spec docs + N plan docs committed before Phase 2.
 
 No language/framework setup (deps, lockfiles) -> implementer handles in Phase 3. Skill stays project-agnostic.
 
-<!-- Sections to fill: Phase 3, Phase 4, Phase 5, Cross-refs -->
+### Phase 3 — Parallel execution
+
+Each impl applies `superpowers:subagent-driven-development` per-task flow. Orchestrator parallelizes across worktrees.
+
+**Override note**: subagent-driven-development "no parallel impl" red flag applies to shared-state conflicts. Per-todo isolated worktrees + verified disjoint files -> safe (per CLAUDE.md rule 1; per [[parallel-impl-orchestration]] wiki recipe).
+
+#### 3.1 Implementer dispatch
+
+```
+N x Agent(...) calls in single message, run_in_background=true
+  - model: sonnet (orchestrator may upgrade per-todo to opus on user request)
+  - prompt: full per-todo plan inline (NEVER make subagent read plan file
+    — per superpowers:subagent-driven-development red flag)
+  - "ALL file edits + git ops MUST happen in worktree path: <path>"
+    (per managed rule 6)
+  - impl applies superpowers:test-driven-development inside task
+  - impl treats superpowers:verification-before-completion as DONE-gate
+```
+
+Status: `DONE` / `DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED`. Handle per superpowers:subagent-driven-development "Handling Implementer Status" section.
+
+#### 3.2 Q-routing — match superpowers (parent absorbs, escalate ambiguity)
+
+Full rubric: `references/implementer-q-routing.md`. Summary:
+
+- Impl Q -> impl pauses.
+- Orchestrator answers from spec/plan/ctx if confident.
+- Ambiguous OR contradicts user prefs -> queue into pending buffer.
+- Flush: buffer hits 4 OR all active impls blocked OR 30s since first Q.
+- Flush call: single `AskUserQuestion` (max 4 Qs per managed rule 4).
+- Relay user answers back to each blocked impl.
+
+Impls never proceed past Q without an answer.
+
+#### 3.3 Per-impl reviewer chain (parallel across workers)
+
+On `DONE`:
+
+1. invoke `superpowers:requesting-code-review` (spec compliance, haiku) -> ❌ -> re-dispatch impl; ✅ -> step 2.
+2. invoke `superpowers:requesting-code-review` (code quality, opus) -> ❌ -> re-dispatch impl; ✅ -> mark worker `REVIEW_PASSED`.
+
+Reviewer chains parallel across workers (disjoint worktrees -> no shared state). Re-review loops per-worker.
+
+#### 3.4 Phase 3 exit
+
+All N `REVIEW_PASSED` -> record SHAs per branch -> Phase 4. `REVIEW_PASSED` workers wait for slowest. Permanent `BLOCKED` -> `AskUserQuestion`: continue N-1 / abort batch / let user investigate.
+
+<!-- Sections to fill: Phase 4, Phase 5, Cross-refs -->
