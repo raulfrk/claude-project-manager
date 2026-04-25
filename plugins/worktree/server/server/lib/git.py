@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from server.lib.models import WorktreeEntry
@@ -378,8 +379,6 @@ def merge_ff_only(
 
     Raises GitError if not FF-mergeable or max retries exhausted.
     """
-    import time
-
     if worktree_path is None:
         # Legacy path: kept for backward-compat; no CAS protection.
         try:

@@ -403,7 +403,11 @@ def rebase_continue_worktree(path: str) -> str:
             if default_branch.returncode == 0 and default_branch.stdout.strip():
                 rebase_base_branch = default_branch.stdout.strip()
     except FileNotFoundError:
-        pass  # keep default; merge_ff_only will surface the error
+        logger.warning(
+            "rebase_continue_worktree: failed to read base branch from worktree config; "
+            "defaulting to 'dev'. If git is missing, merge_ff_only will surface the error."
+        )
+        # keep default; merge_ff_only will surface the error
 
     # Fast-forward merge into base repo
     try:

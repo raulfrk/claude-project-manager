@@ -1184,3 +1184,261 @@ class TestRebaseContinue:
             pytest.raises(GitError),
         ):
             rebase_continue("/some/worktree")
+
+
+# ---------------------------------------------------------------------------
+# merge_ff_only CAS unit tests (todo 735)
+# ---------------------------------------------------------------------------
+
+
+def _init_repo_on_branch(path: Path, branch: str = "dev") -> None:
+    """Create a git repo at *path* with one initial commit on *branch*."""
+    subprocess.run(
+        ["git", "-c", f"init.defaultBranch={branch}", "init", "-q", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "test"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    (path / "init.txt").write_text("init\n")
+    subprocess.run(["git", "add", "init.txt"], cwd=str(path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init", "-q"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+
+
+class TestMergeFFOnlyCAS:
+    """Unit tests for the CAS code path in merge_ff_only (todo 735)."""
+
+    def test_cas_happy_path_single_thread(self, tmp_path: Path) -> None:
+        """Single-threaded happy path through CAS code.
+
+        Set up base + 1 worktree with a FF-mergeable commit; call merge_ff_only.
+        Verify ref advanced, working tree synced.
+        """
+        base = tmp_path / "base"
+        _init_repo_on_branch(base, "dev")
+
+        wt = tmp_path / "wt" / "feat-A"
+        wt.parent.mkdir(exist_ok=True)
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "feat-A", str(wt), "dev", "-q"],
+            cwd=str(base),
+            check=True,
+            capture_output=True,
+        )
+        (wt / "a.txt").write_text("feat-A work\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=str(wt), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feat-A change", "-q"],
+            cwd=str(wt),
+            check=True,
+            capture_output=True,
+        )
+
+        result = merge_ff_only(str(base), "feat-A", worktree_path=str(wt), base_branch="dev")
+        assert result == {"status": "merged", "branch": "feat-A"}
+
+        # dev ref must now point to the former feat-A tip
+        dev_sha = subprocess.run(
+            ["git", "rev-parse", "refs/heads/dev"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        feat_sha = subprocess.run(
+            ["git", "rev-parse", "feat-A"],
+            cwd=str(wt),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert dev_sha == feat_sha, "dev ref must equal feat-A tip after merge"
+
+        # base working tree must have the new file
+        assert (base / "a.txt").exists(), "a.txt must appear in base working tree after merge"
+
+    def test_cas_non_ff_rejected(self, tmp_path: Path) -> None:
+        """Non-FF branch raises GitError.
+
+        Set up base + worktree where the worktree's branch diverged
+        (both base dev and the branch have exclusive commits).
+        """
+        base = tmp_path / "base"
+        _init_repo_on_branch(base, "dev")
+
+        # Advance dev so feat-A is no longer a FF onto it
+        (base / "dev-extra.txt").write_text("dev-only\n")
+        subprocess.run(
+            ["git", "add", "dev-extra.txt"], cwd=str(base), check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "dev extra", "-q"],
+            cwd=str(base),
+            check=True,
+            capture_output=True,
+        )
+
+        # Branch feat-A from the original init commit (not from current dev tip)
+        init_sha = subprocess.run(
+            ["git", "rev-parse", "dev~1"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        wt = tmp_path / "wt" / "feat-A"
+        wt.parent.mkdir(exist_ok=True)
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "feat-A", str(wt), init_sha, "-q"],
+            cwd=str(base),
+            check=True,
+            capture_output=True,
+        )
+        (wt / "a.txt").write_text("feat-A work\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=str(wt), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feat-A change", "-q"],
+            cwd=str(wt),
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(GitError, match="not a fast-forward"):
+            merge_ff_only(str(base), "feat-A", worktree_path=str(wt), base_branch="dev")
+
+    def test_legacy_2arg_still_works(self, tmp_path: Path) -> None:
+        """Legacy 2-arg call (no worktree_path) still uses old git merge --ff-only path."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        (repo / "feature.txt").write_text("feature\n")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit", "-q"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+
+        # Legacy 2-arg form: no worktree_path
+        result = merge_ff_only(str(repo), "feature")
+        assert result == {"status": "merged", "branch": "feature"}
+        assert (repo / "feature.txt").exists()
+
+    def test_merge_ff_only_concurrent_cas(self, tmp_path: Path) -> None:
+        """Regression test for todo 735: concurrent merge_ff_only CAS must not corrupt state.
+
+        Spawns N=4 threads calling merge_ff_only against the same base repo.
+        Each branch is independently FF-mergeable from the original dev tip but
+        they cannot all merge in parallel — exactly one wins the CAS; the others
+        receive a clean GitError (dev tip moved, not FF anymore).
+
+        The invariant being tested is NOT "all succeed" — it is:
+          1. No GitError is suppressed or causes corrupt working-tree state.
+          2. The base repo working tree has NO unstaged content after all threads finish.
+          3. Exactly 1 merge succeeded; exactly 3 raised GitError cleanly.
+
+        Pre-fix: the losing `git merge --ff-only` would partially write files to the
+        base repo's working tree before aborting, leaving unstaged sibling-file leakage.
+        Post-fix: the CAS never touches the working tree on failure (update-ref is
+        atomic and the sync only runs on CAS success), so the base repo stays clean.
+        """
+        import concurrent.futures
+
+        base = tmp_path / "base"
+        _init_repo_on_branch(base, "dev")
+
+        # 4 independent branches, each adding a distinct file — no file overlaps.
+        branches = ["feat-A", "feat-B", "feat-C", "feat-D"]
+        files = {"feat-A": "a", "feat-B": "b", "feat-C": "c", "feat-D": "d"}
+        worktrees: list[tuple[Path, str]] = []
+
+        for branch in branches:
+            wt = tmp_path / "wt" / branch
+            wt.parent.mkdir(exist_ok=True)
+            subprocess.run(
+                ["git", "worktree", "add", "-b", branch, str(wt), "dev", "-q"],
+                cwd=str(base),
+                check=True,
+                capture_output=True,
+            )
+            f = files[branch]
+            (wt / f"{f}.txt").write_text(f"{f} base\nmodified by {branch}\n")
+            subprocess.run(["git", "add", f"{f}.txt"], cwd=str(wt), check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"{branch} change", "-q"],
+                cwd=str(wt),
+                check=True,
+                capture_output=True,
+            )
+            worktrees.append((wt, branch))
+
+        # Spawn 4 threads concurrently.
+        successes: list[dict[str, str]] = []
+        errors: list[str] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            futures = [
+                ex.submit(merge_ff_only, str(base), branch, str(wt), "dev")
+                for wt, branch in worktrees
+            ]
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    successes.append(fut.result())
+                except GitError as e:
+                    errors.append(str(e))
+
+        # Exactly 1 must succeed; the other 3 must have raised clean GitErrors.
+        assert len(successes) == 1, f"expected exactly 1 merge to succeed, got: {successes}"
+        assert len(errors) == 3, f"expected exactly 3 clean GitErrors, got: {errors}"
+
+        # KEY invariant: base repo must have NO unstaged sibling-file leftovers.
+        # Pre-fix: losing `git merge --ff-only` partially applied sibling files.
+        # Post-fix: CAS never touches working tree on failure → always clean.
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert status.stdout == "", f"base repo has unstaged content post-merge: {status.stdout!r}"
+
+        # dev must have advanced exactly 1 commit past init (= 2 total).
+        log = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        commit_count = len(log.stdout.strip().split("\n"))
+        assert commit_count == 2, (
+            f"expected 2 commits on dev (init + 1 winner), got {commit_count}: {log.stdout}"
+        )
