@@ -164,7 +164,13 @@ def _install(args) -> int:
 
     prompt_kill_stale_sessions(console)
 
-    # 6. Run setup wizard now that plugins are installed and marketplace
+    # 6. Reconcile ~/.claude/settings.json MCP allow rules with selected
+    # plugins. Runs before the wizard (which builds the shared venv).
+    from installer.flow.installer_flow import _finalize_sandbox
+
+    _finalize_sandbox(args, selected, console)
+
+    # 7. Run setup wizard now that plugins are installed and marketplace
     # dir exists (so wizard can create the shared venv).
     run_wizard(selected, skip=args.skip_wizard, args=args)
 
@@ -193,7 +199,7 @@ def _install(args) -> int:
                         f"[yellow]Failed to create shared venv at {LOCAL_CLONE_DIR}: {exc}[/yellow]"
                     )
 
-    # 7. Summary
+    # 8. Summary
     n_installed = sum(1 for v in results.values() if v == "installed")
     n_failed = sum(1 for v in results.values() if v == "failed")
     n_skipped = sum(1 for v in results.values() if v == "skipped")
@@ -307,6 +313,12 @@ def _reinstall(args) -> int:
     from installer.flow.kill_stale import prompt_kill_stale_sessions
 
     prompt_kill_stale_sessions(console)
+
+    # Reconcile ~/.claude/settings.json MCP allow rules with selected
+    # plugins.
+    from installer.flow.installer_flow import _finalize_sandbox
+
+    _finalize_sandbox(args, plugins, console)
 
     # Run wizard after reinstall if configs were reset
     if not args.skip_wizard:
