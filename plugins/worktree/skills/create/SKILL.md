@@ -1,7 +1,7 @@
 ---
 name: create
 description: Create a git worktree from a registered base repository. Use when the user says "create a worktree", "new worktree", or "worktree for branch X".
-allowed-tools: mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_sandbox_sandbox__sandbox_add_write_path
+allowed-tools: mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__wt_create, mcp__plugin_proj_proj__sandbox_sandbox_add_write_path
 argument-hint: "[repo-label] [branch-name]"
 ---
 
@@ -19,7 +19,7 @@ Create git worktree. Args: $ARGUMENTS (opt — repo label and/or branch name)
  - "Custom path? [blank for default ~/worktrees/<repo>/<branch>]"
 **3.** `mcp__plugin_worktree_worktree__wt_create` w/ provided vals.
  Error → display msg, stop.
-**4.** `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` w/ new worktree path for read/edit perms.
+**4.** `mcp__plugin_proj_proj__sandbox_sandbox_add_write_path` w/ new worktree path for read/edit perms.
  Sandbox server unavailable → skip, continue.
 **5.** Show created worktree path; confirm success.
 

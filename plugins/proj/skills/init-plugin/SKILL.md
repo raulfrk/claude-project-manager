@@ -3,7 +3,7 @@
 ---
 name: init-plugin
 desc: First-time setup wizard for proj plugin. Run this before via any other /proj:* commands. Creates ~/.claude/proj.yaml with your preferences.
-allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_sandbox_sandbox__sandbox_add_write_path, mcp__plugin_sandbox_sandbox__sandbox_list, mcp__plugin_sandbox_sandbox__sandbox_batch_setup, mcp__plugin_sandbox_sandbox__sandbox_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__zoxide_query, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
+allowed-tools: Read, mcp__proj__config_init, mcp__proj__config_load, mcp__proj__config_update, mcp__plugin_proj_proj__sandbox_sandbox_add_write_path, mcp__plugin_proj_proj__sandbox_sandbox_list, mcp__plugin_proj_proj__sandbox_sandbox_batch_setup, mcp__plugin_proj_proj__sandbox_sandbox_set_deny, Bash, mcp__proj__tracking_git_flush, mcp__plugin_router_router__router_list_tool, mcp__plugin_router_router__router_register_tool, mcp__plugin_worktree_worktree__wt_list_repos, mcp__plugin_worktree_worktree__zoxide_query, mcp__plugin_todoist_todoist__todoist_find_projects, mcp__plugin_trello_trello__list_boards, mcp__plugin_jira_jira__jira_list_projects, mcp__plugin_trello_trello__trello_init, mcp__plugin_jira_jira__jira_init, mcp__plugin_todoist_todoist__todoist_init
 
 
 > **Output**: caveman ultra. Drop articles, abbrev, fragments, arrows. Code/tables unchanged.
@@ -30,7 +30,7 @@ Load each config file via `Read` on absolute path, parse w/ `yaml.safe_load`. On
 2. **todoist_config** — Read `~/.claude/todoist.yaml`: missing → `None` (silent); parse fail → `None` + warn once
 3. **trello_config** — Read `~/.claude/trello.yaml`: same pattern
 4. **jira_config** — Read `~/.claude/jira.yaml`: same pattern
-5. **sandbox_state** — Call `mcp__plugin_sandbox_sandbox__sandbox_list` w/ `scope="user"`, `format="json"`:
+5. **sandbox_state** — Call `mcp__plugin_proj_proj__sandbox_sandbox_list` w/ `scope="user"`, `format="json"`:
  - Success → parse JSON, store as `sandbox_state`
  - Fail → `sandbox_state = None` (silent; Step 2 handles detection)
 
@@ -61,7 +61,7 @@ Call `mcp__proj__config_load`. If configured:
 Auto-detect plugins by calling lightweight MCP tools. Do NOT ask user — detect programmatically.
 
 Check each plugin:
-- **sandbox**: `mcp__plugin_sandbox_sandbox__sandbox_list` w/ `scope="user"`, `format="json"`
+- **sandbox**: `mcp__plugin_proj_proj__sandbox_sandbox_list` w/ `scope="user"`, `format="json"`
 - **worktree**: `mcp__plugin_worktree_worktree__wt_list_repos`
 - **router**: `mcp__plugin_router_router__router_list_tool`
 - **todoist**: `mcp__plugin_todoist_todoist__todoist_find_projects` w/ `name=""`
@@ -238,7 +238,7 @@ existing_write = set(sandbox_state.get("write_paths", [])) if sandbox_state else
 ```
 
 ### 7a. MCP auto-allow
-Build server list, call `mcp__plugin_sandbox_sandbox__sandbox_batch_setup(mcp_servers=[...])` once:
+Build server list, call `mcp__plugin_proj_proj__sandbox_sandbox_batch_setup(mcp_servers=[...])` once:
 - Always: `"claude_ai_Excalidraw"`, `"claude_ai_Mermaid_Chart"`
 - `auto_allow_mcps: true` → also: `"plugin_proj_proj"`, `"plugin_sandbox_sandbox"`
 - + worktree detected: `"plugin_worktree_worktree"`
@@ -247,12 +247,12 @@ Build server list, call `mcp__plugin_sandbox_sandbox__sandbox_batch_setup(mcp_se
 - + trello enabled: `"plugin_trello_trello"`
 - + jira enabled: `"plugin_jira_jira"`
 - Filter out servers w/ wildcard rule `f"mcp__{server}__*"` already in `existing_allow` — report each as `"<rule> already present, skipping"`. Call only if filtered list non-empty.
-- `zoxide_integration: true` + `"Bash(zoxide *)"` not in `existing_allow` → `mcp__plugin_sandbox_sandbox__sandbox_add_write_path` w/ `entry="Bash(zoxide *)"`. (zoxide tools are part of worktree plugin)
+- `zoxide_integration: true` + `"Bash(zoxide *)"` not in `existing_allow` → `mcp__plugin_proj_proj__sandbox_sandbox_add_write_path` w/ `entry="Bash(zoxide *)"`. (zoxide tools are part of worktree plugin)
 
 ### 7b. Verify MCP rules
-Re-read sandbox state via `mcp__plugin_sandbox_sandbox__sandbox_list` w/ `scope="user"`, `format="json"` (fresh; 7a may have mutated).
+Re-read sandbox state via `mcp__plugin_proj_proj__sandbox_sandbox_list` w/ `scope="user"`, `format="json"` (fresh; 7a may have mutated).
 Parse `permissions_allow`.
-- `sandbox_integration: true` → check `mcp__plugin_sandbox_sandbox__*` — warn if missing
+- `sandbox_integration: true` → check `mcp__plugin_proj_proj__sandbox_*` — warn if missing
 - `worktree_integration: true` → check `mcp__plugin_worktree_worktree__*` — warn if missing
 
 ### 7c. Sandbox setup
