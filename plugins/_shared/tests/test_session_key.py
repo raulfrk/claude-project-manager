@@ -52,13 +52,37 @@ class TestGetClaudeSessionKey:
     (CLAUDE_CODE_EXECPATH realpath) — no cmdline regex, no marker files.
     """
 
-    def test_falls_back_to_own_pid_when_execpath_unset(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_falls_back_to_ppid_when_execpath_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Bug 779: when EXECPATH is unset (plugin MCP server context), the
+        resolver returns os.getppid(), not os.getpid(). MCP servers' ppid IS
+        the long-lived claude-bin that owns the session, so ppid is the same
+        pid the EXECPATH walk would resolve for a hook subprocess. Both code
+        paths converge on a single proj-session.yaml slot.
+        """
         from session_key.session_key import get_claude_session_key
 
         monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
-        assert get_claude_session_key() == str(os.getpid())
+        assert get_claude_session_key() == str(os.getppid())
+
+    def test_mcp_server_resolution_uses_ppid_when_execpath_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bug 779 regression: simulate plugin MCP server context.
+
+        Claude Code launches plugins via ``.mcp.json`` -> ``bash start.sh`` ->
+        ``exec python -m server.main``. The exec preserves the bash pid+ppid,
+        so the python process's ppid IS the spawning claude-bin. CLAUDE_CODE_
+        EXECPATH is NOT propagated to plugin MCP subprocesses (only to hook
+        subprocesses). Verify resolver returns ppid in that scenario, matching
+        what a hook subprocess would resolve via the EXECPATH walk.
+        """
+        from session_key.session_key import get_claude_session_key
+
+        # MCP server context: no EXECPATH, ppid is the (mocked) parent claude.
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
+        monkeypatch.setattr(os, "getppid", lambda: 186785)
+
+        assert get_claude_session_key() == "186785"
 
     def test_direct_parent_match_returns_ppid(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the only matching ancestor IS the immediate parent, resolver

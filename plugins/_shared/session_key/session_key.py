@@ -56,12 +56,22 @@ def get_claude_session_key() -> str:
     outermost. The ``test_outermost_match_*`` regression tests pin this; if
     upstream ever inverts the order, those tests fail loud.
 
-    Falls back to ``os.getpid()`` when EXECPATH is unset (tests, non-Claude
-    environments) or no ancestor matches.
+    EXECPATH-unset fallback: returns ``os.getppid()``. This handles plugin MCP
+    servers, which Claude Code launches directly via ``.mcp.json`` ``command:
+    bash start.sh ...`` without propagating CLAUDE_CODE_EXECPATH (asymmetry
+    with hook subprocesses, where it IS set). The MCP server's parent IS the
+    long-lived claude-bin that owns the session, so ``getppid()`` returns the
+    same pid the EXECPATH walk would have returned for a hook subprocess.
+    For non-Claude contexts (tests run from a shell, standalone CLI), ppid is
+    the launcher — still a stable session-like key, just a different one.
+
+    Walk-failed fallback: ``os.getpid()`` when EXECPATH IS set but no ancestor
+    matches (anomaly — process tree was rewritten, or test mocks return an
+    empty/non-matching chain).
     """
     expected_raw = os.environ.get("CLAUDE_CODE_EXECPATH", "")
     if not expected_raw:
-        return str(os.getpid())
+        return str(os.getppid())
     expected = os.path.realpath(expected_raw)
 
     last_match: int | None = None
