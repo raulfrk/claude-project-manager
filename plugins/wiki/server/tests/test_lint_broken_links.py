@@ -47,6 +47,38 @@ class TestWikiLintBrokenLinks:
         # [[hooks]] resolves via alias → not broken
         assert not any(b["link"] == "hooks" for b in result["broken"])
 
+    async def test_inline_wikilink_with_display_alias_strips_alias(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """Bug fix: ``[[page|display alias]]`` previously linted as broken
+        because ``_collect_link_targets`` returned the raw match
+        ``page|display alias``, which then failed slug lookup. After the fix,
+        the alias is stripped → resolver looks up ``page`` only.
+        """
+        _write_page(wiki_setup["wiki_dir"], "concepts", "target")
+        _write_page(
+            wiki_setup["wiki_dir"],
+            "concepts",
+            "a",
+            "See [[target|the target page]] for details.",
+        )
+        result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_links"))
+        # Alias-stripped target resolves → not broken.
+        assert result["broken"] == []
+
+    async def test_inline_wikilink_with_alias_pointing_to_missing_page_still_broken(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """When the page is missing, ``[[ghost|nice name]]`` is still broken,
+        but the reported ``link`` field is the alias-stripped slug ``ghost``,
+        not the raw ``ghost|nice name``.
+        """
+        _write_page(wiki_setup["wiki_dir"], "concepts", "a", "See [[ghost|nice name]] for details.")
+        result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_links"))
+        broken = [b for b in result["broken"] if b["from"] == "a"]
+        assert len(broken) == 1
+        assert broken[0]["link"] == "ghost"
+
 
 @pytest.mark.asyncio
 class TestWikiLintBrokenSectionRefs:
@@ -101,4 +133,30 @@ class TestWikiLintBrokenSectionRefs:
             "See [[ghost#Overview]] for details.",
         )
         result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_section_refs"))
+        assert result["broken"] == []
+
+    async def test_section_ref_with_display_alias_strips_alias(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """Bug fix: ``[[page#section|display alias]]`` previously linted as a
+        broken section ref because ``_collect_link_targets`` returned the raw
+        match ``page#section|display alias``, which split into
+        section=``section|display alias``, never matching the heading. After
+        the fix, the alias is stripped before split → section lookup uses
+        ``section`` only.
+        """
+        _write_page(
+            wiki_setup["wiki_dir"],
+            "concepts",
+            "target",
+            "# Target\n\n## Overview\n\nbody",
+        )
+        _write_page(
+            wiki_setup["wiki_dir"],
+            "concepts",
+            "a",
+            "See [[target#Overview|the overview]] for details.",
+        )
+        result = json.loads(await call_tool(mcp_app, "wiki_lint_broken_section_refs"))
+        # Alias-stripped section resolves → not broken.
         assert result["broken"] == []

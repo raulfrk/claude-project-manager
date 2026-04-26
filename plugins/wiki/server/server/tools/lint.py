@@ -63,13 +63,23 @@ def _parse_iso_utc(value: str) -> datetime | None:
 
 
 def _collect_link_targets(fm: dict[str, Any], body: str) -> list[str]:
-    """Return all link refs from both frontmatter.links_to and inline [[page]] in body."""
+    """Return all link refs from both frontmatter.links_to and inline [[page]] in body.
+
+    For inline wikilinks, strips the optional display alias (``|alias``) so the
+    returned target is ``page`` or ``page#section`` only — never
+    ``page|alias`` or ``page#section|alias``. Mirrors the alias-stripping
+    behavior in ``links._parse_link``; before this fix, lint was reporting
+    every aliased wikilink as a broken link / broken section ref.
+    """
     targets: list[str] = []
     links_to: list[Any] = fm.get("links_to", []) or []  # type: ignore[assignment]
     for t in links_to:
         targets.append(str(t))
     for m in _WIKILINK_RE.finditer(body):
-        targets.append(m.group(1).strip().strip("[]").strip())
+        raw = m.group(1).strip().strip("[]").strip()
+        if "|" in raw:
+            raw = raw.split("|", 1)[0].strip()
+        targets.append(raw)
     return targets
 
 
