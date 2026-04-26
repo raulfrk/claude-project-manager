@@ -14,7 +14,8 @@
     "plugins/_shared/hook_transport",
     "plugins/_shared/sandbox",
     "plugins/_shared/session_key",
-    "plugins/_shared/claudemd"
+    "plugins/_shared/claudemd",
+    "plugins/_shared/scrubbing"
   ],
   "reportUnusedFunction": false,
   "reportUnknownMemberType": false,
