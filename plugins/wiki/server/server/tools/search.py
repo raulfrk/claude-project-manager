@@ -83,6 +83,12 @@ async def wiki_search_bm25(
         async with storage.wiki_lock(wiki_dir):
             idx = await anyio.to_thread.run_sync(bm25_mod.load_or_rebuild, wiki_dir)
 
+        # Per-hit page metadata reads run UNLOCKED below — search accepts a
+        # stale snapshot for performance. A concurrent wiki_page_write/_delete
+        # may produce snippets reflecting partially-written or just-deleted
+        # pages. Acceptable for search UX (eventual consistency is standard
+        # for search engines). If strict consistency is ever needed, hold
+        # wiki_lock across the _do_search call below.
         def _do_search() -> list[dict[str, Any]]:
             raw_hits = idx.query(
                 query, top_k=limit * 3 if (category or tags or scope_filter) else limit
