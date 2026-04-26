@@ -103,9 +103,8 @@ class TestReconcileSettings:
 
     def test_atomic_write_failure_leaves_settings_unchanged(self, isolated_settings: Path) -> None:
         """If save() fails mid-write, original settings.json must be intact."""
-        from sandbox.reconcile import reconcile_settings
-
         from sandbox import storage
+        from sandbox.reconcile import reconcile_settings
 
         _write_settings(isolated_settings, allow=["mcp__plugin_proj_proj__*"])
         original = isolated_settings.read_text()
