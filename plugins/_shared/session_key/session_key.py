@@ -28,44 +28,50 @@ _legacy_cleanup_done: bool = False
 
 
 def get_claude_session_key() -> str:
-    """Return the calling process's Claude Code ancestor pid as a string.
+    """Return the calling process's outermost Claude Code ancestor pid as a string.
 
-    Uses CLAUDE_CODE_EXECPATH (an env var Claude Code injects into every
-    subprocess) to identify the Claude binary by canonical exe path. Two
-    stages:
+    Walks ``psutil.Process().parents()`` and returns the OUTERMOST ancestor
+    whose canonical exe path matches CLAUDE_CODE_EXECPATH (the env var Claude
+    Code injects into every subprocess).
 
-    1. Fast path — os.getppid()'s exe matches EXECPATH (covers stdio MCP
-       servers Claude spawns directly).
-    2. General path — walk psutil.Process().parents(), return the first
-       whose exe path matches (covers hook subprocesses via bash/uv/etc.).
+    Outermost-match — not first-match — because Claude self-forks for hook
+    execution. The process tree under a SessionStart hook is::
 
-    Falls back to os.getpid() when EXECPATH is absent (tests, non-Claude
-    environments) — same fallback semantics as the previous resolver.
+        claude-bin (OUTER, long-lived, parents MCP servers)
+         └─ claude-bin (INNER, transient fork for hook execution)
+             └─ <shell or interpreter chain>
+                 └─ python (cli.py)
+
+    Both INNER and OUTER match EXECPATH. Only OUTER is authoritative for
+    session state — it parents the MCP servers that read what hooks write.
+    Returning INNER's pid (first-match) causes hooks and MCP servers to
+    disagree on the session key, breaking ``proj-session.yaml`` lookups.
+
+    No fast path: a single walk handles both MCP servers (one matching
+    ancestor) and hooks (multiple matching ancestors). ``parents()`` is
+    microseconds-fast.
+
+    Falls back to ``os.getpid()`` when EXECPATH is unset (tests, non-Claude
+    environments) or no ancestor matches.
     """
     expected_raw = os.environ.get("CLAUDE_CODE_EXECPATH", "")
-    if expected_raw:
-        expected = os.path.realpath(expected_raw)
+    if not expected_raw:
+        return str(os.getpid())
+    expected = os.path.realpath(expected_raw)
 
-        # Fast path: direct parent.
-        try:
-            ppid = os.getppid()
-            parent_exe = os.path.realpath(psutil.Process(ppid).exe())
-            if parent_exe == expected:
-                return str(ppid)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-            pass
+    last_match: int | None = None
+    try:
+        for ancestor in psutil.Process().parents():
+            try:
+                if os.path.realpath(ancestor.exe()) == expected:
+                    last_match = ancestor.pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                continue
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        pass
 
-        # General path: walk the ancestor chain.
-        try:
-            for ancestor in psutil.Process().parents():
-                try:
-                    if os.path.realpath(ancestor.exe()) == expected:
-                        return str(ancestor.pid)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-                    continue
-        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-            pass
-
+    if last_match is not None:
+        return str(last_match)
     return str(os.getpid())
 
 

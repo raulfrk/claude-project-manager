@@ -61,16 +61,24 @@ class TestGetClaudeSessionKey:
         assert get_claude_session_key() == str(os.getpid())
 
     def test_direct_parent_match_returns_ppid(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fast path: os.getppid()'s exe matches EXECPATH → return ppid."""
+        """When the only matching ancestor IS the immediate parent, resolver
+        returns ppid. (No fast path post-775; this exercises the walk path
+        with a single matching ancestor.)
+        """
         from session_key import session_key as sk
 
         monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
         monkeypatch.setattr(sk.os, "getppid", lambda: 1234)
 
-        fake_parent = _FakeProc(pid=1234, exe="/usr/bin/claude")
-        # psutil.Process(1234).exe() must return the EXECPATH for the fast path.
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: fake_parent)
-        # realpath is identity for these absolute paths
+        claude_parent = _FakeProc(pid=1234, exe="/usr/bin/claude")
+
+        # Process() (no arg) returns self whose parents() yields [claude_parent].
+        def fake_process(pid=None):
+            if pid == 1234:
+                return claude_parent
+            return _FakeProc(pid=os.getpid(), parents_=[claude_parent])
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
         monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
 
         assert sk.get_claude_session_key() == "1234"
@@ -147,9 +155,15 @@ class TestGetClaudeSessionKey:
         # EXECPATH is /usr/bin/claude (a symlink); realpath → /opt/claude/bin/claude.
         monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
         monkeypatch.setattr(sk.os, "getppid", lambda: 4242)
-        parent = _FakeProc(pid=4242, exe="/usr/bin/claude")  # also a symlink
 
-        monkeypatch.setattr(sk.psutil, "Process", lambda pid=None: parent)
+        claude_parent = _FakeProc(pid=4242, exe="/usr/bin/claude")  # also a symlink
+
+        def fake_process(pid=None):
+            if pid == 4242:
+                return claude_parent
+            return _FakeProc(pid=os.getpid(), parents_=[claude_parent])
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
 
         def fake_realpath(p: str) -> str:
             if p == "/usr/bin/claude":
@@ -196,6 +210,65 @@ class TestGetClaudeSessionKey:
         monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
 
         # Outermost match wins → OUTER.pid (200), NOT INNER.pid (100).
+        assert sk.get_claude_session_key() == "200"
+
+    def test_ppid_match_does_not_short_circuit_walk(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Confirms fast path is gone (post-775).
+
+        os.getppid() returns a pid whose exe matches EXECPATH AND there's a
+        deeper ancestor that ALSO matches. The deeper (outermost) ancestor
+        must win — proving resolver no longer short-circuits on ppid match.
+        """
+        from session_key import session_key as sk
+
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 100)  # immediate parent matches
+
+        inner_claude = _FakeProc(pid=100, exe="/usr/bin/claude")
+        outer_claude = _FakeProc(pid=200, exe="/usr/bin/claude")
+        launcher = _FakeProc(pid=1, exe="/sbin/init")
+
+        def fake_process(pid=None):
+            if pid == 100:
+                return inner_claude
+            return _FakeProc(
+                pid=os.getpid(),
+                parents_=[inner_claude, outer_claude, launcher],
+            )
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
+
+        # Even with ppid matching, outermost wins.
+        assert sk.get_claude_session_key() == "200"
+
+    def test_outermost_match_with_dead_pid_in_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One ancestor in the fork chain is dead (raises NoSuchProcess on
+        .exe()). Walk must continue and return the outermost LIVE match.
+        """
+        from session_key import session_key as sk
+
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 7000)
+
+        shell_proc = _FakeProc(pid=7000, exe="/bin/bash")
+        inner_claude = _FakeProc(pid=100, exe="/usr/bin/claude")
+        dead_proc = _FakeProc(pid=150, exe_raises=True)
+        outer_claude = _FakeProc(pid=200, exe="/usr/bin/claude")
+        launcher = _FakeProc(pid=1, exe="/sbin/init")
+
+        def fake_process(pid=None):
+            if pid == 7000:
+                return shell_proc
+            return _FakeProc(
+                pid=os.getpid(),
+                parents_=[shell_proc, inner_claude, dead_proc, outer_claude, launcher],
+            )
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
+
+        # Dead ancestor between INNER and OUTER does NOT short-circuit walk.
         assert sk.get_claude_session_key() == "200"
 
 
