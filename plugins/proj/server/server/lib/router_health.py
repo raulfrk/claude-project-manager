@@ -35,7 +35,8 @@ _DETAIL_ENUM = {
 
 
 def _cache_path() -> Path:
-    return Path(f"/tmp/claude-cpm-health-{os.getppid()}.cache")  # noqa: S108
+    tmpdir = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
+    return Path(f"{tmpdir}/claude-cpm-health-{os.getppid()}.cache")
 
 
 def _read_cache() -> tuple[bool, str] | None:

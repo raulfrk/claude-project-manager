@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,7 +46,8 @@ def register(app: FastMCP) -> None:
 
         filtered = filter_session_text(text)
         # Path documented in spec; consumer (/proj:save) deletes after ingest subagent returns.
-        tmp_path = Path("/tmp") / f"wiki-ingest-{uuid.uuid4()}.md"  # noqa: S108
+        tmpdir = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
+        tmp_path = Path(tmpdir) / f"wiki-ingest-{uuid.uuid4()}.md"
         try:
             tmp_path.write_text(filtered, encoding="utf-8")
         except OSError as exc:
