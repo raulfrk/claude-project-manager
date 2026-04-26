@@ -30,6 +30,19 @@ SOURCE RESOLUTION (step 0, before any fetch):
 - On ambiguity: use AskUserQuestion to disambiguate BEFORE fetching anything.
 - Log the resolved form as part of your JSON return value.
 
+EXCLUSION RULES — do NOT extract these as wiki entities:
+- Todo IDs or any "todo NNN" references.
+- In-flight/active/shipped/ready/blocked status framing.
+- Anything from a "## Todos Worked On" section if present.
+- Project-internal tracking state (NOTES.md heading conventions, todo-graph batches, etc.).
+
+DO extract:
+- Concepts, patterns, designs (architectural reuse value).
+- Decisions with rejected alternatives + trade-offs.
+- Pitfalls + technical insights (gotchas, surprising behavior).
+
+Commit SHAs and file paths within these categories are EVIDENCE — keep them.
+
 PROTOCOL:
 1. Resolve + read source using the matching reader.
 2. Extract 3-15 candidate entities per the `dedup-protocol.md` extraction rules.
