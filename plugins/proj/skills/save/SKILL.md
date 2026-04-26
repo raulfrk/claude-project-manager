@@ -1,7 +1,7 @@
 ---
 name: save
 description: Save session notes, reconcile git activity with todos, and update project context. Use when asked "save session", "proj:save", or at the end of a work session.
-allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__plugin_wiki_wiki__wiki_scope_detect, Task, Read, Bash, Write
+allowed-tools: mcp__proj__proj_session_context, mcp__proj__notes_append, mcp__proj__proj_git_reconcile_todos, mcp__proj__todo_complete, mcp__proj__claudemd_write, mcp__proj__tracking_git_flush, mcp__proj__proj_decision_log, mcp__proj__config_load, mcp__proj__wiki_ingest_filter_session, mcp__plugin_wiki_wiki__wiki_scope_detect, Task, Read, Bash, Write
 argument-hint: "[free-form session note]"
 ---
 
@@ -92,10 +92,13 @@ Save session ctx; reconcile git activity for active project.
    - Compute total word count of session file.
    - **Gate fail when ALL true**: Decisions bullets < `decisions_min` AND Insights bullets < `insights_min` AND word count < `word_count_min`.
    - Gate fail → log to console: `Wiki ingest skipped: trivial session (no decisions/insights, <{word_count_min} words).` Skip subagent dispatch. Continue to step 12.
-   - Gate pass → spawn forked subagent via `Task`:
-     - `subagent_type="general-purpose"`
-     - `description="Wiki ingest session file"`
-     - `prompt` = contents of `plugins/wiki/skills/ingest/references/subagent-prompt.md` (read via `Read`) w/ `{source}` = `session:<tracking_dir>/<name>/sessions/<filename>`, `{scope}` = `project:<name>` (from step 1), `{wiki_config}` = JSON of `~/.claude/wiki.yaml` + `~/.claude/wiki/config.yaml` (read via `Read`).
+   - Gate pass → pre-filter session file then spawn forked subagent:
+     - `mcp__proj__wiki_ingest_filter_session(session_path=<tracking_dir>/<name>/sessions/<filename>)` → parse JSON → on `status: "error"`: warn "Wiki ingest skipped: filter failed: <error>." + skip dispatch + continue to step 12. On `status: "filtered"`: capture `tmp_path`.
+     - Spawn forked subagent via `Task`:
+       - `subagent_type="general-purpose"`
+       - `description="Wiki ingest session file"`
+       - `prompt` = contents of `plugins/wiki/skills/ingest/references/subagent-prompt.md` (read via `Read`) w/ `{source}` = `session:<tmp_path>`, `{scope}` = `project:<name>` (from step 1), `{wiki_config}` = JSON of `~/.claude/wiki.yaml` + `~/.claude/wiki/config.yaml` (read via `Read`).
+     - On subagent return (success OR failure): `Bash(rm -f <tmp_path>)` to clean up the tmp file.
  - Subagent success → "Wiki ingest: N pages created, M updated."
  - Subagent failure → warn: "Wiki ingest failed: <err>. Session file saved. Retry manually via `/wiki:ingest session:<path>`." + continue.
 
