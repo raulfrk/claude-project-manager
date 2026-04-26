@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv --directory ${CLAUDE_PLUGIN_ROOT}/server run python -m server.cli session-start --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "command": "${CLAUDE_PLUGIN_ROOT}/server/.venv/bin/python -m server.cli session-start --cwd \"$CLAUDE_PROJECT_DIR\"",
             "timeout": 10,
             "statusMessage": "Loading project context..."
           }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv --directory ${CLAUDE_PLUGIN_ROOT}/server run python -m server.cli session-end --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "command": "${CLAUDE_PLUGIN_ROOT}/server/.venv/bin/python -m server.cli session-end --cwd \"$CLAUDE_PROJECT_DIR\"",
             "timeout": 10,
             "async": true
           }
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv --directory ${CLAUDE_PLUGIN_ROOT}/server run python -m server.cli session-start --cwd \"$CLAUDE_PROJECT_DIR\" --compact",
+            "command": "${CLAUDE_PLUGIN_ROOT}/server/.venv/bin/python -m server.cli session-start --cwd \"$CLAUDE_PROJECT_DIR\" --compact",
             "timeout": 10,
             "statusMessage": "Refreshing project context..."
           }
