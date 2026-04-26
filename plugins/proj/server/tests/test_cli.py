@@ -473,4 +473,23 @@ class TestCliArgParsing:
             env_extra={"PROJ_CONFIG": str(config_path)},
         )
         assert result.returncode == 0
+
+
+class TestDebugSessionKey:
+    """Tests for the `debug-session-key` CLI subcommand (todo 778)."""
+
+    def test_debug_session_key_prints_required_fields(self) -> None:
+        """Output must contain the 5 required fields.
+
+        Don't assert exact pid values (depend on the test process); just
+        verify the structure / labels are present.
+        """
+        result = _run_cli("debug-session-key")
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        out = result.stdout
+        assert "CLAUDE_CODE_EXECPATH:" in out
+        assert "Resolved session key:" in out
+        assert "Process: pid=" in out
+        assert "Ancestor chain (immediate-first):" in out
+        assert "proj-session.yaml slot for key '" in out
         assert "myapp" in result.stdout
