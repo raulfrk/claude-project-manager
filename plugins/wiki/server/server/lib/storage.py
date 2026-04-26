@@ -6,6 +6,7 @@ import fcntl
 import os
 import tempfile
 import threading
+import time
 from contextlib import contextmanager, suppress
 from functools import wraps
 from pathlib import Path
@@ -24,6 +25,32 @@ class WikiLockReentryError(RuntimeError):
 
 class WikiLockTimeoutError(RuntimeError):
     """Raised when cross-process flock cannot be acquired within WIKI_LOCK_TIMEOUT."""
+
+
+def _flock_with_timeout(fd: int, lock_path: Path) -> None:
+    """Acquire fcntl.flock(LOCK_EX) with WIKI_LOCK_TIMEOUT budget.
+
+    LOCK_NB retry loop with WIKI_LOCK_RETRY_INTERVAL between attempts.
+    Reads WIKI_LOCK_TIMEOUT at call time so monkeypatched values take effect.
+
+    Designed to run on a worker thread (called via anyio.to_thread.run_sync).
+    The retry-loop sleep blocks the worker thread, not the event loop.
+
+    Raises:
+        WikiLockTimeoutError: if budget exhausted.
+    """
+    deadline = time.monotonic() + WIKI_LOCK_TIMEOUT
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise WikiLockTimeoutError(
+                    f"wiki .lock not acquired within {WIKI_LOCK_TIMEOUT}s "
+                    f"({lock_path}; another session/process likely holds it)"
+                ) from None
+            time.sleep(WIKI_LOCK_RETRY_INTERVAL)
 
 
 _WIKI_LOCK = threading.RLock()  # re-entrant so same-thread nested wiki_lock() is fine

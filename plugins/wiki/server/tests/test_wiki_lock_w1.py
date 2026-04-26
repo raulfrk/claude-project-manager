@@ -2,6 +2,32 @@
 
 from __future__ import annotations
 
+import fcntl
+import multiprocessing
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from server.lib.storage import WikiLockTimeoutError, _flock_with_timeout
+
+
+@pytest.fixture
+def fast_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lower the 30s production timeout to 0.5s for fast unit tests."""
+    monkeypatch.setattr("server.lib.storage.WIKI_LOCK_TIMEOUT", 0.5)
+
+
+def _hold_flock_subprocess(lock_path: str, hold_s: float, ready_path: str) -> None:
+    """Subprocess helper: open lock_path, take fcntl flock, signal ready, sleep, release."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    Path(ready_path).touch()
+    time.sleep(hold_s)
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+
 
 class TestExceptionClasses:
     def test_wiki_lock_timeout_error_importable(self) -> None:
@@ -19,3 +45,44 @@ class TestExceptionClasses:
 
         assert WIKI_LOCK_TIMEOUT == 30.0
         assert WIKI_LOCK_RETRY_INTERVAL == 0.1
+
+
+class TestFlockWithTimeout:
+    def test_acquires_immediately_when_uncontended(self, tmp_path: Path) -> None:
+        lock_path = tmp_path / ".lock"
+        lock_path.touch()
+        fd = os.open(str(lock_path), os.O_RDWR)
+        try:
+            start = time.monotonic()
+            _flock_with_timeout(fd, lock_path)
+            elapsed = time.monotonic() - start
+            assert elapsed < 0.05
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def test_raises_timeout_when_subprocess_holds(self, tmp_path: Path, fast_timeout: None) -> None:
+        lock_path = tmp_path / ".lock"
+        lock_path.touch()
+        ready = tmp_path / ".ready"
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(target=_hold_flock_subprocess, args=(str(lock_path), 2.0, str(ready)))
+        proc.start()
+        try:
+            for _ in range(50):
+                if ready.exists():
+                    break
+                time.sleep(0.02)
+            assert ready.exists()
+
+            fd = os.open(str(lock_path), os.O_RDWR)
+            try:
+                with pytest.raises(WikiLockTimeoutError, match="not acquired within"):
+                    _flock_with_timeout(fd, lock_path)
+            finally:
+                os.close(fd)
+        finally:
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
