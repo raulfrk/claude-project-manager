@@ -160,6 +160,44 @@ class TestGetClaudeSessionKey:
 
         assert sk.get_claude_session_key() == "4242"
 
+    def test_outermost_match_when_multiple_claude_ancestors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bug 775 regression: when both INNER and OUTER claude-bin processes
+        appear in the ancestor chain (because Claude self-forks for hook
+        execution), the resolver must return OUTER (outermost match), not
+        INNER (first match).
+
+        Process tree under SessionStart hook (CLI's view, walking up):
+            shell → INNER claude-bin → OUTER claude-bin → terminal/launcher
+        Both INNER and OUTER exes match EXECPATH; the launcher does not.
+        Expected resolver result: OUTER.pid.
+        """
+        from session_key import session_key as sk
+
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
+        monkeypatch.setattr(sk.os, "getppid", lambda: 5000)  # immediate parent: shell
+
+        shell_proc = _FakeProc(pid=5000, exe="/bin/bash")
+        inner_claude = _FakeProc(pid=100, exe="/usr/bin/claude")
+        outer_claude = _FakeProc(pid=200, exe="/usr/bin/claude")
+        launcher = _FakeProc(pid=1, exe="/sbin/init")
+
+        # parents() yields ancestors immediate-first (psutil contract).
+        def fake_process(pid=None):
+            if pid == 5000:
+                return shell_proc
+            return _FakeProc(
+                pid=os.getpid(),
+                parents_=[shell_proc, inner_claude, outer_claude, launcher],
+            )
+
+        monkeypatch.setattr(sk.psutil, "Process", fake_process)
+        monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
+
+        # Outermost match wins → OUTER.pid (200), NOT INNER.pid (100).
+        assert sk.get_claude_session_key() == "200"
+
 
 def _write_yaml(path: Path, data: dict) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False))
