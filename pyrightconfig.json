@@ -1,0 +1,37 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "include": [
+    "plugins/proj/server/server",
+    "plugins/router/server/server",
+    "plugins/wiki/server/server",
+    "plugins/worktree/server/server",
+    "plugins/todoist/server/server",
+    "plugins/trello/server/server",
+    "plugins/jira/server/server",
+    "plugins/confluence/server/server",
+    "plugins/_shared/hook_dispatch",
+    "plugins/_shared/hook_transport",
+    "plugins/_shared/sandbox",
+    "plugins/_shared/session_key",
+    "plugins/_shared/claudemd"
+  ],
+  "reportUnusedFunction": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownParameterType": false,
+  "reportPrivateUsage": false,
+  "reportMissingTypeStubs": false,
+  "reportUnnecessaryIsInstance": false,
+  "executionEnvironments": [
+    {
+      "root": "plugins/wiki/server/server",
+      "reportUnknownMemberType": true,
+      "reportUnknownVariableType": true,
+      "reportUnknownArgumentType": true,
+      "reportUnknownParameterType": true,
+      "reportUnnecessaryIsInstance": true
+    }
+  ]
+}
