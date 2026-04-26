@@ -56,6 +56,14 @@ def get_claude_session_key() -> str:
     outermost. The ``test_outermost_match_*`` regression tests pin this; if
     upstream ever inverts the order, those tests fail loud.
 
+    Nested-session semantics: Claude Code subagent / ``--continue`` re-launches
+    share a process tree with their parent. Outermost-match resolution returns
+    the parent session's claude pid — subagents read/write the parent's
+    ``proj-session.yaml`` slot. This is by design: subagents inherit project
+    context from their invoker. A future subagent that wants its own session
+    state would need an explicit env-var override (e.g. CLAUDE_CODE_SESSION_PID);
+    not a need surfaced today.
+
     EXECPATH-unset fallback: returns ``os.getppid()``. This handles plugin MCP
     servers, which Claude Code launches directly via ``.mcp.json`` ``command:
     bash start.sh ...`` without propagating CLAUDE_CODE_EXECPATH (asymmetry
