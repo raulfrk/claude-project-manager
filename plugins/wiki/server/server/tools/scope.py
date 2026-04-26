@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
 import session_key
 
 if TYPE_CHECKING:
@@ -38,14 +40,18 @@ def _proj_yaml_present() -> bool:
     return _PROJ_YAML_PATH.exists()
 
 
-def wiki_scope_detect() -> str:
+async def wiki_scope_detect() -> str:
     """Detect active project scope via proj plugin's session file.
 
     Returns JSON {scope, proj_present}:
         - scope: "project:<name>" if this session has an active project, else "global"
         - proj_present: whether ~/.claude/proj.yaml exists on disk
     """
-    proj_present = _proj_yaml_present()
-    active = _read_active_from_session()
-    scope = f"project:{active}" if active else "global"
-    return json.dumps({"scope": scope, "proj_present": proj_present})
+
+    def _do_detect() -> dict[str, Any]:
+        proj_present = _proj_yaml_present()
+        active = _read_active_from_session()
+        scope = f"project:{active}" if active else "global"
+        return {"scope": scope, "proj_present": proj_present}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_detect))

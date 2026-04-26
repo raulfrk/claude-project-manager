@@ -7,10 +7,14 @@ import re
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
+
 from server.lib import config as config_mod
 from server.lib import frontmatter as fm_mod
 from server.lib import profile as profile_mod
 from server.lib import storage
+from server.lib.storage import WikiLockTimeoutError
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -42,10 +46,8 @@ def _first_summary_line(body: str) -> str:
     return ""
 
 
-def wiki_index_rebuild() -> str:
-    """Regenerate index.md by scanning pages/**. Groups by active profile categories."""
-    cfg = config_mod.load_config()
-    wiki_dir = cfg.wiki_dir
+def _build_index_text(wiki_dir: Path) -> tuple[str, dict[str, int], int]:
+    """Sync helper: walk pages, build index.md text, return (text, counts, recent_count)."""
     try:
         profile = profile_mod.load_profile(wiki_dir)
     except profile_mod.ProfileError:
@@ -102,39 +104,58 @@ def wiki_index_rebuild() -> str:
             lines.append(f"- [[{e['slug']}]] ({date_part})")
         lines.append("")
 
-    with storage.wiki_lock(wiki_dir):
-        storage.atomic_write(wiki_dir / INDEX_FILENAME, "\n".join(lines))
-
-    return json.dumps(
-        {
-            "entries_by_category": {c: len(v) for c, v in by_category.items()},
-            "recent_count": len(recent_sorted),
-        }
-    )
+    counts = {c: len(v) for c, v in by_category.items()}
+    return "\n".join(lines), counts, len(recent_sorted)
 
 
-def wiki_index_read() -> str:
+async def wiki_index_rebuild() -> str:
+    """Regenerate index.md by scanning pages/**. Groups by active profile categories."""
+    cfg = config_mod.load_config()
+    wiki_dir = cfg.wiki_dir
+    try:
+        # Heavy: walk pages, read frontmatter, sort, render. Worker thread.
+        rendered_text, counts, recent_count = await anyio.to_thread.run_sync(
+            _build_index_text, wiki_dir
+        )
+        async with storage.wiki_lock(wiki_dir):
+            await anyio.to_thread.run_sync(
+                storage.atomic_write, wiki_dir / INDEX_FILENAME, rendered_text
+            )
+        return json.dumps(
+            {
+                "entries_by_category": counts,
+                "recent_count": recent_count,
+            }
+        )
+    except WikiLockTimeoutError as exc:
+        return json.dumps({"error": "lock_timeout", "detail": str(exc)})
+
+
+async def wiki_index_read() -> str:
     """Read index.md + return content + parsed category counts + recent list."""
     cfg = config_mod.load_config()
     index_path: Path = cfg.wiki_dir / INDEX_FILENAME
-    if not index_path.exists():
-        return json.dumps({"content": "", "categories": {}, "recent": []})
 
-    content = index_path.read_text()
-    categories: dict[str, int] = {}
-    for m in _CATEGORY_HEADER_RE.finditer(content):
-        name = m.group(1).strip().lower()
-        if name.startswith("recent"):
-            continue
-        categories[name] = int(m.group(2))
+    def _do_read() -> dict[str, Any]:
+        if not index_path.exists():
+            return {"content": "", "categories": {}, "recent": []}
+        content = index_path.read_text()
+        categories: dict[str, int] = {}
+        for m in _CATEGORY_HEADER_RE.finditer(content):
+            name = m.group(1).strip().lower()
+            if name.startswith("recent"):
+                continue
+            categories[name] = int(m.group(2))
 
-    # Parse "## Recent ..." section for slug list
-    recent: list[str] = []
-    if "## Recent" in content:
-        section = content.split("## Recent", 1)[1]
-        for line in section.splitlines():
-            m = re.match(r"- \[\[(.+?)\]\]", line.strip())
-            if m:
-                recent.append(m.group(1))
+        # Parse "## Recent ..." section for slug list
+        recent: list[str] = []
+        if "## Recent" in content:
+            section = content.split("## Recent", 1)[1]
+            for line in section.splitlines():
+                m = re.match(r"- \[\[(.+?)\]\]", line.strip())
+                if m:
+                    recent.append(m.group(1))
+        return {"content": content, "categories": categories, "recent": recent}
 
-    return json.dumps({"content": content, "categories": categories, "recent": recent})
+    result = await anyio.to_thread.run_sync(_do_read)
+    return json.dumps(result)

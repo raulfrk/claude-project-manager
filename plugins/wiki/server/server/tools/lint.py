@@ -11,6 +11,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
 import yaml
 
 from server.lib import config as config_mod
@@ -131,7 +133,7 @@ def _iter_pages(wiki_dir: Path) -> Any:  # Generator[tuple[Path, dict[str, Any],
         yield md, fm, body
 
 
-def wiki_lint_orphans() -> str:
+async def wiki_lint_orphans() -> str:
     """Pages with 0 inbound + 0 outbound links_to refs.
 
     Skipped when total page count < lint.orphan_min_page_count (default 3).
@@ -139,32 +141,36 @@ def wiki_lint_orphans() -> str:
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    lint_cfg = _load_lint_config(wiki_dir)
-    min_pages = int(lint_cfg.get("orphan_min_page_count", 3))
 
-    pages: list[tuple[Path, dict[str, Any], str]] = list(_iter_pages(wiki_dir))
-    if len(pages) < min_pages:
-        return json.dumps({"orphans": []})
+    def _do_lint() -> dict[str, Any]:
+        lint_cfg = _load_lint_config(wiki_dir)
+        min_pages = int(lint_cfg.get("orphan_min_page_count", 3))
 
-    inbound: dict[str, int] = {}
-    for _, fm, _ in pages:
-        links_to: list[Any] = fm.get("links_to", []) or []  # type: ignore[assignment]
-        for target in links_to:
-            inbound[str(target)] = inbound.get(str(target), 0) + 1
+        pages: list[tuple[Path, dict[str, Any], str]] = list(_iter_pages(wiki_dir))
+        if len(pages) < min_pages:
+            return {"orphans": []}
 
-    pages_root = storage.pages_dir(wiki_dir)
-    orphans: list[dict[str, Any]] = []
-    for md, fm, _ in pages:
-        slug = md.stem
-        outlinks: list[Any] = fm.get("links_to", []) or []  # type: ignore[assignment]
-        if not outlinks and inbound.get(slug, 0) == 0:
-            rel = md.relative_to(pages_root)
-            cat = rel.parts[0] if len(rel.parts) > 1 else None
-            orphans.append({"slug": slug, "category": cat, "path": str(md)})
-    return json.dumps({"orphans": orphans})
+        inbound: dict[str, int] = {}
+        for _, fm, _ in pages:
+            links_to: list[Any] = fm.get("links_to", []) or []  # type: ignore[assignment]
+            for target in links_to:
+                inbound[str(target)] = inbound.get(str(target), 0) + 1
+
+        pages_root = storage.pages_dir(wiki_dir)
+        orphans: list[dict[str, Any]] = []
+        for md, fm, _ in pages:
+            slug = md.stem
+            outlinks: list[Any] = fm.get("links_to", []) or []  # type: ignore[assignment]
+            if not outlinks and inbound.get(slug, 0) == 0:
+                rel = md.relative_to(pages_root)
+                cat = rel.parts[0] if len(rel.parts) > 1 else None
+                orphans.append({"slug": slug, "category": cat, "path": str(md)})
+        return {"orphans": orphans}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
-def wiki_lint_broken_links() -> str:
+async def wiki_lint_broken_links() -> str:
     """Refs from pages' links_to + inline [[wikilinks]] whose target page doesn't exist.
 
     For `[[page#section]]`, only reports when the PAGE is missing; missing sections
@@ -174,53 +180,61 @@ def wiki_lint_broken_links() -> str:
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    broken: list[dict[str, str]] = []
-    for md, fm, body in _iter_pages(wiki_dir):
-        slug = md.stem
-        for target in _collect_link_targets(fm, body):
-            page_part = target.split("#", 1)[0].strip()
-            if not page_part:
-                continue
-            resolved = _find_page_by_slug_or_alias(wiki_dir, page_part)
-            if resolved is None:
-                broken.append({"from": slug, "link": target})
-    return json.dumps({"broken": broken})
+
+    def _do_lint() -> dict[str, Any]:
+        broken: list[dict[str, str]] = []
+        for md, fm, body in _iter_pages(wiki_dir):
+            slug = md.stem
+            for target in _collect_link_targets(fm, body):
+                page_part = target.split("#", 1)[0].strip()
+                if not page_part:
+                    continue
+                resolved = _find_page_by_slug_or_alias(wiki_dir, page_part)
+                if resolved is None:
+                    broken.append({"from": slug, "link": target})
+        return {"broken": broken}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
-def wiki_lint_broken_section_refs() -> str:
+async def wiki_lint_broken_section_refs() -> str:
     """Refs like [[page#section]] where page resolves but section heading doesn't.
 
     Returns JSON {broken: [{from, link, resolved_page}]}.
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    broken: list[dict[str, str]] = []
-    for md, fm, body in _iter_pages(wiki_dir):
-        slug = md.stem
-        for target in _collect_link_targets(fm, body):
-            if "#" not in target:
-                continue
-            page_part, section = target.split("#", 1)
-            resolved = _find_page_by_slug_or_alias(wiki_dir, page_part.strip())
-            if resolved is None:
-                # Page missing — falls to broken_links, not here
-                continue
-            try:
-                _, target_body = fm_mod.parse(resolved.read_text())
-            except fm_mod.FrontmatterError:
-                continue
-            if not _section_present(target_body, section.strip()):
-                broken.append(
-                    {
-                        "from": slug,
-                        "link": target,
-                        "resolved_page": str(resolved),
-                    }
-                )
-    return json.dumps({"broken": broken})
+
+    def _do_lint() -> dict[str, Any]:
+        broken: list[dict[str, str]] = []
+        for md, fm, body in _iter_pages(wiki_dir):
+            slug = md.stem
+            for target in _collect_link_targets(fm, body):
+                if "#" not in target:
+                    continue
+                page_part, section = target.split("#", 1)
+                resolved = _find_page_by_slug_or_alias(wiki_dir, page_part.strip())
+                if resolved is None:
+                    # Page missing — falls to broken_links, not here
+                    continue
+                try:
+                    _, target_body = fm_mod.parse(resolved.read_text())
+                except fm_mod.FrontmatterError:
+                    continue
+                if not _section_present(target_body, section.strip()):
+                    broken.append(
+                        {
+                            "from": slug,
+                            "link": target,
+                            "resolved_page": str(resolved),
+                        }
+                    )
+        return {"broken": broken}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
-def wiki_lint_category_violations() -> str:
+async def wiki_lint_category_violations() -> str:
     """Pages whose dir is not in active profile's configured categories.
 
     Flat-layout pages (no category dir) under non-minimal profile also flagged w/
@@ -231,35 +245,39 @@ def wiki_lint_category_violations() -> str:
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    try:
-        profile = profile_mod.load_profile(wiki_dir)
-    except profile_mod.ProfileError:
-        return json.dumps({"violations": []})
 
-    # Minimal profile explicitly allows anything — skip check.
-    if not profile.categories:
-        return json.dumps({"violations": []})
+    def _do_lint() -> dict[str, Any]:
+        try:
+            profile = profile_mod.load_profile(wiki_dir)
+        except profile_mod.ProfileError:
+            return {"violations": []}
 
-    configured = sorted(profile.categories)
-    configured_set = set(profile.categories)
-    pages_root = storage.pages_dir(wiki_dir)
-    violations: list[dict[str, Any]] = []
-    for md, _fm, _body in _iter_pages(wiki_dir):
-        rel = md.relative_to(pages_root)
-        cat = rel.parts[0] if len(rel.parts) > 1 else None
-        if cat is None or cat not in configured_set:
-            violations.append(
-                {
-                    "page": md.stem,
-                    "found_category": cat,
-                    "configured": configured,
-                    "path": str(md),
-                }
-            )
-    return json.dumps({"violations": violations})
+        # Minimal profile explicitly allows anything — skip check.
+        if not profile.categories:
+            return {"violations": []}
+
+        configured = sorted(profile.categories)
+        configured_set = set(profile.categories)
+        pages_root = storage.pages_dir(wiki_dir)
+        violations: list[dict[str, Any]] = []
+        for md, _fm, _body in _iter_pages(wiki_dir):
+            rel = md.relative_to(pages_root)
+            cat = rel.parts[0] if len(rel.parts) > 1 else None
+            if cat is None or cat not in configured_set:
+                violations.append(
+                    {
+                        "page": md.stem,
+                        "found_category": cat,
+                        "configured": configured,
+                        "path": str(md),
+                    }
+                )
+        return {"violations": violations}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
-def wiki_lint_stale(days: int = 0) -> str:
+async def wiki_lint_stale(days: int = 0) -> str:
     """Pages whose last_ingested is older than `days` (or lint.stale_after_days default).
 
     Pages with unparseable last_ingested are NOT flagged here — they're caught
@@ -269,26 +287,30 @@ def wiki_lint_stale(days: int = 0) -> str:
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    lint_cfg = _load_lint_config(wiki_dir)
-    threshold_days = int(days) if days > 0 else int(lint_cfg.get("stale_after_days", 90))
-    cutoff = datetime.now(UTC) - timedelta(days=threshold_days)
-    stale: list[dict[str, Any]] = []
-    for md, fm, _ in _iter_pages(wiki_dir):
-        last_ingested = str(fm.get("last_ingested", "") or "")
-        parsed = _parse_iso_utc(last_ingested)
-        if parsed is None:
-            continue
-        if parsed < cutoff:
-            age_days = (datetime.now(UTC) - parsed).days
-            stale.append(
-                {
-                    "slug": md.stem,
-                    "path": str(md),
-                    "last_ingested": last_ingested,
-                    "age_days": age_days,
-                }
-            )
-    return json.dumps({"stale": stale})
+
+    def _do_lint() -> dict[str, Any]:
+        lint_cfg = _load_lint_config(wiki_dir)
+        threshold_days = int(days) if days > 0 else int(lint_cfg.get("stale_after_days", 90))
+        cutoff = datetime.now(UTC) - timedelta(days=threshold_days)
+        stale: list[dict[str, Any]] = []
+        for md, fm, _ in _iter_pages(wiki_dir):
+            last_ingested = str(fm.get("last_ingested", "") or "")
+            parsed = _parse_iso_utc(last_ingested)
+            if parsed is None:
+                continue
+            if parsed < cutoff:
+                age_days = (datetime.now(UTC) - parsed).days
+                stale.append(
+                    {
+                        "slug": md.stem,
+                        "path": str(md),
+                        "last_ingested": last_ingested,
+                        "age_days": age_days,
+                    }
+                )
+        return {"stale": stale}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
 def _load_required_fields(wiki_dir: Path) -> list[str]:
@@ -309,7 +331,7 @@ def _load_required_fields(wiki_dir: Path) -> list[str]:
     return [str(f) for f in required]
 
 
-def wiki_lint_schema() -> str:
+async def wiki_lint_schema() -> str:
     """Pages violating required_frontmatter.
 
     A page violates schema when: (a) any required field is absent, OR (b) the
@@ -319,37 +341,45 @@ def wiki_lint_schema() -> str:
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    required = _load_required_fields(wiki_dir)
-    violations: list[dict[str, Any]] = []
-    for md, fm, _ in _iter_pages(wiki_dir):
-        missing = [f for f in required if f not in fm]
-        invalid: list[str] = []
-        if "last_ingested" in fm:
-            li = str(fm.get("last_ingested", "") or "")
-            if li and _parse_iso_utc(li) is None:
-                invalid.append("last_ingested")
-        if missing or invalid:
-            violations.append(
-                {
-                    "page": md.stem,
-                    "path": str(md),
-                    "missing_fields": missing,
-                    "invalid_fields": invalid,
-                }
-            )
-    return json.dumps({"violations": violations})
+
+    def _do_lint() -> dict[str, Any]:
+        required = _load_required_fields(wiki_dir)
+        violations: list[dict[str, Any]] = []
+        for md, fm, _ in _iter_pages(wiki_dir):
+            missing = [f for f in required if f not in fm]
+            invalid: list[str] = []
+            if "last_ingested" in fm:
+                li = str(fm.get("last_ingested", "") or "")
+                if li and _parse_iso_utc(li) is None:
+                    invalid.append("last_ingested")
+            if missing or invalid:
+                violations.append(
+                    {
+                        "page": md.stem,
+                        "path": str(md),
+                        "missing_fields": missing,
+                        "invalid_fields": invalid,
+                    }
+                )
+        return {"violations": violations}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))
 
 
-def wiki_lint_duplicates() -> str:
+async def wiki_lint_duplicates() -> str:
     """Pages whose filename stem (slug) collides (case-insensitive) across the wiki.
 
     Returns JSON {duplicates: [[path_a, path_b, ...], ...]}.
     """
     cfg = config_mod.load_config()
     wiki_dir = cfg.wiki_dir
-    by_slug: dict[str, list[str]] = {}
-    for md, _fm, _body in _iter_pages(wiki_dir):
-        key = md.stem.lower()
-        by_slug.setdefault(key, []).append(str(md))
-    duplicates = [sorted(paths) for paths in by_slug.values() if len(paths) > 1]
-    return json.dumps({"duplicates": duplicates})
+
+    def _do_lint() -> dict[str, Any]:
+        by_slug: dict[str, list[str]] = {}
+        for md, _fm, _body in _iter_pages(wiki_dir):
+            key = md.stem.lower()
+            by_slug.setdefault(key, []).append(str(md))
+        duplicates = [sorted(paths) for paths in by_slug.values() if len(paths) > 1]
+        return {"duplicates": duplicates}
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_lint))

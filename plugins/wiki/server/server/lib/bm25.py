@@ -105,7 +105,11 @@ def _pages_latest_mtime(wiki_dir: Path) -> float:
 
 
 def rebuild_index(wiki_dir: Path) -> BM25Index:
-    """Full rebuild: scan pages/, tokenize, write sidecar, return in-memory index."""
+    """Rebuild the BM25 sidecar index.
+
+    NOTE: Caller MUST hold wiki_lock around invocation. This helper does NOT
+    acquire the lock itself (changed in W1 fix 2026-04-26 — see todo 764).
+    """
     idx_dir = index_dir(wiki_dir)
     idx_dir.mkdir(parents=True, exist_ok=True)
     docs = _collect_page_tokens(wiki_dir)
@@ -116,8 +120,7 @@ def rebuild_index(wiki_dir: Path) -> BM25Index:
         "docs": docs,
     }
     sidecar = sidecar_path(wiki_dir)
-    with storage.wiki_lock(wiki_dir):
-        storage.atomic_write(sidecar, json.dumps(data, separators=(",", ":")))
+    storage.atomic_write(sidecar, json.dumps(data, separators=(",", ":")))
 
     idx = BM25Index(docs=docs)
     idx.build()

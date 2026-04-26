@@ -5,15 +5,16 @@ from __future__ import annotations
 import fcntl
 import os
 import tempfile
-import threading
 import time
-from contextlib import contextmanager, suppress
-from functools import wraps
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING
+
+import anyio
+import anyio.to_thread
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import AsyncGenerator
 
 WIKI_LOCK_TIMEOUT = 30.0  # seconds; cross-process flock acquisition budget
 WIKI_LOCK_RETRY_INTERVAL = 0.1  # seconds between flock LOCK_NB retry attempts
@@ -39,7 +40,10 @@ def _flock_with_timeout(fd: int, lock_path: Path) -> None:
     Raises:
         WikiLockTimeoutError: if budget exhausted.
     """
-    deadline = time.monotonic() + WIKI_LOCK_TIMEOUT
+    # Re-read module-level timeout each call so monkeypatching works in tests.
+    from server.lib import storage as _storage_mod
+
+    deadline = time.monotonic() + _storage_mod.WIKI_LOCK_TIMEOUT
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -47,15 +51,14 @@ def _flock_with_timeout(fd: int, lock_path: Path) -> None:
         except BlockingIOError:
             if time.monotonic() >= deadline:
                 raise WikiLockTimeoutError(
-                    f"wiki .lock not acquired within {WIKI_LOCK_TIMEOUT}s "
+                    f"wiki .lock not acquired within {_storage_mod.WIKI_LOCK_TIMEOUT}s "
                     f"({lock_path}; another session/process likely holds it)"
                 ) from None
-            time.sleep(WIKI_LOCK_RETRY_INTERVAL)
+            time.sleep(_storage_mod.WIKI_LOCK_RETRY_INTERVAL)
 
 
-_WIKI_LOCK = threading.RLock()  # re-entrant so same-thread nested wiki_lock() is fine
+_WIKI_LOCK = anyio.Lock()  # in-process exclusion (anyio-aware, single per MCP process)
 _LOCK_FILENAME = ".lock"
-_HELD_LOCKS = threading.local()
 
 
 def pages_dir(wiki_dir: Path) -> Path:
@@ -86,60 +89,33 @@ def atomic_write(target: Path, content: str) -> None:
         raise
 
 
-@contextmanager
-def wiki_lock(wiki_dir: Path) -> Generator[None, None, None]:
-    """Acquire the shared wiki lock: thread-local RLock + fcntl.flock for cross-process.
+@asynccontextmanager
+async def wiki_lock(wiki_dir: Path) -> AsyncGenerator[None, None]:
+    """Acquire shared wiki lock: in-process anyio.Lock + cross-process fcntl.flock.
 
-    Yields once lock is held; releases on exit. Re-entrant within the same thread.
+    Async context manager. Callers must use `async with wiki_lock(wiki_dir): ...`.
+
+    Raises:
+        WikiLockReentryError: if the calling task already holds the lock.
+        WikiLockTimeoutError: if the cross-process flock cannot be acquired
+            within WIKI_LOCK_TIMEOUT seconds.
     """
+    owner = _WIKI_LOCK.statistics().owner
+    if owner is not None and owner.id == anyio.get_current_task().id:
+        raise WikiLockReentryError(
+            "nested wiki_lock detected (anyio.Lock is non-reentrant; "
+            "refactor caller to acquire lock once at the outermost level)"
+        )
     wiki_dir.mkdir(parents=True, exist_ok=True)
     lock_path = wiki_dir / _LOCK_FILENAME
     lock_path.touch(exist_ok=True)
 
-    # Track held locks per thread to avoid re-acquiring fcntl lock on same FD
-    if not hasattr(_HELD_LOCKS, "fds"):
-        _HELD_LOCKS.fds = cast("dict[str, int]", {})
-
-    _WIKI_LOCK.acquire()
-    fd: int | None = None
-    fds = cast("dict[str, int]", _HELD_LOCKS.fds)
-    is_first_acquire = str(wiki_dir) not in fds
-    try:
-        if is_first_acquire:
-            fd = os.open(str(lock_path), os.O_RDWR)
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            fds[str(wiki_dir)] = fd
-        else:
-            fd = fds[str(wiki_dir)]
+    async with _WIKI_LOCK:
+        fd = await anyio.to_thread.run_sync(os.open, str(lock_path), os.O_RDWR)
         try:
+            await anyio.to_thread.run_sync(_flock_with_timeout, fd, lock_path)
             yield
         finally:
-            pass  # unlock only on final release
-    finally:
-        if is_first_acquire and fd is not None:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
-            del fds[str(wiki_dir)]
-        _WIKI_LOCK.release()
-
-
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-def with_wiki_lock[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
-    """Decorator: acquire wiki_lock before fn runs.
-
-    Expects fn's first positional arg to be the wiki_dir Path.
-    """
-
-    @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        wiki_dir = args[0] if args and isinstance(args[0], Path) else kwargs.get("wiki_dir")
-        if not isinstance(wiki_dir, Path):
-            msg = "with_wiki_lock requires wiki_dir as first arg or kwarg"
-            raise TypeError(msg)
-        with wiki_lock(wiki_dir):
-            return fn(*args, **kwargs)
-
-    return wrapper
+            with suppress(OSError):
+                await anyio.to_thread.run_sync(fcntl.flock, fd, fcntl.LOCK_UN)
+            await anyio.to_thread.run_sync(os.close, fd)

@@ -6,6 +6,9 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
+
 from server.lib import config as config_mod
 from server.lib import frontmatter as fm_mod
 from server.lib import storage
@@ -71,30 +74,33 @@ def _section_in_body(body: str, section: str) -> bool:
     return any(m.group(1).strip().lower() == section_lower for m in _HEADING_RE.finditer(body))
 
 
-def wiki_link_resolve(link: str) -> str:
+async def wiki_link_resolve(link: str) -> str:
     """Resolve a [[page]] or [[page#section]] link to file path + section flag."""
     cfg = config_mod.load_config()
-    pages_root = storage.pages_dir(cfg.wiki_dir)
-    slug, section = _parse_link(link)
-    if not pages_root.exists():
-        return json.dumps({"resolved": None, "section_found": None, "candidates": []})
+    wiki_dir = cfg.wiki_dir
 
-    path, candidates = _find_page(pages_root, slug)
-    if path is None:
-        return json.dumps({"resolved": None, "section_found": None, "candidates": candidates})
+    def _do_resolve() -> dict[str, Any]:
+        pages_root = storage.pages_dir(wiki_dir)
+        slug, section = _parse_link(link)
+        if not pages_root.exists():
+            return {"resolved": None, "section_found": None, "candidates": []}
 
-    section_found: bool | None = None
-    if section is not None:
-        try:
-            _, body = fm_mod.parse(path.read_text())
-            section_found = _section_in_body(body, section)
-        except fm_mod.FrontmatterError:
-            section_found = False
+        path, candidates = _find_page(pages_root, slug)
+        if path is None:
+            return {"resolved": None, "section_found": None, "candidates": candidates}
 
-    return json.dumps(
-        {
+        section_found: bool | None = None
+        if section is not None:
+            try:
+                _, body = fm_mod.parse(path.read_text())
+                section_found = _section_in_body(body, section)
+            except fm_mod.FrontmatterError:
+                section_found = False
+
+        return {
             "resolved": str(path),
             "section_found": section_found,
             "candidates": candidates,
         }
-    )
+
+    return json.dumps(await anyio.to_thread.run_sync(_do_resolve))

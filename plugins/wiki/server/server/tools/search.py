@@ -6,10 +6,14 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
+
 from server.lib import bm25 as bm25_mod
 from server.lib import config as config_mod
 from server.lib import frontmatter as fm_mod
 from server.lib import storage
+from server.lib.storage import WikiLockTimeoutError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,7 +60,7 @@ def _page_metadata(
     return False, None, {}, ""
 
 
-def wiki_search_bm25(
+async def wiki_search_bm25(
     query: str,
     limit: int = 20,
     category: str | None = None,
@@ -74,43 +78,58 @@ def wiki_search_bm25(
     Returns JSON {hits: [{slug, score, snippet, category, tags, scope}]}.
     """
     cfg = config_mod.load_config()
-    idx = bm25_mod.load_or_rebuild(cfg.wiki_dir)
-    raw_hits = idx.query(query, top_k=limit * 3 if (category or tags or scope_filter) else limit)
+    wiki_dir = cfg.wiki_dir
+    try:
+        async with storage.wiki_lock(wiki_dir):
+            idx = await anyio.to_thread.run_sync(bm25_mod.load_or_rebuild, wiki_dir)
 
-    query_tokens = bm25_mod.tokenize(query)
-    tag_set = set(tags or [])
-    results: list[dict[str, Any]] = []
-    for hit in raw_hits:
-        found, cat, fm, body = _page_metadata(cfg.wiki_dir, hit["slug"])
-        if not found:
-            continue
-        if category and cat != category:
-            continue
-        page_tags = set(fm.get("tags", []) or [])
-        if tag_set and not tag_set.issubset(page_tags):
-            continue
-        page_scope: list[str] = fm.get("scope", []) or []
-        if scope_filter and scope_filter not in page_scope:
-            continue
-        results.append(
-            {
-                "slug": hit["slug"],
-                "score": hit["score"],
-                "snippet": _extract_snippet(body, query_tokens),
-                "category": cat,
-                "tags": list(page_tags),
-                "scope": page_scope,
-            }
-        )
-        if len(results) >= limit:
-            break
-    return json.dumps({"hits": results})
+        def _do_search() -> list[dict[str, Any]]:
+            raw_hits = idx.query(
+                query, top_k=limit * 3 if (category or tags or scope_filter) else limit
+            )
+            query_tokens = bm25_mod.tokenize(query)
+            tag_set = set(tags or [])
+            results: list[dict[str, Any]] = []
+            for hit in raw_hits:
+                found, cat, fm, body = _page_metadata(wiki_dir, hit["slug"])
+                if not found:
+                    continue
+                if category and cat != category:
+                    continue
+                page_tags = set(fm.get("tags", []) or [])
+                if tag_set and not tag_set.issubset(page_tags):
+                    continue
+                page_scope: list[str] = fm.get("scope", []) or []
+                if scope_filter and scope_filter not in page_scope:
+                    continue
+                results.append(
+                    {
+                        "slug": hit["slug"],
+                        "score": hit["score"],
+                        "snippet": _extract_snippet(body, query_tokens),
+                        "category": cat,
+                        "tags": list(page_tags),
+                        "scope": page_scope,
+                    }
+                )
+                if len(results) >= limit:
+                    break
+            return results
+
+        results = await anyio.to_thread.run_sync(_do_search)
+        return json.dumps({"hits": results})
+    except WikiLockTimeoutError as exc:
+        return json.dumps({"error": "lock_timeout", "detail": str(exc)})
 
 
-def wiki_search_index_refresh() -> str:
+async def wiki_search_index_refresh() -> str:
     """Force full rebuild of the BM25 sidecar index."""
     cfg = config_mod.load_config()
-    start = time.monotonic()
-    idx = bm25_mod.rebuild_index(cfg.wiki_dir)
-    elapsed_ms = int((time.monotonic() - start) * 1000)
-    return json.dumps({"pages_indexed": idx.doc_count, "elapsed_ms": elapsed_ms})
+    try:
+        start = time.monotonic()
+        async with storage.wiki_lock(cfg.wiki_dir):
+            idx = await anyio.to_thread.run_sync(bm25_mod.rebuild_index, cfg.wiki_dir)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return json.dumps({"pages_indexed": idx.doc_count, "elapsed_ms": elapsed_ms})
+    except WikiLockTimeoutError as exc:
+        return json.dumps({"error": "lock_timeout", "detail": str(exc)})
