@@ -51,6 +51,11 @@ def get_claude_session_key() -> str:
     ancestor) and hooks (multiple matching ancestors). ``parents()`` is
     microseconds-fast.
 
+    Iteration-order invariant: ``psutil.Process().parents()`` yields ancestors
+    immediate-first (ascending toward init), so the LAST recorded match is the
+    outermost. The ``test_outermost_match_*`` regression tests pin this; if
+    upstream ever inverts the order, those tests fail loud.
+
     Falls back to ``os.getpid()`` when EXECPATH is unset (tests, non-Claude
     environments) or no ancestor matches.
     """
