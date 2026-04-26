@@ -212,12 +212,19 @@ class TestManagedSectionContent:
         assert "memory recall" in MANAGED_SECTION
 
     def test_wiki_proj_search_knowledge_rule(self):
+        # Strengthened 2026-04-26 (todo 739): wiki query is now MANDATORY first
+        # across ALL inquiry types (was: brainstorm/spec/plan only). Hard
+        # wording ("FIRST", "ONLY when wiki plugin disabled") replaces soft
+        # "skip if wiki plugin disabled" guidance language.
         assert "Wiki + proj_search are primary knowledge sources" in MANAGED_SECTION
         assert "/wiki:query" in MANAGED_SECTION
         assert "mcp__plugin_proj_proj__proj_search_knowledge" in MANAGED_SECTION
         assert "Explore" in MANAGED_SECTION
         assert "general-purpose" in MANAGED_SECTION
-        assert "skip if wiki plugin disabled" in MANAGED_SECTION
+        # Mandatory wording (replaces soft "skip if" wording)
+        assert "FIRST" in MANAGED_SECTION
+        assert "ONLY when wiki plugin disabled" in MANAGED_SECTION
+        # Priority order: wiki -> proj_search -> Explore preserved
         wiki_pos = MANAGED_SECTION.index("/wiki:query")
         proj_search_pos = MANAGED_SECTION.index("mcp__plugin_proj_proj__proj_search_knowledge")
         explore_pos = MANAGED_SECTION.index("Explore")
@@ -268,36 +275,40 @@ def test_managed_section_contains_revdiff_rule():
     )
 
 
-def test_managed_section_contains_research_synthesis_rule():
-    """Rule 25: research-synthesis guidance bullet is present in MANAGED_SECTION."""
-    # Title present
-    assert "Research synthesis for brainstorm/spec/plan work" in claudemd.MANAGED_SECTION
-    # Required order: wiki → code → web
+def test_research_synthesis_absorbed_into_wiki_query_rule():
+    """Research synthesis content was merged into the wiki-query rule (2026-04-26 todo 739).
+
+    Verifies the merge happened:
+    - Old "Research synthesis for brainstorm/spec/plan work" rule deleted (no longer
+      a separate rule).
+    - Its content (wiki-first ordering, web search caveat, brainstorm/spec/plan
+      applicability) absorbed into "Wiki + proj_search are primary knowledge sources"
+      rule + broadened to ALL inquiry types.
+    """
+    # Old rule title gone
+    assert "Research synthesis for brainstorm/spec/plan work" not in claudemd.MANAGED_SECTION
+    # Soft "Guidance, not mandate" wording gone
+    assert "Guidance, not mandate" not in claudemd.MANAGED_SECTION
+    # Content absorbed: wiki-first + WebSearch caveat + applicability list
     assert "/wiki:query" in claudemd.MANAGED_SECTION
-    # Inline gating check — wildcard semantics (marketplace name varies)
-    assert 'enabledPlugins["wiki@<marketplace>"]' in claudemd.MANAGED_SECTION
-    assert "wildcard" in claudemd.MANAGED_SECTION
-    # Code research step
-    assert "Explore" in claudemd.MANAGED_SECTION
-    # Web research step
     assert "WebSearch" in claudemd.MANAGED_SECTION
     assert "WebFetch" in claudemd.MANAGED_SECTION
-    # Guidance framing (not mandate)
-    assert "Guidance, not mandate" in claudemd.MANAGED_SECTION
-    # Concrete example present
-    assert "brainstorming a new plugin" in claudemd.MANAGED_SECTION
-    # Rule 25 is placed AFTER rule 24 (mid-execution checkpoint rhythm)
-    rule24_pos = claudemd.MANAGED_SECTION.index("Mid-execution checkpoint rhythm")
-    rule25_pos = claudemd.MANAGED_SECTION.index("Research synthesis for brainstorm/spec/plan work")
-    assert rule24_pos < rule25_pos, "rule 25 must appear after rule 24"
+    # Broadened scope: all inquiry types (not just brainstorm/spec/plan)
+    assert "brainstorm" in claudemd.MANAGED_SECTION
+    assert "debug" in claudemd.MANAGED_SECTION
 
 
-def test_research_synthesis_rule_orders_wiki_code_web():
-    """Rule 25 must enumerate sources in the order: wiki → code → web."""
-    rule25_pos = claudemd.MANAGED_SECTION.find("<!-- rule: 25 -->")
-    assert rule25_pos != -1, "rule 25 marker not found"
-    rule25_text = claudemd.MANAGED_SECTION[rule25_pos : rule25_pos + 1000]
-    wiki_p = rule25_text.index("/wiki:query")
-    code_p = rule25_text.index("Explore")
-    web_p = rule25_text.index("WebSearch")
-    assert wiki_p < code_p < web_p, "rule 25 must enumerate wiki → code → web in that order"
+def test_wiki_query_rule_orders_wiki_proj_explore_web():
+    """Wiki-query rule must establish: wiki → proj_search → Explore → web (last resort)."""
+    # Locate the strengthened wiki rule
+    rule_pos = claudemd.MANAGED_SECTION.find("Wiki + proj_search are primary knowledge sources")
+    assert rule_pos != -1, "wiki-query rule title not found"
+    rule_text = claudemd.MANAGED_SECTION[rule_pos : rule_pos + 1500]
+    wiki_p = rule_text.index("/wiki:query")
+    proj_p = rule_text.index("mcp__plugin_proj_proj__proj_search_knowledge")
+    explore_p = rule_text.index("Explore")
+    web_p = rule_text.index("WebSearch")
+    assert wiki_p < proj_p < explore_p < web_p, (
+        "wiki-query rule must enumerate wiki → proj_search → Explore → web "
+        f"(got wiki={wiki_p}, proj={proj_p}, explore={explore_p}, web={web_p})"
+    )
