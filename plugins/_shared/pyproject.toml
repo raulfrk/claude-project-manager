@@ -39,17 +39,7 @@ select = ["F", "E", "W", "I", "B", "C4", "UP", "SIM", "RUF", "TCH", "PTH"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S"]
 
-[tool.basedpyright]
-typeCheckingMode = "strict"
-pythonVersion = "3.12"
-reportUnusedFunction = false  # @mcp.tool() decorated functions flagged as unused
-reportUnknownMemberType = false
-reportUnknownVariableType = false
-reportUnknownArgumentType = false
-reportPrivateUsage = false
-reportMissingTypeStubs = false
-reportUnnecessaryIsInstance = false  # runtime guards for dynamic JSON/MCP data (34 sites)
-reportUnknownParameterType = false
+# basedpyright config: see /pyrightconfig.json (top-level, single source of truth)
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "test_contracts/tests"]

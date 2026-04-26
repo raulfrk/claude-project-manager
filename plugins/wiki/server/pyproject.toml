@@ -55,12 +55,7 @@ ignore = ["S603", "S607"]
 "tests/**" = ["S"]
 "tests/*" = ["TC001", "TC003"]
 
-[tool.basedpyright]
-typeCheckingMode = "strict"
-pythonVersion = "3.12"
-reportUnusedFunction = false
-reportMissingTypeStubs = false
-reportPrivateUsage = false
+# basedpyright config: see /pyrightconfig.json (top-level, single source of truth)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

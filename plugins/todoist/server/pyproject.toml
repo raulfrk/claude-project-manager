@@ -53,17 +53,7 @@ ignore = ["S603", "S607"]
 "tests/**" = ["S"]
 "tests/*" = ["TC003"]
 
-[tool.basedpyright]
-typeCheckingMode = "strict"
-pythonVersion = "3.12"
-reportUnusedFunction = false  # @mcp.tool() decorated functions flagged as unused
-reportUnknownMemberType = false
-reportUnknownVariableType = false
-reportUnknownArgumentType = false
-reportPrivateUsage = false
-reportMissingTypeStubs = false
-reportUnnecessaryIsInstance = false  # runtime guards for dynamic JSON/MCP data (34 sites)
-reportUnknownParameterType = false
+# basedpyright config: see /pyrightconfig.json (top-level, single source of truth)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
