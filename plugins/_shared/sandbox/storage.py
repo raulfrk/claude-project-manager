@@ -10,7 +10,7 @@ import stat
 import tempfile
 from pathlib import Path
 
-from server.lib.sandbox.models import SettingsFile
+from sandbox.models import SettingsFile
 
 logger = logging.getLogger(__name__)
 

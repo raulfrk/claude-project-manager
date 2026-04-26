@@ -1,8 +1,9 @@
-"""Back-compat shim — sandbox lib lives in plugins/_shared/sandbox/.
+"""Sandbox library shared between installer and proj plugin.
 
-Exists so existing in-tree imports like `from server.lib.sandbox.storage
-import mcp_allow_entry` keep working without churn during the migration.
-New code should import directly from `sandbox`.
+Pure-Python lib for reading/writing ~/.claude/settings.json. Owns the
+allow-rule semantics for MCP servers, sandbox paths, and skill prefixes.
+The proj plugin's tools/sandbox.py wraps these primitives in MCP tools;
+the installer calls reconcile_settings directly during install finalize.
 """
 
 from __future__ import annotations
