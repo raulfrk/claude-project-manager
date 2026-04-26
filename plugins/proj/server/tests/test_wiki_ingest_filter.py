@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+
 from server.lib.wiki_ingest_filter import filter_session_text
+from tests.conftest import call_tool
 
 
 class TestSectionStrip:
@@ -133,3 +141,44 @@ class TestPreservesContent:
         text = "Path D was chosen — commit b7dae45 lifted the lib.\n"
         out = filter_session_text(text)
         assert out == text
+
+
+class TestWikiFilterTool:
+    @pytest.mark.anyio()
+    async def test_tool_writes_tmp_and_strips(self, tmp_path: Any, mcp_app: Any) -> None:
+        session = tmp_path / "session.md"
+        session.write_text(
+            "## Key Decisions\n"
+            "- Decided X\n"
+            "\n"
+            "## Todos Worked On\n"
+            "- 736: completed\n"
+            "\n"
+            "## Insights Discovered\n"
+            "- Insight A\n"
+        )
+        result = json.loads(
+            await call_tool(mcp_app, "wiki_ingest_filter_session", session_path=str(session))
+        )
+        assert result["status"] == "filtered"
+        tmp_path_str = result["tmp_path"]
+        assert re.match(r"^/tmp/wiki-ingest-[0-9a-f-]+\.md$", tmp_path_str)
+        body = Path(tmp_path_str).read_text()
+        assert "## Todos Worked On" not in body
+        assert "736: completed" not in body
+        assert "## Key Decisions" in body
+        assert "## Insights Discovered" in body
+        # Cleanup so subsequent tests don't accumulate
+        Path(tmp_path_str).unlink()
+
+    @pytest.mark.anyio()
+    async def test_tool_missing_session_returns_error(self, tmp_path: Any, mcp_app: Any) -> None:
+        result = json.loads(
+            await call_tool(
+                mcp_app,
+                "wiki_ingest_filter_session",
+                session_path=str(tmp_path / "does-not-exist.md"),
+            )
+        )
+        assert result["status"] == "error"
+        assert "not found" in result["error"].lower() or "no such" in result["error"].lower()

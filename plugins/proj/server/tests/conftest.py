@@ -105,6 +105,7 @@ def mcp_app(cfg: ProjConfig) -> FastMCP:
         projects,
         todos,
         tracking_git,
+        wiki_filter,
     )
 
     app = FastMCP("test-proj")
@@ -117,6 +118,7 @@ def mcp_app(cfg: ProjConfig) -> FastMCP:
     migrate.register(app)
     perms_sync.register(app)
     tracking_git.register(app)
+    wiki_filter.register(app)
     return app
 
 

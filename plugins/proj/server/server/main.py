@@ -29,6 +29,7 @@ from server.tools import (
     tracking_git,
     trello_full_sync,
     trello_sync,
+    wiki_filter,
 )
 from server.tools.context import ctx_detect_project_name
 
@@ -54,6 +55,7 @@ decisions.register(mcp)
 digest.register(mcp)
 tracking_git.register(mcp)
 sandbox.register(mcp)
+wiki_filter.register(mcp)
 
 
 def main() -> None:
