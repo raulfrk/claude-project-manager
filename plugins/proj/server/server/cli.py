@@ -252,7 +252,18 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
 
 
 def cmd_session_end(cwd: str | None) -> None:
-    """Bump last_updated for the active project (async, no output needed)."""
+    """Bump last_updated + clear the session's session_key slot.
+
+    Mirrors cmd_session_start's dual-path pattern:
+    - Direct state.clear_session_active() runs in the hook subprocess. Best-
+      effort: targets whatever slot the hook subprocess's resolver returns,
+      which may be a transient/wrong slot on --resume or --continue flows
+      where the parent chain is severed. Harmless when wrong (clears a slot
+      that either doesn't exist or holds transient data).
+    - Socket RPC to proj_clear_session runs INSIDE the long-lived MCP server,
+      where the resolver returns the OUTER claude pid — matching the slot
+      proj_load_session wrote on SessionStart. This is the meaningful clear.
+    """
     if not storage.config_exists():
         return
     cfg = storage.load_config()
@@ -261,16 +272,20 @@ def cmd_session_end(cwd: str | None) -> None:
     detected: str | None = None
     if cwd:
         detected = ctx_detect_project_name(cwd)
-    if not detected:
-        return
-    try:
-        meta = storage.load_meta(cfg, detected)
-        today = str(date.today())
-        if meta.dates.last_updated == today:
-            return
-        storage.save_meta(cfg, meta)
-    except FileNotFoundError:
-        print("Warning: project config not found, skipping session context", file=sys.stderr)
+    if detected:
+        try:
+            meta = storage.load_meta(cfg, detected)
+            today = str(date.today())
+            if meta.dates.last_updated != today:
+                storage.save_meta(cfg, meta)
+        except FileNotFoundError:
+            print("Warning: project config not found, skipping session context", file=sys.stderr)
+
+    # Clear session_key slot. Direct call handles the case where the socket
+    # is already gone (MCP server dying first); socket call handles the
+    # meaningful MCP-resolved slot.
+    state.clear_session_active()
+    _call_proj_socket("proj_clear_session", {})
 
 
 def main() -> None:

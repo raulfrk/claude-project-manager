@@ -873,6 +873,20 @@ def register(app: FastMCP) -> None:
             }
         )
 
+    @app.tool(
+        description=(
+            "Clear the current session's active-project slot in proj-session.yaml. "
+            "Called from the SessionEnd hook via socket RPC so the clear runs INSIDE "
+            "the long-lived MCP server process — the MCP server's session_key resolver "
+            "returns the OUTER claude pid (its ppid), which matches the slot "
+            "proj_load_session wrote on SessionStart. Idempotent."
+        )
+    )
+    def proj_clear_session() -> str:
+        """Clear the session-scoped active project for this Claude Code session."""
+        state.clear_session_active()
+        return json.dumps({"message": "Session cleared."})
+
     @app.tool(description="Set the active project for this session only (not persisted globally).")
     def proj_load_session(name: str) -> str:
         """Load a project into session context without changing the persisted active project."""
