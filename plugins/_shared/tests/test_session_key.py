@@ -130,9 +130,16 @@ class TestGetClaudeSessionKey:
 
         assert sk.get_claude_session_key() == "8999"
 
-    def test_no_ancestor_matches_falls_back_to_own_pid(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_ancestor_matches_falls_back_to_ppid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Walk-failed fallback returns os.getppid() (not os.getpid()).
+
+        Bug 779 follow-up: Claude Code's hook execution path on ``--resume``
+        can sever the parent chain (subreaper / setsid detach), so the
+        EXECPATH walk finds no claude ancestor. Falling back to ppid converges
+        with what the MCP-server-fallback path produces (same logic as the
+        EXECPATH-unset branch); falling back to own pid would diverge from
+        what MCP servers see, breaking ``proj-session.yaml`` lookups.
+        """
         from session_key import session_key as sk
 
         monkeypatch.setenv("CLAUDE_CODE_EXECPATH", "/usr/bin/claude")
@@ -148,7 +155,7 @@ class TestGetClaudeSessionKey:
         monkeypatch.setattr(sk.psutil, "Process", fake_process)
         monkeypatch.setattr(sk.os.path, "realpath", lambda p: p)
 
-        assert sk.get_claude_session_key() == str(os.getpid())
+        assert sk.get_claude_session_key() == "5000"
 
     def test_no_such_process_mid_walk_continues(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """One ancestor raises NoSuchProcess; walk continues to find next match."""

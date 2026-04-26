@@ -65,9 +65,15 @@ def get_claude_session_key() -> str:
     For non-Claude contexts (tests run from a shell, standalone CLI), ppid is
     the launcher — still a stable session-like key, just a different one.
 
-    Walk-failed fallback: ``os.getpid()`` when EXECPATH IS set but no ancestor
-    matches (anomaly — process tree was rewritten, or test mocks return an
-    empty/non-matching chain).
+    Walk-failed fallback: ``os.getppid()`` when EXECPATH IS set but no ancestor
+    matches. Mirrors the EXECPATH-unset fallback on the same rationale: when we
+    can't identify the long-lived claude in our ancestor chain (e.g., Claude
+    Code's hook execution path on ``--resume`` severs the chain via subreaper
+    or setsid detach so ``parents()`` no longer surfaces OUTER), our ppid is a
+    better stable session-like key than our own pid. On systems where ppid is
+    init (1) after reparenting, this is still no worse than own-pid; on systems
+    where ppid is OUTER (because OUTER is a subreaper), this matches what the
+    walk would have returned. Convergence > correctness in pathological cases.
     """
     expected_raw = os.environ.get("CLAUDE_CODE_EXECPATH", "")
     if not expected_raw:
@@ -87,7 +93,7 @@ def get_claude_session_key() -> str:
 
     if last_match is not None:
         return str(last_match)
-    return str(os.getpid())
+    return str(os.getppid())
 
 
 def _cleanup_legacy_marker_dir_once() -> None:
