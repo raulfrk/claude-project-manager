@@ -11,7 +11,9 @@ from __future__ import annotations
 from sandbox import storage
 from sandbox.models import (
     Permissions,
+    SandboxConfig,
     SandboxFilesystem,
+    SandboxNetwork,
     SettingsFile,
 )
 from sandbox.reconcile import (
@@ -31,7 +33,9 @@ __all__ = [
     "SETTINGS_PATH",
     "Permissions",
     "ReconcileResult",
+    "SandboxConfig",
     "SandboxFilesystem",
+    "SandboxNetwork",
     "SettingsFile",
     "allow_entries_for_path",
     "mcp_allow_entry",

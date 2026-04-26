@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sandbox": {
+      "command": "bash",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/start.sh",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "sandbox-server"
+      ],
+      "timeout": 120
+    }
+  }
+}

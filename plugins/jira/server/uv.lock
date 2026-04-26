@@ -237,7 +237,7 @@ wheels = [
 
 [[package]]
 name = "claude-hook-transport"
-version = "0.4.31"
+version = "0.4.32"
 source = { directory = "../../_shared" }
 dependencies = [
     { name = "httpx" },

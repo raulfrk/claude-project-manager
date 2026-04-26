@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
+import sandbox.storage as storage_mod
 
-import server.lib.sandbox.storage as storage_mod
 from server.lib.sandbox.models import (
     Permissions,
     SandboxConfig,
