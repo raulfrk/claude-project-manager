@@ -27,7 +27,7 @@ repos:
       # Explicit --pythonpath forces the per-plugin venv used by `uv run`.
       - id: basedpyright
         name: basedpyright
-        entry: bash -c 'export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"; exit_code=0; for dir in plugins/*/server; do echo "==> basedpyright $dir"; uv run --directory "$dir" python -m basedpyright --pythonpath ./.venv/bin/python server || exit_code=1; done; echo "==> basedpyright plugins/_shared"; uv run --directory plugins/_shared python -m basedpyright --pythonpath ./.venv/bin/python hook_transport hook_dispatch sandbox session_key scrubbing || exit_code=1; exit $exit_code'
+        entry: bash -c 'export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"; exit_code=0; for dir in plugins/*/server; do echo "==> basedpyright $dir"; uv run --directory "$dir" python -m basedpyright --pythonpath ./.venv/bin/python server || exit_code=1; done; echo "==> basedpyright plugins/_shared"; uv run --directory plugins/_shared python -m basedpyright --pythonpath ./.venv/bin/python hook_transport hook_dispatch sandbox session_key scrubbing claudemd || exit_code=1; exit $exit_code'
         language: system
         pass_filenames: false
         types: [python]
