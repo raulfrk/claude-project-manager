@@ -65,6 +65,64 @@ def _kill_then_finalize(args: Any, console: Console) -> None:
     _finalize_shared_venv(args, console)
 
 
+def _finalize_sandbox(args: Any, selected_plugins: list[str], console: Console) -> None:
+    """Reconcile ~/.claude/settings.json MCP allow rules.
+
+    Runs AFTER plugin install + kill_stale, BEFORE shared venv build.
+    Failures are warnings only — start.sh + plugin runtime degrade
+    gracefully without sandbox rules (Claude prompts per-tool
+    permissions instead of auto-allow).
+
+    The expected-set is the union of:
+    - selected_plugins from this install's wizard selection.
+    - get_installed_plugins() parsed names (covers plugins from prior
+      installs the user didn't touch this run).
+
+    Stale inference still removes entries for plugins NOT installed
+    at all.
+    """
+    from sandbox import PLUGIN_TO_MCP_SERVER, reconcile_settings
+
+    name_to_id = _name_to_id_map()
+    union = set(selected_plugins) | set(name_to_id.keys())
+
+    expected_servers: list[str] = []
+    skipped: list[str] = []
+    for plugin_name in sorted(union):
+        server = PLUGIN_TO_MCP_SERVER.get(plugin_name)
+        if server is None:
+            skipped.append(plugin_name)
+            continue
+        expected_servers.append(server)
+
+    if skipped:
+        console.print(
+            f"[dim]Skipped sandbox reconcile for unmapped plugins: "
+            f"{', '.join(skipped)}[/dim]"
+        )
+
+    try:
+        result = reconcile_settings(expected_servers=expected_servers)
+    except (OSError, ValueError) as exc:
+        console.print(
+            f"[yellow]Failed to reconcile settings.json sandbox rules: {exc}[/yellow]"
+        )
+        return
+
+    if result.added or result.removed:
+        msg_parts: list[str] = []
+        if result.added:
+            msg_parts.append(f"added {result.added}")
+        if result.removed:
+            stale = ", ".join(result.stale_removed)
+            msg_parts.append(f"removed {result.removed} stale ({stale})")
+        console.print(
+            f"  [green]✓[/green] Sandbox rules reconciled: {', '.join(msg_parts)}"
+        )
+    else:
+        console.print("  [dim]✓ Sandbox rules already in sync[/dim]")
+
+
 def _finalize_shared_venv(args: Any, console: Console) -> None:
     """Build the shared marketplace venv after install/reinstall/update.
 
@@ -504,7 +562,9 @@ def _run_install(args: Any, console: Console) -> int:
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=[], console=console)
     if exit_code == 0:
-        _kill_then_finalize(args, console)
+        prompt_kill_stale_sessions(console)
+        _finalize_sandbox(args, selected_names, console)
+        _finalize_shared_venv(args, console)
     return exit_code
 
 
@@ -533,7 +593,9 @@ def _run_update(args: Any, pre_state: Any, console: Console) -> int:
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=[], console=console)
     if exit_code == 0:
-        _kill_then_finalize(args, console)
+        prompt_kill_stale_sessions(console)
+        _finalize_sandbox(args, selected, console)
+        _finalize_shared_venv(args, console)
     return exit_code
 
 
@@ -583,7 +645,9 @@ def _run_reinstall(
     exit_code = _execute_and_report(plan, console)
     _post_execute_cleanup(full_cleanup=False, orphans=orphans, console=console)
     if exit_code == 0:
-        _kill_then_finalize(args, console)
+        prompt_kill_stale_sessions(console)
+        _finalize_sandbox(args, installed_names, console)
+        _finalize_shared_venv(args, console)
     if mode_options.get("reset_configs"):
         _reset_installer_configs(console)
     return exit_code
