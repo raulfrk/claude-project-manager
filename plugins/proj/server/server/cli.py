@@ -256,6 +256,68 @@ def cmd_session_start(cwd: str | None, compact: bool) -> None:
     _check_router_health()
 
 
+def cmd_debug_session_key() -> None:
+    """Print resolver state for diagnosing session-key issues.
+
+    Outputs CLAUDE_CODE_EXECPATH, the resolved session key, the calling
+    process's pid + ppid, the full ancestor chain with realpath'd exe paths,
+    and the matching ``proj-session.yaml`` slot (if any). Read-only; all
+    output to stdout. See spec
+    docs/superpowers/specs/2026-04-26-debug-session-key-cli-design.md.
+    """
+    import psutil
+    import yaml as yaml_mod
+    from session_key import session_key as sk
+
+    execpath = os.environ.get("CLAUDE_CODE_EXECPATH", "<unset>")
+    resolved = sk.get_claude_session_key()
+    own_pid = os.getpid()
+    own_ppid = os.getppid()
+
+    print(f"CLAUDE_CODE_EXECPATH: {execpath}")
+    print(f"Resolved session key: {resolved}")
+    print(f"Process: pid={own_pid} ppid={own_ppid}")
+    print("Ancestor chain (immediate-first):")
+    try:
+        for ancestor in psutil.Process().parents():
+            try:
+                exe = os.path.realpath(ancestor.exe())
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+                exe = f"<error: {type(exc).__name__}>"
+            print(f"  pid={ancestor.pid} exe={exe}")
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+        print(f"  <ancestor walk failed: {type(exc).__name__}: {exc}>")
+
+    yaml_path = Path.home() / ".claude" / "proj-session.yaml"
+    print(f"proj-session.yaml slot for key '{resolved}':")
+    if not yaml_path.exists():
+        print("  <yaml file missing>")
+        return
+    try:
+        data = yaml_mod.safe_load(yaml_path.read_text())
+    except (yaml_mod.YAMLError, OSError) as exc:
+        print(f"  <read error: {exc}>")
+        return
+    if not isinstance(data, dict):
+        print("  <yaml malformed>")
+        return
+    entries = data.get("active_by_claude_pid", {})
+    if not isinstance(entries, dict):
+        print("  <active_by_claude_pid malformed>")
+        return
+    slot = entries.get(resolved)
+    if slot is None:
+        print(
+            f"  <missing — no entry for key '{resolved}' (yaml has keys: {list(entries.keys())})>"
+        )
+        return
+    if not isinstance(slot, dict):
+        print(f"  <slot malformed: {slot!r}>")
+        return
+    print(f"  active: {slot.get('active', '<missing>')}")
+    print(f"  last_seen: {slot.get('last_seen', '<missing>')}")
+
+
 def cmd_session_end(cwd: str | None) -> None:
     """Bump last_updated + clear the session's session_key slot.
 
@@ -304,12 +366,16 @@ def main() -> None:
     end = sub.add_parser("session-end")
     end.add_argument("--cwd", default=None)
 
+    sub.add_parser("debug-session-key")
+
     args = parser.parse_args()
 
     if args.command == "session-start":
         cmd_session_start(args.cwd, args.compact)
     elif args.command == "session-end":
         cmd_session_end(args.cwd)
+    elif args.command == "debug-session-key":
+        cmd_debug_session_key()
     else:
         parser.print_help()
         sys.exit(1)

@@ -473,6 +473,7 @@ class TestCliArgParsing:
             env_extra={"PROJ_CONFIG": str(config_path)},
         )
         assert result.returncode == 0
+        assert "myapp" in result.stdout
 
 
 class TestDebugSessionKey:
@@ -492,4 +493,3 @@ class TestDebugSessionKey:
         assert "Process: pid=" in out
         assert "Ancestor chain (immediate-first):" in out
         assert "proj-session.yaml slot for key '" in out
-        assert "myapp" in result.stdout
