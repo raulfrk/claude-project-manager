@@ -2664,6 +2664,89 @@ class TestLinkStandaloneKey:
 # ── proj_jira_full_sync tests ────────────────────────────────────────────────
 
 
+class TestStandaloneBucketingRegression:
+    """Regression tests for the silent mis-bucketing fix in _run_jira_full_sync.
+
+    Pre-fix bug: ``_run_jira_full_sync`` called ``require_project(project_name)``
+    and unconditionally rebound ``project_name`` to the resolved active project,
+    so every standalone Jira issue (Case C) was bucketed under whichever project
+    happened to be active. These tests target ``_deterministic_map`` directly
+    to pin its contract: ``name=None`` MUST route through the per-issue
+    standalone path (creation + dedup), regardless of cfg state.
+
+    Spec: docs/superpowers/specs/2026-04-26-jira-sync-standalone-bucketing-design.md
+    """
+
+    def test_standalone_creates_per_issue_projects_when_name_is_none(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """name=None → standalone issue gets its own dedicated project."""
+        cfg, _existing = cfg_with_project
+        issues = [_make_jira_issue("STAND-1", "Some standalone task")]
+        apply_input, _diagnostics = _deterministic_map(issues, cfg, name=None)
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+        assert group["create_project"] is True
+        assert group["jira_key"] == "STAND-1"
+        assert "jira-standalone" in group.get("labels", [])
+        # suggested_project is derived from issue key + summary, slugified.
+        suggested = group["suggested_project"]
+        assert isinstance(suggested, str)
+        assert "stand-1" in suggested
+
+    def test_standalone_does_not_fall_back_to_existing_project_when_name_is_none(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """Pinned regression: even when cfg has an existing project loaded,
+        name=None must NOT bucket the standalone issue under that project.
+
+        The bug in ``_run_jira_full_sync`` was rebinding ``project_name`` to
+        the resolved active project before invoking ``_deterministic_map``.
+        This test pins that ``_deterministic_map`` itself respects name=None
+        and never auto-falls-back to an existing project name.
+        """
+        cfg, existing_name = cfg_with_project  # "myapp" is registered.
+        issues = [_make_jira_issue("STAND-2", "Another standalone task")]
+        apply_input, _diagnostics = _deterministic_map(issues, cfg, name=None)
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+        assert group["create_project"] is True
+        # Critical assertion: standalone is NOT bucketed under the existing project.
+        assert group["suggested_project"] != existing_name
+
+    def test_standalone_dedups_via_todo_key_index_when_name_is_none(
+        self, cfg_with_project: tuple[ProjConfig, str]
+    ) -> None:
+        """When an existing project already has a todo with the issue's
+        jira_issue_key, the standalone path dedups via ``todo_key_index``
+        instead of creating a duplicate standalone project. Pre-fix, the
+        override branch (``if name:``) skipped this dedup entirely.
+        """
+        cfg, existing_name = cfg_with_project  # "myapp" — pre-populated by fixture.
+        # Inject a todo linked to STAND-3 under "myapp" via the storage API.
+        today = str(date.today())
+        existing_todo = Todo(
+            id="1",
+            title="existing-todo",
+            created=today,
+            updated=today,
+            jira_issue_key="STAND-3",
+        )
+        storage.save_todos(cfg, existing_name, [existing_todo])
+        issues = [_make_jira_issue("STAND-3", "Already linked task")]
+        apply_input, _diagnostics = _deterministic_map(issues, cfg, name=None)
+        assert len(apply_input.groups) == 1
+        group = apply_input.groups[0]
+        assert group["source"] == "standalone"
+        # Dedup hit: no new project, route to the project that already has
+        # the linked todo.
+        assert group["suggested_project"] == existing_name
+        assert group["create_project"] is False
+        assert group["project_exists"] is True
+
+
 class TestProjJiraFullSync:
     """Tests for _deterministic_map and the full-sync flow."""
 

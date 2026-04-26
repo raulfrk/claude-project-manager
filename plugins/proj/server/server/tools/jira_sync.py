@@ -1988,7 +1988,13 @@ def _run_jira_full_sync(
 
             cfg_obj = require_config()
         else:
-            cfg_obj, project_name = cfg
+            # Discard the active-project fallback; preserve caller's original
+            # project_name. When caller passed None, _deterministic_map's Case
+            # C (standalone-per-issue + dedup) MUST run. Rebinding here forced
+            # every standalone issue into the active project, bypassing both
+            # dedup and per-issue project creation. See spec
+            # docs/superpowers/specs/2026-04-26-jira-sync-standalone-bucketing-design.md.
+            cfg_obj, _ = cfg
     except Exception as e:
         return json.dumps({"status": "error", "error": f"Config error: {e}"})
 
