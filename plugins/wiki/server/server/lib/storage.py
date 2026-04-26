@@ -14,6 +14,18 @@ from typing import TYPE_CHECKING, ParamSpec, TypeVar, cast
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
+WIKI_LOCK_TIMEOUT = 30.0  # seconds; cross-process flock acquisition budget
+WIKI_LOCK_RETRY_INTERVAL = 0.1  # seconds between flock LOCK_NB retry attempts
+
+
+class WikiLockReentryError(RuntimeError):
+    """Raised when wiki_lock detects same-task reentry (anyio.Lock is non-reentrant)."""
+
+
+class WikiLockTimeoutError(RuntimeError):
+    """Raised when cross-process flock cannot be acquired within WIKI_LOCK_TIMEOUT."""
+
+
 _WIKI_LOCK = threading.RLock()  # re-entrant so same-thread nested wiki_lock() is fine
 _LOCK_FILENAME = ".lock"
 _HELD_LOCKS = threading.local()
