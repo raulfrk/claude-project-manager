@@ -139,6 +139,47 @@ async def test_hooks_unreachable_returns_result(mock_mcp, caplog):
     assert "unreachable" in caplog.text.lower() or "refused" in caplog.text.lower()
 
 
+def test_resolve_hooks_transport_glob_fallback_honors_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: glob fallback in _resolve_hooks_transport must use the same
+    SOCKET_DIR (TMPDIR) that hook_transport.dual_transport._socket_path uses
+    when binding sockets. Pre-fix, the glob hardcoded "/tmp" so on hosts with
+    TMPDIR != /tmp the fallback always returned no candidates → dispatch
+    returned (url, None) → "hooks server unreachable" warnings whenever the
+    primary registry-file lookup also failed.
+    """
+    import hook_transport.dual_transport as dual
+
+    # Force SOCKET_DIR onto a non-/tmp path. The local import in
+    # _resolve_hooks_transport re-fetches this attribute on each call.
+    fake_tmpdir = tmp_path / "fake-tmpdir"
+    fake_tmpdir.mkdir()
+    monkeypatch.setattr(dual, "SOCKET_DIR", str(fake_tmpdir))
+
+    # Create a fake PID-tagged router socket file in the non-/tmp dir.
+    sock = fake_tmpdir / f"{dual.SOCKET_PREFIX}router-12345.sock"
+    sock.touch()
+
+    # Force the registry-file primary lookup to fail (point HOME at a tmp dir
+    # with no ~/.claude/sockets/router).
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+
+    # Unix mode by default. Disable TCP fallback path.
+    monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
+
+    url, transport = _resolve_hooks_transport(hooks_port=0)
+
+    # Glob fallback found the socket → returns httpx.AsyncHTTPTransport(uds=...)
+    # rather than (url, None). Pre-fix, transport would be None because the
+    # glob looked in /tmp and the socket is in fake_tmpdir.
+    assert transport is not None, (
+        "Glob fallback failed to find socket in non-/tmp SOCKET_DIR — "
+        "_resolve_hooks_transport may still be hardcoding /tmp"
+    )
+    assert url == "http://localhost/hook"
+
+
 @pytest.mark.anyio
 async def test_hooks_timeout_returns_result(mock_mcp, caplog):
     enable_hook_dispatch(mock_mcp, hooks_port=19199)

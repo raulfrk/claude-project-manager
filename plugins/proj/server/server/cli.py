@@ -19,7 +19,12 @@ from server.tools.digest import _deduplicate, _parse_session
 
 logger = logging.getLogger(__name__)
 
-_SOCKET_DIR = "/tmp"  # noqa: S108
+# TMPDIR-aware: matches the bind site in hook_transport.dual_transport
+# (sockets are created at $TMPDIR/claude-cpm-{plugin}-{pid}.sock). Hardcoding
+# "/tmp" silently broke the glob fallback on hosts with TMPDIR != /tmp,
+# manifesting as "proj socket not found" warnings when the registry-file
+# lookup also failed (e.g. inside subagent mount namespaces).
+_SOCKET_DIR = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
 _SOCKET_PREFIX = "claude-cpm-"
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
 
