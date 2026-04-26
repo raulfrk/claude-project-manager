@@ -374,7 +374,10 @@ def _name_to_id_map() -> dict[str, str]:
     try:
         available = get_available_plugins()
         installed_ids = get_installed_plugins()
-    except InstallerError:
+    except (InstallerError, FileNotFoundError, OSError):
+        # FileNotFoundError: `claude` binary missing on PATH (e.g. CI without
+        # the Anthropic CLI installed). Best-effort metadata — degrade to empty
+        # rather than crashing the install flow's downstream consumers.
         available, installed_ids = [], []
     name_to_id: dict[str, str] = {}
     for pid in list(available) + list(installed_ids):
