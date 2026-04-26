@@ -260,6 +260,8 @@ def fast_timeout(monkeypatch):
 
 - Memory: `project_vm_freeze_root_cause.md` — root-cause investigation that produced this todo.
 - Reference impl: `plugins/proj/server/server/tools/todos.py:1041` — `LOCK_EX | LOCK_NB` pattern (one-shot, not retry; this spec adapts the pattern for a long-held context manager).
+- Wiki page `[[batch-completion-enforcement]]` — documents the canonical `threading.Lock + fcntl.flock` cross-process locking pattern this spec follows.
+- Wiki page `[[atomic-update-ref-cas-pattern]]` — documents when to prefer CAS over flock. Considered + rejected here: `wiki_lock` guards multi-step writes with no natural CAS equivalent, so flock is correct.
 - Sibling todo 761: `/proj:save` defer wiki ingest off inline path. Eliminates the primary contention source. 759 is defense-in-depth for any remaining cross-process wiki access (e.g. concurrent `/wiki:ingest` from two sessions).
 - Sibling todo 762: stale-socket connect probe in hook dispatch.
 - Wiki page `[[parallel-orchestration-boundary-issues]]` lists cross-layer integration gaps; this fix closes one (cross-process lock contention not visible to per-todo reviewers).
