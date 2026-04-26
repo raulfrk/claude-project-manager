@@ -46,12 +46,12 @@ After completing any implementation, always validate the result against the spec
 
 ## Batch Completion Enforcement
 
-**Always use `mcp__proj__todo_batch_complete` when marking 2 or more todos done in the same operation.** Never loop `todo_complete` across multiple ids. The batch tool:
-- Validates, deduplicates, and atomically saves all ids under a cross-process file lock (`threading.Lock` + `fcntl.flock`).
+**Always pass `todo_ids=[...]` to `mcp__plugin_proj_proj__todo_complete` when marking 2+ todos done in the same operation.** Never loop the tool with one `todo_id` per call. The batch path:
+- Routes via `todo_ids` (list) parameter — atomic, deduplicated, saved under a single cross-process file lock.
 - Fires ONE aggregated hook chain per integration (Todoist `todoist_complete_tasks`, Trello `trello_batch_archive_cards`, Jira `jira_update_issues`) instead of N sequential chains.
-- Returns a `_hooks.structured_errors` sidecar that identifies which integration/ids failed per hook.
+- Returns `_hooks.structured_errors` listing per-integration failures by id.
 
-Single-todo completion continues to use `mcp__proj__todo_complete`.
+Single-todo completion: pass `todo_id="..."` (or `todo_ids=["..."]` — both work).
 
 ## E2E TUI Snapshot Flakes
 
