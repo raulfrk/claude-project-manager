@@ -207,10 +207,14 @@ class TestEventLoopResponsiveness:
             lambda: replace(original_load(), wiki_dir=wiki_dir),
         )
 
-        # Populate w/ enough pages so rebuild has work
+        # Populate w/ enough pages so rebuild stays in flight long enough for
+        # quick_op tasks to schedule + complete. 500 pages keeps rebuild busy
+        # for hundreds of ms even on fast hardware (was 50; that finished too
+        # fast on some systems leaving elapsed_for_quick empty + masking
+        # regressions silently).
         pages = wiki_dir / "pages" / "concepts"
         pages.mkdir(parents=True)
-        for i in range(50):
+        for i in range(500):
             (pages / f"page-{i}.md").write_text(
                 f"---\ntitle: page-{i}\ntags: []\nlinks_to: []\nscope: []\n"
                 f"sources: []\nlast_ingested: 2026-04-26\n---\nbody-{i}\n"
@@ -229,9 +233,14 @@ class TestEventLoopResponsiveness:
             for _ in range(10):
                 tg.start_soon(quick_op)
 
-        # quick_op tasks may not have run yet if rebuild finished too fast; allow empty
-        if elapsed_for_quick:
-            assert max(elapsed_for_quick) < 0.5, (
-                f"event loop stalled (max quick op took {max(elapsed_for_quick):.3f}s, "
-                f"all values: {elapsed_for_quick})"
-            )
+        # Hard assert quick_op tasks ran — empty list means rebuild finished
+        # before any quick_op was scheduled, which means the responsiveness
+        # check itself didn't run + silently masks regressions.
+        assert len(elapsed_for_quick) > 0, (
+            "responsiveness test no-op: quick_op tasks never ran during rebuild "
+            "(rebuild finished too fast). Increase page count."
+        )
+        assert max(elapsed_for_quick) < 0.5, (
+            f"event loop stalled (max quick op took {max(elapsed_for_quick):.3f}s, "
+            f"all values: {elapsed_for_quick})"
+        )

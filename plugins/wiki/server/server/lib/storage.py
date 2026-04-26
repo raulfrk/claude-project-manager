@@ -40,7 +40,10 @@ def _flock_with_timeout(fd: int, lock_path: Path) -> None:
     Raises:
         WikiLockTimeoutError: if budget exhausted.
     """
-    # Re-read module-level timeout each call so monkeypatching works in tests.
+    # Late-import the module so that test monkeypatching of WIKI_LOCK_TIMEOUT
+    # AND WIKI_LOCK_RETRY_INTERVAL takes effect at call time (a normal
+    # `from .storage import WIKI_LOCK_TIMEOUT` would bind the value at import,
+    # invisible to monkeypatch).
     from server.lib import storage as _storage_mod
 
     deadline = time.monotonic() + _storage_mod.WIKI_LOCK_TIMEOUT
@@ -111,6 +114,11 @@ async def wiki_lock(wiki_dir: Path) -> AsyncGenerator[None, None]:
     lock_path.touch(exist_ok=True)
 
     async with _WIKI_LOCK:
+        # fd lifecycle: os.open runs first and binds `fd` BEFORE entering the
+        # try block. If os.open itself raises (rare, e.g. EMFILE), `fd` is
+        # never bound — no leak, no finally needed (suppress would fail on
+        # NameError). Once bound, the try/finally ensures unlock + close even
+        # if _flock_with_timeout raises WikiLockTimeoutError.
         fd = await anyio.to_thread.run_sync(os.open, str(lock_path), os.O_RDWR)
         try:
             await anyio.to_thread.run_sync(_flock_with_timeout, fd, lock_path)
