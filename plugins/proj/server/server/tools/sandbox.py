@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sandbox import storage
-from sandbox.storage import allow_entries_for_path, mcp_allow_entry, skill_allow_entry
+from sandbox.reconcile import reconcile_settings
+from sandbox.storage import (
+    SETTINGS_PATH,
+    allow_entries_for_path,
+    mcp_allow_entry,
+    skill_allow_entry,
+)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -324,72 +330,30 @@ def sandbox_reconcile(
     stale_servers: list[str] | None = None,
     expected_skill_prefixes: list[str] | None = None,
 ) -> str:
-    """Sync expected vs actual MCP servers, paths, and skill
-    prefixes. Removes stale, adds missing."""
-    # Validate all server names before loading settings to prevent partial mutations
+    """Sync expected vs actual MCP servers, paths, and skill prefixes.
+
+    MCP tool wrapping `sandbox.reconcile_settings`. Skill consumers
+    receive the JSON envelope; programmatic in-tree callers should
+    import `reconcile_settings` directly from `sandbox`.
+
+    Note: the legacy `stale_servers` arg is accepted for back-compat but
+    ignored — the new reconciler always infers stale from current state.
+    """
     try:
-        expected_entries = [mcp_allow_entry(name) for name in expected_servers]
-        skill_entries = [skill_allow_entry(prefix) for prefix in expected_skill_prefixes or []]
+        result = reconcile_settings(
+            expected_servers=expected_servers,
+            expected_paths=expected_paths,
+            expected_skill_prefixes=expected_skill_prefixes,
+        )
     except ValueError as exc:
         return _json_result(error=str(exc))
 
-    settings = storage.load()
-    added = 0
-    removed = 0
-
-    # Remove stale servers
-    stale = stale_servers or []
-    if not stale:
-        # Infer stale: present MCP rules not in expected
-        current_servers = [
-            r.removeprefix("mcp__").removesuffix("__*")
-            for r in settings.permissions.allow
-            if r.startswith("mcp__") and r.endswith("__*")
-        ]
-        stale = [s for s in current_servers if s not in expected_servers]
-
-    for name in stale:
-        try:
-            stale_entry = mcp_allow_entry(name)
-        except ValueError:
-            continue
-        if stale_entry in settings.permissions.allow:
-            settings.permissions.allow.remove(stale_entry)
-            removed += 1
-
-    # Add missing servers
-    for entry in expected_entries:
-        if entry not in settings.permissions.allow:
-            settings.permissions.allow.append(entry)
-            added += 1
-
-    # Reconcile paths if provided
-    if expected_paths is not None:
-        for p in expected_paths:
-            abs_path = _resolve_path(p)
-            if abs_path not in settings.sandbox.filesystem.allow_write:
-                settings.sandbox.filesystem.allow_write.append(abs_path)
-                added += 1
-            for entry in allow_entries_for_path(abs_path):
-                if entry not in settings.permissions.allow:
-                    settings.permissions.allow.append(entry)
-                    added += 1
-
-    # Reconcile skill prefixes if provided
-    if expected_skill_prefixes is not None:
-        for entry in skill_entries:
-            if entry not in settings.permissions.allow:
-                settings.permissions.allow.append(entry)
-                added += 1
-
-    if added or removed:
-        storage.save(settings)
-
     return _json_result(
-        result=f"Reconciled: {added} added, {removed} removed",
-        settings_path=str(settings.path),
-        added=added,
-        removed=removed,
+        result=f"Reconciled: {result.added} added, {result.removed} removed",
+        settings_path=str(SETTINGS_PATH),
+        added=result.added,
+        removed=result.removed,
+        stale_removed=result.stale_removed,
     )
 
 

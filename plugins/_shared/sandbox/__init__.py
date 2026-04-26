@@ -14,6 +14,11 @@ from sandbox.models import (
     SandboxFilesystem,
     SettingsFile,
 )
+from sandbox.reconcile import (
+    PLUGIN_TO_MCP_SERVER,
+    ReconcileResult,
+    reconcile_settings,
+)
 from sandbox.storage import (
     SETTINGS_PATH,
     allow_entries_for_path,
@@ -22,12 +27,15 @@ from sandbox.storage import (
 )
 
 __all__ = [
+    "PLUGIN_TO_MCP_SERVER",
     "SETTINGS_PATH",
     "Permissions",
+    "ReconcileResult",
     "SandboxFilesystem",
     "SettingsFile",
     "allow_entries_for_path",
     "mcp_allow_entry",
+    "reconcile_settings",
     "skill_allow_entry",
     "storage",
 ]

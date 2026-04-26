@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.30"
+version = "0.4.31"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
