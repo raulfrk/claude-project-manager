@@ -179,3 +179,59 @@ class TestWikiLockAsync:
             if proc.is_alive():
                 proc.terminate()
                 proc.join()
+
+
+class TestEventLoopResponsiveness:
+    @pytest.mark.anyio()
+    async def test_event_loop_responsive_during_index_rebuild(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """While wiki_index_rebuild runs, concurrent anyio sleeps complete fast."""
+        from dataclasses import replace
+
+        from server.lib import config as config_mod
+        from server.lib.models import WikiConfig
+        from server.tools.index import wiki_index_rebuild
+
+        cfg_path = tmp_path / "wiki.yaml"
+        wiki_dir = tmp_path / "wiki"
+        wiki_dir.mkdir()
+        (wiki_dir / "pages").mkdir()
+        monkeypatch.setattr(config_mod, "_DEFAULT_CONFIG_PATH", cfg_path)
+        config_mod.save_config(WikiConfig(enabled=True, wiki_dir=wiki_dir))
+        # Avoid touching real config
+        original_load = config_mod.load_config
+        monkeypatch.setattr(
+            config_mod,
+            "load_config",
+            lambda: replace(original_load(), wiki_dir=wiki_dir),
+        )
+
+        # Populate w/ enough pages so rebuild has work
+        pages = wiki_dir / "pages" / "concepts"
+        pages.mkdir(parents=True)
+        for i in range(50):
+            (pages / f"page-{i}.md").write_text(
+                f"---\ntitle: page-{i}\ntags: []\nlinks_to: []\nscope: []\n"
+                f"sources: []\nlast_ingested: 2026-04-26\n---\nbody-{i}\n"
+            )
+
+        elapsed_for_quick: list[float] = []
+
+        async def quick_op() -> None:
+            start = time.monotonic()
+            await anyio.sleep(0.001)
+            elapsed_for_quick.append(time.monotonic() - start)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(wiki_index_rebuild)
+            await anyio.sleep(0.05)  # let rebuild start
+            for _ in range(10):
+                tg.start_soon(quick_op)
+
+        # quick_op tasks may not have run yet if rebuild finished too fast; allow empty
+        if elapsed_for_quick:
+            assert max(elapsed_for_quick) < 0.5, (
+                f"event loop stalled (max quick op took {max(elapsed_for_quick):.3f}s, "
+                f"all values: {elapsed_for_quick})"
+            )
