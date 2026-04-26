@@ -92,3 +92,30 @@ class TestWikiPageDelete:
         referrer_text = (wiki_dir / "pages" / "topics" / "integrations.md").read_text()
         fm, _body = fm_mod.parse(referrer_text)
         assert fm.get("links_to") == ["hooks"]
+
+    async def test_delete_no_collision_still_prunes_backlinks(
+        self, mcp_app: FastMCP, wiki_setup: dict[str, Path]
+    ) -> None:
+        """Regression for the existing prune behavior: when no other page
+        shares the slug, deleting it MUST still strip the slug from other
+        pages' links_to (the original purpose of the prune loop).
+
+        Pinned to ensure the same-slug guard from bug 751 doesn't
+        over-broaden and accidentally suppress prunes for unique-slug
+        deletes.
+        """
+        wiki_dir = wiki_setup["wiki_dir"]
+        _write_page(wiki_dir, "concepts", "auth")
+        _write_page(wiki_dir, "topics", "integrations", links_to=["auth"])
+
+        result = json.loads(
+            await call_tool(mcp_app, "wiki_page_delete", slug="auth", category="concepts")
+        )
+        assert result["deleted"] is True
+        assert result["backlinks_updated"] == ["integrations"]
+
+        from server.lib import frontmatter as fm_mod
+
+        referrer_text = (wiki_dir / "pages" / "topics" / "integrations.md").read_text()
+        fm, _body = fm_mod.parse(referrer_text)
+        assert fm.get("links_to") == []

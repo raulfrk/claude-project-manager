@@ -237,22 +237,38 @@ async def wiki_page_list(
 
 
 def _do_page_delete(wiki_dir: Path, target: Path, slug: str) -> list[str]:
-    """Sync helper: backlink prune + delete, on worker thread."""
+    """Sync helper: backlink prune + delete, on worker thread.
+
+    When another page (e.g., in a different category) shares the slug,
+    skip the backlink prune — the slug still resolves to a real page,
+    so existing ``links_to: [slug]`` entries remain valid. Without this
+    guard, deleting one of two same-stem pages would orphan all
+    incoming references that point at the surviving page via slug
+    lookup (bug 751).
+    """
     updated_backlinks: list[str] = []
     pages_root = storage.pages_dir(wiki_dir)
-    for md in pages_root.rglob("*.md"):
-        if md == target:
-            continue
-        try:
-            fm, body = fm_mod.parse(md.read_text())
-        except fm_mod.FrontmatterError:
-            continue
-        links: list[str] = cast("list[str]", fm.get("links_to", []) or [])
-        if slug in links:
-            new_links = [link for link in links if link != slug]
-            fm["links_to"] = new_links
-            storage.atomic_write(md, fm_mod.dump(fm, body))
-            updated_backlinks.append(md.stem)
+    slug_lower = slug.lower()
+
+    another_exists = any(
+        md != target and md.stem.lower() == slug_lower for md in pages_root.rglob("*.md")
+    )
+
+    if not another_exists:
+        for md in pages_root.rglob("*.md"):
+            if md == target:
+                continue
+            try:
+                fm, body = fm_mod.parse(md.read_text())
+            except fm_mod.FrontmatterError:
+                continue
+            links: list[str] = cast("list[str]", fm.get("links_to", []) or [])
+            if slug in links:
+                new_links = [link for link in links if link != slug]
+                fm["links_to"] = new_links
+                storage.atomic_write(md, fm_mod.dump(fm, body))
+                updated_backlinks.append(md.stem)
+
     target.unlink()
     return updated_backlinks
 
