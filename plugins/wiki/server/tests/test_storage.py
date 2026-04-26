@@ -1,16 +1,18 @@
 """Tests for lib/storage.py."""
 
-import threading
+from __future__ import annotations
+
 from pathlib import Path
 
+import anyio
 import pytest
 
 from server.lib.storage import (
+    WikiLockReentryError,
     atomic_write,
     page_path,
     pages_dir,
     wiki_lock,
-    with_wiki_lock,
 )
 
 
@@ -48,44 +50,34 @@ class TestAtomicWrite:
 
 
 class TestWikiLock:
-    def test_lock_is_reentrant_within_thread(self, wiki_root: Path) -> None:
-        # `with wiki_lock()` must allow recursive acquisition from the same thread
-        with wiki_lock(wiki_root), wiki_lock(wiki_root):  # should NOT deadlock
-            (wiki_root / "x.md").write_text("ok")
-        assert (wiki_root / "x.md").exists()
+    @pytest.mark.anyio()
+    async def test_lock_is_not_reentrant_within_task(self, wiki_root: Path) -> None:
+        """Post-W1: anyio.Lock is non-reentrant. Nested same-task acquire raises."""
+        async with wiki_lock(wiki_root):
+            with pytest.raises(WikiLockReentryError, match="nested wiki_lock"):
+                async with wiki_lock(wiki_root):
+                    pass
 
-    def test_with_wiki_lock_decorator(self, wiki_root: Path) -> None:
-        @with_wiki_lock
-        def op(wiki_dir: Path, name: str) -> str:
-            (wiki_dir / f"{name}.md").write_text(name)
-            return name
-
-        assert op(wiki_root, "foo") == "foo"
-        assert (wiki_root / "foo.md").exists()
-
-    def test_lock_blocks_other_thread(self, wiki_root: Path) -> None:
-        import time
-
+    @pytest.mark.anyio()
+    async def test_lock_blocks_other_task(self, wiki_root: Path) -> None:
         order: list[str] = []
 
-        def worker_a() -> None:
-            with wiki_lock(wiki_root):
+        async def worker_a() -> None:
+            async with wiki_lock(wiki_root):
                 order.append("A-enter")
-                time.sleep(0.1)
+                await anyio.sleep(0.1)
                 order.append("A-exit")
 
-        def worker_b() -> None:
-            time.sleep(0.02)  # start slightly after A
-            with wiki_lock(wiki_root):
+        async def worker_b() -> None:
+            await anyio.sleep(0.02)  # start slightly after A
+            async with wiki_lock(wiki_root):
                 order.append("B-enter")
                 order.append("B-exit")
 
-        t_a = threading.Thread(target=worker_a)
-        t_b = threading.Thread(target=worker_b)
-        t_a.start()
-        t_b.start()
-        t_a.join()
-        t_b.join()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(worker_a)
+            tg.start_soon(worker_b)
+
         assert order == ["A-enter", "A-exit", "B-enter", "B-exit"]
 
 
