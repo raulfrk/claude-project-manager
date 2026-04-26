@@ -304,19 +304,26 @@ class TestKillStaleOrdering:
     restart. The kill must come first.
     """
 
-    def _assert_kill_before_finalize(self, parent_mock):
-        """Verify prompt_kill_stale_sessions was called before
+    def _assert_ordering(self, parent_mock):
+        """Verify prompt_kill_stale_sessions < _finalize_sandbox <
         _finalize_shared_venv on the shared parent mock."""
         names = [c[0] for c in parent_mock.mock_calls]
         try:
             kill_idx = names.index("prompt_kill_stale_sessions")
+            sandbox_idx = names.index("_finalize_sandbox")
             finalize_idx = names.index("_finalize_shared_venv")
         except ValueError as exc:
-            raise AssertionError(f"Expected both calls; got names={names}") from exc
-        assert kill_idx < finalize_idx, (
-            f"prompt_kill_stale_sessions (call #{kill_idx}) must precede "
-            f"_finalize_shared_venv (call #{finalize_idx}); calls={names}"
+            raise AssertionError(
+                f"Expected all three calls; got names={names}"
+            ) from exc
+        assert kill_idx < sandbox_idx < finalize_idx, (
+            f"Expected kill (#{kill_idx}) < sandbox (#{sandbox_idx}) < "
+            f"finalize (#{finalize_idx}); calls={names}"
         )
+
+    def _assert_kill_before_finalize(self, parent_mock):
+        """Back-compat alias — call _assert_ordering."""
+        self._assert_ordering(parent_mock)
 
     def test_run_install_kills_before_finalize(self) -> None:
         from unittest.mock import MagicMock as _MagicMock
@@ -370,6 +377,10 @@ class TestKillStaleOrdering:
                 "installer.flow.installer_flow._finalize_shared_venv",
                 parent._finalize_shared_venv,
             ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
+            ),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
             run_installer_flow("install", _Args(), console)
@@ -408,6 +419,10 @@ class TestKillStaleOrdering:
             patch(
                 "installer.flow.installer_flow._finalize_shared_venv",
                 parent._finalize_shared_venv,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
             ),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)
@@ -453,6 +468,10 @@ class TestKillStaleOrdering:
             patch(
                 "installer.flow.installer_flow._finalize_shared_venv",
                 parent._finalize_shared_venv,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
             ),
         ):
             console = Console(width=80, force_terminal=False, no_color=True)

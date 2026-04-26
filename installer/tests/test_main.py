@@ -409,6 +409,89 @@ class TestInstall:
             f"prompt_kill_stale_sessions must precede ensure_shared_venv; got {names}"
         )
 
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
+    @patch("installer.main.check_marketplace_registered", return_value=True)
+    def test_install_wizard_path_sandbox_between_kill_and_wizard(
+        self,
+        _check_mp,
+        _avail,
+        _installed,
+        _install_plugin,
+    ):
+        """--no-tui non-skip-wizard install: kill < sandbox < run_wizard."""
+        from unittest.mock import MagicMock as _MagicMock
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
+            ),
+            patch("installer.main.run_wizard", parent.run_wizard),
+        ):
+            args = _make_args(plugins=["proj"], skip_wizard=False)
+            _install(args)
+        names = [c[0] for c in parent.mock_calls]
+        kill_idx = names.index("prompt_kill_stale_sessions")
+        sandbox_idx = names.index("_finalize_sandbox")
+        wizard_idx = names.index("run_wizard")
+        assert kill_idx < sandbox_idx < wizard_idx, (
+            f"Expected kill < sandbox < run_wizard; got {names}"
+        )
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.get_installed_plugins", return_value=[])
+    @patch("installer.main.get_available_plugins", return_value=["proj@gh:x/y"])
+    @patch("installer.main.check_marketplace_registered", return_value=True)
+    @patch("installer.main.run_wizard")
+    def test_install_skip_wizard_sandbox_between_kill_and_ensure(
+        self,
+        _wizard,
+        _check_mp,
+        _avail,
+        _installed,
+        _install_plugin,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--no-tui --skip-wizard install: kill < sandbox < ensure_shared_venv."""
+        from unittest.mock import MagicMock as _MagicMock
+
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
+            ),
+            patch(
+                "installer.shared_venv.ensure_shared_venv",
+                parent.ensure_shared_venv,
+            ),
+        ):
+            args = _make_args(plugins=["proj"], skip_wizard=True)
+            _install(args)
+        names = [c[0] for c in parent.mock_calls]
+        kill_idx = names.index("prompt_kill_stale_sessions")
+        sandbox_idx = names.index("_finalize_sandbox")
+        ensure_idx = names.index("ensure_shared_venv")
+        assert kill_idx < sandbox_idx < ensure_idx, (
+            f"Expected kill < sandbox < ensure; got {names}"
+        )
+
 
 # ===================================================================
 # _reinstall dispatch
@@ -853,6 +936,60 @@ class TestReinstallSharedVenv:
         ensure_idx = names.index("ensure_shared_venv")
         assert kill_idx < ensure_idx, (
             f"prompt_kill_stale_sessions must precede ensure_shared_venv; got {names}"
+        )
+
+    @patch("installer.main.install_plugin")
+    @patch("installer.main.add_marketplace")
+    @patch("installer.main.remove_marketplace")
+    @patch("installer.main.scan_stale_cache", side_effect=FileNotFoundError("skip"))
+    @patch("installer.main.get_installed_plugins", return_value=["proj"])
+    @patch("installer.main.display_detection")
+    @patch("installer.main.detect_existing")
+    @patch("installer.main.run_wizard")
+    def test_reinstall_skip_wizard_sandbox_between_kill_and_ensure(
+        self,
+        _wizard,
+        mock_detect,
+        _disp,
+        _gip,
+        _scan,
+        _remove_mp,
+        _add_mp,
+        _install_plugin,
+        tmp_path,
+        monkeypatch,
+    ):
+        """--no-tui --skip-wizard reinstall: kill < sandbox < ensure."""
+        from unittest.mock import MagicMock as _MagicMock
+
+        target = tmp_path / "mp"
+        target.mkdir()
+        monkeypatch.setattr("installer.shared_venv.marketplaces_dir", lambda: target)
+        mock_detect.return_value = InstallState(installed_plugins=["proj"])
+
+        parent = _MagicMock()
+        with (
+            patch(
+                "installer.flow.kill_stale.prompt_kill_stale_sessions",
+                parent.prompt_kill_stale_sessions,
+            ),
+            patch(
+                "installer.flow.installer_flow._finalize_sandbox",
+                parent._finalize_sandbox,
+            ),
+            patch(
+                "installer.shared_venv.ensure_shared_venv",
+                parent.ensure_shared_venv,
+            ),
+        ):
+            args = _make_args(reinstall=True, skip_wizard=True)
+            _reinstall(args)
+        names = [c[0] for c in parent.mock_calls]
+        kill_idx = names.index("prompt_kill_stale_sessions")
+        sandbox_idx = names.index("_finalize_sandbox")
+        ensure_idx = names.index("ensure_shared_venv")
+        assert kill_idx < sandbox_idx < ensure_idx, (
+            f"Expected kill < sandbox < ensure; got {names}"
         )
 
 
