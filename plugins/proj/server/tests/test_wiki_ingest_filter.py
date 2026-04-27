@@ -47,6 +47,61 @@ class TestSectionStrip:
         assert "## Key Decisions" in out
         assert "## Insights Discovered" in out
 
+    def test_strip_next_session_resumes_here_wholesale(self) -> None:
+        text = (
+            "## Key Decisions\n"
+            "- Decided X\n"
+            "\n"
+            "## Next Session Resumes Here\n"
+            "\n"
+            "### Attempted\n"
+            "- Worked on todo 804\n"
+            "\n"
+            "### Blocked\n"
+            "- _(none)_\n"
+            "\n"
+            "### Next Action\n"
+            "- Resume Task 3 of plan\n"
+            "\n"
+            "### Files / Todos\n"
+            "- Todos: 804\n"
+            "- Files: lib/handoff.py\n"
+        )
+        out = filter_session_text(text)
+        assert "## Next Session Resumes Here" not in out
+        assert "Attempted" not in out
+        assert "Resume Task 3" not in out
+        assert "lib/handoff.py" not in out
+        assert "## Key Decisions" in out
+        assert "Decided X" in out
+
+    def test_strip_next_session_terminates_at_next_h2(self) -> None:
+        text = (
+            "## Next Session Resumes Here\n"
+            "\n"
+            "### Attempted\n"
+            "- alpha\n"
+            "\n"
+            "### Blocked\n"
+            "- _(none)_\n"
+            "\n"
+            "### Next Action\n"
+            "- beta\n"
+            "\n"
+            "### Files / Todos\n"
+            "- gamma\n"
+            "\n"
+            "## Open Questions\n"
+            "- preserved bullet\n"
+        )
+        out = filter_session_text(text)
+        assert "## Next Session Resumes Here" not in out
+        assert "alpha" not in out
+        assert "beta" not in out
+        assert "gamma" not in out
+        assert "## Open Questions" in out
+        assert "preserved bullet" in out
+
 
 class TestTodoIdStrip:
     def test_strip_todo_id_explicit(self) -> None:

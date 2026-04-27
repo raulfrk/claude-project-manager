@@ -56,8 +56,30 @@ Save session ctx; reconcile git activity for active project.
 
    ## Open Questions
    - <bullet>
+
+   ## Next Session Resumes Here
+
+   ### Attempted
+   - <bullet describing what was worked on>
+
+   ### Blocked
+   - <bullet OR `_(none)_`>
+
+   ### Next Action
+   - <ONE concrete instruction a fresh agent can execute>
+
+   ### Files / Todos
+   - Todos: <comma-separated ids OR `_(none specified)_`>
+   - Files: <comma-separated paths OR `_(none specified)_`>
    ```
 <!-- session-template-end -->
+
+**7b.** Synthesise handoff block — populate `## Next Session Resumes Here` w/ 4 named subsections:
+ - **Attempted**: 1-3 bullets summarizing what was worked on this session (drawn from Key Decisions + Todos Worked On).
+ - **Blocked**: bullets for explicit blockers (waiting on user, external dep, unresolved bug). Empty → `_(none)_`.
+ - **Next Action**: ONE concrete instruction a fresh agent can execute without re-reading the session. Examples: "Implement Task 3 of plan at <plan-path>", "Resume todo 793 implementation in worktree X", "Review this session and ask user direction". If genuinely unclear → `_(no concrete next action — review session or ask user)_`.
+ - **Files / Todos**: comma-separated todo IDs + key file paths. No specific files touched → `_(none specified)_`.
+ - All 4 subsections always present — never omit. Placeholders for missing data signal what's missing.
 
 **8.** Knowledge bridge — extract Key Decisions from step 7:
  - No decisions → skip silently.

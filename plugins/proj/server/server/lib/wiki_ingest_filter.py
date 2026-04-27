@@ -12,6 +12,13 @@ import re
 # Section heading + everything until next H2 or EOF.
 _TODOS_WORKED_ON_RE = re.compile(r"(?ms)^[ \t]*## Todos Worked On\b.*?(?=^[ \t]*## |\Z)")
 
+# Strip transient handoff block (## Next Session Resumes Here) — coordinator-style
+# resumption ctx is task-execution state, not durable wiki knowledge. See spec
+# 2026-04-27-claude-progress-handoff-design.md (revised w/ wiki-exclusion add-on).
+_NEXT_SESSION_RESUMES_HERE_RE = re.compile(
+    r"(?ms)^[ \t]*## Next Session Resumes Here\b.*?(?=^[ \t]*## |\Z)"
+)
+
 # Whole-line strip: explicit "todo NNN" / "todo-NNN" references.
 _TODO_ID_EXPLICIT_RE = re.compile(r"(?im)^.*\btodo[\s-]*\d+\b.*$\n?")
 
@@ -32,12 +39,13 @@ _STATUS_PHRASE_RE = re.compile(rf"(?im)^.*\b{_STATUS_PHRASES}\b.*$\n?")
 
 
 def filter_session_text(text: str) -> str:
-    """Apply 3 strip passes in order: section, todo-id, status-phrase.
+    """Apply 4 strip passes in order: todos-section, handoff-section, todo-id, status-phrase.
 
     Returns the filtered text. Whole-line strip is used (not match-only) so
     paragraph readability is preserved for what remains.
     """
     out = _TODOS_WORKED_ON_RE.sub("", text)
+    out = _NEXT_SESSION_RESUMES_HERE_RE.sub("", out)
     out = _TODO_ID_EXPLICIT_RE.sub("", out)
     out = _TODO_ID_BARE_RE.sub("", out)
     out = _STATUS_PHRASE_RE.sub("", out)

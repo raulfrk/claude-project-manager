@@ -26,7 +26,15 @@ Load project ctx for this session only (not persisted).
  - `mcp__proj__ctx_session_start` → get full project ctx
  - Confirm: "Loaded project '<name>' for this session. This session is now working on <name>."
 
-**3a.** Show last session ctx (before todos):
+**3a.** Surface handoff block from latest session — BEFORE other context:
+ - `mcp__proj__proj_session_context` → get `config.tracking_dir` + `project.name`
+ - Bash: `ls <tracking_dir>/<name>/sessions/session-*.md 2>/dev/null | sort | tail -1` → latest session file path
+ - Empty → skip silently to step 3b
+ - Read file, search for `## Next Session Resumes Here` heading
+ - Heading absent (legacy session file) → skip silently to step 3b
+ - Heading present → extract section + 4 subsections (Attempted / Blocked / Next Action / Files / Todos), display under top-level `# Next Session Resumes Here` heading verbatim, BEFORE step 3b output
+
+**3b.** Show last session ctx (before todos):
  - `mcp__proj__proj_session_context` → get `config.tracking_dir` + `project.name`
  - Bash: `ls <tracking_dir>/<name>/sessions/session-*.md 2>/dev/null | sort | tail -1`
  - Non-empty → `Read` file, display under `### Last Session` **before** ctx_session_start block
