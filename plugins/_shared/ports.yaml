@@ -1,0 +1,13 @@
+# Single source of truth for plugin TCP fallback ports.
+# Used by HOOK_TRANSPORT=tcp mode only (Unix sockets are default).
+# Imported via plugins/_shared/hook_transport/ports.py::port_for(plugin_name).
+# Enforced unique by policies/port_uniqueness.rego.
+router: 19100
+proj: 19102
+worktree: 19103
+trello: 19104
+jira: 19105
+todoist: 19106
+zoxide: 19107
+confluence: 19108
+wiki: 19109
