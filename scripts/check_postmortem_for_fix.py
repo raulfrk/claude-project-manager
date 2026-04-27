@@ -14,12 +14,14 @@ from __future__ import annotations
 import os
 import re
 import sys
-import time
 from pathlib import Path
 
-# Reuse shared parser
+# Reuse shared parser. has_recent_postmortem lives in the shared module
+# (plugins/_shared/postmortem/parse.py); importing it instead of duplicating
+# avoids the boundary-drift smell -- the very smell todo 799 introduces a
+# managed rule against.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "_shared"))
-from postmortem.parse import POSTMORTEM_HEADING_RE  # noqa: E402
+from postmortem.parse import has_recent_postmortem  # noqa: E402
 
 FIX_PREFIX_RE = re.compile(r"^(fix|bug)\(")
 RECENT_HOURS = 24
@@ -42,21 +44,6 @@ def _resolve_tracking_dir() -> Path:
     return Path.home() / "projects" / "tracking"
 
 
-def _has_recent_postmortem(tracking_dir: Path, within_hours: int) -> bool:
-    if not tracking_dir.is_dir():
-        return False
-    cutoff = time.time() - within_hours * 3600
-    for notes in tracking_dir.rglob("NOTES.md"):
-        try:
-            if notes.stat().st_mtime < cutoff:
-                continue
-            if POSTMORTEM_HEADING_RE.search(notes.read_text(errors="replace")):
-                return True
-        except OSError:
-            continue
-    return False
-
-
 def main() -> int:
     msg_file = Path(sys.argv[1] if len(sys.argv) > 1 else ".git/COMMIT_EDITMSG")
     if not msg_file.is_file():
@@ -65,7 +52,7 @@ def main() -> int:
     if not lines or not FIX_PREFIX_RE.match(lines[0]):
         return 0  # not a fix/bug commit
     tracking_dir = _resolve_tracking_dir()
-    if _has_recent_postmortem(tracking_dir, RECENT_HOURS):
+    if has_recent_postmortem(tracking_dir, RECENT_HOURS):
         return 0
     print(
         f"\nWARN: fix commit without recent postmortem in {tracking_dir}/*/NOTES.md\n"
