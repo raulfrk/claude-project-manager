@@ -47,6 +47,27 @@ jobs:
 
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
 
+      - name: Install conftest
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v0.49.1/conftest_0.49.1_Linux_x86_64.tar.gz" \
+            | sudo tar -xzv -C /usr/local/bin/ conftest
+
+      - name: Run cpm Rego policies
+        run: |
+          set -euo pipefail
+          echo "==> shared_version_cascade"
+          python scripts/_gather_shared_version_state.py | conftest test --namespace cpm.shared_version_cascade --policy policies/ -
+          echo "==> version_parity"
+          conftest test --namespace cpm.version_parity --combine --policy policies/ .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json
+          echo "==> port_uniqueness"
+          conftest test --namespace cpm.port_uniqueness --policy policies/ plugins/_shared/ports.yaml
+          echo "==> condition_paths"
+          for f in plugins/*/.claude-plugin/default-hooks.yaml; do
+            [ -f "$f" ] && conftest test --namespace cpm.condition_paths --policy policies/ "$f"
+          done
+          echo "==> Rego unit tests"
+          conftest verify --policy policies/
+
   test:
     needs: pre-commit
     runs-on: ubuntu-latest
