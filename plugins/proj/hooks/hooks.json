@@ -10,6 +10,12 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run-cli.sh session-start --cwd \"$CLAUDE_PROJECT_DIR\"",
             "timeout": 10,
             "statusMessage": "Loading project context..."
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run-cli.sh postmortem-session-reminder",
+            "timeout": 5,
+            "async": true
           }
         ]
       }
@@ -36,6 +42,18 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run-cli.sh session-start --cwd \"$CLAUDE_PROJECT_DIR\" --compact",
             "timeout": 10,
             "statusMessage": "Refreshing project context..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/postmortem_pretooluse_check.sh",
+            "timeout": 5
           }
         ]
       }
