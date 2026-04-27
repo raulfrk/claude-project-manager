@@ -83,13 +83,15 @@ class TestPostmortemSessionReminder:
 
 
 class TestPostmortemPreToolUse:
-    def test_no_recent_postmortem_emits_approve_with_reason(
+    def test_no_recent_postmortem_emits_allow_with_reason(
         self,
         cfg: ProjConfig,
         capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """No postmortem in tracking dir → emit `decision: approve` + reason."""
+        """No postmortem in tracking dir → emit modern hookSpecificOutput w/
+        permissionDecision="allow" + reason. Reason shown to user (not
+        Claude) per Claude Code hook docs."""
         payload = {
             "tool_name": "Bash",
             "tool_input": {"command": 'git commit -m "fix(scope/123): bug"'},
@@ -100,8 +102,14 @@ class TestPostmortemPreToolUse:
         cmd_postmortem_pretooluse_git_commit()
         captured = capsys.readouterr()
         body = json.loads(captured.out)
-        assert body["decision"] == "approve"
-        assert "postmortem" in body["reason"].lower()
+        # Modern hookSpecificOutput schema
+        hso = body["hookSpecificOutput"]
+        assert hso["hookEventName"] == "PreToolUse"
+        assert hso["permissionDecision"] == "allow"
+        assert "postmortem" in hso["permissionDecisionReason"].lower()
+        # Legacy top-level fields must not be set (deprecated for PreToolUse)
+        assert "decision" not in body
+        assert "reason" not in body
 
     def test_recent_postmortem_emits_silent_approve(
         self,
@@ -167,10 +175,10 @@ class TestPostmortemPreToolUse:
 
         cmd_postmortem_pretooluse_git_commit()
         captured = capsys.readouterr()
-        # No crash, default behavior: approve w/ reason (no recent postmortem)
+        # No crash, default behavior: allow w/ reason (no recent postmortem)
         if captured.out:
             body = json.loads(captured.out)
-            assert body["decision"] == "approve"
+            assert body["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 # ---------------------------------------------------------------------------

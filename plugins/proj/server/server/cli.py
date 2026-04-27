@@ -369,6 +369,10 @@ def cmd_postmortem_session_reminder() -> None:
 
     Suppresses output when a recent postmortem already exists in tracking dir.
     Always exits 0 so SessionStart never blocks.
+
+    On import-failure (e.g. shared parse module unavailable) the reminder is
+    still printed — failing-open is preferred over silent suppression because
+    the reminder is the entire point of the hook.
     """
     tracking = _resolve_tracking_dir()
     if tracking is not None:
@@ -377,8 +381,13 @@ def cmd_postmortem_session_reminder() -> None:
 
             if has_recent_postmortem(tracking, within_hours=24):
                 return
-        except Exception:  # noqa: S110
-            pass
+        except Exception as exc:
+            # Fall through to print reminder (fail-open). Log to stderr so the
+            # import-failure mode is debuggable in the user's session log.
+            print(
+                f"postmortem-session-reminder: parse module load failed: {exc}",
+                file=sys.stderr,
+            )
     print(
         "\nReminder: before fixing any reproducible bug, write a 5-line "
         "postmortem.\n"
@@ -390,16 +399,41 @@ def cmd_postmortem_session_reminder() -> None:
 
 
 def cmd_postmortem_pretooluse_git_commit() -> None:
-    """PreToolUse(Bash) hook: emit decision JSON on git-commit + fix prefix.
+    """PreToolUse(Bash) hook: emit allow-w/-reason JSON on git-commit + fix prefix.
 
-    Reads PreToolUse JSON payload from stdin. When invoked it always implies
-    a fix/bug commit (the trampoline pre-filters). If no recent postmortem
-    is present, emit `{"decision": "approve", "reason": ...}` so Claude Code
-    surfaces the message to the user. Otherwise silent approve (no output).
+    Reads the PreToolUse JSON payload from stdin. The trampoline
+    (``hooks/postmortem_pretooluse_check.sh``) pre-filters so this is only
+    invoked for Bash + git-commit + (fix|bug)-subject. If no recent postmortem
+    exists, emit a permissionDecision="allow" w/ a reason that Claude Code
+    surfaces to the user. Otherwise stay silent so Claude Code uses default
+    handling.
+
+    Output schema (per https://code.claude.com/docs/en/hooks):
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "<message>"
+          }
+        }
+
+    User vs. Claude visibility (from the docs):
+        | permissionDecision | reason visible to        |
+        | ------------------ | ------------------------ |
+        | allow              | user (NOT Claude)        |
+        | ask                | user (NOT Claude)        |
+        | deny               | Claude (NOT user)        |
+
+    We use ``allow`` so the reason is shown to the user in their terminal —
+    the entire point of this hook. The legacy top-level
+    ``{"decision": "approve", "reason": ...}`` format is deprecated per docs:
+    ``"approve"`` maps to ``"allow"``. We emit the modern schema.
     """
     try:
         raw = sys.stdin.read()
-    except Exception:
+    except Exception as exc:
+        # stdin failure is unrecoverable + non-blocking by design; log + exit 0.
+        print(f"postmortem-pretooluse: stdin read failed: {exc}", file=sys.stderr)
         return
     if not raw.strip():
         return
@@ -414,17 +448,37 @@ def cmd_postmortem_pretooluse_git_commit() -> None:
             from postmortem.parse import has_recent_postmortem
 
             has_recent = has_recent_postmortem(tracking, within_hours=24)
-        except Exception:
+        except Exception as exc:
+            # Fail-open: treat parse-module failure as "no recent postmortem"
+            # so the user still gets nudged. Log so the failure mode is
+            # visible during debug.
+            print(
+                f"postmortem-pretooluse: parse module load failed: {exc}",
+                file=sys.stderr,
+            )
             has_recent = False
     if has_recent:
-        return  # silent approve
+        return  # silent: no output → Claude Code uses default permission handling
     msg = (
         "Per managed CLAUDE.md rule 'Postmortem ritual': write a 5-line "
         "postmortem to NOTES.md BEFORE fixing. Heading: "
         "## [YYYY-MM-DD HH:MM] postmortem | <id>. Lines: what / why / class "
         "/ prevented / detected."
     )
-    print(json.dumps({"decision": "approve", "reason": msg}))
+    # Emit modern hookSpecificOutput schema. Legacy top-level
+    # {"decision": "approve", "reason": ...} is deprecated for PreToolUse.
+    # See: https://code.claude.com/docs/en/hooks (PreToolUse output schema).
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "permissionDecisionReason": msg,
+                },
+            }
+        )
+    )
 
 
 def main() -> None:
