@@ -59,9 +59,18 @@ or schedule weekly via `/schedule` to catch drift over time.
 
 Validates that all plugin Python dependencies are consistent across the monorepo.
 
-## check_shared_version.py
+## _gather_shared_version_state.py
 
-Checks that `plugins/_shared` version is in sync across all plugin `pyproject.toml` files.
+Pre-conftest data gatherer: collects staged `_shared/*.py` files, HEAD vs staged
+`pyproject.toml` versions, and each `uv.lock`'s pinned `claude-hook-transport` version
+into a JSON document on stdout. Pipe to conftest:
+
+```bash
+python scripts/_gather_shared_version_state.py | conftest test --namespace cpm.shared_version_cascade --policy policies/ -
+```
+
+Replaces the prior `check_shared_version.py` validator (logic now in
+`policies/shared_version_cascade.rego`).
 
 ## migrate-hooks.py
 
