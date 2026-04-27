@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.43"
+version = "0.4.44"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hook_transport", "hook_dispatch", "scrubbing", "test_contracts", "claudemd", "session_key", "sandbox"]
+packages = ["hook_transport", "hook_dispatch", "scrubbing", "test_contracts", "claudemd", "session_key", "sandbox", "postmortem"]
 force-include = { "claudemd/managed_section.md" = "claudemd/managed_section.md", "ports.yaml" = "ports.yaml" }
 
 [dependency-groups]
@@ -49,7 +49,7 @@ testpaths = ["tests", "test_contracts/tests"]
 # modules contribute 0% to the aggregate. Workaround: pass --no-cov to skip the
 # threshold check for targeted runs:
 #   uv run pytest tests/<file> -v --no-cov
-addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov=session_key", "--cov-fail-under=80"]
+addopts = ["-v", "--tb=short", "--cov=hook_transport", "--cov=hook_dispatch", "--cov=scrubbing", "--cov=claudemd", "--cov=test_contracts", "--cov=session_key", "--cov=postmortem", "--cov-fail-under=80"]
 
 [tool.coverage.run]
 omit = [
