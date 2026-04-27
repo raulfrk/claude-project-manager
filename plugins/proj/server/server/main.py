@@ -4,7 +4,7 @@ import logging
 import os
 
 from hook_dispatch import enable_hook_dispatch
-from hook_transport import run_dual
+from hook_transport import port_for, run_dual
 from mcp.server.fastmcp import FastMCP
 
 from server.lib import state
@@ -69,7 +69,7 @@ def main() -> None:
                 state.set_session_active(detected)
         except Exception:
             logging.getLogger(__name__).debug("Auto-detect active project failed", exc_info=True)
-    run_dual(mcp, "proj", default_port=19102)
+    run_dual(mcp, "proj", default_port=port_for("proj"))
 
 
 if __name__ == "__main__":

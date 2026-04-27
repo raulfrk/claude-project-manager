@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from hook_dispatch import enable_hook_dispatch
-from hook_transport import run_dual
+from hook_transport import port_for, run_dual
 from mcp.server.fastmcp import FastMCP
 
 from server.lib.discovery import run_discovery
@@ -86,7 +86,7 @@ _run_startup_discovery()
 
 
 def main() -> None:
-    run_dual(mcp, "router", default_port=19100)
+    run_dual(mcp, "router", default_port=port_for("router"))
 
 
 if __name__ == "__main__":

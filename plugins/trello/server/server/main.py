@@ -1,7 +1,7 @@
 """Trello MCP server entrypoint."""
 
 from hook_dispatch import enable_hook_dispatch
-from hook_transport import run_dual
+from hook_transport import port_for, run_dual
 from mcp.server.fastmcp import FastMCP
 
 from server.tools import (
@@ -30,7 +30,7 @@ attachments.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, "trello", default_port=19104)
+    run_dual(mcp, "trello", default_port=port_for("trello"))
 
 
 if __name__ == "__main__":

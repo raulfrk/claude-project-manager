@@ -1,7 +1,7 @@
 """Wiki plugin MCP server entrypoint."""
 
 from hook_dispatch import enable_hook_dispatch
-from hook_transport import run_dual
+from hook_transport import port_for, run_dual
 from mcp.server.fastmcp import FastMCP
 
 from server.tools import index, links, lint, log, page, scope, search
@@ -19,7 +19,7 @@ lint.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, "wiki", default_port=19109)
+    run_dual(mcp, "wiki", default_port=port_for("wiki"))
 
 
 if __name__ == "__main__":

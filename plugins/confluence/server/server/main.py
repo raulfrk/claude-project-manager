@@ -1,7 +1,7 @@
 """Confluence read-only MCP server entrypoint."""
 
 from hook_dispatch import enable_hook_dispatch
-from hook_transport import run_dual
+from hook_transport import port_for, run_dual
 from mcp.server.fastmcp import FastMCP
 
 from server.tools import attachments, comments, init, pages, search, spaces
@@ -18,7 +18,7 @@ comments.register(mcp)
 
 
 def main() -> None:
-    run_dual(mcp, "confluence", default_port=19108)
+    run_dual(mcp, "confluence", default_port=port_for("confluence"))
 
 
 if __name__ == "__main__":
