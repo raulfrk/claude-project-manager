@@ -143,22 +143,30 @@ def test_resolve_hooks_transport_glob_fallback_honors_tmpdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Regression: glob fallback in _resolve_hooks_transport must use the same
-    SOCKET_DIR (TMPDIR) that hook_transport.dual_transport._socket_path uses
-    when binding sockets. Pre-fix, the glob hardcoded "/tmp" so on hosts with
-    TMPDIR != /tmp the fallback always returned no candidates → dispatch
-    returned (url, None) → "hooks server unreachable" warnings whenever the
-    primary registry-file lookup also failed.
-    """
-    import hook_transport.dual_transport as dual
+    socket_dir() that the bind site uses. Pre-fix, the glob hardcoded "/tmp"
+    so on hosts with TMPDIR != /tmp the fallback always returned no candidates
+    → dispatch returned (url, None) → "hooks server unreachable" warnings
+    whenever the primary registry-file lookup also failed.
 
-    # Force SOCKET_DIR onto a non-/tmp path. The local import in
-    # _resolve_hooks_transport re-fetches this attribute on each call.
+    Post-793, both the bind site and the glob fallback resolve through
+    hook_transport.socket_path.socket_dir(), so monkeypatching the helper
+    affects both.
+    """
+    # Force socket_dir() onto a non-/tmp path. _resolve_hooks_transport
+    # imports socket_dir/socket_glob locally, so the patch applied to the
+    # source module is picked up on every call. Bind to a local name to
+    # bypass the package __init__.py re-export (which makes the bare attr
+    # 'hook_transport.socket_path' resolve to the function, not the module).
+    import sys
+
+    sp_module = sys.modules["hook_transport.socket_path"]
+
     fake_tmpdir = tmp_path / "fake-tmpdir"
     fake_tmpdir.mkdir()
-    monkeypatch.setattr(dual, "SOCKET_DIR", str(fake_tmpdir))
+    monkeypatch.setattr(sp_module, "socket_dir", lambda: fake_tmpdir)
 
     # Create a fake PID-tagged router socket file in the non-/tmp dir.
-    sock = fake_tmpdir / f"{dual.SOCKET_PREFIX}router-12345.sock"
+    sock = fake_tmpdir / "claude-cpm-router-12345.sock"
     sock.touch()
 
     # Force the registry-file primary lookup to fail (point HOME at a tmp dir
@@ -174,7 +182,7 @@ def test_resolve_hooks_transport_glob_fallback_honors_tmpdir(
     # rather than (url, None). Pre-fix, transport would be None because the
     # glob looked in /tmp and the socket is in fake_tmpdir.
     assert transport is not None, (
-        "Glob fallback failed to find socket in non-/tmp SOCKET_DIR — "
+        "Glob fallback failed to find socket in non-/tmp socket_dir() — "
         "_resolve_hooks_transport may still be hardcoding /tmp"
     )
     assert url == "http://localhost/hook"
