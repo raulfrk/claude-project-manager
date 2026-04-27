@@ -39,9 +39,30 @@ repos:
         pass_filenames: false
         files: '(marketplace\.json|\.test-summary\.json|README\.md)$'
 
-      - id: check-shared-version
-        name: Check _shared version bump
-        entry: python scripts/check_shared_version.py
+      - id: shared-version-cascade
+        name: _shared version cascade (Rego)
+        entry: bash -c 'command -v conftest >/dev/null || { echo "conftest not installed; skipping (CI gates this)"; exit 0; } && python scripts/_gather_shared_version_state.py | conftest test --namespace cpm.shared_version_cascade --policy policies/ -'
         language: system
         pass_filenames: false
         stages: [pre-commit]
+
+      - id: version-parity
+        name: plugin.json marketplace.json version parity
+        entry: bash -c 'command -v conftest >/dev/null || exit 0 ; conftest test --namespace cpm.version_parity --combine --policy policies/ .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json'
+        language: system
+        pass_filenames: false
+        files: '\.claude-plugin/(marketplace|plugin)\.json$'
+
+      - id: port-uniqueness
+        name: TCP fallback port uniqueness
+        entry: bash -c 'command -v conftest >/dev/null || exit 0 ; conftest test --namespace cpm.port_uniqueness --policy policies/ plugins/_shared/ports.yaml'
+        language: system
+        pass_filenames: false
+        files: 'plugins/_shared/ports\.yaml$'
+
+      - id: condition-paths
+        name: default-hooks.yaml conditions reference known proj.yaml paths
+        entry: bash -c 'command -v conftest >/dev/null || exit 0 ; for f in plugins/*/.claude-plugin/default-hooks.yaml; do [ -f "$f" ] && conftest test --namespace cpm.condition_paths --policy policies/ "$f"; done'
+        language: system
+        pass_filenames: false
+        files: 'default-hooks\.yaml$'
