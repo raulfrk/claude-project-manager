@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-hook-transport"
-version = "0.4.39"
+version = "0.4.40"
 description = "Shared dual-transport library for MCP plugin inter-server hook communication"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["hook_transport", "hook_dispatch", "scrubbing", "test_contracts", "claudemd", "session_key", "sandbox"]
-force-include = { "claudemd/managed_section.md" = "claudemd/managed_section.md" }
+force-include = { "claudemd/managed_section.md" = "claudemd/managed_section.md", "ports.yaml" = "ports.yaml" }
 
 [dependency-groups]
 dev = [
