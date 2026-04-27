@@ -19,7 +19,10 @@ from pathlib import Path
 
 import pytest
 
-TRAMPOLINE = Path(__file__).resolve().parents[1] / "postmortem_pretooluse_check.sh"
+# Test file: plugins/proj/server/tests/test_postmortem_trampoline.py
+# Trampoline: plugins/proj/hooks/postmortem_pretooluse_check.sh
+# parents[0]=tests, parents[1]=server, parents[2]=proj
+TRAMPOLINE = Path(__file__).resolve().parents[2] / "hooks" / "postmortem_pretooluse_check.sh"
 
 
 @pytest.fixture()
@@ -33,9 +36,7 @@ def fake_plugin_root(tmp_path: Path) -> Path:
     (hooks_dir / "postmortem_pretooluse_check.sh").chmod(0o755)
     # Stub run-cli.sh: drains stdin and echoes "FORWARDED <stdin>"
     stub = hooks_dir / "run-cli.sh"
-    stub.write_text(
-        '#!/usr/bin/env bash\nstdin=$(cat)\necho "FORWARDED $1 stdin=$stdin"\n'
-    )
+    stub.write_text('#!/usr/bin/env bash\nstdin=$(cat)\necho "FORWARDED $1 stdin=$stdin"\n')
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return plugin_root
 

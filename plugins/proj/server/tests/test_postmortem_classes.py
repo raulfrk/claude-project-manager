@@ -7,12 +7,15 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
-    pass
+    import pytest
 
-import postmortem_classes
+# Test file lives at plugins/proj/server/tests/; scripts/ is at repo root.
+# parents[0]=tests, [1]=server, [2]=proj, [3]=plugins, [4]=repo-root.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+
+import postmortem_classes  # noqa: E402
 
 
 def test_tally_empty_notes(tmp_path: Path) -> None:
@@ -53,9 +56,7 @@ def test_tally_unparsed_aggregated(tmp_path: Path) -> None:
     assert result == {"<unparsed>": 2}
 
 
-def test_main_missing_file_returns_1(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_missing_file_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "no_such_file.md"
     sys.argv = ["postmortem_classes.py", str(missing)]
     rc = postmortem_classes.main()
@@ -72,7 +73,7 @@ def test_cli_output_format(tmp_path: Path) -> None:
         "## [2026-04-27 13:00] postmortem | b\nclass: boundary-drift\n\n"
         "## [2026-04-27 14:00] postmortem | c\nclass: microsoft:rogue-actions\n"
     )
-    script = Path(__file__).resolve().parent.parent / "postmortem_classes.py"
+    script = _REPO_ROOT / "scripts" / "postmortem_classes.py"
     result = subprocess.run(
         [sys.executable, str(script), str(notes)],
         capture_output=True,
