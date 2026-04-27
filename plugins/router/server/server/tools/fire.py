@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import glob
 import json
 import logging
 import os
 import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+from hook_transport.socket_path import socket_dir, socket_glob
 
 from server.lib import storage
 from server.lib.conditions import _load_proj_config, evaluate_condition
@@ -57,17 +58,21 @@ def _resolve_server_url(server_name: str, hooks_port: int) -> str:
     except (FileNotFoundError, OSError):
         logger.debug("Socket registry lookup failed", exc_info=True)
 
-    # Fallback: glob for newest PID-tagged socket
-    tmpdir = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
-    prefix = f"{tmpdir}/claude-cpm-{server_name}-"
-    candidates = sorted(
-        glob.glob(f"{prefix}*.sock"),
-        key=lambda p: os.path.getmtime(p),
-        reverse=True,
-    )
+    # Fallback: glob for newest PID-tagged socket via the shared helper.
+    # server_name is validated by socket_glob (raises ValueError on bad
+    # names); registered server names always pass.
+    try:
+        candidates = sorted(
+            socket_dir().glob(socket_glob(server_name)),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except ValueError:
+        logger.warning("Invalid server name %r for socket glob; skipping fallback", server_name)
+        candidates = []
     for candidate in candidates:
         try:
-            mode = os.stat(candidate).st_mode
+            mode = candidate.stat().st_mode
             if stat.S_ISSOCK(mode):
                 return f"unix://{candidate}"
             logger.warning(

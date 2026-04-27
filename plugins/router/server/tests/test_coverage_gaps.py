@@ -96,32 +96,37 @@ class TestGetMaxDepth:
 class TestResolveServerUrlEdge:
     def test_unix_mode_empty_registry_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Empty socket registry file falls back to glob then server name."""
-        from unittest.mock import patch
-
         from server.tools.fire import _resolve_server_url
 
-        registry_file = tmp_path / "proj"
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+        registry_file = registry_dir / "proj"
         registry_file.write_text("")
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
-        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
-        with patch("server.tools.fire.glob.glob", return_value=[]):
-            result = _resolve_server_url("proj", 19100)
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", registry_dir)
+        # Empty tmp_path subdir → socket_dir().glob(...) yields no candidates
+        sock_dir = tmp_path / "sockets"
+        sock_dir.mkdir()
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: sock_dir)
+        result = _resolve_server_url("proj", 19100)
         assert result == "proj"  # empty file + no glob matches -> fallback
 
     def test_unix_mode_whitespace_only_registry_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         """Whitespace-only socket registry file falls back to glob then server name."""
-        from unittest.mock import patch
-
         from server.tools.fire import _resolve_server_url
 
-        registry_file = tmp_path / "proj"
+        registry_dir = tmp_path / "registry"
+        registry_dir.mkdir()
+        registry_file = registry_dir / "proj"
         registry_file.write_text("   \n  ")
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
-        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
-        with patch("server.tools.fire.glob.glob", return_value=[]):
-            result = _resolve_server_url("proj", 19100)
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", registry_dir)
+        sock_dir = tmp_path / "sockets"
+        sock_dir.mkdir()
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: sock_dir)
+        result = _resolve_server_url("proj", 19100)
         assert result == "proj"
 
 

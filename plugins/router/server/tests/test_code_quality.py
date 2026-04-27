@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -136,20 +135,17 @@ class TestSocketValidation:
 
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
 
-        # Make registry lookup fail
-        fake_registry = tmp_path / "sockets" / "test_srv"
-        fake_registry.parent.mkdir(parents=True, exist_ok=True)
-        # Don't create registry file — force glob fallback
+        # Make registry lookup fail (no registry file under tmp_path/sockets)
+        (tmp_path / "sockets").mkdir(parents=True, exist_ok=True)
 
-        # Create a regular file where a socket is expected
-        sock_file = tmp_path / "fake.sock"
-        sock_file.write_text("not a socket")
+        # Create a regular file matching the socket glob pattern — should be
+        # skipped because stat says it's not S_IFSOCK.
+        fake = tmp_path / "claude-cpm-test_srv-99999.sock"
+        fake.write_text("not a socket")
 
-        with (
-            patch("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "sockets"),
-            patch("server.tools.fire.glob.glob", return_value=[str(sock_file)]),
-            caplog.at_level(logging.WARNING),
-        ):
+        monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "sockets")
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
+        with caplog.at_level(logging.WARNING):
             result = _resolve_server_url("test_srv", 19100)
 
         # Should fall through to raw name since non-socket was skipped
@@ -164,19 +160,18 @@ class TestSocketValidation:
 
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
 
-        sock_path = str(tmp_path / "real.sock")
+        sock_path = tmp_path / "claude-cpm-test_srv-99999.sock"
         s = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
         try:
-            s.bind(sock_path)
-            with (
-                patch("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "sockets"),
-                patch("server.tools.fire.glob.glob", return_value=[sock_path]),
-            ):
-                result = _resolve_server_url("test_srv", 19100)
+            s.bind(str(sock_path))
+            monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "sockets")
+            monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
+            result = _resolve_server_url("test_srv", 19100)
             assert result == f"unix://{sock_path}"
         finally:
             s.close()
-            os.unlink(sock_path)
+            if sock_path.exists():
+                sock_path.unlink()
 
 
 # ── 475.39: Exception context in cascade dispatch ──────────────────────────

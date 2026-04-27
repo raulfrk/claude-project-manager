@@ -13,19 +13,14 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from hook_transport.socket_path import socket_dir, socket_glob
+
 from server.lib import state, storage
 from server.tools.context import _build_context, ctx_detect_project_name
 from server.tools.digest import _deduplicate, _parse_session
 
 logger = logging.getLogger(__name__)
 
-# TMPDIR-aware: matches the bind site in hook_transport.dual_transport
-# (sockets are created at $TMPDIR/claude-cpm-{plugin}-{pid}.sock). Hardcoding
-# "/tmp" silently broke the glob fallback on hosts with TMPDIR != /tmp,
-# manifesting as "proj socket not found" warnings when the registry-file
-# lookup also failed (e.g. inside subagent mount namespaces).
-_SOCKET_DIR = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
-_SOCKET_PREFIX = "claude-cpm-"
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
 
 
@@ -33,8 +28,9 @@ def _call_proj_socket(tool: str, params: dict) -> None:  # type: ignore[type-arg
     """Call a tool on the proj MCP server via its Unix domain socket.
 
     Resolves the socket path from the registry file (~/.claude/sockets/proj).
-    Falls back to globbing /tmp for PID-tagged sockets if registry is missing.
-    Silently no-ops if the socket is unreachable (MCP server not yet started).
+    Falls back to globbing the helper's socket_dir() for PID-tagged sockets if
+    registry is missing. Silently no-ops if the socket is unreachable (MCP
+    server not yet started).
     """
     # Resolve socket path from registry
     sock_path: str | None = None
@@ -46,10 +42,10 @@ def _call_proj_socket(tool: str, params: dict) -> None:  # type: ignore[type-arg
     except (FileNotFoundError, OSError):
         pass
 
-    # Fallback: glob for newest PID-tagged socket
+    # Fallback: glob for newest PID-tagged socket via the shared helper.
     if not sock_path:
         candidates = sorted(
-            Path(_SOCKET_DIR).glob(f"{_SOCKET_PREFIX}proj-*.sock"),
+            socket_dir().glob(socket_glob("proj")),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )

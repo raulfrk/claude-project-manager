@@ -186,11 +186,14 @@ class TestE2EHookFire:
         )
         storage.save(registry, path=hooks_yaml)
 
+        empty_sockets = tmp_path / "empty_sockets"
+        empty_sock_dir = tmp_path / "empty_sock_dir"
+        empty_sock_dir.mkdir()
         with (
             patch("server.lib.storage._HOOKS_FILE", hooks_yaml),
             patch("server.lib.storage._FAILURES_FILE", failures_yaml),
-            patch("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path / "empty_sockets"),
-            patch("server.tools.fire.glob.glob", return_value=[]),
+            patch("server.tools.fire._SOCKET_REGISTRY_DIR", empty_sockets),
+            patch("server.tools.fire.socket_dir", lambda: empty_sock_dir),
         ):
             raw = await hooks_fire("test_trigger", source_result="{}")
 

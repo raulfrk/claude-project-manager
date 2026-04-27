@@ -1164,17 +1164,17 @@ def _resolve_todoist_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    import tempfile
+    from hook_transport.socket_path import socket_dir, socket_glob
 
-    _tmp = tempfile.gettempdir()
+    sock_root = socket_dir()
     candidates = sorted(
-        Path(_tmp).glob("claude-cpm-todoist-*.sock"),
+        sock_root.glob(socket_glob("todoist")),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    return str(Path(_tmp) / "claude-cpm-todoist.sock")
+    return str(sock_root / "claude-cpm-todoist.sock")
 
 
 def _check_hook_errors(tool_name: str, result: dict[str, JsonValue]) -> None:

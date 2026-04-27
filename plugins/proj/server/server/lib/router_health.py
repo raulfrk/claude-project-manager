@@ -6,9 +6,12 @@ import asyncio
 import json
 import os
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _resolve_hooks_transport(port: int):  # type: ignore[return]
@@ -35,8 +38,9 @@ _DETAIL_ENUM = {
 
 
 def _cache_path() -> Path:
-    tmpdir = os.environ.get("TMPDIR", "/tmp")  # noqa: S108
-    return Path(f"{tmpdir}/claude-cpm-health-{os.getppid()}.cache")
+    from hook_transport.socket_path import tmp_dir
+
+    return tmp_dir() / f"claude-cpm-health-{os.getppid()}.cache"
 
 
 def _read_cache() -> tuple[bool, str] | None:

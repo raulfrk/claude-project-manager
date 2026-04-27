@@ -74,31 +74,25 @@ class TestResolveServerUrl:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stale registry (socket doesn't exist) falls back to glob."""
-        import stat as stat_mod
-        from unittest.mock import MagicMock
+        import socket
 
         registry_file = tmp_path / "trello"
-        registry_file.write_text("/tmp/claude-cpm-trello-10.sock")  # sandbox PID
+        registry_file.write_text(str(tmp_path / "claude-cpm-trello-10.sock"))  # sandbox PID
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
 
-        # Mock os.stat to return a socket mode for the glob candidate
-        mock_stat_result = MagicMock()
-        mock_stat_result.st_mode = stat_mod.S_IFSOCK | 0o755
-
-        with (
-            patch("server.tools.fire.os.path.exists", return_value=False),
-            patch(
-                "server.tools.fire.glob.glob",
-                return_value=[
-                    "/tmp/claude-cpm-trello-99999.sock",
-                ],
-            ),
-            patch("server.tools.fire.os.path.getmtime", return_value=1000),
-            patch("server.tools.fire.os.stat", return_value=mock_stat_result),
-        ):
-            result = _resolve_server_url("trello", 19100)
-        assert result == "unix:///tmp/claude-cpm-trello-99999.sock"
+        # Create a real socket file at the glob candidate location so the helper
+        # finds it and stat()'s it as S_IFSOCK.
+        sock_path = tmp_path / "claude-cpm-trello-99999.sock"
+        sock_obj = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock_obj.bind(str(sock_path))
+            monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
+            with patch("server.tools.fire.os.path.exists", return_value=False):
+                result = _resolve_server_url("trello", 19100)
+        finally:
+            sock_obj.close()
+        assert result == f"unix://{sock_path}"
 
     def test_unix_mode_falls_back_to_name_when_no_sockets(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -106,8 +100,9 @@ class TestResolveServerUrl:
         """Falls back to server name when registry missing AND no glob matches."""
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
-        with patch("server.tools.fire.glob.glob", return_value=[]):
-            result = _resolve_server_url("trello", 19100)
+        # Empty tmp_path → socket_dir().glob(...) yields no candidates
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
+        result = _resolve_server_url("trello", 19100)
         assert result == "trello"
 
     def test_tcp_mode_uses_port_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,8 +121,9 @@ class TestResolveServerUrl:
         """Default mode (no HOOK_TRANSPORT env var) is Unix."""
         monkeypatch.delenv("HOOK_TRANSPORT", raising=False)
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", tmp_path)
-        with patch("server.tools.fire.glob.glob", return_value=[]):
-            result = _resolve_server_url("proj", 19100)
+        # Empty tmp_path → socket_dir().glob(...) yields no candidates
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
+        result = _resolve_server_url("proj", 19100)
         assert result == "proj"  # falls back to server name
 
 

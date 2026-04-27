@@ -132,7 +132,7 @@ class TestSocketValidation:
         """Regular file matching glob pattern is skipped with warning."""
         from server.tools.fire import _resolve_server_url
 
-        # Create a regular file that looks like a socket
+        # Create a regular file that matches the socket glob pattern
         fake = tmp_path / "claude-cpm-proj-12345.sock"
         fake.write_text("not a socket")
 
@@ -140,12 +140,9 @@ class TestSocketValidation:
         registry_dir.mkdir()
         monkeypatch.setenv("HOOK_TRANSPORT", "unix")
         monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", registry_dir)
+        monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
 
-        with (
-            patch("server.tools.fire.glob.glob", return_value=[str(fake)]),
-            patch("server.tools.fire.os.path.getmtime", return_value=1.0),
-            caplog.at_level(logging.WARNING),
-        ):
+        with caplog.at_level(logging.WARNING):
             result = _resolve_server_url("proj", 19102)
 
         # Falls through to last-resort (server name as-is)
@@ -158,7 +155,7 @@ class TestSocketValidation:
 
         from server.tools.fire import _resolve_server_url
 
-        sock_path = tmp_path / "test.sock"
+        sock_path = tmp_path / "claude-cpm-proj-12345.sock"
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             s.bind(str(sock_path))
@@ -167,12 +164,9 @@ class TestSocketValidation:
             registry_dir.mkdir()
             monkeypatch.setenv("HOOK_TRANSPORT", "unix")
             monkeypatch.setattr("server.tools.fire._SOCKET_REGISTRY_DIR", registry_dir)
+            monkeypatch.setattr("server.tools.fire.socket_dir", lambda: tmp_path)
 
-            with (
-                patch("server.tools.fire.glob.glob", return_value=[str(sock_path)]),
-                patch("server.tools.fire.os.path.getmtime", return_value=1.0),
-            ):
-                result = _resolve_server_url("proj", 19102)
+            result = _resolve_server_url("proj", 19102)
 
             assert result == f"unix://{sock_path}"
         finally:

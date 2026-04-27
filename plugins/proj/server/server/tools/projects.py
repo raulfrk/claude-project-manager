@@ -55,17 +55,17 @@ def _resolve_router_socket_path() -> str | None:
 
 
 def _fallback_router_socket() -> str | None:
-    import tempfile
+    from hook_transport.socket_path import socket_dir, socket_glob
 
-    _tmp = tempfile.gettempdir()
+    sock_root = socket_dir()
     candidates = sorted(
-        Path(_tmp).glob("claude-cpm-router-*.sock"),
+        sock_root.glob(socket_glob("router")),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if candidates:
         return str(candidates[0])
-    fallback = Path(_tmp) / "claude-cpm-router.sock"
+    fallback = sock_root / "claude-cpm-router.sock"
     if fallback.exists():
         return str(fallback)
     return None
