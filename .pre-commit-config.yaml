@@ -46,6 +46,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+<<<<<<< HEAD
       - id: version-parity
         name: plugin.json marketplace.json version parity
         entry: bash -c 'command -v conftest >/dev/null || exit 0 ; conftest test --namespace cpm.version_parity --combine --policy policies/ .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json'
@@ -74,3 +75,12 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+=======
+      - id: warn-fix-without-postmortem
+        name: Warn on fix commit without recent postmortem
+        entry: python scripts/check_postmortem_for_fix.py
+        language: system
+        pass_filenames: false
+        stages: [commit-msg]
+        always_run: true
+>>>>>>> 015045e3 (feat(scripts/799): add pre-commit soft-warn for fix-without-postmortem)
