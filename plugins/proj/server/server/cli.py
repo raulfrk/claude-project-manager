@@ -351,6 +351,82 @@ def cmd_session_end(cwd: str | None) -> None:
     _call_proj_socket("proj_clear_session", {})
 
 
+def _resolve_tracking_dir() -> Path | None:
+    """Resolve tracking_dir from proj config, or None when missing/invalid."""
+    if not storage.config_exists():
+        return None
+    try:
+        cfg = storage.load_config()
+    except Exception:
+        return None
+    if not cfg.tracking_dir:
+        return None
+    return Path(cfg.tracking_dir).expanduser()
+
+
+def cmd_postmortem_session_reminder() -> None:
+    """SessionStart hook: nudge user to write postmortem before fix work.
+
+    Suppresses output when a recent postmortem already exists in tracking dir.
+    Always exits 0 so SessionStart never blocks.
+    """
+    tracking = _resolve_tracking_dir()
+    if tracking is not None:
+        try:
+            from postmortem.parse import has_recent_postmortem
+
+            if has_recent_postmortem(tracking, within_hours=24):
+                return
+        except Exception:  # noqa: S110
+            pass
+    print(
+        "\nReminder: before fixing any reproducible bug, write a 5-line "
+        "postmortem.\n"
+        "  Heading: ## [YYYY-MM-DD HH:MM] postmortem | <id>\n"
+        "  Lines  : what / why / class / prevented / detected\n"
+        "  See managed CLAUDE.md rule 'Postmortem ritual'.\n",
+        file=sys.stderr,
+    )
+
+
+def cmd_postmortem_pretooluse_git_commit() -> None:
+    """PreToolUse(Bash) hook: emit decision JSON on git-commit + fix prefix.
+
+    Reads PreToolUse JSON payload from stdin. When invoked it always implies
+    a fix/bug commit (the trampoline pre-filters). If no recent postmortem
+    is present, emit `{"decision": "approve", "reason": ...}` so Claude Code
+    surfaces the message to the user. Otherwise silent approve (no output).
+    """
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        return
+    if not raw.strip():
+        return
+    try:
+        json.loads(raw)  # validate parseable; payload itself unused beyond filtering
+    except json.JSONDecodeError:
+        return
+    tracking = _resolve_tracking_dir()
+    has_recent = False
+    if tracking is not None:
+        try:
+            from postmortem.parse import has_recent_postmortem
+
+            has_recent = has_recent_postmortem(tracking, within_hours=24)
+        except Exception:
+            has_recent = False
+    if has_recent:
+        return  # silent approve
+    msg = (
+        "Per managed CLAUDE.md rule 'Postmortem ritual': write a 5-line "
+        "postmortem to NOTES.md BEFORE fixing. Heading: "
+        "## [YYYY-MM-DD HH:MM] postmortem | <id>. Lines: what / why / class "
+        "/ prevented / detected."
+    )
+    print(json.dumps({"decision": "approve", "reason": msg}))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="proj hook CLI")
     sub = parser.add_subparsers(dest="command")
@@ -363,6 +439,8 @@ def main() -> None:
     end.add_argument("--cwd", default=None)
 
     sub.add_parser("debug-session-key")
+    sub.add_parser("postmortem-session-reminder")
+    sub.add_parser("postmortem-pretooluse-git-commit")
 
     args = parser.parse_args()
 
@@ -372,6 +450,10 @@ def main() -> None:
         cmd_session_end(args.cwd)
     elif args.command == "debug-session-key":
         cmd_debug_session_key()
+    elif args.command == "postmortem-session-reminder":
+        cmd_postmortem_session_reminder()
+    elif args.command == "postmortem-pretooluse-git-commit":
+        cmd_postmortem_pretooluse_git_commit()
     else:
         parser.print_help()
         sys.exit(1)
