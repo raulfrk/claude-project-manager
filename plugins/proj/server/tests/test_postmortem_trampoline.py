@@ -124,3 +124,49 @@ def test_invalid_payload_does_not_crash(fake_plugin_root: Path) -> None:
     res = _run(fake_plugin_root, "this is not json at all")
     assert res.returncode == 0
     assert "FORWARDED" not in res.stdout
+
+
+def test_chore_commit_referencing_fix_in_body_silent(fake_plugin_root: Path) -> None:
+    """False-positive guard: chore-prefixed commit that mentions `fix(` in
+    body must NOT trigger trampoline (was matching on `-m "...fix(...` w/
+    pre-fix regex ``git[[:space:]]+commit.*(fix|bug)\\(``).
+    """
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'git commit -m "chore: revert fix(scope) earlier change"',
+            },
+        }
+    )
+    res = _run(fake_plugin_root, payload)
+    assert res.returncode == 0
+    assert "FORWARDED" not in res.stdout
+
+
+def test_chore_commit_referencing_bug_in_body_silent(fake_plugin_root: Path) -> None:
+    """Same guard for `bug(` mentioned in non-fix commit body."""
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'git commit -m "docs: explain bug(auth) workaround"',
+            },
+        }
+    )
+    res = _run(fake_plugin_root, payload)
+    assert res.returncode == 0
+    assert "FORWARDED" not in res.stdout
+
+
+def test_single_quoted_fix_msg_forwards(fake_plugin_root: Path) -> None:
+    """Single-quoted -m argument: ``git commit -m 'fix(scope): bug'`` → forward."""
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m 'fix(scope): bug'"},
+        }
+    )
+    res = _run(fake_plugin_root, payload)
+    assert res.returncode == 0
+    assert "FORWARDED" in res.stdout
