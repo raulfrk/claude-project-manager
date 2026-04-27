@@ -66,3 +66,11 @@ repos:
         language: system
         pass_filenames: false
         files: 'default-hooks\.yaml$'
+
+      - id: forbid-tmpdir-drift
+        name: Forbid TMPDIR / claude-cpm socket-glob drift in production code
+        entry: bash scripts/check_tmpdir_drift.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
