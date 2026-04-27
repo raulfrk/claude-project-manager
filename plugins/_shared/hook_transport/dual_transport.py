@@ -25,23 +25,14 @@ import uvicorn
 from mcp.server.stdio import stdio_server
 
 from hook_transport.http_hook_handler import create_hook_app
+from hook_transport.socket_path import socket_path as _resolve_socket_path
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger("hook_transport.dual")
 
-SOCKET_DIR = os.environ.get("TMPDIR", "/tmp")
-SOCKET_PREFIX = "claude-cpm-"
-
 _PreRunFn = Callable[[], None] | Callable[[], Coroutine[None, None, None]]
-
-
-def _socket_path(plugin_name: str) -> str:
-    """Return the Unix domain socket path for a plugin (PID-tagged)."""
-    pid = os.getpid()
-    socket_dir = os.environ.get("TMPDIR", "/tmp")
-    return f"{socket_dir}/{SOCKET_PREFIX}{plugin_name}-{pid}.sock"
 
 
 _SOCKET_REGISTRY_DIR = Path.home() / ".claude" / "sockets"
@@ -155,7 +146,7 @@ async def _run_dual_async(
         label = f"tcp://127.0.0.1:{port}"
     else:
         # Unix domain socket (default)
-        sock_path = _socket_path(plugin_name)
+        sock_path = str(_resolve_socket_path(plugin_name, os.getpid()))
         _cleanup_stale_socket(sock_path)
         _write_socket_registry(plugin_name, sock_path)
         _register_socket_cleanup(sock_path)

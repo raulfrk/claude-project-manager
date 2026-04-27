@@ -12,14 +12,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hook_transport.dual_transport import (
-    SOCKET_PREFIX,
     _cleanup_stale_socket,
     _delete_socket_registry,
     _run_dual_async,
-    _socket_path,
     _start_http,
     _write_socket_registry,
 )
+from hook_transport.socket_path import socket_path as _socket_path
 
 
 def _unix_socket_blocked() -> bool:
@@ -76,43 +75,6 @@ async def test_start_http_calls_serve():
     server.serve = AsyncMock(return_value=None)
     await _start_http(server, "unix:///tmp/test.sock")
     server.serve.assert_awaited_once()
-
-
-# ── _socket_path tests ──────────────────────────────────────────────────────
-
-
-def test_socket_prefix_constant():
-    """SOCKET_PREFIX is the cpm-namespaced literal."""
-    assert SOCKET_PREFIX == "claude-cpm-"
-
-
-def test_socket_path_format():
-    """Socket path follows expected PID-tagged format."""
-    path = _socket_path("router")
-    tmpdir = os.environ.get("TMPDIR", "/tmp")
-    assert path.startswith(f"{tmpdir}/claude-cpm-router-")
-    assert path.endswith(".sock")
-    assert str(os.getpid()) in path
-
-
-# ── Bug #13: TMPDIR socket path ──────────────────────────────────────────────
-
-
-def test_socket_path_uses_tmpdir_env(monkeypatch):
-    """_socket_path uses $TMPDIR when set, not hardcoded /tmp."""
-    monkeypatch.setenv("TMPDIR", "/custom/tmp")
-    path = _socket_path("router")
-    assert path.startswith("/custom/tmp/claude-cpm-router-")
-    assert path.endswith(".sock")
-
-
-def test_socket_path_falls_back_to_tmp_when_no_tmpdir(monkeypatch):
-    """_socket_path falls back to /tmp when $TMPDIR is not set."""
-    monkeypatch.delenv("TMPDIR", raising=False)
-    path = _socket_path("router")
-    tmpdir = os.environ.get("TMPDIR", "/tmp")
-    assert path.startswith(f"{tmpdir}/claude-cpm-router-")
-    assert path.endswith(".sock")
 
 
 # ── _cleanup_stale_socket tests ─────────────────────────────────────────────
@@ -309,7 +271,7 @@ async def test_default_uses_unix_socket():
 
     mock_uvicorn.Config.assert_called_once()
     call_kwargs = mock_uvicorn.Config.call_args
-    expected_path = _socket_path("todoist")
+    expected_path = str(_socket_path("todoist", os.getpid()))
     assert call_kwargs.kwargs.get("uds") == expected_path
     assert "host" not in call_kwargs.kwargs
     assert "port" not in call_kwargs.kwargs

@@ -106,7 +106,7 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
     """
     from pathlib import Path
 
-    from hook_transport.dual_transport import SOCKET_DIR, SOCKET_PREFIX
+    from hook_transport.socket_path import socket_dir, socket_glob
 
     transport_mode = os.environ.get("HOOK_TRANSPORT", "unix").lower()
     if transport_mode == "tcp":
@@ -123,14 +123,15 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
         pass
 
     # Fallback: glob for newest PID-tagged socket if registry missing/empty/stale.
-    # MUST use SOCKET_DIR (TMPDIR-aware) — not hardcoded /tmp — to match the bind
-    # site in hook_transport.dual_transport._socket_path. Drifted before this
-    # fix: bind honored TMPDIR, glob hardcoded /tmp → fallback never found
-    # sockets on hosts with TMPDIR != /tmp (manifesting as "hooks server
-    # unreachable" whenever the registry-file lookup also failed).
+    # Uses socket_dir() + socket_glob() to share resolution semantics with the
+    # bind site in hook_transport.dual_transport. Pre-793 drift: bind honored
+    # TMPDIR, glob hardcoded /tmp → fallback never found sockets on hosts with
+    # TMPDIR != /tmp (manifesting as "hooks server unreachable" when registry
+    # lookup also failed).
+    sock_root = socket_dir()
     if not sock_path:
         candidates = sorted(
-            Path(SOCKET_DIR).glob(f"{SOCKET_PREFIX}{DISPATCH_PLUGIN_NAME}-*.sock"),
+            sock_root.glob(socket_glob(DISPATCH_PLUGIN_NAME)),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -143,7 +144,7 @@ def _resolve_hooks_transport(hooks_port: int) -> tuple[str, httpx.AsyncBaseTrans
             "router socket registry not found at %s and no PID-tagged sockets in %s; "
             "dispatch will fail",
             registry_file,
-            SOCKET_DIR,
+            sock_root,
         )
         return "http://localhost/hook", None
 
