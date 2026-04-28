@@ -57,6 +57,68 @@ def _resolve_worktree_path(repo_label: str, branch: str, custom_path: str | None
     return str(base / repo_label / branch.replace("/", "-"))
 
 
+def _sync_worktree_venvs(worktree_path: str) -> list[str]:
+    """Run ``uv sync --frozen --all-groups`` in each plugin server dir + _shared.
+
+    Targets are:
+      - ``<worktree_path>/plugins/_shared``
+      - ``<worktree_path>/plugins/*/server`` (each plugin)
+
+    Skips dirs lacking ``pyproject.toml`` (so non-cpm worktrees no-op).
+    Skips silently if ``uv`` is not on PATH.
+
+    Returns a list of warning strings (empty when all syncs succeed). Does
+    NOT raise on failure — venv sync is best-effort because a missing
+    network or lockfile drift should not block worktree creation. The
+    caller surfaces warnings via the ``create_worktree`` response.
+
+    Implements todo 822: fresh worktree venvs need ``--all-groups`` so dev
+    + test deps (pytest, basedpyright, pre-commit) are installed and the
+    quality gates run cleanly out of the box.
+    """
+    import shutil
+
+    warnings: list[str] = []
+    root = Path(worktree_path).expanduser().resolve()
+    plugins_dir = root / "plugins"
+    if not plugins_dir.is_dir():
+        return warnings  # not a cpm-style repo — no-op
+
+    if shutil.which("uv") is None:
+        warnings.append("uv not found on PATH — skipping venv sync")
+        return warnings
+
+    targets: list[Path] = []
+    shared = plugins_dir / "_shared"
+    if (shared / "pyproject.toml").is_file():
+        targets.append(shared)
+    for entry in sorted(plugins_dir.iterdir()):
+        if entry.name == "_shared":
+            continue
+        server_dir = entry / "server"
+        if (server_dir / "pyproject.toml").is_file():
+            targets.append(server_dir)
+
+    for target in targets:
+        try:
+            result = subprocess.run(
+                ["uv", "sync", "--frozen", "--all-groups"],
+                capture_output=True,
+                text=True,
+                cwd=str(target),
+                stdin=subprocess.DEVNULL,
+                # 5min cap; per-plugin sync is normally <30s on warm cache.
+                timeout=300,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            warnings.append(f"uv sync timed out / failed for {target}: {exc}")
+            continue
+        if result.returncode != 0:
+            tail = (result.stderr.strip() or result.stdout.strip())[-300:]
+            warnings.append(f"uv sync failed for {target} (rc={result.returncode}): {tail}")
+    return warnings
+
+
 def create_worktree(
     repo_label: str,
     branch: str,
@@ -96,6 +158,13 @@ def create_worktree(
         git.clean_untracked(worktree_path)
     except GitError as e:
         warnings.append(f"git clean -fd failed: {e}")
+
+    # Sync per-plugin venvs with --all-groups so dev/test deps (pytest,
+    # basedpyright, pre-commit) are present in the fresh worktree. Best-effort
+    # — failures surface as warnings, do not block creation. (Todo 822.)
+    config = storage.load()
+    if config.sync_venvs_on_create:
+        warnings.extend(_sync_worktree_venvs(worktree_path))
 
     msg = f"Created worktree at {worktree_path} (branch: {branch}, repo: {repo_label})."
     if warnings:

@@ -238,6 +238,152 @@ class TestCreateWorktree:
         assert "Created" in data["result"]
         assert data["worktree_path"] is not None
 
+    # 822 regression tests --------------------------------------------------
+
+    def test_create_invokes_venv_sync_when_enabled(self, real_git_repo: Path) -> None:
+        """sync_venvs_on_create=True (default) → _sync_worktree_venvs is called.
+        Regression for todo 822: fresh worktrees need ``--all-groups`` so dev +
+        test deps are installed."""
+        with patch("server.tools.worktrees._sync_worktree_venvs", return_value=[]) as mock_sync:
+            result = create_worktree("myapp", "feature/sync-on")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        mock_sync.assert_called_once_with(data["worktree_path"])
+
+    def test_create_skips_venv_sync_when_disabled(
+        self, real_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """sync_venvs_on_create=False → _sync_worktree_venvs is NOT called."""
+        cfg = storage.load()
+        cfg.sync_venvs_on_create = False
+        storage.save(cfg)
+        with patch("server.tools.worktrees._sync_worktree_venvs") as mock_sync:
+            create_worktree("myapp", "feature/sync-off")
+        mock_sync.assert_not_called()
+
+    def test_create_surfaces_venv_sync_warnings(self, real_git_repo: Path) -> None:
+        """Warnings from _sync_worktree_venvs surface in the create_worktree
+        result message."""
+        with patch(
+            "server.tools.worktrees._sync_worktree_venvs",
+            return_value=["uv sync failed for /tmp/x: lockfile drift"],
+        ):
+            result = create_worktree("myapp", "feature/sync-warn")
+        data = json.loads(result)
+        assert "Created" in data["result"]
+        assert "lockfile drift" in data["result"]
+
+
+class TestSyncWorktreeVenvs:
+    """Tests for _sync_worktree_venvs helper (todo 822)."""
+
+    def test_no_plugins_dir_is_noop(self, tmp_path: Path) -> None:
+        """Worktree without ``plugins/`` dir → empty warnings, no subprocess."""
+        from server.tools.worktrees import _sync_worktree_venvs
+
+        with patch("server.tools.worktrees.subprocess.run") as mock_run:
+            warnings = _sync_worktree_venvs(str(tmp_path))
+        assert warnings == []
+        mock_run.assert_not_called()
+
+    def test_uv_missing_emits_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """uv not on PATH → single warning, no subprocess invocations."""
+        from server.tools.worktrees import _sync_worktree_venvs
+
+        (tmp_path / "plugins" / "_shared").mkdir(parents=True)
+        (tmp_path / "plugins" / "_shared" / "pyproject.toml").write_text("")
+
+        with (
+            patch("shutil.which", return_value=None),
+            patch("server.tools.worktrees.subprocess.run") as mock_run,
+        ):
+            warnings = _sync_worktree_venvs(str(tmp_path))
+        assert any("uv not found" in w for w in warnings)
+        mock_run.assert_not_called()
+
+    def test_runs_uv_sync_with_all_groups_per_target(self, tmp_path: Path) -> None:
+        """Each target dir gets ``uv sync --frozen --all-groups``. Regression
+        guard for todo 822 — must include ``--all-groups``."""
+        from server.tools.worktrees import _sync_worktree_venvs
+
+        # Layout: plugins/_shared + plugins/foo/server + plugins/bar/server
+        for sub in ["_shared", "foo/server", "bar/server"]:
+            d = tmp_path / "plugins" / sub
+            d.mkdir(parents=True)
+            (d / "pyproject.toml").write_text("")
+
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("shutil.which", return_value="/usr/bin/uv"),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=result,
+            ) as mock_run,
+        ):
+            warnings = _sync_worktree_venvs(str(tmp_path))
+        assert warnings == []
+        # 3 invocations — one per target dir
+        assert mock_run.call_count == 3
+        for call in mock_run.call_args_list:
+            cmd, _ = call.args, call.kwargs
+            assert cmd[0] == ["uv", "sync", "--frozen", "--all-groups"]
+            # Must use stdin=DEVNULL so any prompt cannot deadlock the MCP
+            # server when running in a non-interactive env.
+            assert call.kwargs.get("stdin") == subprocess.DEVNULL
+        # Confirm each target dir was passed as cwd
+        cwds = {call.kwargs.get("cwd") for call in mock_run.call_args_list}
+        assert cwds == {
+            str((tmp_path / "plugins" / "_shared").resolve()),
+            str((tmp_path / "plugins" / "foo" / "server").resolve()),
+            str((tmp_path / "plugins" / "bar" / "server").resolve()),
+        }
+
+    def test_skips_dirs_without_pyproject(self, tmp_path: Path) -> None:
+        """plugins/<x>/server without pyproject.toml is skipped."""
+        from server.tools.worktrees import _sync_worktree_venvs
+
+        # Only foo has pyproject; bar lacks it.
+        foo = tmp_path / "plugins" / "foo" / "server"
+        foo.mkdir(parents=True)
+        (foo / "pyproject.toml").write_text("")
+        bar = tmp_path / "plugins" / "bar" / "server"
+        bar.mkdir(parents=True)
+        # NO pyproject for bar
+
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("shutil.which", return_value="/usr/bin/uv"),
+            patch(
+                "server.tools.worktrees.subprocess.run",
+                return_value=result,
+            ) as mock_run,
+        ):
+            _sync_worktree_venvs(str(tmp_path))
+        assert mock_run.call_count == 1
+        cwd = mock_run.call_args_list[0].kwargs.get("cwd")
+        assert cwd == str(foo.resolve())
+
+    def test_failure_is_warning_not_raise(self, tmp_path: Path) -> None:
+        """uv sync rc!=0 surfaces as a warning, does NOT raise — venv sync
+        must not block worktree creation on a broken lockfile or no-network."""
+        from server.tools.worktrees import _sync_worktree_venvs
+
+        d = tmp_path / "plugins" / "_shared"
+        d.mkdir(parents=True)
+        (d / "pyproject.toml").write_text("")
+
+        result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="lockfile drift\n"
+        )
+        with (
+            patch("shutil.which", return_value="/usr/bin/uv"),
+            patch("server.tools.worktrees.subprocess.run", return_value=result),
+        ):
+            warnings = _sync_worktree_venvs(str(tmp_path))
+        assert any("lockfile drift" in w for w in warnings)
+
 
 class TestListWorktrees:
     def test_lists_for_all_repos(self, real_git_repo: Path) -> None:

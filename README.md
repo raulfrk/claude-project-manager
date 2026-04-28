@@ -54,7 +54,7 @@ The wizard handles plugin installation, first-time config (`~/.claude/proj.yaml`
 <!-- AUTO:plugins-table-start -->
 | Plugin | Version | Category | Description |
 |--------|---------|----------|-------------|
-| [worktree](plugins/worktree/) | 5.0.1 | utilities | Git worktree management — create, list, and remove worktrees from configured base repositories |
+| [worktree](plugins/worktree/) | 5.1.0 | utilities | Git worktree management — create, list, and remove worktrees from configured base repositories |
 | [proj](plugins/proj/) | 5.1.9 | productivity | Project lifecycle management: init, explore, status, update, todo, report, archive |
 | [trello](plugins/trello/) | 5.0.0 | integrations | Trello board, card, and list management via REST API — full CRUD for boards, lists, cards, labels, members, comments, checklists, attachments |
 | [confluence](plugins/confluence/) | 1.0.0 | integrations | Read-only Confluence Cloud + Server/Data Center access via REST API. |

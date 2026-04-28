@@ -56,6 +56,14 @@ class WorktreeConfig:
     default_worktree_dir: str = "~/worktrees"
     base_repos: list[BaseRepo] = field(default_factory=list)
     zoxide_integration: bool = False
+    # When True, ``create_worktree`` runs ``uv sync --frozen --all-groups``
+    # in each ``plugins/<x>/server`` and ``plugins/_shared`` dir of the
+    # newly created worktree (when those dirs exist + contain a
+    # ``pyproject.toml``). Ensures dev/test deps (pytest, basedpyright,
+    # pre-commit) are present so quality gates run cleanly out of the box.
+    # Default ``True`` because the cpm dogfooding workflow assumes those
+    # deps are present; set to ``False`` for non-uv repos. (Todo 822.)
+    sync_venvs_on_create: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -63,6 +71,7 @@ class WorktreeConfig:
             "default_worktree_dir": self.default_worktree_dir,
             "base_repos": [r.to_dict() for r in self.base_repos],
             "zoxide_integration": self.zoxide_integration,
+            "sync_venvs_on_create": self.sync_venvs_on_create,
         }
 
     @classmethod
@@ -74,4 +83,5 @@ class WorktreeConfig:
             default_worktree_dir=str(data.get("default_worktree_dir", "~/worktrees")),
             base_repos=[BaseRepo.from_dict(r) for r in repos_raw if isinstance(r, dict)],
             zoxide_integration=bool(data.get("zoxide_integration", False)),
+            sync_venvs_on_create=bool(data.get("sync_venvs_on_create", True)),
         )
