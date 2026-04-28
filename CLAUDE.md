@@ -103,9 +103,21 @@ Condition-to-`proj.yaml` path mapping (from `default-hooks.yaml` files):
 | `project.todoist_project_id` | `project.todoist_project_id` (runtime) | todoist |
 | `sync.trello.enabled` | `sync.trello.enabled` | trello |
 | `sync.trello.auto_sync` | `sync.trello.auto_sync` | trello |
+| `sync.trello.list_mappings.archived` | `sync.trello.list_mappings.archived` | trello |
 | `project.trello_card_id` | `project.trello_card_id` (runtime) | trello |
+| `todo.trello_card_id` | `todo.trello_card_id` (runtime) | trello |
+| `sync.jira.enabled` | `sync.jira.enabled` | jira |
+| `sync.jira.auto_sync` | `sync.jira.auto_sync` | jira |
+| `project.jira_issue_key` | `project.jira_issue_key` (runtime) | jira |
+| `todo.jira_issue_key` | `todo.jira_issue_key` (runtime) | jira |
+| `sync.wiki.enabled` | `sync.wiki.enabled` | proj (wiki integration) |
+| `sync.wiki.auto_sync` | `sync.wiki.auto_sync` | (reserved) |
+| `sync.wiki.auto_ingest_sessions` | `sync.wiki.auto_ingest_sessions` | (reserved) |
+| `sync.wiki.capture_notes_as_log` | `sync.wiki.capture_notes_as_log` | proj (wiki integration) |
+| `sync.wiki.replace_notes_md` | `sync.wiki.replace_notes_md` | (reserved) |
+| `sync.confluence.enabled` | `sync.confluence.enabled` | (reserved) |
 
-Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"`.
+Compound conditions are common, e.g. `"sync.todoist.enabled and sync.todoist.auto_sync and project.todoist_project_id"`. The authoritative list of valid condition paths is enforced by `policies/condition_paths.rego::valid_paths` — keep this table in sync when adding new paths.
 
 **Blocking vs non-blocking**: the dispatcher always awaits the `router_fire_tool` HTTP response (30s timeout). Inside `router_fire_tool`, blocking hooks (`blocking: true`) are awaited concurrently via `asyncio.gather`; non-blocking hooks (`blocking: false`, the default) are dispatched in background daemon threads and return immediately.
 
