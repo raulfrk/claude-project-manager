@@ -21,6 +21,8 @@ Wizard uses **load-once pattern**: Step 0 reads `~/.claude/worktree.yaml` once, 
    a. `"Where should worktrees be created by default? [<worktree_config.default_worktree_dir or '~/worktrees'>]"`
       Confirmed → persist as `default_worktree_dir` in `~/.claude/worktree.yaml`.
    b. `"Would you like to register any base repositories now? (You can always add more later with /worktree:add-repo)"`
+   c. `"Sync plugin venvs (uv sync --frozen --all-groups) on every worktree create? [<worktree_config.sync_venvs_on_create or true>]"`
+      Confirmed → persist as `sync_venvs_on_create` in `~/.claude/worktree.yaml`. Useful: keeps fresh worktrees ready for tests/pre-commit. Opt-out: non-uv repos.
 
 **3.** Each base repo:
    - Ask local path to git repo

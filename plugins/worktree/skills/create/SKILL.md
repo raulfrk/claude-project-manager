@@ -38,5 +38,6 @@ Create git worktree. Args: $ARGUMENTS (opt — repo label and/or branch name)
 ## Output
 
 Created worktree path + success confirmation. Perm grant status if needed.
+Plugin venv-sync warnings surface in result msg when `sync_venvs_on_create` is enabled (worktree.yaml).
 
 Suggested next: `1. /worktree:list` -- see all worktrees | `2. /worktree:remove` -- remove worktree when done
