@@ -42,3 +42,19 @@ test_compound_with_unknown_partial_detected if {
 	}]}
 	count(result) == 1
 }
+
+test_empty_condition_skipped if {
+	result := condition_paths.deny with input as {"hooks": [{
+		"id": "h1",
+		"condition": "",
+	}]}
+	count(result) == 0
+}
+
+test_whitespace_only_condition_skipped if {
+	result := condition_paths.deny with input as {"hooks": [{
+		"id": "h1",
+		"condition": "   ",
+	}]}
+	count(result) == 0
+}

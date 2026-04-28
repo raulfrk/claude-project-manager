@@ -33,6 +33,7 @@ valid_paths := {
 deny contains msg if {
 	some hook in input.hooks
 	cond := hook.condition
+	trim_space(cond) != ""
 	paths := atomic_paths(cond)
 	some path in paths
 	not path in valid_paths
