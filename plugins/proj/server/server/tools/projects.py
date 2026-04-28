@@ -55,7 +55,7 @@ def _resolve_router_socket_path() -> str | None:
 
 
 def _fallback_router_socket() -> str | None:
-    from hook_transport.socket_path import socket_dir, socket_glob
+    from hook_transport.socket_path import legacy_socket_path, socket_dir, socket_glob
 
     sock_root = socket_dir()
     candidates = sorted(
@@ -65,7 +65,7 @@ def _fallback_router_socket() -> str | None:
     )
     if candidates:
         return str(candidates[0])
-    fallback = sock_root / "claude-cpm-router.sock"
+    fallback = legacy_socket_path("router")
     if fallback.exists():
         return str(fallback)
     return None

@@ -51,7 +51,7 @@ async def post_hook(
     payload = {"tool": target_tool, "params": params}
     try:
         if url.startswith("unix://"):
-            # Unix domain socket: unix:///tmp/claude-cpm-plugin.sock
+            # Unix domain socket: unix://<tmp>/claude-cpm-<plugin>-<pid>.sock
             socket_path = url[len("unix://") :]
             transport = httpx.AsyncHTTPTransport(uds=socket_path)
             effective_url = "http://localhost/hook"

@@ -84,7 +84,7 @@ def _resolve_trello_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    from hook_transport.socket_path import socket_dir, socket_glob
+    from hook_transport.socket_path import legacy_socket_path, socket_dir, socket_glob
 
     sock_root = socket_dir()
     candidates = sorted(
@@ -94,7 +94,7 @@ def _resolve_trello_socket() -> str:
     )
     if candidates:
         return str(candidates[0])
-    return str(sock_root / "claude-cpm-trello.sock")
+    return str(legacy_socket_path("trello"))
 
 
 def _call_trello_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:

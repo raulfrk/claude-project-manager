@@ -80,11 +80,13 @@ for root in "${production_paths[@]}"; do
     done <<< "$matches"
   fi
 
-  # Pattern 3: claude-cpm-{plugin}-*.sock glob literals (PID-tagged form).
-  # Catches both '...*.sock' and "...*.sock" forms.
+  # Pattern 3: claude-cpm-{plugin}.sock literals — catches all 3 forms:
+  #   - glob:        claude-cpm-router-*.sock
+  #   - PID-tagged:  claude-cpm-router-1234.sock
+  #   - no-PID:      claude-cpm-router.sock  (legacy fallback form)
   if matches=$(grep -rnE --include='*.py' \
       --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=tests \
-      'claude-cpm-[a-z][a-z0-9_]*-\*\.sock' "$root" 2>/dev/null); then
+      'claude-cpm-[a-z][a-z0-9_]*(-([0-9]+|\*))?\.sock' "$root" 2>/dev/null); then
     while IFS= read -r line; do
       file="${line%%:*}"
       skip=0
@@ -92,17 +94,18 @@ for root in "${production_paths[@]}"; do
         [[ "$file" == "$allow" ]] && skip=1 && break
       done
       [[ $skip -eq 1 ]] && continue
-      report "$line  (use hook_transport.socket_path.socket_glob(plugin) instead)"
+      report "$line  (use hook_transport.socket_path.{socket_path,socket_glob,legacy_socket_path}(plugin) instead)"
     done <<< "$matches"
   fi
 done
 
 if [[ $violations -gt 0 ]]; then
   echo
-  echo "Found $violations TMPDIR/socket-glob drift site(s) outside the"
+  echo "Found $violations TMPDIR/socket-literal drift site(s) outside the"
   echo "plugins/_shared/hook_transport/socket_path.py helper."
   echo "Migrate to:"
-  echo "  from hook_transport.socket_path import tmp_dir, socket_dir, socket_glob, socket_path"
+  echo "  from hook_transport.socket_path import (tmp_dir, socket_dir,"
+  echo "      socket_glob, socket_path, legacy_socket_path)"
   echo "Tests are exempt; only production code under plugins/*/server/server/"
   echo "and plugins/_shared/hook_{transport,dispatch}/ is enforced."
   exit 1

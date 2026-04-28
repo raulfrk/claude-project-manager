@@ -61,7 +61,7 @@ def _resolve_jira_socket() -> str:
             return path
     except (FileNotFoundError, OSError):
         pass
-    from hook_transport.socket_path import socket_dir, socket_glob
+    from hook_transport.socket_path import legacy_socket_path, socket_dir, socket_glob
 
     sock_root = socket_dir()
     candidates = sorted(
@@ -71,7 +71,7 @@ def _resolve_jira_socket() -> str:
     )
     if candidates:
         return str(candidates[0])
-    return str(sock_root / "claude-cpm-jira.sock")
+    return str(legacy_socket_path("jira"))
 
 
 def _call_jira_tool(tool_name: str, params: dict[str, JsonValue]) -> JsonValue:
