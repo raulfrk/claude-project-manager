@@ -25,16 +25,42 @@ class GitConflictError(GitError):
     """Raised when a git rebase encounters conflicts."""
 
 
-def _run(args: list[str], cwd: str | None = None) -> str:
-    """Run a git command and return stdout. Raises GitError on failure."""
+def _run(
+    args: list[str],
+    cwd: str | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    stdin: int | None = None,
+    error_includes_stdout: bool = False,
+) -> str:
+    """Run a git command and return stdout. Raises GitError on failure.
+
+    Optional kw-only params:
+    - env: env dict for subprocess (default: inherit parent env)
+    - stdin: stdin file-descriptor (e.g. ``subprocess.DEVNULL`` for non-interactive
+      invocations like ``commit`` w/ pre-commit hooks)
+    - error_includes_stdout: when True, GitError message falls back to stdout
+      on empty stderr — used by ``commit`` since pre-commit hooks print hook
+      progress to stdout, not stderr.
+    """
     result = subprocess.run(
         ["git", *args],
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=env,
+        stdin=stdin,
     )
     if result.returncode != 0:
-        raise GitError(result.stderr.strip() or f"git {args[0]} failed")
+        if error_includes_stdout:
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"git {args[0]} failed (rc={result.returncode})"
+            )
+        else:
+            detail = result.stderr.strip() or f"git {args[0]} failed"
+        raise GitError(detail)
     return result.stdout
 
 
@@ -187,23 +213,13 @@ def commit(path: Path, message: str, skip_hooks: bool = False) -> str:
     if not cur or not Path(cur).is_absolute():
         env["UV_CACHE_DIR"] = str((path / ".uv-cache").resolve())
 
-    result = subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
+    _run(
+        args,
         cwd=str(path),
-        stdin=subprocess.DEVNULL,
         env=env,
+        stdin=subprocess.DEVNULL,
+        error_includes_stdout=True,
     )
-    if result.returncode != 0:
-        # Include stdout (where pre-commit prints hook progress) so the
-        # caller can see which hook failed, not just the terminal stderr.
-        detail = (
-            result.stderr.strip()
-            or result.stdout.strip()
-            or f"git commit failed (rc={result.returncode})"
-        )
-        raise GitError(detail)
     return _run(["-C", str(path), "rev-parse", "HEAD"]).strip()
 
 
