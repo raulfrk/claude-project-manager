@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from hook_transport.socket_path import (
+    legacy_socket_path,
     socket_dir,
     socket_glob,
     socket_path,
@@ -100,6 +101,65 @@ def test_socket_glob_validates_plugin_name() -> None:
     """socket_glob applies the same plugin-name validation as socket_path."""
     with pytest.raises(ValueError, match="plugin"):
         socket_glob("Bad-Name")
+
+
+# ── legacy_socket_path tests ─────────────────────────────────────────────────
+
+
+def test_legacy_socket_path_format() -> None:
+    """legacy_socket_path returns <socket_dir>/claude-cpm-<plugin>.sock (no PID)."""
+    p = legacy_socket_path("trello")
+    assert p == socket_dir() / "claude-cpm-trello.sock"
+
+
+def test_legacy_socket_path_uses_current_socket_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """legacy_socket_path uses the current socket_dir() at call time."""
+    monkeypatch.setattr("tempfile.gettempdir", lambda: "/elsewhere")
+    p = legacy_socket_path("router")
+    assert p == Path("/elsewhere/claude-cpm-router.sock")
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "",
+        "Router",
+        "router-1",
+        "1router",
+        "router/x",
+        "router.x",
+        "ROUTER",
+        "router x",
+    ],
+)
+def test_legacy_socket_path_rejects_invalid_plugin_names(bad_name: str) -> None:
+    """legacy_socket_path applies the same plugin-name validation as socket_path."""
+    with pytest.raises(ValueError, match="plugin"):
+        legacy_socket_path(bad_name)
+
+
+@pytest.mark.parametrize(
+    "good_name",
+    ["router", "proj", "todoist", "trello", "jira", "wiki_log", "a", "a1", "a_b_c"],
+)
+def test_legacy_socket_path_accepts_valid_plugin_names(good_name: str) -> None:
+    """Valid plugin names: leading lowercase letter, then [a-z0-9_]*."""
+    p = legacy_socket_path(good_name)
+    assert p.name == f"claude-cpm-{good_name}.sock"
+
+
+def test_legacy_socket_path_consistent_with_socket_path_prefix() -> None:
+    """legacy_socket_path shares the claude-cpm- prefix + socket_dir w/ socket_path."""
+    plugin = "trello"
+    legacy = legacy_socket_path(plugin)
+    pid_tagged = socket_path(plugin, 1234)
+    assert legacy.parent == pid_tagged.parent
+    assert legacy.name.startswith("claude-cpm-")
+    assert pid_tagged.name.startswith("claude-cpm-")
+    # Legacy form is the no-PID variant: claude-cpm-trello.sock
+    # PID-tagged form: claude-cpm-trello-1234.sock
+    assert legacy.name == f"claude-cpm-{plugin}.sock"
+    assert pid_tagged.name == f"claude-cpm-{plugin}-1234.sock"
 
 
 # ── round-trip integration test ─────────────────────────────────────────────

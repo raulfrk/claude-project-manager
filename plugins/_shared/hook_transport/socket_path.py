@@ -11,6 +11,7 @@ Public API
 - ``socket_dir()`` — directory that holds Unix socket bind files.
 - ``socket_path(plugin, pid)`` — full bind path for a given plugin + pid.
 - ``socket_glob(plugin)`` — filename glob for fallback resolvers.
+- ``legacy_socket_path(plugin)`` — no-PID fallback path (last-resort lookup).
 
 Resolution semantics
 --------------------
@@ -31,7 +32,7 @@ import re
 import tempfile
 from pathlib import Path
 
-__all__ = ["socket_dir", "socket_glob", "socket_path", "tmp_dir"]
+__all__ = ["legacy_socket_path", "socket_dir", "socket_glob", "socket_path", "tmp_dir"]
 
 
 _PLUGIN_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -78,6 +79,22 @@ def socket_path(plugin: str, pid: int) -> Path:
     """
     _validate_plugin_name(plugin)
     return socket_dir() / f"{_SOCKET_PREFIX}{plugin}-{pid}.sock"
+
+
+def legacy_socket_path(plugin: str) -> Path:
+    """Return the no-PID fallback socket path for ``plugin``.
+
+    Format: ``<socket_dir>/claude-cpm-<plugin>.sock`` (no pid suffix).
+
+    Used by fallback resolvers in proj tools when no PID-tagged socket is
+    found via the registry file or the ``socket_glob`` scan (last-resort
+    lookup before failing the call).
+
+    Raises:
+        ValueError: if ``plugin`` does not match ``^[a-z][a-z0-9_]*$``.
+    """
+    _validate_plugin_name(plugin)
+    return socket_dir() / f"{_SOCKET_PREFIX}{plugin}.sock"
 
 
 def socket_glob(plugin: str) -> str:
