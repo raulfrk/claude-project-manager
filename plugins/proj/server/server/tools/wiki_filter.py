@@ -26,9 +26,10 @@ def register(app: FastMCP) -> None:
         description=(
             "Filter a session file for wiki ingest by stripping todo-tracked "
             "content (todo IDs, status framing, '## Todos Worked On' section). "
-            "Writes filtered output to /tmp/wiki-ingest-<uuid4>.md and returns "
-            "the tmp path. Caller is responsible for deleting the tmp file "
-            "after the wiki ingest subagent returns."
+            "Writes filtered output to <tmp>/wiki-ingest-<uuid4>.md (TMPDIR-aware "
+            "via hook_transport.socket_path.tmp_dir) and returns the tmp path. "
+            "Caller is responsible for deleting the tmp file after the wiki ingest "
+            "subagent returns."
         )
     )
     def wiki_ingest_filter_session(session_path: str) -> str:
