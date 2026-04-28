@@ -1082,6 +1082,37 @@ class TestAutoCommit:
         assert data["result"] == "error"
         assert "status failed" in data["error"]
 
+    def test_skip_hooks_threaded_to_git_commit(self, tmp_path: Path) -> None:
+        """skip_hooks=True is forwarded to git.commit (todo 821 last-resort bypass)."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="M file.py\n"),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="ddd4444") as mock_commit,
+        ):
+            result = auto_commit(str(wt), "msg", skip_hooks=True)
+        data = json.loads(result)
+        assert data["committed"] is True
+        # First positional arg is the path; check skip_hooks kwarg routed through.
+        _, kwargs = mock_commit.call_args
+        assert kwargs.get("skip_hooks") is True
+
+    def test_skip_hooks_default_false(self, tmp_path: Path) -> None:
+        """Default skip_hooks=False — hooks run as normal."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        with (
+            patch("server.tools.worktrees.git.is_git_repo", return_value=True),
+            patch("server.tools.worktrees.git.status_porcelain", return_value="M file.py\n"),
+            patch("server.tools.worktrees.git.add_all"),
+            patch("server.tools.worktrees.git.commit", return_value="eee5555") as mock_commit,
+        ):
+            auto_commit(str(wt), "msg")
+        _, kwargs = mock_commit.call_args
+        assert kwargs.get("skip_hooks") is False
+
 
 # ---------------------------------------------------------------------------
 # Bare subprocess.run call tests for merge_worktree

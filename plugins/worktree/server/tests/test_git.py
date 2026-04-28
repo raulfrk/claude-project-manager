@@ -765,20 +765,127 @@ class TestAddAll:
 
 class TestCommit:
     def test_calls_git_commit_and_returns_sha(self) -> None:
-        with patch("server.lib.git._run") as mock_run:
-            mock_run.side_effect = ["", "abc1234def\n"]
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="abc1234def\n") as mock_run,
+        ):
             result = commit(Path("/some/path"), "test message")
         assert result == "abc1234def"
-        assert mock_run.call_count == 2
-        mock_run.assert_any_call(["-C", "/some/path", "commit", "-m", "test message"])
-        mock_run.assert_any_call(["-C", "/some/path", "rev-parse", "HEAD"])
+        # subprocess.run handles the commit; _run handles rev-parse HEAD.
+        mock_sp.assert_called_once()
+        sp_args, _ = mock_sp.call_args
+        assert sp_args[0] == ["git", "-C", "/some/path", "commit", "-m", "test message"]
+        mock_run.assert_called_once_with(["-C", "/some/path", "rev-parse", "HEAD"])
 
     def test_commit_failure_raises(self) -> None:
+        commit_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="nothing to commit\n"
+        )
         with (
-            patch("server.lib.git._run", side_effect=GitError("nothing to commit")),
+            patch("server.lib.git.subprocess.run", return_value=commit_result),
             pytest.raises(GitError, match="nothing to commit"),
         ):
             commit(Path("/some/path"), "test")
+
+    # 821 regression tests --------------------------------------------------
+
+    def test_commit_subprocess_passes_explicit_cwd(self, tmp_path: Path) -> None:
+        """git.commit must run with cwd=worktree_path so pre-commit hooks
+        resolve relative paths (e.g. ${UV_CACHE_DIR:-.uv-cache}) consistently
+        regardless of the parent process cwd. Regression for todo 821."""
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="aaa\n"),
+        ):
+            commit(tmp_path, "msg")
+        _, kwargs = mock_sp.call_args
+        assert kwargs.get("cwd") == str(tmp_path)
+
+    def test_commit_subprocess_uses_devnull_stdin(self, tmp_path: Path) -> None:
+        """git.commit must pass stdin=DEVNULL so no pre-commit hook can block
+        waiting on stdin (which deadlocks an MCP server tool). Regression for
+        todo 821."""
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="bbb\n"),
+        ):
+            commit(tmp_path, "msg")
+        _, kwargs = mock_sp.call_args
+        assert kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_commit_pins_uv_cache_dir_when_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """git.commit pins UV_CACHE_DIR to an absolute path inside the worktree
+        when the env var is unset. Prevents the per-plugin basedpyright hook's
+        ``${UV_CACHE_DIR:-.uv-cache}`` from resolving against an unexpected cwd
+        when running under an MCP server. Regression for todo 821."""
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="ccc\n"),
+        ):
+            commit(tmp_path, "msg")
+        _, kwargs = mock_sp.call_args
+        env = kwargs.get("env") or {}
+        cache = env.get("UV_CACHE_DIR", "")
+        assert Path(cache).is_absolute()
+        assert str(tmp_path) in cache
+
+    def test_commit_preserves_absolute_uv_cache_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the caller already set an absolute UV_CACHE_DIR, git.commit
+        must NOT overwrite it."""
+        explicit = str(tmp_path / "shared-cache")
+        monkeypatch.setenv("UV_CACHE_DIR", explicit)
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="ddd\n"),
+        ):
+            commit(tmp_path, "msg")
+        _, kwargs = mock_sp.call_args
+        assert (kwargs.get("env") or {}).get("UV_CACHE_DIR") == explicit
+
+    def test_commit_skip_hooks_passes_no_verify(self, tmp_path: Path) -> None:
+        """skip_hooks=True appends --no-verify so pre-commit hooks are bypassed.
+        Last-resort workaround for broken hook environments (todo 821)."""
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="eee\n"),
+        ):
+            commit(tmp_path, "msg", skip_hooks=True)
+        sp_args, _ = mock_sp.call_args
+        assert "--no-verify" in sp_args[0]
+
+    def test_commit_default_does_not_skip_hooks(self, tmp_path: Path) -> None:
+        """Default invocation must NOT pass --no-verify so quality gates run."""
+        commit_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result) as mock_sp,
+            patch("server.lib.git._run", return_value="fff\n"),
+        ):
+            commit(tmp_path, "msg")
+        sp_args, _ = mock_sp.call_args
+        assert "--no-verify" not in sp_args[0]
+
+    def test_commit_failure_includes_stdout_when_stderr_empty(self, tmp_path: Path) -> None:
+        """Pre-commit hooks print to stdout; if stderr is empty on rc!=0, the
+        GitError must surface stdout so the caller can see which hook failed."""
+        commit_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="basedpyright FAILED\n", stderr=""
+        )
+        with (
+            patch("server.lib.git.subprocess.run", return_value=commit_result),
+            pytest.raises(GitError, match="basedpyright FAILED"),
+        ):
+            commit(tmp_path, "msg")
 
 
 # ---------------------------------------------------------------------------

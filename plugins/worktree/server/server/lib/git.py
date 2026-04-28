@@ -161,9 +161,49 @@ def add_all(path: Path) -> None:
     _run(["-C", str(path), "add", "-A"])
 
 
-def commit(path: Path, message: str) -> str:
-    """Commit staged changes and return the new HEAD SHA."""
-    _run(["-C", str(path), "commit", "-m", message])
+def commit(path: Path, message: str, skip_hooks: bool = False) -> str:
+    """Commit staged changes and return the new HEAD SHA.
+
+    Subprocess is invoked with explicit ``cwd``, ``stdin=DEVNULL``, and an env
+    that pins ``UV_CACHE_DIR`` to an absolute path inside ``path`` when not
+    already set. This matches the behavior of an interactive ``git commit``
+    invocation and keeps pre-commit hooks (which resolve relative cache dirs
+    against their own cwd) deterministic regardless of where the parent
+    process (e.g. an MCP server) was launched from.
+
+    Setting ``skip_hooks=True`` adds ``--no-verify`` as a last-resort bypass
+    for environments where pre-commit hooks are broken or unavailable.
+    """
+    args = ["-C", str(path), "commit", "-m", message]
+    if skip_hooks:
+        args.append("--no-verify")
+
+    env = os.environ.copy()
+    # Pin UV_CACHE_DIR to an absolute path inside the worktree so pre-commit
+    # hooks like the per-plugin basedpyright iterator (which defaults to
+    # ``${UV_CACHE_DIR:-.uv-cache}``) don't resolve a relative path against an
+    # unexpected cwd. No-op if caller already set an absolute UV_CACHE_DIR.
+    cur = env.get("UV_CACHE_DIR", "")
+    if not cur or not Path(cur).is_absolute():
+        env["UV_CACHE_DIR"] = str((path / ".uv-cache").resolve())
+
+    result = subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        cwd=str(path),
+        stdin=subprocess.DEVNULL,
+        env=env,
+    )
+    if result.returncode != 0:
+        # Include stdout (where pre-commit prints hook progress) so the
+        # caller can see which hook failed, not just the terminal stderr.
+        detail = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"git commit failed (rc={result.returncode})"
+        )
+        raise GitError(detail)
     return _run(["-C", str(path), "rev-parse", "HEAD"]).strip()
 
 

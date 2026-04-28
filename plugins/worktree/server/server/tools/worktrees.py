@@ -433,8 +433,19 @@ def rebase_continue_worktree(path: str) -> str:
     )
 
 
-def auto_commit(worktree_path: str, message: str = "Auto-commit agent work") -> str:
-    """Auto-commit any uncommitted changes in a worktree."""
+def auto_commit(
+    worktree_path: str,
+    message: str = "Auto-commit agent work",
+    skip_hooks: bool = False,
+) -> str:
+    """Auto-commit any uncommitted changes in a worktree.
+
+    ``skip_hooks=True`` passes ``--no-verify`` to ``git commit`` as a
+    last-resort bypass for environments where pre-commit hooks are broken or
+    where the agent has already verified the change out-of-band. Default
+    ``False`` keeps hooks running so quality gates (ruff, basedpyright, etc.)
+    are honored.
+    """
     path = Path(worktree_path).expanduser().resolve()
     if not path.exists():
         return json.dumps(
@@ -478,7 +489,7 @@ def auto_commit(worktree_path: str, message: str = "Auto-commit agent work") -> 
         )
 
     try:
-        sha = git.commit(path, message)
+        sha = git.commit(path, message, skip_hooks=skip_hooks)
     except GitError as e:
         return json.dumps(
             {
@@ -551,7 +562,13 @@ def register(app: FastMCP) -> None:
         description=(
             "Auto-commit any uncommitted changes in a worktree."
             " Safety net for agents that write files without committing."
+            " Set skip_hooks=true to bypass pre-commit hooks (--no-verify)"
+            " as a last-resort for broken hook environments."
         )
     )
-    def wt_auto_commit(worktree_path: str, message: str = "Auto-commit agent work") -> str:
-        return auto_commit(worktree_path, message)
+    def wt_auto_commit(
+        worktree_path: str,
+        message: str = "Auto-commit agent work",
+        skip_hooks: bool = False,
+    ) -> str:
+        return auto_commit(worktree_path, message, skip_hooks=skip_hooks)
