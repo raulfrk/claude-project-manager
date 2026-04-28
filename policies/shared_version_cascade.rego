@@ -20,14 +20,27 @@ deny contains msg if {
 	)
 }
 
-# Rule B: version was bumped but lockfile drift.
+# Rule B1: version was bumped but lockfile pins a different version.
 deny contains msg if {
 	count(input.shared_py_staged) > 0
 	input.staged_version != input.head_version
 	some path, actual in input.lockfiles
+	actual != null
 	actual != input.staged_version
 	msg := sprintf(
 		"lockfile drift: %s pins claude-hook-transport=%v but staged _shared version is %s. Run `just sync` then re-stage.",
 		[path, actual, input.staged_version],
+	)
+}
+
+# Rule B2: version was bumped but lockfile is missing or unparseable.
+deny contains msg if {
+	count(input.shared_py_staged) > 0
+	input.staged_version != input.head_version
+	some path, actual in input.lockfiles
+	actual == null
+	msg := sprintf(
+		"lockfile missing or unparseable: %s — run `just sync` to regenerate.",
+		[path],
 	)
 }
